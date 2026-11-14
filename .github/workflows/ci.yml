@@ -28,8 +28,9 @@ jobs:
           persist-credentials: false
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install --profile minimal "$channel"
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: macos-latest
@@ -73,8 +74,6 @@ jobs:
           docker run --rm --init \
             --platform "${{ matrix.platform }}" \
             -e CI \
-            -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc \
-            -e CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=cc \
             -v "$GITHUB_WORKSPACE:/ctrs" \
             -w /ctrs \
             ctrs-builder:${{ matrix.target }} \
