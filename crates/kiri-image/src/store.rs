@@ -13,6 +13,8 @@ use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The most an image config may be: real ones are a few KB.
@@ -119,6 +121,14 @@ pub struct Store {
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Serializes the image index's read-modify-write across the engine's
+/// threads: two pulls finishing together, or a pull and a tag, would
+/// otherwise each read the same base list and the last rename would drop
+/// the other's image. The blobs are safe regardless (digest-verified,
+/// atomic rename); the index is the shared mutable part. The cross-engine
+/// case is the data root's flock (see the daemon).
+static INDEX_LOCK: LazyLock<Mutex<()>> = LazyLock::new(Mutex::default);
+
 /// The filesystem-safe hexadecimal part of a SHA-256 digest.
 pub fn digest_hex(digest: &str) -> io::Result<&str> {
     let h = digest.strip_prefix("sha256:").unwrap_or_default();
@@ -208,6 +218,7 @@ impl Store {
 
     /// Adds `image`, replacing any image with the same name.
     pub fn put_image(&self, image: Image) -> io::Result<()> {
+        let _one_writer = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut images = self.images()?;
         images.retain(|i| i.name != image.name);
         images.push(image);
@@ -219,6 +230,7 @@ impl Store {
     /// pin to it. Every tag of the image in that repository gets it, as there.
     /// Not if `name` became another image during the push.
     pub fn set_pushed(&self, name: &str, config_digest: &str, digest: &str) -> io::Result<()> {
+        let _one_writer = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut images = self.images()?;
         let Some(repo) = images.iter().find(|i| i.name == name && i.config_digest == config_digest).map(|i| i.repo().to_owned()) else { return Ok(()) };
         for i in images.iter_mut().filter(|i| i.config_digest == config_digest && i.repo() == repo) {
@@ -230,6 +242,7 @@ impl Store {
 
     /// Removes the image and deletes blobs no remaining image uses.
     pub fn remove_image(&self, name: &str) -> io::Result<Option<Image>> {
+        let _one_writer = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut images = self.images()?;
         let Some(pos) = images.iter().position(|i| i.name == name) else { return Ok(None) };
         let removed = images.remove(pos);
@@ -484,5 +497,37 @@ mod tests {
         assert_eq!(named("localhost:5000/app:1").repo(), "localhost:5000/app");
         assert_eq!(named("localhost:5000/app").repo(), "localhost:5000/app");
         assert_eq!(named(&format!("kindest/node@sha256:{}", "a".repeat(64))).repo(), "kindest/node");
+    }
+
+    #[test]
+    fn concurrent_put_image_keeps_every_image() {
+        let root = std::env::temp_dir().join(format!("kiri-store-race-test-{}", std::process::id()));
+        let store = Store::open(&root).unwrap();
+        fn image(name: String) -> Image {
+            Image {
+                name,
+                digest: format!("sha256:{}", "d".repeat(64)),
+                index_digest: None,
+                config_digest: format!("sha256:{}", "c".repeat(64)),
+                layers: Vec::new(),
+                size: 0,
+                platform: "linux/arm64".into(),
+                created: String::new(),
+                pulled_at: 0,
+                config: RunConfig::default(),
+            }
+        }
+        let store = &store;
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                s.spawn(move || {
+                    for n in 0..8 {
+                        store.put_image(image(format!("img-{i}-{n}:latest"))).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(store.images().unwrap().len(), 64);
+        fs::remove_dir_all(&root).unwrap();
     }
 }
