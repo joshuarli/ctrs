@@ -43,6 +43,70 @@ else
 fi
 
 if [ -n "$BIN" ]; then
+  step 'per-instance lifecycle (two engines, concurrent starts, stale pidfile)'
+  LIFE=$WORK/smoke-life
+  rm -rf "$LIFE"; mkdir -p "$LIFE"
+  # Two engines in one directory: distinct pidfiles, no shared kiri.pid.
+  KIRI_SOCKET="$LIFE/a.sock" KIRI_DATA_DIR="$LIFE/a-data" HOME="$LIFE/home-a" "$BIN" daemon >>"$LOG" 2>&1 &
+  LA=$!
+  KIRI_SOCKET="$LIFE/b.sock" KIRI_DATA_DIR="$LIFE/b-data" HOME="$LIFE/home-b" "$BIN" daemon >>"$LOG" 2>&1 &
+  LB=$!
+  for i in $(seq 1 60); do [ -S "$LIFE/a.sock" ] && [ -S "$LIFE/b.sock" ] && break; sleep 1; done
+  if [ -f "$LIFE/a.sock.pid" ] && [ -f "$LIFE/b.sock.pid" ] && [ ! -e "$LIFE/kiri.pid" ]; then
+    pa=$(cut -d' ' -f1 "$LIFE/a.sock.pid"); pb=$(cut -d' ' -f1 "$LIFE/b.sock.pid")
+    if [ "$pa" = "$LA" ] && [ "$pb" = "$LB" ]; then ok 'two engines, two pidfiles, no shared kiri.pid'; else bad "pidfiles do not match the engines (got $pa/$LA $pb/$LB)"; fi
+  else
+    bad 'per-instance pidfiles missing'
+  fi
+  # Concurrent starts on one endpoint: both report the same engine.
+  mkdir -p "$LIFE/home-c"
+  KIRI_SOCKET="$LIFE/c.sock" KIRI_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-1.log" 2>&1 &
+  C1=$!
+  KIRI_SOCKET="$LIFE/c.sock" KIRI_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-2.log" 2>&1 &
+  C2=$!
+  wait $C1; r1=$?
+  wait $C2; r2=$?
+  pid1=$(grep -oE 'pid [0-9]+' "$LIFE/start-1.log" | head -1 | awk '{print $2}')
+  pid2=$(grep -oE 'pid [0-9]+' "$LIFE/start-2.log" | head -1 | awk '{print $2}')
+  if [ "$r1" = 0 ] && [ "$r2" = 0 ] && [ -n "$pid1" ] && [ "$pid1" = "$pid2" ]; then ok "concurrent starts converged on one engine (pid $pid1)"; else bad "concurrent starts diverged (rc $r1/$r2 pids $pid1/$pid2)"; fi
+  # One engine stops; the other is untouched.
+  if KIRI_SOCKET="$LIFE/a.sock" HOME="$LIFE/home-a" "$BIN" engine stop >>"$LOG" 2>&1 && kill -0 "$LB" 2>/dev/null; then
+    ok 'engine stop is per-instance; the sibling engine lives'
+  else
+    bad 'engine stop hurt the sibling engine or failed'
+  fi
+  # pidfile whose pid is a live unrelated process: refused, never signalled.
+  sleep 300 &
+  SLEEP=$!
+  printf '%s 12345\n' "$SLEEP" > "$LIFE/d.sock.pid"
+  out=$(KIRI_SOCKET="$LIFE/d.sock" HOME="$LIFE/home-d" "$BIN" engine stop 2>&1); rc=$?
+  if [ "$rc" != 0 ] && kill -0 "$SLEEP" 2>/dev/null; then
+    ok 'live foreign pid in the pidfile is refused, not signalled'
+  else
+    bad "foreign pid in the pidfile was handled wrong (rc $rc, alive $(kill -0 "$SLEEP" 2>/dev/null && echo yes || echo no))"
+  fi
+  kill "$SLEEP" 2>/dev/null; wait "$SLEEP" 2>/dev/null
+  # pidfile whose pid is dead: reported stale, pidfile removed.
+  sh -c 'exit 0' &
+  DEAD=$!
+  wait "$DEAD"
+  printf '%s 12345\n' "$DEAD" > "$LIFE/e.sock.pid"
+  out=$(KIRI_SOCKET="$LIFE/e.sock" HOME="$LIFE/home-e" "$BIN" engine stop 2>&1); rc=$?
+  if [ "$rc" = 0 ] && [ ! -e "$LIFE/e.sock.pid" ]; then ok 'stale pidfile for a dead pid is removed, never signalled'; else bad "stale pidfile: rc $rc, out: $out"; fi
+  # Startup failure before publication: read-only parent, nonexistent root.
+  mkdir -p "$LIFE/ro"; chmod 555 "$LIFE/ro"
+  out=$(KIRI_SOCKET="$LIFE/f.sock" KIRI_DATA_DIR="$LIFE/ro/data" HOME="$LIFE/home-f" "$BIN" engine start 2>&1); rc=$?
+  chmod 755 "$LIFE/ro"
+  if [ "$rc" != 0 ] && [ ! -e "$LIFE/f.sock.pid" ] && [[ "$out" == *startup* ]]; then
+    ok 'startup failure is reported and the pidfile is never published'
+  else
+    bad "startup failure mishandled (rc $rc, out: $out)"
+  fi
+  kill -TERM "$LA" "$LB" "$pid1" 2>/dev/null
+  sleep 2
+  kill -9 "$LA" "$LB" "$pid1" 2>/dev/null
+  rm -rf "$LIFE"
+
   step 'start daemon (scratch roots)'
   KIRI_DATA_DIR="$DATA" KIRI_SOCKET="$SOCK" HOME="$HOME_DIR" "$BIN" daemon >>"$LOG" 2>&1 &
   DPID=$!

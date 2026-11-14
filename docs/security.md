@@ -158,11 +158,18 @@ primary LAN segment.
   scratch engine: VM re-boots in ~150 ms, the policy container comes back.
   Details: `docs/issues.md` (#50) and `docs/evidence/security.md`.
 - Nine silent daemon deaths in this campaign (zero log output, no host
-  memory pressure, guest VM helper gone) — root cause unproven
-  (Virtualization.framework XPC helper; correlates with bursts of
-  privileged-container activity and VM wakes). The engine survives each
-  one if the launchd job is set to restart it; a restart loses in-flight
-  pulls but not the store (digest-verified, atomic `containers.json`).
+  memory pressure, guest VM helper gone) — root cause **unproven**: a
+  hypothesis (Virtualization.framework XPC helper dying after bursts of
+  privileged-container activity and VM wakes), not an established cause.
+  `conformance/watch.sh` now supervises the daemon as a child process
+  under privileged-container churn and records the OS-reported end
+  (exit code or signal), instance identity (pid, data root, socket,
+  kernel boot id), VM generations and the log tail to
+  `.work/tmp/watch-reports/*.jsonl`; the next death on this host will be
+  classified as signal or exit code rather than presumed. The engine
+  survives each one if a supervisor restarts it; a restart loses
+  in-flight pulls but not the store (digest-verified, atomic
+  `containers.json`).
 - The guest's console (`hvc0`) is captured to `<data root>/vm-console.log`
   (previous generation `.prev`) since CTRS-21, and the last 32 KiB are
   emitted into the daemon log when the VM stops unexpectedly, so a guest

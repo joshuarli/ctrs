@@ -113,6 +113,11 @@ compiled without those features) are kernel answers, not filter answers.
 - `conformance/isolation.sh` — host socket 0600 / data root 0700 / no
   host socket, relay socket, virtiofs share, or engine env in a container
   (default and `--privileged`)
+- `conformance/watch.sh` — supervising harness for the silent daemon
+  deaths: daemon as a child process under privileged-container churn;
+  records OS exit code/signal, instance identity, VM generations, log
+  tail to `.work/tmp/watch-reports/*.jsonl`; clean budget stop is success,
+  any other exit is a failure with evidence
 - `docs/security.md` (threat model) · `docs/issues.md` (#50 restart gap, now fixed)
 - `crates/kiri/src/guest.rs`, `crates/kiri/src/daemon/engine.rs`,
   `crates/kiri-vmm/src/process.rs` (console capture)

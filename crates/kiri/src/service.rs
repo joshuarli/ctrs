@@ -196,6 +196,12 @@ fn start() -> io::Result<()> {
         }
         match child.try_wait()? {
             Some(status) => {
+                // Lost the bind race to a sibling start: the socket answers
+                // with that engine's identity, so this one succeeded too.
+                if let Some(pid) = socket_pid() {
+                    println!("kiri: running (pid {pid})");
+                    return Ok(());
+                }
                 return Err(io::Error::other(format!("the daemon exited during startup ({status}); see ~/.kiri/logs/daemon.log")));
             }
             None => {}
