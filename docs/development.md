@@ -59,7 +59,7 @@ buildx ─────┘    Docker Engine API          owns the VM             
 - **VM**: Apple's Virtualization.framework, driven from Rust through objc2.
   A custom 10 MB kernel (`guest/kernel/`) built from allnoconfig. Rosetta is
   shared in over virtiofs and registered with binfmt_misc.
-- **Guest agent**: a ~900 KB static Rust binary that is PID 1. One `poll()`
+- **Guest agent**: a static Rust binary that is PID 1. One `poll()`
   loop serves the host, reaps children, forwards container output and
   relays ports. `docker cp` runs in forked children so a large copy never
   stalls it.
