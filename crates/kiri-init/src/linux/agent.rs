@@ -580,9 +580,15 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     }
                     None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
                 },
-                Ok(Msg::UplinkQuery) => match dhcp.as_ref().and_then(|d| d.lease.as_ref()) {
-                    Some(l) => Msg::Uplink { ip: l.ip, gateway: l.gateway }.encode(&mut out),
-                    None => Msg::Error("no uplink lease").encode(&mut out),
+                Ok(Msg::UplinkQuery) => match super::netlink::default_v4_route().and_then(|(index, gateway)| super::netlink::primary_v4_addr(index).map(|ip| (ip, gateway))) {
+                    // The live answer: survives a vmnet re-lease without a
+                    // VM restart. The boot-time lease is the fallback for a
+                    // route that is not there yet (before DHCP finishes).
+                    Ok((ip, gateway)) => Msg::Uplink { ip, gateway }.encode(&mut out),
+                    Err(_) => match dhcp.as_ref().and_then(|d| d.lease.as_ref()) {
+                        Some(l) => Msg::Uplink { ip: l.ip, gateway: l.gateway }.encode(&mut out),
+                        None => Msg::Error("no uplink lease").encode(&mut out),
+                    },
                 },
                 Ok(Msg::Route { dst, prefix, via, add }) => match net::route(dst, prefix, via, add) {
                     Ok(()) => Msg::Ack.encode(&mut out),

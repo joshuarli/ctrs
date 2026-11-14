@@ -1031,3 +1031,147 @@ mod tests {
         assert_eq!(verdict(&r), libc::NF_DROP as u32);
     }
 }
+
+/// The kernel's default IPv4 route and address, read live (CTRS-17):
+/// `RTM_GETROUTE` for dst 0.0.0.0/0 in the main table, then the primary
+/// `IFA_LOCAL` address on its interface. The agent's DHCP lease is only a
+/// boot-time starting point; these survive a vmnet re-lease without a
+/// VM restart, which a lease cached at boot does not.
+
+const NLM_F_DUMP: u16 = 0x300;
+const RTM_GETROUTE: u16 = 26;
+const RTM_GETADDR: u16 = 22;
+const RTN_UNICAST: u8 = 1;
+const RT_TABLE_MAIN: u8 = 254;
+const RT_SCOPE_UNIVERSE: u8 = 0;
+
+fn nl_raw(msg_type: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
+    // SAFETY: plain socket; owned immediately.
+    let fd = sys::check(unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_ROUTE) } as _, "netlink")?;
+    let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::unix::io::RawFd) };
+    let mut hdr = Vec::with_capacity(16 + payload.len());
+    hdr.extend_from_slice(&((16 + payload.len()) as u32).to_ne_bytes());
+    hdr.extend_from_slice(&msg_type.to_ne_bytes());
+    hdr.extend_from_slice(&(NLM_F_REQUEST | NLM_F_DUMP).to_ne_bytes());
+    hdr.extend_from_slice(&1u32.to_ne_bytes());
+    hdr.extend_from_slice(&0u32.to_ne_bytes());
+    hdr.extend_from_slice(payload);
+    // SAFETY: sending a buffer we own on a socket we own.
+    sys::check(unsafe { libc::send(fd.as_raw_fd(), hdr.as_ptr().cast(), hdr.len(), 0) } as _, "netlink send")?;
+    let mut out = Vec::with_capacity(8192);
+    let mut buf = [0u8; 8192];
+    loop {
+        // SAFETY: receiving into a buffer we own.
+        let n = sys::check(unsafe { libc::recv(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), 0) } as _, "netlink recv")? as usize;
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+        // Stop once a DONE or a real error has arrived.
+        let mut off = 0;
+        let mut done = false;
+        while off + 16 <= out.len() {
+            let len = u32::from_ne_bytes(out[off..off + 4].try_into().expect("4")) as usize;
+            let ty = u16::from_ne_bytes(out[off + 4..off + 6].try_into().expect("2"));
+            if len < 16 || off + len > out.len() {
+                break;
+            }
+            if ty == NLMSG_DONE {
+                done = true;
+            } else if ty == NLMSG_ERROR {
+                let code = i32::from_ne_bytes(out[off + 16..off + 20].try_into().expect("4")) as i32;
+                if code != 0 {
+                    return Err(io::Error::from_raw_os_error(-code));
+                }
+                done = true;
+            }
+            off += (len + 3) & !3;
+        }
+        if done {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn attrs(mut bytes: &[u8]) -> Vec<(u16, &[u8])> {
+    let mut out = Vec::new();
+    while bytes.len() >= 4 {
+        let len = u16::from_ne_bytes([bytes[0], bytes[1]]) as usize;
+        let ty = u16::from_ne_bytes([bytes[2], bytes[3]]);
+        if len < 4 || len > bytes.len() {
+            break;
+        }
+        out.push((ty, &bytes[4..len]));
+        let next = (len + 3) & !3;
+        bytes = &bytes[next..];
+    }
+    out
+}
+
+/// The (ifindex, gateway) of the IPv4 default route, from the kernel.
+pub fn default_v4_route() -> io::Result<(i32, [u8; 4])> {
+    // struct rtmsg: family, dst_len, src_len, tos, table, protocol, scope, type, flags(4).
+    let mut rtm = [0u8; 12];
+    rtm[0] = libc::AF_INET as u8;
+    let buf = nl_raw(RTM_GETROUTE, &rtm)?;
+    let mut off = 0;
+    while off + 16 <= buf.len() {
+        let len = u32::from_ne_bytes(buf[off..off + 4].try_into().expect("4")) as usize;
+        let ty = u16::from_ne_bytes(buf[off + 4..off + 6].try_into().expect("2"));
+        if len < 16 || off + len > buf.len() {
+            break;
+        }
+        if ty == RTM_NEWROUTE {
+            let payload = &buf[off + 16..off + len];
+            if payload.len() >= 8 && payload[0] == libc::AF_INET as u8 && payload[1] == 0 && payload[4] == RT_TABLE_MAIN && payload[7] == RTN_UNICAST {
+                let mut gateway = None;
+                let mut oif = None;
+                for (aty, data) in attrs(&payload[12..]) {
+                    match (aty, data.len()) {
+                        (RTA_GATEWAY, 4) => gateway = Some(data.try_into().expect("4")),
+                        (RTA_OIF, 4) => oif = Some(i32::from_ne_bytes(data.try_into().expect("4"))),
+                        _ => {}
+                    }
+                }
+                if let (Some(g), Some(i)) = (gateway, oif) {
+                    return Ok((i, g));
+                }
+            }
+        }
+        off += (len + 3) & !3;
+    }
+    Err(io::Error::new(io::ErrorKind::NotFound, "no IPv4 default route"))
+}
+
+/// The primary IPv4 address on `index`, from the kernel.
+pub fn primary_v4_addr(index: i32) -> io::Result<[u8; 4]> {
+    // struct ifaddrmsg: family, prefixlen, flags, scope, index(4).
+    let mut ifa = [0u8; 8];
+    ifa[0] = libc::AF_INET as u8;
+    let buf = nl_raw(RTM_GETADDR, &ifa)?;
+    let mut off = 0;
+    while off + 16 <= buf.len() {
+        let len = u32::from_ne_bytes(buf[off..off + 4].try_into().expect("4")) as usize;
+        let ty = u16::from_ne_bytes(buf[off + 4..off + 6].try_into().expect("2"));
+        if len < 16 || off + len > buf.len() {
+            break;
+        }
+        if ty == RTM_NEWADDR {
+            let payload = &buf[off + 16..off + len];
+            if payload.len() >= 8 && payload[0] == libc::AF_INET as u8 {
+                let scope = payload[3];
+                let idx = i32::from_ne_bytes(payload[4..8].try_into().expect("4"));
+                if idx == index && scope == RT_SCOPE_UNIVERSE {
+                    for (aty, data) in attrs(&payload[8..]) {
+                        if aty == IFA_LOCAL && data.len() == 4 {
+                            return Ok(data.try_into().expect("4"));
+                        }
+                    }
+                }
+            }
+        }
+        off += (len + 3) & !3;
+    }
+    Err(io::Error::new(io::ErrorKind::NotFound, "no IPv4 address on the uplink"))
+}
