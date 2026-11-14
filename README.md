@@ -1,22 +1,48 @@
 # ctrs
 
-An experimental, aggressively headless macOS/Linux container-engine project based on the core of [Kiri](https://github.com/libracoder/kiri), with planned integration of [crabtables](https://github.com/laputa-systems/crabtables) and [smolith](https://github.com/laputa-systems/smolith).
+An experimental, fast container engine for macOS and Linux, with no UI and
+no system service required. The daemon serves the Docker Engine API on a
+local Unix socket, so the Docker CLI, Compose and buildx work unchanged.
 
-**Status: extraction in progress.** The pinned Kiri runtime (Apache-2.0) is imported and being made headless at commit `99b63c07fc003d3dcd8e03c76891ba747b5c984f`; see [the import record](docs/upstream.md). Design and sequencing live in [the implementation campaign](docs/campaign-headless-ctrs.md).
+On macOS a small Linux guest runs under Apple's Virtualization.framework;
+on Linux the agent runs directly on the host kernel.
 
-## Build and run
+## Build
+
+Needs Rust (see `rust-toolchain.toml`). The guest kernel and disk template
+also need a Docker engine to build (any engine works); see
+[docs/development.md](docs/development.md).
 
 ```sh
-cargo xtask host      # target/release/ctrs, signed with the virtualization entitlement
+CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
+```
+
+## Run
+
+```sh
 ./target/release/ctrs daemon &
 DOCKER_HOST=unix://$HOME/.local/share/ctrs/run/docker.sock docker run --rm alpine echo hello
 ```
 
-The engine needs no installer, no docker context and no system service; see
-[docs/development.md](docs/development.md) and [docs/launchd.md](docs/launchd.md).
+Data (image store, VM disk) goes to `~/.local/share/ctrs`; override with
+`CTRS_DATA_DIR`. The socket defaults to `~/.local/share/ctrs/run/docker.sock`;
+override with `CTRS_SOCKET`. Logs live under the data root. Nothing is
+installed system-wide. Build and run details, including the optional
+launchd example: [docs/development.md](docs/development.md) and
+[docs/launchd.md](docs/launchd.md).
 
-Read [the implementation campaign](docs/campaign-headless-ctrs.md) before importing or modifying upstream code. The campaign defines the executable milestones, compatibility/security gates, and Lima/smolvm research experiments.
+## Help
 
-The repository is not affiliated with the Kiri project; its name and logo are not licensed by Apache-2.0. Do not reuse Kiri logos or distribute a ctrs build under its trademark.
+Bug reports and questions: <https://github.com/joshuarli/ctrs/issues>.
+Developer docs are indexed in [AGENTS.md](AGENTS.md).
 
-The upstream Kiri code is Apache-2.0, with third-party notices and Linux guest-kernel GPL-2.0 source obligations that must be preserved when importing the runtime.
+## License and attribution
+
+ctrs is licensed under Apache-2.0. It is a derived work of the
+[Kiri](https://github.com/libracoder/kiri) project, imported at commit
+`99b63c07fc003d3dcd8e03c76891ba747b5c984f`, Copyright its authors, licensed
+under Apache-2.0. The ctrs repository is not affiliated with Kiri, and
+Kiri's name and logo are not used in ctrs. The guest Linux kernel
+(`guest/kernel/`) is a separate GPL-2.0-only work; its source offer is in
+`guest/kernel/SOURCE_OFFER.md` and must travel with any distribution of the
+guest assets.

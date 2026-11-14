@@ -97,8 +97,8 @@ asserts the filter and the relaxation rules. It is green on this host
 
 `--privileged` gives a container every capability, the guest's devices,
 writable `/sys` and writable cgroups. It does **not** give the host's
-socket, `/dev/kmsg` on the host, or io_uring/vsock — those stay closed
-(see `docs/features.md`). What it *shares* is the guest: a privileged
+socket, `/dev/kmsg` on the host, or io_uring/vsock — those stay closed.
+What it *shares* is the guest: a privileged
 container can reach the agent's vsock control channel (it is a root
 process in the guest, after all), can mount over what it can see, and can
 set the guest's clock (verified: `settimeofday` returns OK).
@@ -156,7 +156,8 @@ primary LAN segment.
   running when the VM died (the same policy scan a daemon boot uses).
   Verified by `kill -9` of the Virtualization.framework XPC helper on a
   scratch engine: VM re-boots in ~150 ms, the policy container comes back.
-  Details: `docs/issues.md` (#50) and `docs/evidence/security.md`.
+  Details: the #50 known-issue in `docs/decisions.md` and
+  `docs/evidence/security.md`.
 - Nine silent daemon deaths in this campaign (zero log output, no host
   memory pressure, guest VM helper gone) — root cause **unproven**: a
   hypothesis (Virtualization.framework XPC helper dying after bursts of

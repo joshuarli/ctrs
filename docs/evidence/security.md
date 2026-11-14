@@ -118,7 +118,7 @@ compiled without those features) are kernel answers, not filter answers.
   records OS exit code/signal, instance identity, VM generations, log
   tail to `.work/tmp/watch-reports/*.jsonl`; clean budget stop is success,
   any other exit is a failure with evidence
-- `docs/security.md` (threat model) · `docs/issues.md` (#50 restart gap, now fixed)
+- `docs/security.md` (threat model) · the #50 restart gap (now fixed; see `docs/decisions.md`)
 - `crates/ctrs/src/guest.rs`, `crates/ctrs/src/daemon/engine.rs`,
   `crates/ctrs-vmm/src/process.rs` (console capture)
 - `crates/ctrs-init/src/linux/layers.rs` (fail-closed unpack)

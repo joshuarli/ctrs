@@ -5,10 +5,10 @@ device path. The only attachable idea with real upside today is a DNS answer
 cache, and even that is not adopted here — it needs a measured hot path and a
 written threat model first (Gate G).**
 
-Inputs (all pinned; paths/line numbers verified at the pin):
+Inputs (all pinned to the smolvm and libkrun repos; paths/line numbers verified at the pin):
 
 - smolvm `146f3a5121c01a98bb894dc954e3c143a17c0084` (2026-11-14T08:19, v1.34.1)
-  — `crates/smolvm-network/` (identical to current main `e2aa564a` / v1.35.0
+  — smolvm's crates/smolvm-network/ (identical to current main `e2aa564a` / v1.35.0
   except the crate version bump; `git diff` shows only `Cargo.toml`).
 - libkrun `171e502379b513d0f15d4edf1c27e518f33ba58d` (2026-11-13) — `README.md`.
 - ctrs (this repo, CTRS-01…17 head): `crates/ctrs/src/daemon/{dns.rs,ports.rs}`,
@@ -30,8 +30,8 @@ plus sockets of type SOCK_STREAM/SOCK_DGRAM and AF_INET/AF_INET6/AF_UNIX only.
 | Concern | smolvm-network (virtio-net) | ctrs (VZNAT + vsock fallback) |
 | --- | --- | --- |
 | host FDs per guest TCP flow | 1 host `TcpStream` (host-facing) + ≈1 wake-pipe/channel set; the guest-facing smoltcp socket holds no FD. Published ports: 1 accept socket per `-p HOST:GUEST` (`lib.rs` `TcpPortListeners` — "one accept thread for every `-p HOST:GUEST`") | 0 per egress flow (the guest kernel owns them; host kernel tracks conntrack only). Published ports: 1 host socket per client connection; vsock relay path additionally holds the guest-relay stream pair |
-| per-process FD cap | macOS `kern.maxfilesperproc` = 10,240 on an 8 GB Mac → "a Mac machine holds about 9,900 connections at once" (`docs/limitations.md:35-36`); Linux ~524,288, `SMOLVM_TCP_RELAY_CAPACITY` caps machine at 65,536 open TCP connections (`docs/limitations.md:40`) | not applicable to VZNAT egress (no VMM sockets); published ports capped by host sockets, not by a VM-wide table (1024-session cap per UDP relay, `relay.rs`) |
-| outbound source ports | leave from the host's ephemeral pool **shared by every machine on the host**; TIME-WAIT 30 s (macOS) / 60 s (Linux) over a 16,384-port range; churn → `EADDRNOTAVAIL` (`docs/limitations.md:42-45`) | VZNAT flows originate inside the guest (own ephemeral range, guest conntrack); shared-host-port exhaustion cannot occur for egress |
+| per-process FD cap | macOS `kern.maxfilesperproc` = 10,240 on an 8 GB Mac → "a Mac machine holds about 9,900 connections at once" (smolvm smolvm's docs/limitations.md:35-36); Linux ~524,288, `SMOLVM_TCP_RELAY_CAPACITY` caps machine at 65,536 open TCP connections (smolvm smolvm's docs/limitations.md:40) | not applicable to VZNAT egress (no VMM sockets); published ports capped by host sockets, not by a VM-wide table (1024-session cap per UDP relay, `relay.rs`) |
+| outbound source ports | leave from the host's ephemeral pool **shared by every machine on the host**; TIME-WAIT 30 s (macOS) / 60 s (Linux) over a 16,384-port range; churn → `EADDRNOTAVAIL` (smolvm smolvm's docs/limitations.md:42-45) | VZNAT flows originate inside the guest (own ephemeral range, guest conntrack); shared-host-port exhaustion cannot occur for egress |
 | guest-facing buffers/flow | full tier (≤1024 flows): 256 KiB RX + 256 KiB TX smoltcp buffer per flow (`tcp_relay.rs:52-64` `TCP_RX/TX_BUFFER_BYTES`, `FULL_BUFFER_CONNECTIONS`); small tier: 16 KiB/side; relay channel 32 × 16 KiB (`CHANNEL_CAPACITY`, `RELAY_BUFFER_BYTES`) | kernel socket buffers + conntrack entry (~hundreds of bytes/flow); no per-flow smoltcp state in the VMM |
 | extra per-flow state | `TsyncSender`/`mpsc` channels, `FlowSummary` accounting, timers in a binary heap, relay poller | conntrack tuple only (measured 12→20 entries after 10×10 MB fetches, `docs/evidence/net.md`) |
 | throughput ceiling | one poll thread per machine (`smolvm-net-poll thread`) plus one relay thread per flow, or a shared reactor (`tcp_reactor.rs`); every packet crosses userspace twice | hardware line rate for NAT paths (container↔container measured 125–149 Gbps in the guest); published-port vsock fallback ≈2.1/4.17 Gbps single/8-flow |
@@ -62,7 +62,7 @@ for any userspace relay, not the kernel path.
   service). The egress policy (`EgressPolicy`, `egress.rs`) is a filter on
   *which* flows open host sockets, never a boundary for a compromised VMM.
   Its own docs say so: "An allowlist is one layer of enforcement, not a
-  complete sandbox" (`crates/smolvm-network/README.md:62`).
+  complete sandbox" (smolvm's crates/smolvm-network/README.md:62).
 - TSI (libkrun): "the VMM and the guest should be considered to be running in
   the network context"; apply on the VMM whatever restrictions you would apply
   on the guest (libkrun `README.md` §Security model). TSI additionally
@@ -150,28 +150,28 @@ authorized for implementation.
 
 ## Citation index
 
-- `crates/smolvm-network/README.md` (pin v1.34.1): frame-bridge path; "one
+- smolvm's crates/smolvm-network/README.md (pin v1.34.1): frame-bridge path; "one
   accept thread for every `-p HOST:GUEST`" is in `lib.rs` module docs;
   "allowlist is one layer" at line 62; TCP_NODELAY both sides.
-- `crates/smolvm-network/src/tcp_relay.rs` (pin): `TCP_RX_BUFFER_BYTES` /
+- smolvm's crates/smolvm-network/src/tcp_relay.rs (pin): `TCP_RX_BUFFER_BYTES` /
   `TCP_TX_BUFFER_BYTES` = 256 KiB (L52-53); `MAX_CONNECTIONS` = 65,536 (L58);
   `FULL_BUFFER_CONNECTIONS` = 1024, `TCP_SMALL_BUFFER_BYTES` = 16 KiB (L63-64);
   `CHANNEL_CAPACITY` = 32, `RELAY_BUFFER_BYTES` = 16 KiB (L71-72);
   `GUEST_CLOSED_KEEPALIVE` = 60 s (L81-84); flow → host-`TcpStream` mapping and
   `TcpRelayTable` (module docs).
-- `crates/smolvm-network/src/tcp_reactor.rs` (pin): shared reactor vs
+- smolvm's crates/smolvm-network/src/tcp_reactor.rs (pin): shared reactor vs
   per-flow thread; reactor adopts established flows.
-- `crates/smolvm-network/src/dns_cache.rs` (pin): TTL caps 300/60 s, 4,096
+- smolvm's crates/smolvm-network/src/dns_cache.rs (pin): TTL caps 300/60 s, 4,096
   entries; single-query recursive only; key = lowercased question + flags +
   upstreams; VMM-process lifetime.
-- `crates/smolvm-network/src/egress.rs` (pin): policy is pre-connection filter
+- smolvm's crates/smolvm-network/src/egress.rs (pin): policy is pre-connection filter
   ("Disallowed destinations are dropped before any host socket is created");
   learned hosts TTL clamp [60, 3600] (L30-31, clamped at L968); private floor
   with explicit exceptions; TSI explicitly rejected for policy machines (L3-6).
-- `crates/smolvm-network/src/lib.rs` (pin): `GuestNetworkConfig` point-to-point
+- smolvm's crates/smolvm-network/src/lib.rs (pin): `GuestNetworkConfig` point-to-point
   /30 + ULA fd53:4d00::/64 link; NAT-in-default (`GuestSubnet` RFC 6598
   100.96.0.0/30); TUN/TAP netns mode behind `#[cfg(target_os = "linux")]`.
-- `docs/limitations.md` (pin): per-flow host socket holds one FD; macOS
+- smolvm's docs/limitations.md (pin): per-flow host socket holds one FD; macOS
   maxfilesperproc 10,240 → ~9,900 concurrent; virtio-net cap
   `SMOLVM_TCP_RELAY_CAPACITY` = 65,536; host-ephemeral TIME-WAIT 30 s/16,384
   ports → `EADDRNOTAVAIL`; "ping fails … even while HTTP works" (default

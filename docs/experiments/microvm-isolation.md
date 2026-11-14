@@ -106,8 +106,8 @@ its documented limits is the honest answer at this stage.
   `docs/decisions.md` (CTRS-17).
 - smolvm pin `146f3a5121c01a98bb894dc954e3c143a17c0084` (v1.34.1):
   `README.md` comparison table (boot claims, per-workload VMs) and
-  platform matrix (HVF on macOS); `docs/limitations.md` (checkpoint/DAX
-  caveats); `docs/credential-substitution.md` (restore re-authorization);
-  `docs/incremental-checkpoints.md` (snapshot constraints).
+  platform matrix (HVF on macOS); smolvm's docs/limitations.md (checkpoint/DAX
+  caveats); smolvm's docs/credential-substitution.md (restore re-authorization);
+  smolvm's docs/incremental-checkpoints.md (snapshot constraints).
 - libkrun `171e5023`: `README.md` (HVF on macOS/ARM64; TSI needs custom
   kernel; VMM/guest as one network context).

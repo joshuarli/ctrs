@@ -1,6 +1,6 @@
 # Architecture — the headless fork, as of CTRS-07
 
-Verified against git state after CTRS-06/07 deletions (see `docs/upstream.md` for the import record). This is a reading map, not a design doc; keep it accurate as slices land.
+Verified against git state after CTRS-06/07 deletions. This is a reading map, not a design doc; keep it accurate as slices land.
 
 ## Workspace
 
@@ -67,10 +67,9 @@ Nothing spawns `git`, `curl`, `ruby`, `python3`, `open`, `find`, or a shell to *
 
 | Surface | Tool |
 | --- | --- |
-| Unit/integration | `cargo test --workspace` (193 passing after CTRS-07, see `docs/baseline.md`) |
+| Unit/integration | `cargo test --workspace` |
 | Engine round-trip | `conformance/smoke.sh` |
 | API conformance | `conformance/run.sh` + fixtures (D1) |
 | Docker-CLI e2e | `tests/e2e.sh` (adapted to scratch env in CTRS-08) |
 | Linux host proof | `tests/linux-host.sh` — needs Linux (N-1) |
 | Firewall | netns fixtures in `conformance/fixtures/` (CTRS-11/13) — needs the guest VM or Linux root |
-| Parity oracle | `docs/parity.md` |

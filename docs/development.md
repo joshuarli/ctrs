@@ -13,7 +13,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask kernel  # guest/out/Image      (needs a D
 CARGO_ENCODED_RUSTFLAGS="" cargo xtask disk    # guest/out/data.img   (needs a Docker engine)
 cargo xtask host      # target/release/ctrs, signed with the virtualization entitlement
 cargo xtask all       # guest + host
-cargo xtask linux     # ctrs and ctrs-init as static musl binaries (Linux host build; see docs/upstream.md and N-1)
+cargo xtask linux     # ctrs and ctrs-init as static musl binaries (Linux host build; see N-1 in docs/campaign-headless-ctrs.md)
 ```
 
 `CARGO_ENCODED_RUSTFLAGS=""` is required on hosts whose global cargo config
@@ -28,7 +28,7 @@ with the same container build.
 
 ```sh
 ./target/release/ctrs daemon &              # serves ~/.local/share/ctrs/run/docker.sock; boots on first use
-DOCKER_HOST=unix://$HOME/.ctrs/run/docker.sock docker run --rm alpine echo hello
+DOCKER_HOST=unix://$HOME/.local/share/ctrs/run/docker.sock docker run --rm alpine echo hello
 docker buildx create --name ctrs-build --driver docker-container \
   --driver-opt default-load=true unix:///absolute/path/to/run/docker.sock   # for docker build
 SOAK=600 CTRS_SOCKET=.work/tmp/smoke.sock tests/e2e.sh    # full suite + 600-run leak soak
@@ -91,5 +91,4 @@ buildx ─────┘    Docker Engine API          owns the VM             
 `conformance/smoke.sh` boots the VM with scratch roots and round-trips a
 container. `tests/e2e.sh` runs the full compatibility suite against a
 running engine (see its header). `cargo test --workspace` runs the unit
-suite. The parity register (`docs/parity.md`) tracks every supported
-behavior.
+suite.
