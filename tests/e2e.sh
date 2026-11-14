@@ -587,7 +587,10 @@ t build-resolvconf "nameserver 172.17.0.1" bash -c "cd $BD && printf 'FROM alpin
 code build-no-public-resolver 1 bash -c "cd $BD && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --no-cache --progress plain -f Dockerfile.dns . 2>&1 | grep -q 'nameserver 8.8.8.8'"
 t build-dns "Address" bash -c "cd $BD && printf 'FROM alpine\nRUN nslookup example.com\n' > Dockerfile.lookup && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --no-cache --progress plain -f Dockerfile.lookup . 2>&1"
 t build-fails "exit code: 3" bash -c "cd $BD && printf 'FROM alpine\nRUN exit 3\n' > Dockerfile.bad && BUILDX_BUILDER=$BX $D build -f Dockerfile.bad . 2>&1"
-$D rmi kiri-test/built kiri-test/net >/dev/null 2>&1; rm -rf "$BD"
+printf 'FROM alpine\nENTRYPOINT ["/bin/echo"]\nCMD ["hello-from-image"]\n' > "$BD/Dockerfile.ep"
+BUILDX_BUILDER=$BX $D build -f "$BD/Dockerfile.ep" -t kiri-test/ep-cmd "$BD" >/dev/null 2>&1 || echo "  FAIL build-ep-cmd (image did not build)"
+t create-empty-cmd "hello-from-image" bash -c "cid=\$(curl -s --unix-socket $SOCK -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"kiri-test/ep-cmd\",\"Cmd\":[]}' http://x/containers/create | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"Id\"])') && curl -s --unix-socket $SOCK -X POST \"http://x/containers/\$cid/start\" -o /dev/null && sleep 1 && out=\$(curl -s --unix-socket $SOCK \"http://x/containers/\$cid/logs?stdout=true\") && echo \"\$out\" | grep -o hello-from-image; curl -s --unix-socket $SOCK -X DELETE \"http://x/containers/\$cid?force=true\" -o /dev/null"
+$D rmi kiri-test/built kiri-test/net kiri-test/ep-cmd >/dev/null 2>&1; rm -rf "$BD"
 
 section "registry: login, push, pull"
 REG=$(mktemp -d); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}

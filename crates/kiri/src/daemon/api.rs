@@ -1199,6 +1199,20 @@ fn strings(v: &Value) -> Option<Vec<String>> {
     }
 }
 
+/// Docker's create-time merge of the request's Entrypoint and Cmd with the
+/// image's (moby `daemon/commit.go: merge`): a missing or empty Entrypoint
+/// takes the image's; a missing or empty Cmd takes the image's too, unless
+/// an Entrypoint was given — an explicit Entrypoint drops the image's Cmd
+/// (an explicit empty Entrypoint resets the image's Entrypoint instead).
+fn merge_entry_cmd(entry: Option<Vec<String>>, cmd: Option<Vec<String>>, image_entry: &[String], image_cmd: &[String]) -> (Vec<String>, Vec<String>) {
+    let cmd = if cmd.as_ref().is_none_or(Vec::is_empty) && entry.as_ref().is_none_or(Vec::is_empty) {
+        Some(image_cmd.to_vec())
+    } else {
+        cmd
+    };
+    (entry.unwrap_or_else(|| image_entry.to_vec()), cmd.unwrap_or_default())
+}
+
 /// cgroup limits from a HostConfig (create) or an update body, on top of `base`.
 /// Capability names as Docker writes them (`NET_ADMIN`, `CAP_NET_ADMIN`, `ALL`).
 const CAPS: [&str; 41] = [
@@ -1367,11 +1381,7 @@ pub(super) fn create(req: &Request, engine: &Engine) -> Result<Value, Error> {
     if !ports.is_empty() && network_mode == "none" {
         return Err(Error::BadRequest("a container with --network none cannot publish ports".into()));
     }
-    // Docker's rules: an explicit Entrypoint drops the image's Cmd; an
-    // explicit Cmd replaces the image's Cmd but keeps its Entrypoint.
-    let entry_override = strings(&body["Entrypoint"]);
-    let entrypoint = entry_override.clone().unwrap_or_else(|| image.config.entrypoint.clone());
-    let cmd = strings(&body["Cmd"]).unwrap_or_else(|| if entry_override.is_some() { Vec::new() } else { image.config.cmd.clone() });
+    let (entrypoint, cmd) = merge_entry_cmd(strings(&body["Entrypoint"]), strings(&body["Cmd"]), &image.config.entrypoint, &image.config.cmd);
     let mut env = image.config.env.clone();
     // Settings → Network → "Pass to containers": the proxy, unless set here.
     let given = strings(&body["Env"]).unwrap_or_default();
@@ -2519,6 +2529,31 @@ pub(super) fn parse_signal(raw: &str) -> Result<u32, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[test]
+    fn entry_cmd_merge_matches_docker() {
+        let image_entry: Vec<String> = vec!["/bin/echo".into()];
+        let image_cmd: Vec<String> = vec!["hello-from-image".into()];
+        let cases: &[(Option<&[&str]>, Option<&[&str]>, &[&str], &[&str])] = &[
+            (None, None, &["/bin/echo"], &["hello-from-image"]),
+            (None, Some(&[]), &["/bin/echo"], &["hello-from-image"]),
+            (None, Some(&["x"]), &["/bin/echo"], &["x"]),
+            (Some(&[]), None, &[], &["hello-from-image"]),
+            (Some(&[]), Some(&[]), &[], &["hello-from-image"]),
+            (Some(&[]), Some(&["x"]), &[], &["x"]),
+            (Some(&["a"]), None, &["a"], &[]),
+            (Some(&["a"]), Some(&[]), &["a"], &[]),
+            (Some(&["a"]), Some(&["x"]), &["a"], &["x"]),
+        ];
+        for (i, (entry, cmd, want_entry, want_cmd)) in cases.iter().enumerate() {
+            let entry = entry.map(|v| v.iter().map(|s| s.to_string()).collect());
+            let cmd = cmd.map(|v| v.iter().map(|s| s.to_string()).collect());
+            let (got_entry, got_cmd) = merge_entry_cmd(entry, cmd, &image_entry, &image_cmd);
+            assert_eq!(got_entry, want_entry.iter().map(|s| s.to_string()).collect::<Vec<_>>(), "case {i}: Entrypoint");
+            assert_eq!(got_cmd, want_cmd.iter().map(|s| s.to_string()).collect::<Vec<_>>(), "case {i}: Cmd");
+        }
+    }
 
     #[test]
     fn kernel_release_is_trimmed_and_empty_is_none() {
