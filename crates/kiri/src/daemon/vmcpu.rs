@@ -9,10 +9,10 @@ mod imp {
     /// The VM's process, once found.
     static VM_PID: AtomicI32 = AtomicI32::new(0);
 
-    /// The process macOS holds responsible for `pid`: for an XPC service such
-    /// as Virtualization's, the app it runs for, which is the app's first
-    /// process rather than the engine when the window started the engine. A private function, so it is
-    /// looked up rather than linked; without it there is no reading.
+    /// The process macOS holds responsible for `pid`: for an XPC service
+    /// such as Virtualization's, the first process of the program it serves.
+    /// A private function, so it is looked up rather than linked; without it
+    /// there is no reading.
     fn responsible(pid: i32) -> Option<i32> {
         type F = unsafe extern "C" fn(i32) -> i32;
         static F: std::sync::OnceLock<Option<F>> = std::sync::OnceLock::new();

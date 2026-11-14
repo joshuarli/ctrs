@@ -183,8 +183,8 @@ fn data_disk(guest_dir: &std::path::Path) -> io::Result<PathBuf> {
             std::fs::copy(&template, &tmp)
                 .map_err(|e| io::Error::new(e.kind(), format!("copy data disk template {}: {e}", template.display())))?;
         } else {
-            // The app ships the 64 GiB template as a sparse tarball (a few
-            // hundred KB); tar recreates its holes, so it stays small on disk.
+            // The distribution may pack the 64 GiB template as a sparse tarball;
+            // tar recreates its holes, so it stays small on disk.
             let packed = guest_dir.join("data.img.tgz");
             let unpack = vm.join("unpack");
             let _ = std::fs::remove_dir_all(&unpack);
@@ -223,9 +223,9 @@ fn mac_address() -> io::Result<String> {
     Ok(mac)
 }
 
-/// The guest kernel in the app: an arm64 `Image` for Apple Silicon, an
-/// x86-64 `bzImage` for Intel (each Mac's app carries only its own;
-/// `cargo xtask app [--arch x86_64]`).
+/// The guest kernel: an arm64 `Image` for Apple Silicon, an
+/// x86-64 `bzImage` for Intel (the build for the other architecture lives
+/// under `guest/out/x86_64`).
 #[cfg(target_arch = "x86_64")]
 pub const KERNEL: &str = "bzImage";
 #[cfg(not(target_arch = "x86_64"))]
@@ -242,22 +242,22 @@ fn translated() -> bool {
     on == 1
 }
 
-/// The error for a guest kernel that isn't there. Mostly the app was
-/// deleted or moved while its engine ran: say that, not a bare path.
+/// The error for a guest kernel that isn't there. Usually the engine ran
+/// from a checkout whose `guest/out/` was cleaned: say that, not a bare path.
 #[cfg(target_os = "macos")]
 fn missing_kernel(kernel: &std::path::Path, exe: Option<&std::path::Path>) -> io::Error {
     let msg = match exe {
-        Some(exe) if !exe.exists() => format!("{} was deleted or moved while it ran: open Kiri again from where it is now", "Kiri"),
+        Some(exe) if !exe.exists() => format!("{} was deleted or moved while it ran: rebuild it with `cargo xtask host`", "the kiri binary"),
         // The whole path, so it shows where Kiri looked.
-        _ => format!("the guest kernel {} is missing: reinstall Kiri", std::path::absolute(kernel).unwrap_or_else(|_| kernel.to_owned()).display()),
+        _ => format!("the guest kernel {} is missing: rebuild it with `cargo xtask kernel`", std::path::absolute(kernel).unwrap_or_else(|_| kernel.to_owned()).display()),
     };
     io::Error::new(io::ErrorKind::NotFound, msg)
 }
 
 #[cfg(target_os = "macos")]
 /// Where the kernel and initramfs live: `KIRI_GUEST_DIR`, else
-/// `Kiri.app/Contents/Resources/guest` when running from the app, else the
-/// in-repo build output (development).
+/// the in-repo build output (`guest/out`, or `guest/out/x86_64` on Intel),
+/// found relative to the binary.
 pub fn guest_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("KIRI_GUEST_DIR") {
         return PathBuf::from(d);

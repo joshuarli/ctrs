@@ -8,7 +8,7 @@ D=${D:-docker}
 BIN=$(cd "$(dirname "$0")/.." && pwd)/target/linux/release
 [ -x "$BIN/kiri" ] || { echo "build first: cargo xtask linux"; exit 1; }
 $D rm -f kiri-linux-host >/dev/null 2>&1
-$D run -d --name kiri-linux-host --privileged --tmpfs /run -v kiri-linux-host:/var/lib/kiri -v kiri-linux-host-store:/root/.local/share/kiri \
+$D run -d --name kiri-linux-host --privileged --tmpfs /run -v kiri-linux-host:/var/lib/kiri -e KIRI_DATA_DIR=/data -v kiri-linux-host-store:/data \
   -v "$BIN:/opt/kiri:ro" alpine sh -c 'apk add -q docker-cli curl >/dev/null 2>&1; exec /opt/kiri/kiri daemon' >/dev/null
 for _ in $(seq 60); do $D exec kiri-linux-host sh -c 'DOCKER_HOST=unix:///root/.kiri/run/docker.sock docker version' >/dev/null 2>&1 && break; sleep 1; done
 PASS=0; FAIL=0

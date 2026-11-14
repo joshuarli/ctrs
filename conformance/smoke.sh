@@ -93,8 +93,8 @@ if [ -n "$BIN" ]; then
   step 'SIGTERM daemon'
   kill -TERM "$DPID" 2>/dev/null
   i=0
-  for i in $(seq 1 20); do kill -0 "$DPID" 2>/dev/null || break; sleep 1; done
-  if kill -0 "$DPID" 2>/dev/null; then bad 'daemon did not exit within 20s of SIGTERM'; kill -9 "$DPID"; else ok "daemon exited after ${i}s"; fi
+  for i in $(seq 1 10); do kill -0 "$DPID" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$DPID" 2>/dev/null; then bad 'daemon did not exit within 10s of SIGTERM'; kill -9 "$DPID"; else ok "daemon exited after ${i}s"; fi
   pgrep -f 'kiri-init' >/dev/null && bad 'stale kiri-init process' || ok 'no stale agent'
 
   step 'host hygiene'

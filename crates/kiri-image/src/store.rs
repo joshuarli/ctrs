@@ -9,6 +9,8 @@
 //! ```
 
 use std::fs::{self, File};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -127,27 +129,22 @@ pub fn digest_hex(digest: &str) -> io::Result<&str> {
 }
 
 impl Store {
-    /// The per-user data directory: `~/Library/Application Support/Kiri` on
-    /// macOS, `$XDG_DATA_HOME/kiri` (or `~/.local/share/kiri`) elsewhere.
-    /// `KIRI_DATA_DIR` overrides both.
+    /// The per-user data directory: `~/.kiri/data`. `KIRI_DATA_DIR`
+    /// overrides it. The root is made private on open (0700).
     pub fn default_root() -> io::Result<PathBuf> {
         if let Some(dir) = std::env::var_os("KIRI_DATA_DIR") {
             return Ok(PathBuf::from(dir));
         }
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| io::Error::other("HOME is not set"))?;
-        Ok(if cfg!(target_os = "macos") {
-            home.join("Library/Application Support/Kiri")
-        } else if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-            PathBuf::from(xdg).join("kiri")
-        } else {
-            home.join(".local/share/kiri")
-        })
+        Ok(home.join(".kiri").join("data"))
     }
 
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Store> {
         let root = root.into();
         fs::create_dir_all(root.join("blobs/sha256"))?;
         fs::create_dir_all(root.join("tmp"))?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
         Ok(Store { root })
     }
 

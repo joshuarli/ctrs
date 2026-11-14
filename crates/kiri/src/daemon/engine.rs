@@ -28,7 +28,7 @@ const MEMORY_FLOOR: u64 = 256 << 20;
 const MEMORY_GROW: u64 = 1 << 30;
 
 /// What a request that needs the VM gets while Kiri is stopped.
-pub const STOPPED: &str = "Kiri is stopped: press Start in the Kiri window to run containers again";
+pub const STOPPED: &str = "the container engine is stopped: start it with `kiri daemon`";
 
 /// The file that keeps "stopped" across engine restarts.
 fn stopped_marker() -> Option<std::path::PathBuf> {
@@ -346,8 +346,8 @@ pub struct Container {
     pub exit_code: i32,
     /// Its last run ended with the kernel killing it for memory.
     pub oom_killed: bool,
-    /// Its last run ended because the VM or the engine stopped under it, not
-    /// because the app exited: Docker's exit code 255, but nothing failed.
+    /// Its last run ended because the VM or the engine stopped under it,
+    /// not because the container failed: Docker's exit code 255, but not a crash.
     pub vm_stopped: bool,
     /// Set by `stop`/`kill`: no automatic restart until started again.
     pub stopped_by_user: bool,
@@ -1066,7 +1066,7 @@ impl Engine {
                         c.exit_code = code;
                         c.pid = 0;
                         c.oom_killed = oom;
-                        // Stopped by the daemon's shutdown, not by the app.
+                        // Stopped by the daemon's shutdown, not by the container.
                         c.vm_stopped = SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst);
                         if oom {
                             crate::diag::warn!("container killed for memory", name = c.name.clone(), exit_code = code);

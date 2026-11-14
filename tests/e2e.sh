@@ -1,31 +1,26 @@
 #!/bin/bash
-# End-to-end tests: drives a running `kiri daemon` through the real docker
-# CLI (context `kiri`) and checks every result. Usage:
+# End-to-end tests: drives a running engine through the real docker CLI and
+# checks every result. The engine is expected at $KIRI_SOCKET (a scratch
+# socket; never a docker context, never OrbStack). How to get one:
 #
-#   tests/e2e.sh            # functional tests (DOCKER_CONTEXT=kiri-dev for another Kiri)
+#   conformance/smoke.sh          # boots the VM with scratch roots (recommended)
+#   KIRI_DATA_DIR=... KIRI_SOCKET=... target/release/kiri daemon &
+#
+# Usage:
+#   KIRI_SOCKET=.work/tmp/smoke.sock tests/e2e.sh
 #   SOAK=500 tests/e2e.sh   # plus a leak soak of 500 container runs
 #
 # Exits non-zero if any check fails.
 
 set -u
-export DOCKER_CONTEXT=${DOCKER_CONTEXT:-kiri}
+SOCK=${KIRI_SOCKET:?set KIRI_SOCKET to the engine socket}
+export DOCKER_HOST="unix://$SOCK"
+unset DOCKER_CONTEXT
 D=docker
 PASS=0
 FAIL=0
 SKIP=0
 FAILED=()
-# The Kiri under test. A second Kiri (context kiri-dev, kiri-rc...) has its
-# own Finder folder (~/Kiri Dev) and no *.kiri.localhost routers: there is
-# one pair of ports 80 and 443 on a Mac, and the installed Kiri has them.
-FEATURE=${DOCKER_CONTEXT#kiri}; FEATURE=${FEATURE#-}
-# The engine under test's socket. Every `kiri` command (machines, k8s) and
-# every direct API call goes there, never to another Kiri on this Mac: once,
-# the Kubernetes checks ran on the installed Kiri and deleted its cluster.
-SOCK=$(docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null); SOCK=${SOCK#unix://}
-[ -S "$SOCK" ] || { echo "e2e: no engine socket for context $DOCKER_CONTEXT ($SOCK)"; exit 1; }
-export KIRI_SOCKET=$SOCK
-if [ -z "$FEATURE" ]; then KF="$HOME/Kiri"; else KF="$HOME/Kiri $(printf %s "${FEATURE:0:1}" | tr a-z A-Z)${FEATURE:1}"; fi
-KFQ=$(printf %q "$KF")
 
 # t NAME EXPECTED COMMAND... : passes when the command's output (stdout+stderr,
 # trimmed) contains EXPECTED.
@@ -350,7 +345,8 @@ t ipv6-pool-ula " fd" $D network inspect v6net -f '{{range .IPAM.Config}} {{.Sub
 t ipv6-subnet "fd00:db8:7::/64 fd00:db8:7::fe" bash -c "$D network create --ipv6 --subnet fd00:db8:7::/64 --gateway fd00:db8:7::fe v6sub >/dev/null && $D network inspect v6sub -f '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}} {{end}}'"
 t ipv6-overlap "Pool overlaps" $D network create --ipv6 --subnet fd00:db8:7::/80 v6dup
 # IPv6-only (--ipv4=false), as Docker 28 has: no IPv4 address on eth0.
-t ipv6-only-create "false" bash -c "$D network create --ipv6 --ipv4=false v6only >/dev/null && $D network inspect v6only -f '{{.EnableIPv4}}'"
+# The host docker CLI may predate --ipv4 (27.x): drive the API directly.
+t ipv6-only-create "False" bash -c "curl -s --unix-socket '$SOCK' -X POST -H 'Content-Type: application/json' -d '{\"Name\":\"v6only\",\"EnableIPv6\":true,\"EnableIPv4\":false}' http://d/networks/create -o /dev/null && curl -s --unix-socket '$SOCK' http://d/networks/v6only | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"EnableIPv4\"])'"
 t ipv6-only-no-v4 "inet6 0" $D run --rm --network v6only alpine sh -c 'echo $(ip -6 addr show eth0 scope global | grep -o inet6 | head -1) $(ip -4 addr show eth0 | grep -c inet)'
 $D network rm v6only >/dev/null
 $D run -d --name v6a --network v6sub --network-alias v6web nginx:alpine >/dev/null
@@ -410,78 +406,6 @@ t host-internal "Directory listing" $D run --rm alpine wget -qO- http://host.doc
 t host-gateway "Directory listing" $D run --rm --add-host mac:host-gateway alpine wget -qO- http://mac:18999/
 t host-internal-hostnet "Directory listing" $D run --rm --network host alpine wget -qO- http://host.docker.internal:18999/
 kill $HTTP_PID
-
-section "container domains"
-if [ -z "$FEATURE" ]; then
-  $D run -d --name dom nginx:alpine >/dev/null; ready http://dom.kiri.localhost
-  t domain-http "Welcome to nginx" curl -s -m 5 http://dom.kiri.localhost
-  t domain-unknown "No running container" curl -s -m 5 http://nope.kiri.localhost
-  # A container that publishes the router's port gets it (Laravel Sail's
-  # 80:80); the router takes it back once the container is gone.
-  t domain-port-yield "Welcome to nginx" bash -c "$D run -d --name p80 -p 80:80 nginx:alpine >/dev/null && sleep 1 && curl -s -m 5 http://127.0.0.1/"
-  $D rm -f p80 >/dev/null
-  t domain-port-back "Welcome to nginx" bash -c "for i in \$(seq 20); do curl -s -m 2 http://dom.kiri.localhost | grep -q nginx && break; sleep 0.5; done; curl -s -m 5 http://dom.kiri.localhost"
-  $D rm -f dom >/dev/null
-else
-  skip domain-http "only the installed Kiri serves *.kiri.localhost"
-  skip domain-unknown "only the installed Kiri serves *.kiri.localhost"
-  skip domain-port-yield "only the installed Kiri has the router on port 80"
-  skip domain-port-back "only the installed Kiri has the router on port 80"
-fi
-
-# Settings → Domains moves the routers with no restart; a taken port
-# changes nothing. Kiri Dev has no routers until given ports, so there the
-# move starts them, and its settings file goes afterwards.
-section "domain router ports"
-dpost() { curl -s --unix-socket "$SOCK" -X POST -H 'Content-Type: application/json' -d "$1" http://d/kiri/domains; }
-dport() { curl -s --unix-socket "$SOCK" http://d/kiri/domains | python3 -c "import json,sys; print(json.load(sys.stdin)['$1']['port'])"; }
-OLD_HTTP=$(dport http) OLD_HTTPS=$(dport https)
-$D run -d --name dmv nginx:alpine >/dev/null
-$D run -d --name dhold -p 18799:80 nginx:alpine >/dev/null
-t domain-ports-same "different ports" curl -s --unix-socket "$SOCK" -X POST -d '{"http":18780,"https":18780}' http://d/kiri/domains
-t domain-ports-zero "1 to 65535" curl -s --unix-socket "$SOCK" -X POST -d '{"http":0,"https":18743}' http://d/kiri/domains
-t domain-ports-taken "18799 is in use" curl -s --unix-socket "$SOCK" -X POST -d '{"http":18799,"https":18743}' http://d/kiri/domains
-t domain-ports-unchanged "$OLD_HTTP" bash -c "curl -s --unix-socket '$SOCK' http://d/kiri/domains | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"http\"][\"port\"])'"
-t domain-ports-move '"port":18780' curl -s --unix-socket "$SOCK" -X POST -d '{"http":18780,"https":18743}' http://d/kiri/domains
-t domain-ports-http "Welcome to nginx" bash -c "for i in \$(seq 20); do curl -s -m 2 http://dmv.kiri.localhost:18780 | grep -q nginx && break; sleep 0.5; done; curl -s -m 5 http://dmv.kiri.localhost:18780"
-t domain-ports-https "Welcome to nginx" curl -sk -m 5 https://dmv.kiri.localhost:18743
-# The old port is free afterwards: only the installed Kiri's (Kiri Dev's
-# old port 80 is the installed Kiri's own router).
-if [ -z "$FEATURE" ]; then
-  t domain-ports-old-free "closed" bash -c "curl -s -m 2 -o /dev/null http://dmv.kiri.localhost:$OLD_HTTP && echo open || echo closed"
-else
-  skip domain-ports-old-free "port $OLD_HTTP is the installed Kiri's"
-fi
-# A container can still take the moved port, and gives it back.
-t domain-ports-yield "Welcome to nginx" bash -c "$D run -d --name d18780 -p 18780:80 nginx:alpine >/dev/null && sleep 1 && curl -s -m 5 http://127.0.0.1:18780/"
-$D rm -f d18780 >/dev/null
-t domain-ports-back "Welcome to nginx" bash -c "for i in \$(seq 20); do curl -s -m 2 http://dmv.kiri.localhost:18780 | grep -q nginx && break; sleep 0.5; done; curl -s -m 5 http://dmv.kiri.localhost:18780"
-if [ -z "$FEATURE" ]; then
-  t domain-ports-restore "\"port\":$OLD_HTTP" dpost "{\"http\":$OLD_HTTP,\"https\":$OLD_HTTPS}"
-  t domain-ports-restored "Welcome to nginx" bash -c "for i in \$(seq 20); do curl -s -m 2 http://dmv.kiri.localhost:$OLD_HTTP | grep -q nginx && break; sleep 0.5; done; curl -s -m 5 http://dmv.kiri.localhost:$OLD_HTTP"
-else
-  rm -f "$HOME/.kiri-$FEATURE/domains.json"
-fi
-$D rm -f dmv dhold >/dev/null
-
-section "container files in Finder ($KF)"
-$D run -d --name fsv nginx:alpine >/dev/null; sleep 0.7
-t finder-lists "fsv" ls "$KF"
-t finder-root "docker-entrypoint.sh" ls "$KF/fsv"
-t finder-read "Alpine Linux" cat "$KF/fsv/etc/os-release"
-t finder-hash "match" bash -c "$D exec fsv sh -c 'head -c 3000000 /dev/urandom > /tmp/r.bin'; a=\$($D exec fsv sha256sum /tmp/r.bin | cut -c1-64); b=\$(shasum -a 256 $KFQ/fsv/tmp/r.bin | cut -c1-64); [ \"\$a\" = \"\$b\" ] && echo match"
-t finder-symlink-inside "docker-entrypoint.sh" bash -c "$D exec fsv ln -s / /loop && ls $KFQ/fsv/loop/"
-code finder-readonly 1 bash -c "echo x > $KFQ/fsv/tmp/written"
-t finder-mounted "nfs" bash -c "mount | grep -F \" on $KF \""
-# A file rewritten in place (same path, same size) must never read stale.
-t finder-fresh "match match match" bash -c "for i in 1 2 3; do $D exec fsv sh -c 'head -c 100000 /dev/urandom > /tmp/same.bin'; a=\$($D exec fsv sha256sum /tmp/same.bin | cut -c1-64); b=\$(shasum -a 256 $KFQ/fsv/tmp/same.bin | cut -c1-64); [ \"\$a\" = \"\$b\" ] && printf 'match '; done"
-t finder-new-file "late" bash -c "$D exec fsv sh -c 'echo late > /tmp/late.txt'; cat $KFQ/fsv/tmp/late.txt"
-t finder-deleted "No such file" bash -c "$D exec fsv rm /tmp/late.txt; cat $KFQ/fsv/tmp/late.txt"
-t finder-big "match" bash -c "$D exec fsv sh -c 'head -c 50000000 /dev/urandom > /tmp/big.bin'; a=\$($D exec fsv sha256sum /tmp/big.bin | cut -c1-64); b=\$(shasum -a 256 $KFQ/fsv/tmp/big.bin | cut -c1-64); [ \"\$a\" = \"\$b\" ] && echo match"
-t finder-perms-readable "ok" bash -c "$D exec fsv sh -c 'echo s > /tmp/secret; chmod 600 /tmp/secret'; [ \"\$(cat $KFQ/fsv/tmp/secret)\" = s ] && echo ok"
-code finder-no-mkdir 1 mkdir "$KF/fsv/tmp/newdir"
-$D rm -f fsv >/dev/null
-t finder-gone "gone" bash -c "ls $KFQ | grep -qx fsv || echo gone"
 
 section "volumes and bind mounts"
 BIND=$(mktemp -d); echo "from the mac" > "$BIND/hello.txt"
@@ -586,7 +510,6 @@ ready http://localhost:18380
 t compose-port "compose on kiri" curl -s -m 5 http://localhost:18380
 t compose-dns "PONG" bash -c "cd $CP && $D compose -p kiritest exec -T web sh -c 'apk add -q redis >/dev/null 2>&1; redis-cli -h cache ping || { cat /etc/resolv.conf; nslookup cache; ip addr show eth0; }'"
 t compose-ps "running" bash -c "cd $CP && $D compose -p kiritest ps --format '{{.State}}'"
-if [ -z "$FEATURE" ]; then t compose-domain "compose on kiri" curl -s -m 5 http://web.kiritest.kiri.localhost; else skip compose-domain "only the installed Kiri serves *.kiri.localhost"; fi
 t compose-down "Removed" bash -c "cd $CP && $D compose -p kiritest down -v 2>&1"
 t compose-clean "0" bash -c "$D ps -aq --filter label=com.docker.compose.project=kiritest | wc -l | tr -d ' '"
 t compose-bystander "bystander" $D ps --format '{{.Names}}'
@@ -648,10 +571,10 @@ $D rmi kiri-test/alp:v1 >/dev/null 2>&1; rm -rf "$IMD"
 
 section "docker build (BuildKit in the VM)"
 BD=$(mktemp -d)
-# Each Kiri's own builder: kiri-build for context kiri, kiri-dev-build for kiri-dev, and so on,
-# so builds go to the Kiri under test and not to another one on this Mac.
-BX=${KIRI_BUILDER:-$DOCKER_CONTEXT-build}
-docker buildx inspect "$BX" >/dev/null 2>&1 || docker buildx create --name "$BX" --driver docker-container --driver-opt default-load=true "$DOCKER_CONTEXT" >/dev/null
+# BuildKit builder for the engine under test, addressed by its endpoint,
+# never through a docker context.
+BX=${KIRI_BUILDER:-kiri-build-e2e}
+docker buildx inspect "$BX" >/dev/null 2>&1 || docker buildx create --name "$BX" --driver docker-container --driver-opt default-load=true "unix://$SOCK" >/dev/null
 printf 'FROM alpine\nRUN echo built > /built\nARG MSG=default\nRUN echo "$MSG" > /msg\nCOPY data.txt /data.txt\nCMD ["cat","/built","/msg","/data.txt"]\n' > "$BD/Dockerfile"
 echo "from context" > "$BD/data.txt"
 t build "importing to docker" bash -c "cd $BD && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --build-arg MSG=hello -t kiri-test/built . 2>&1"
@@ -824,52 +747,10 @@ t udp-inspect "53/udp" $D inspect -f '{{json .NetworkSettings.Ports}}' dns
 $D rm -f dns >/dev/null
 code udp-port-free-after 0 bash -c "python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"0.0.0.0\", 15354))'"
 
-section "Linux machines"
-# Absolute: machine-cwd runs it from another folder.
-KIRI=${KIRI:-$(cd "$(dirname "$0")/.." && pwd)/target/release/kiri}
-# The binary as one shell word, for commands passed to bash -c (app paths have spaces).
-KQ=$(printf %q "$KIRI")
-t machine-create "is running" "$KIRI" machine create e2e-m --distro alpine
-t machine-list "e2e-m" "$KIRI" machine list
-t machine-user "$(whoami) $(id -u)" bash -c "$KQ machine shell e2e-m -- sh -c 'echo \$(whoami) \$(id -u)' < /dev/null"
-# Machines see the Mac's home folder, not /private/tmp, so these use a folder under it.
-MD=$(mktemp -d "$HOME/.kiri-e2e-machine.XXXXXX"); touch "$MD/kiri-e2e-marker"
-t machine-mac-files "kiri-e2e-marker" bash -c "$KQ machine shell e2e-m -- ls $MD < /dev/null"
-t machine-cwd "$MD" bash -c "cd $MD && $KQ machine shell e2e-m -- pwd < /dev/null"
-rm -rf "$MD"
-t machine-hostname "e2e-m" bash -c "$KQ machine shell e2e-m -- hostname < /dev/null"
-t machine-sudo "root" bash -c "for i in \$(seq 30); do out=\$($KQ machine shell e2e-m -- sudo -n whoami < /dev/null 2>/dev/null); [ \"\$out\" = root ] && break; sleep 1; done; echo \$out"
-t machine-stop "Exited" bash -c "$KQ machine stop e2e-m && $KQ machine list"
-t machine-start "Up" bash -c "$KQ machine start e2e-m && $KQ machine list"
-t machine-delete "deleted" "$KIRI" machine delete e2e-m
-code machine-bad-name 1 "$KIRI" machine create 'bad_name!'
+section "stop signal"
 t stop-signal "got USR1" bash -c "$D run -d --name sig --stop-signal USR1 alpine sh -c 'trap \"echo got USR1; exit 0\" USR1; while :; do sleep 0.1; done' >/dev/null; sleep 0.5; $D stop -t 5 sig >/dev/null; $D logs sig; $D rm -f sig >/dev/null"
 t stop-signal-inspect "exited (0)" bash -c "$D run -d --name sig2 --stop-signal SIGRTMIN+3 alpine sh -c 'trap \"exit 0\" 37; while :; do sleep 0.1; done' >/dev/null; sleep 0.5; $D stop -t 5 sig2 >/dev/null; $D ps -a --filter name=sig2 --format '{{.Status}}' | tr A-Z a-z | cut -c1-10; $D rm -f sig2 >/dev/null"
-if [ "${SLOW:-0}" = 1 ]; then
-  t machine-systemd "running" bash -c "$KQ machine create e2e-sd --distro ubuntu --systemd >/dev/null; for i in \$(seq 60); do st=\$($KQ machine shell e2e-sd -- systemctl is-system-running < /dev/null 2>/dev/null); case \"\$st\" in running|degraded) break;; esac; sleep 3; done; echo \$st"
-  t machine-systemd-stop "Exited" bash -c "$KQ machine stop e2e-sd && $KQ machine list | grep e2e-sd"
-  "$KIRI" machine delete e2e-sd >/dev/null
-fi
 
-if [ "${K8S:-0}" = 1 ]; then
-  section "Kubernetes (K8S=1)"
-  KH=$(mktemp -d); mkdir -p "$KH/.kube"
-  KK="env HOME=$KH KIRI_SOCKET=$SOCK $KQ k8s"
-  t k8s-start "is ready" bash -c "$KK start"
-  # The context `kiri k8s start` wrote: named after the Kiri build, not always `kiri`.
-  KCTX=$(env HOME="$KH" kubectl config get-contexts -o name 2>/dev/null | head -1); KCTX=${KCTX:-kiri}
-  t k8s-node "Ready" env HOME="$KH" kubectl --context $KCTX get nodes
-  t k8s-deploy "successfully rolled out" bash -c "env HOME=$KH kubectl --context $KCTX create deployment web --image=nginx:alpine >/dev/null && env HOME=$KH kubectl --context $KCTX rollout status deploy/web --timeout=120s"
-  # CoreDNS may still be starting: ask a few times, as a client would.
-  t k8s-service-dns "Welcome to nginx" bash -c "env HOME=$KH kubectl --context $KCTX expose deploy web --port 80 >/dev/null; for i in 1 2 3 4 5 6; do out=\$(env HOME=$KH kubectl --context $KCTX run t\$i --rm -i --restart=Never --image=alpine -- wget -qO- -T 5 http://web.default.svc.cluster.local 2>/dev/null); echo \"\$out\" | grep -q Welcome && break; sleep 3; done; echo \"\$out\""
-  t k8s-loadbalancer "Welcome to nginx" bash -c "env HOME=$KH kubectl --context $KCTX expose deploy web --name web-lb --type=LoadBalancer --port 18091 --target-port 80 >/dev/null; for i in \$(seq 60); do curl -s -m 2 http://localhost:18091 | grep -q Welcome && break; sleep 2; done; curl -s -m 2 http://localhost:18091"
-  t k8s-loadbalancer-gone "gone" bash -c "env HOME=$KH kubectl --context $KCTX delete svc web-lb >/dev/null; sleep 7; curl -s -m 2 http://localhost:18091 || echo gone"
-  t k8s-stop "exited" bash -c "$KK stop >/dev/null && $KK status"
-  t k8s-resume "is ready" bash -c "$KK start"
-  t k8s-delete "deleted" bash -c "$KK delete"
-  t k8s-context-gone "0" bash -c "env HOME=$KH kubectl config get-contexts -o name | grep -c kiri"
-  rm -rf "$KH"
-fi
 
 section "errors"
 t bad-image-name "invalid" $D run --rm 'UPPER/case' true

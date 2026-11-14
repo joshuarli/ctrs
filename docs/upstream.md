@@ -28,7 +28,7 @@ Everything upstream at the pin is imported except:
 - `kiri run`/`ps`/… delegate to the external `docker` CLI against Kiri's socket (`crates/kiri/src/docker.rs`); the engine itself is the daemon. Not to be described as Docker-independent.
 - `tests/e2e.sh` expects a `kiri` docker context and a `~/Kiri` Finder folder (both absent in the headless fork; adapted in CTRS-08). `tests/linux-host.sh` requires a Linux host (Needs environment N-1).
 - Guest kernel: `6.18.58` (see `guest/kernel/build.sh`), uncompressed arm64 `Image`, patches `guest/kernel/patches/000{1..4}-*.patch`, config `guest/kernel/kiri.config`; GPL-2.0-only; source offer in `guest/kernel/SOURCE_OFFER.md`. macOS boot asset TBD in CTRS-03 (built via `cargo xtask kernel`, which needs a container engine; allowed via Decision O2 in `docs/campaign-headless-kiri.md` only for that build).
-- `docs/features.md` ("What works") is the parity oracle; `docs/development.md` and `docs/testing-windows-arm.md` are upstream contributor docs (kept for reference).
+- `docs/features.md` ("What works") is the parity oracle.
 - Known pre-existing red at import: `dead_code` warning `parse_ipam` at `crates/kiri/src/daemon/network.rs:472`.
 
 ## Third-party inventory (host engine, after Cargo.lock resolution)

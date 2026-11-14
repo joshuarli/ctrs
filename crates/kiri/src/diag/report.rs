@@ -518,7 +518,7 @@ mod tests {
         std::fs::write(state.join("daemon.log"), format!("2026-10-28T09:00:00.000Z kiri daemon: ready on unix://{h}/.kiri/run/docker.sock\n")).unwrap();
         std::fs::write(state.join("crashes/1792800000-daemon.txt"), "Kiri crash report\nMessage:  boom with Bearer abcdefghijklmnop\n").unwrap();
         std::fs::write(state.join("crashes/1792700000-ui.sent.txt"), "Kiri crash report\nMessage:  older\n").unwrap();
-        std::fs::write(reports.join("kiri-2026-10-28-094107.ips"), format!("{{\"app_name\":\"kiri\",\"crashReporterKey\":\"ABCD-1234\"}}\n{{\"procPath\":\"{h}/Applications/Kiri.app\"}}")).unwrap();
+        std::fs::write(reports.join("kiri-2026-10-28-094107.ips"), format!("{{\"app_name\":\"kiri\",\"crashReporterKey\":\"ABCD-1234\"}}\n{{\"procPath\":\"{h}/target/release/kiri\"}}")).unwrap();
         std::fs::write(reports.join("Safari-2026-10-28-094107.ips"), "not ours").unwrap();
         let facts = Facts { engine: "not running".into(), created: UNIX_EPOCH + Duration::from_secs(1_792_800_000), containers: Some("web  nginx:alpine  Up 2 hours\n".into()) };
         let text = assemble(&home, &state, &facts, &Redactor::new(Some(h.clone()), Vec::new()));
@@ -533,7 +533,7 @@ mod tests {
         assert!(text.contains("==== Containers (names, images and status only) ====\nweb  nginx:alpine  Up 2 hours\n"));
         assert!(text.contains("2 in all") && text.contains("--- 1792800000-daemon.txt ---") && text.contains("boom with Bearer [redacted]"));
         assert!(text.find("1792800000-daemon").unwrap() < text.find("1792700000-ui").unwrap(), "newest crash first");
-        assert!(text.contains("--- kiri-2026-10-28-094107.ips ---") && text.contains("~/Applications/Kiri.app") && !text.contains("Safari"));
+        assert!(text.contains("--- kiri-2026-10-28-094107.ips ---") && text.contains("~/target/release/kiri") && !text.contains("Safari"));
         assert!(!text.contains("ABCD-1234") && !text.contains(&h), "{text}");
         let _ = std::fs::remove_dir_all(&home);
     }

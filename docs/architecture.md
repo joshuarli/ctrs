@@ -43,7 +43,7 @@ Deleted in CTRS-06/07: `kiri-win`, `kiri-share-proto`, `crates/kiri/src/ui/`, `w
 
 ## On-disk state
 
-`vm.json` (CPUs/memory), data root (volumes, images, records), sockets. No migration planned; `KIRI_*` env vars stay compatible (D2). `KIRI_STATE_DIR` redirects the diag state dir for tests (`docs/decisions.md`).
+`vm.json` (CPUs/memory) lives in the diag state dir; the image/VM data root is `KIRI_DATA_DIR` or `~/.kiri/data` (0700, enforced on open). No migration planned; `KIRI_*` env vars stay compatible (D2). `KIRI_STATE_DIR` redirects the diag state dir for tests and `KIRI_DATA_DIR` for all image/VM state (`docs/decisions.md`).
 
 ## Verification map
 
