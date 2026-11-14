@@ -23,7 +23,7 @@ mod diag;
 mod guest;
 #[cfg(unix)]
 mod service;
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 mod docker;
 
 const USAGE: &str = "\
@@ -33,7 +33,7 @@ usage: kiri COMMAND          docker's commands, on Kiri: kiri run, ps, exec,
        kiri start | stop | status [--json] | restart
        kiri build-with [docker|kiri]   which builder docker build uses
        kiri diag logs [-f] [--ui|--engine|--cli] [--errors] [-n N]
-       kiri diag report [--out PATH] [--send]   (a file to send us, tokens taken out)";
+       kiri diag report [--out PATH]     a support file: logs and crashes, tokens taken out";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -52,14 +52,11 @@ fn main() -> ExitCode {
         Some("build-with") => buildwith::cli(&args[1..]),
         #[cfg(unix)]
         Some("diag") => diag::run(&args[1..]),
-        #[cfg(any(unix, windows))]
+        #[cfg(unix)]
         Some(c) if docker::handles(c) => {
             engine_version_check();
             docker::run(&args)
         }
-        // Windows: the engine's commands, by the `kiri` in WSL.
-        #[cfg(windows)]
-        Some(c) if wsl::COMMANDS.contains(&c) => wsl::run(&args),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::FAILURE;

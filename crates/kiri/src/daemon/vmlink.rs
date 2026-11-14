@@ -5,8 +5,6 @@
 //! write lock, queue a reply slot and write; a single reader thread hands each
 //! reply to the oldest waiting slot and each container event to the engine.
 
-// The file-view replies serve the Finder view, which only macOS has.
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;

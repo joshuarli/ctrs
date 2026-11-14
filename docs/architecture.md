@@ -13,7 +13,7 @@ Verified against git state after CTRS-06/07 deletions (see `docs/upstream.md` fo
 | `kiri-image` | OCI resolution, registry client (currently `ureq` → pilot CTRS-16), content-addressed blob store |
 | `xtask` | build orchestration: `guest`, `kernel`, `disk`, `host`, `linux`, `all` |
 
-Deleted in CTRS-06/07: `kiri-win`, `kiri-share-proto`, `crates/kiri/src/ui/`, `wsl.rs`, `ui/` tests and assets, `brand/`, `about.*`, the `window` cargo feature, all desktop dependencies (`objc2-app-kit`, `objc2-web-kit`, `objc2-core-text`, `gtk`, `webkit2gtk`, `javascriptcore-rs`, `rustls`, `webpki-roots`, `rcgen`), the Wi-Fi `kiri share`/`Kiri Cloud` upload paths, the container-domain (`*.kiri.localhost`, TLS CA) machinery, the `~/Kiri` NFS Finder mount, USB passthrough, the Kubernetes (`k3s`) surface, the Linux-machines surface, `kiri setup` (docker-context creation, LaunchAgent, `/etc/resolver` install), the updater, the Builds/history window surface and BuildKit's unused host-side helpers.
+Deleted in CTRS-06/07: `kiri-win`, `kiri-share-proto`, `crates/kiri/src/ui/`, `wsl.rs`, `ui/` tests and assets, `brand/`, `about.*`, the `window` cargo feature, all desktop dependencies (`objc2-app-kit`, `objc2-web-kit`, `objc2-core-text`, `gtk`, `webkit2gtk`, `javascriptcore-rs`, `rustls`, `webpki-roots`, `rcgen`), the Wi-Fi `kiri share`/`Kiri Cloud` upload paths, the container-domain (`*.kiri.localhost`, TLS CA) machinery, the `~/Kiri` NFS Finder mount, USB passthrough, the Kubernetes (`k3s`) surface, the Linux-machines surface, `kiri setup` (docker-context creation, LaunchAgent, `/etc/resolver` install), the updater, the Builds/history window surface and BuildKit's unused host-side helpers. CTRS-10 additionally removed: the Windows-cfg arms in `main.rs`/`buildwith.rs`, the WSL path translation in `binds.rs` (with its `wslpath`/`/etc/wsl.conf` handling; the `-v` source parser is path-only now), `diag/report.rs`'s Finder reveal (`/usr/bin/open -R`), and `scripts/kiri-linux.sh`.
 
 ## CLI surface (after CTRS-07)
 
@@ -44,6 +44,24 @@ Deleted in CTRS-06/07: `kiri-win`, `kiri-share-proto`, `crates/kiri/src/ui/`, `w
 ## On-disk state
 
 `vm.json` (CPUs/memory) lives in the diag state dir; the image/VM data root is `KIRI_DATA_DIR` or `~/.kiri/data` (0700, enforced on open). No migration planned; `KIRI_*` env vars stay compatible (D2). `KIRI_STATE_DIR` redirects the diag state dir for tests and `KIRI_DATA_DIR` for all image/VM state (`docs/decisions.md`).
+
+## External delegations (audit, CTRS-10)
+
+Every process the engine or its CLI spawns, and what to make of it. Test-only spawns (Linux ACL tests use `useradd`/`userdel`/`groupadd`/`groupdel`) and build tooling (`xtask` spawns cargo/docker/codesign for the build) are excluded.
+
+| Spawner | Binary | Why | Verdict |
+| --- | --- | --- | --- |
+| `docker.rs` (`kiri ps`/`run`/…) | external `docker` CLI on PATH | Docker's own commands, delegated: `DOCKER_HOST=unix://<socket>`, `DOCKER_CONTEXT` removed, argv untouched | intended delegation; tested with a stub CLI (argv + env) |
+| `builds.rs` (`kiri build-with kiri` / first `docker build`) | `docker buildx` | BuildKit builder provisioning for `docker build`: `buildx version → inspect → rm --keep-state → create`. The builder is addressed by **endpoint** (`unix://<socket>`), never a docker context; ctrs never creates one | intended delegation, user- or first-build-triggered; no context created (CTRS-10) |
+| `service.rs` | `ps` | `kiri stop`'s "is this our daemon" check and `kiri status` RSS/uptime readout | OS helper; the only liveness signal Linux supports without /proc parsing |
+| `service.rs` | the `kiri` binary itself | `kiri start` spawns `kiri daemon` in its own process group | self; not a delegation |
+| `guest.rs` | `/usr/bin/tar` | unpacks the packed 64 GiB `data.img.tgz` template (holes preserved as sparse) | OS helper; fails loudly if missing |
+| `ports.rs` | `/usr/sbin/lsof` | names the non-ctrs process holding a published port, in the "already allocated" error message | macOS integration; absence just drops the detail |
+| `ports.rs` | `/bin/launchctl` | `getenv SSH_AUTH_SOCK` when the daemon wasn't started from a shell that has it | macOS integration; `SSH_AUTH_SOCK` env takes precedence |
+| `proxy.rs` | `/usr/sbin/scutil --proxy` | macOS proxy settings for registry pulls | macOS integration; absence = no proxy |
+| `kiri-vmm` (`process.rs`) | `kiri-init` (the initrd) | Linux host: the guest agent as a root child process | own runtime, not a delegation |
+
+Nothing spawns `git`, `curl`, `ruby`, `python3`, `open`, `find`, or a shell to *do the engine's work*; shelling out is not a control path. The remaining delegations are: (1) Docker's CLI for Docker's commands, (2) optional macOS system-info probes that degrade gracefully, (3) `ps` for process state. There is exactly one privileged external command surface (`kiri-init` on Linux, by design).
 
 ## Verification map
 

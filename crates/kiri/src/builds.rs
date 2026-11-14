@@ -5,10 +5,10 @@
 use std::io;
 use std::process::Command;
 
-/// Kiri's BuildKit builder, a docker-container one on Kiri's context.
+/// Kiri's BuildKit builder, a docker-container one on the engine's endpoint.
 pub const BUILDER: &str = "kiri-build";
 
-/// Makes the builder if it is not there (called at startup, cheap when it is).
+/// Makes the builder if it is not there (called by `kiri build-with kiri`, cheap when it is).
 pub fn ensure_builder() {
     let _ = builder();
 }
@@ -39,12 +39,10 @@ pub fn builder() -> io::Result<bool> {
         exists = !Command::new(&docker).args(["buildx", "rm", "--keep-state", BUILDER]).stdout(quiet()).stderr(quiet()).status()?.success();
     }
     if !exists {
-        // buildx create takes Kiri's context's name; without that context
-        // (Linux makes it only in the optional "docker uses Kiri" step) buildx
-        // reads the name as a host and fails on tcp://kiri:2375.
-        ensure_context(&docker)?;
+        // The endpoint, not a docker context: ctrs never creates one.
+        let endpoint = format!("unix://{}", crate::client::socket()?.display());
         let made = Command::new(&docker)
-            .args(["buildx", "create", "--name", BUILDER, "--driver", "docker-container", "--driver-opt", "default-load=true", "kiri"])
+            .args(["buildx", "create", "--name", BUILDER, "--driver", "docker-container", "--driver-opt", "default-load=true", &endpoint])
             .stdout(quiet())
             .output()?;
         if !made.status.success() {
@@ -57,18 +55,6 @@ pub fn builder() -> io::Result<bool> {
         println!("docker build: could not set which builder it uses ({e})");
     }
     Ok(true)
-}
-
-#[cfg(unix)]
-fn ensure_context(docker: impl AsRef<std::ffi::OsStr>) -> io::Result<()> {
-    let docker = docker.as_ref();
-    let quiet = || std::process::Stdio::null();
-    if Command::new(docker).args(["context", "inspect", "kiri"]).stdout(quiet()).stderr(quiet()).status()?.success() {
-        return Ok(());
-    }
-    let host = format!("host=unix://{}", crate::client::socket()?.display());
-    let out = Command::new(docker).args(["context", "create", "kiri", "--description", "Kiri", "--docker", &host]).stdout(quiet()).output()?;
-    if out.status.success() { Ok(()) } else { Err(io::Error::other(failure("docker context create failed", &out.stderr))) }
 }
 
 /// What failed, with the tool's own last error line when it gave one.

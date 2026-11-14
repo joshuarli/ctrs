@@ -11,12 +11,11 @@
 //! in which case buildx takes its current builder (`~/.docker/buildx/current`).
 //! Compose and `docker buildx build` take buildx's current builder.
 //!
-//! - Always: a buildx builder named after Kiri's context (`kiri`), a copy
-//!   of Kiri's builder (`kiri-build`: the same BuildKit and cache). A
-//!   builder in buildx's store wins over the context of the same name, so
-//!   `docker --context kiri build` builds on Kiri and loads into Kiri,
-//!   where buildx would otherwise ask the engine for a BuildKit of its own,
-//!   which Kiri doesn't have. No other context is touched.
+//! - Always: a buildx builder named `kiri`, a copy of Kiri's builder
+//!   (`kiri-build`: the same BuildKit and cache), so a user's own context
+//!   named `kiri` builds on Kiri and loads into Kiri, where buildx would
+//!   otherwise ask the engine for a BuildKit of its own, which Kiri doesn't
+//!   have. ctrs never creates that context; the user may.
 //! - Build with Docker: nothing more. Builds follow docker's context, as
 //!   they did before Kiri: OrbStack's builds stay OrbStack's, and once
 //!   docker uses Kiri, builds run on Kiri.
@@ -34,7 +33,6 @@
 //! `kiri build` always builds on Kiri, whichever is chosen.
 //!
 //! The same file serves the Mac and Linux (`kiri build-with`, the window)
-//! and Windows (kiri-win includes it).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -78,8 +76,8 @@ pub struct Places {
 
 fn read_json(path: &Path) -> io::Result<Value> {
     match std::fs::read(path) {
-        // A BOM, as Windows PowerShell writes: docker itself tolerates none,
-        // but reading through one costs nothing.
+        // A BOM, as some editors prepend: docker tolerates none, but reading
+        // through one costs nothing.
         Ok(b) => serde_json::from_slice(b.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&b)).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(json!({})),
         Err(e) => Err(e),
@@ -307,14 +305,6 @@ pub fn places() -> io::Result<Places> {
     })
 }
 
-#[cfg(windows)]
-pub fn places() -> io::Result<Places> {
-    let home = std::env::var_os("USERPROFILE").map(PathBuf::from).ok_or_else(|| io::Error::other("USERPROFILE is not set"))?;
-    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
-    let docker = docker_dir(&home);
-    Ok(Places { buildx: buildx_dir(&docker), docker, state: local.join("Kiri").join("build.json"), builder: crate::builds::BUILDER.to_owned(), context: "kiri".to_owned() })
-}
-
 /// The engine besides Kiri on this machine, by name, if there is one.
 #[cfg(unix)]
 pub fn other_engine() -> Option<&'static str> {
@@ -359,23 +349,6 @@ pub fn other_engine() -> Option<&'static str> {
         &[("/usr/bin/dockerd", "Docker"), ("/opt/docker-desktop", "Docker Desktop"), ("/opt/rancher-desktop", "Rancher Desktop")]
     };
     apps.iter().find(|(p, _)| Path::new(p).exists()).map(|(_, n)| *n)
-}
-
-/// The engine besides Kiri on this PC, by name, if there is one.
-#[cfg(windows)]
-pub fn other_engine() -> Option<&'static str> {
-    let under = |var: &str, rel: &str| std::env::var_os(var).is_some_and(|d| Path::new(&d).join(rel).is_file());
-    if under("ProgramFiles", r"Docker\Docker\Docker Desktop.exe") {
-        Some("Docker Desktop")
-    } else if under("ProgramFiles", r"Rancher Desktop\Rancher Desktop.exe") || under("LOCALAPPDATA", r"Programs\Rancher Desktop\Rancher Desktop.exe") {
-        Some("Rancher Desktop")
-    } else if under("ProgramFiles", r"RedHat\Podman\podman.exe") {
-        Some("Podman")
-    } else if Path::new(r"\\.\pipe\docker_engine").exists() {
-        Some("Docker")
-    } else {
-        None
-    }
 }
 
 /// After Kiri's builder is (re)made: what was chosen, made so.

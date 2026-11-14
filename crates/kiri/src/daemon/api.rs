@@ -998,10 +998,8 @@ fn mounts(body: &Value, engine: &Engine, image: &kiri_image::Image) -> Result<Mo
         }
         Ok(())
     };
-    // From the docker CLI on Windows (into WSL), `C:\src:/app` and the like.
-    let wsl = super::binds::wsl();
     for b in strings(&host["Binds"]).unwrap_or_default() {
-        let (src, dst, opts) = super::binds::split(&b, wsl)?;
+        let (src, dst, opts) = super::binds::split(&b)?;
         let (src, dst, opts) = (src.as_str(), dst.as_str(), opts.as_str());
         let ro = opts.split(',').any(|o| o == "ro");
         let kind = if src.starts_with('/') { "bind" } else { "volume" };
@@ -1011,10 +1009,7 @@ fn mounts(body: &Value, engine: &Engine, image: &kiri_image::Image) -> Result<Mo
     for m in host["Mounts"].as_array().into_iter().flatten() {
         let kind = m["Type"].as_str().unwrap_or("bind");
         let src = m["Source"].as_str().unwrap_or("");
-        let src = match wsl {
-            Some(w) if kind == "bind" => super::binds::source(src, w)?,
-            _ => src.to_owned(),
-        };
+        let src = src.to_owned();
         let src = src.as_str();
         let dst = m["Target"].as_str().unwrap_or("");
         let ro = m["ReadOnly"].as_bool().unwrap_or(false);

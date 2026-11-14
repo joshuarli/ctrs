@@ -40,7 +40,7 @@ const TAIL_BYTES: u64 = 512 << 10;
 /// How much of each log a report keeps.
 const LOG_BUDGET: usize = 120 << 10;
 const CRASHES: usize = 5;
-/// Log lines a crash upload carries: its part's last ones before it.
+/// Log lines kept per part: its last ones before it.
 const CRASH_BUDGET: usize = 48 << 10;
 const MAC_REPORTS: usize = 3;
 const MAC_REPORT_BUDGET: usize = 24 << 10;
@@ -421,13 +421,6 @@ pub fn save_report(text: &str, out: Option<PathBuf>) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Shows a file in Finder.
-pub fn reveal(path: &Path) {
-    if cfg!(target_os = "macos") {
-        let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(path).spawn();
-    }
-}
-
 fn report_cli(args: &[String]) -> io::Result<()> {
     let (mut out,) = (None,);
     let mut it = args.iter();
@@ -438,12 +431,8 @@ fn report_cli(args: &[String]) -> io::Result<()> {
         }
     }
     let text = report_text(false)?;
-    let chosen = out.is_some();
     let path = save_report(&text, out)?;
     println!("saved the report to {}", Redactor::home_only().apply(&path.display().to_string()));
-    if !chosen {
-        reveal(&path);
-    }
     Ok(())
 }
 
