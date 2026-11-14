@@ -168,8 +168,9 @@ fn parse_framing(headers: &[(String, String)]) -> io::Result<Framing> {
 }
 
 /// The request body reader: usually `BufReader<UnixStream>`, but the
-/// h12tiny pilot (CTRS-15) substitutes an in-memory reader. Any so the
-/// attach/stdin path can recover the socket when there is one.
+/// chunked decoder is unit-tested through in-memory readers, which is what
+/// this indirection is for; the h12tiny pilot (CTRS-15) is another caller.
+/// Any so the attach/stdin path can recover the socket when there is one.
 pub trait DynBufRead: BufRead + std::any::Any {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
@@ -548,5 +549,52 @@ mod framing_tests {
     #[test]
     fn chunked_roundtrip_is_recognized_identically() {
         assert_eq!(parse_framing(&h(&[("transfer-encoding", "chunked")])).unwrap(), Framing::Chunked);
+    }
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn req_with(framing: Framing) -> Request {
+        Request { method: "POST".into(), path: "/x".into(), query: Vec::new(), headers: Vec::new(), body: Vec::new(), framing }
+    }
+
+    fn body_of(bytes: &[u8], framing: Framing) -> io::Result<Vec<u8>> {
+        let mut cur = Cursor::new(bytes.to_vec());
+        let req = req_with(framing);
+        let mut b = Body::new(&req, &mut cur);
+        let mut out = Vec::new();
+        b.read_to_end(&mut out)?;
+        Ok(out)
+    }
+
+    #[test]
+    fn chunked_body_with_trailers_decodes() {
+        let bytes = b"5\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: v\r\n\r\n";
+        assert_eq!(body_of(bytes, Framing::Chunked).unwrap(), b"hello world");
+    }
+
+    #[test]
+    fn chunk_extensions_are_ignored() {
+        let bytes = b"3;ext=1\r\nabc\r\n0\r\n\r\n";
+        assert_eq!(body_of(bytes, Framing::Chunked).unwrap(), b"abc");
+    }
+
+    #[test]
+    fn a_cut_short_chunk_is_an_error() {
+        assert!(body_of(b"5\r\nhel", Framing::Chunked).is_err());
+    }
+
+    #[test]
+    fn content_length_reads_exactly_that_many_bytes() {
+        assert_eq!(body_of(b"hello world", Framing::ContentLength(5)).unwrap(), b"hello");
+        assert!(body_of(b"hi", Framing::ContentLength(5)).is_err());
+    }
+
+    #[test]
+    fn empty_framing_reads_nothing() {
+        assert_eq!(body_of(b"", Framing::Empty).unwrap(), b"");
     }
 }
