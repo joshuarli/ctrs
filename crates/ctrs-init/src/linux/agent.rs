@@ -354,27 +354,30 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     Ok(stored) => Msg::LayerStored(stored).encode(&mut out),
                     Err(e) => Msg::Error(&format!("unpack {}: {e}", begin.digest)).encode(&mut out),
                 },
-                Ok(Msg::Run(spec)) => match {
+                Ok(Msg::Run(spec)) => {
                     // A container that wants the network must not start before the
                     // VM has it: right after boot the DHCP lease can be a few
                     // hundred milliseconds away.
-                    if spec.flags & (ctrs_proto::run_flags::NET_NONE | ctrs_proto::run_flags::NET_HOST) == 0 {
-                        wait_for_lease(&mut dhcp, std::time::Duration::from_secs(3));
+                    let prepared = {
+                        if spec.flags & (ctrs_proto::run_flags::NET_NONE | ctrs_proto::run_flags::NET_HOST) == 0 {
+                            wait_for_lease(&mut dhcp, std::time::Duration::from_secs(3));
+                        }
+                        let join_pid = ctrs_proto::net_opts::values(spec.net.opts, ctrs_proto::net_opts::NETNS).next().and_then(|t| running_pid(&procs, t));
+                        container::spawn(
+                            &spec,
+                            paths,
+                            NetCtx { bridges: &mut bridges, dns: &mut dns, upstream_dns: dhcp.as_ref().and_then(|d| d.lease.as_ref()).map_or(&host_dns[..], |l| &l.dns), join_pid },
+                        )
+                    };
+                    match prepared {
+                        Ok(run) => {
+                            let cloned_ns = sys::boottime_ns();
+                            Msg::Started { id: &run.id, pid: run.pid as u32 }.encode(&mut out);
+                            procs.insert(run.pid, new_proc(run, received_ns, cloned_ns));
+                        }
+                        Err(e) => Msg::Error(&format!("run {}: {e}", spec.id)).encode(&mut out),
                     }
-                    let join_pid = ctrs_proto::net_opts::values(spec.net.opts, ctrs_proto::net_opts::NETNS).next().and_then(|t| running_pid(&procs, t));
-                    container::spawn(
-                    &spec,
-                    paths,
-                    NetCtx { bridges: &mut bridges, dns: &mut dns, upstream_dns: dhcp.as_ref().and_then(|d| d.lease.as_ref()).map_or(&host_dns[..], |l| &l.dns), join_pid },
-                )
-                } {
-                    Ok(run) => {
-                        let cloned_ns = sys::boottime_ns();
-                        Msg::Started { id: &run.id, pid: run.pid as u32 }.encode(&mut out);
-                        procs.insert(run.pid, new_proc(run, received_ns, cloned_ns));
-                    }
-                    Err(e) => Msg::Error(&format!("run {}: {e}", spec.id)).encode(&mut out),
-                },
+                }
                 Ok(Msg::Exec(spec)) => {
                     let target = procs.values().find(|p| p.run.container.is_none() && p.run.id == spec.container_id);
                     match target.map(|p| p.run.pid) {
@@ -391,15 +394,15 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 }
                 Ok(Msg::Input { id, data }) => {
                     let mut target = None;
-                    if let Some(p) = procs.values_mut().find(|p| p.run.id == id) {
-                        if let Some(fd) = p.run.stdin.as_ref().map(|f| f.as_raw_fd()) {
-                            if p.input.len() + data.len() > MAX_PENDING_INPUT {
-                                p.input.clear();
-                                p.run.stdin = None;
-                            } else {
-                                p.input.extend(data);
-                                target = Some(fd);
-                            }
+                    if let Some(p) = procs.values_mut().find(|p| p.run.id == id)
+                        && let Some(fd) = p.run.stdin.as_ref().map(|f| f.as_raw_fd())
+                    {
+                        if p.input.len() + data.len() > MAX_PENDING_INPUT {
+                            p.input.clear();
+                            p.run.stdin = None;
+                        } else {
+                            p.input.extend(data);
+                            target = Some(fd);
                         }
                     }
                     if let Some(fd) = target {
@@ -855,6 +858,15 @@ fn reap(procs: &mut HashMap<libc::pid_t, Proc>) {
     }
 }
 
+/// A non-blocking pipe: (read end the loop polls, write end the thread rings).
+fn usage_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [0; 2];
+    // SAFETY: `fds` has room for the two descriptors pipe2 writes.
+    sys::check(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } as _, "pipe")?;
+    // SAFETY: pipe2 just opened both; nothing else owns them.
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
 #[cfg(test)]
 mod clock_tests {
     use super::off_by_more;
@@ -871,11 +883,3 @@ mod clock_tests {
     }
 }
 
-/// A non-blocking pipe: (read end the loop polls, write end the thread rings).
-fn usage_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0; 2];
-    // SAFETY: `fds` has room for the two descriptors pipe2 writes.
-    sys::check(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } as _, "pipe")?;
-    // SAFETY: pipe2 just opened both; nothing else owns them.
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
-}

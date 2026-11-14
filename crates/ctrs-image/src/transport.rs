@@ -256,7 +256,7 @@ fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
             // Never forward credentials across a redirect hop; the auth
             // header names the previous origin, so drop it on every hop.
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case(AUTHORIZATION.as_str()));
-            if matches!(status, 301 | 302 | 303) && method != "HEAD" {
+            if matches!(status, 301..=303) && method != "HEAD" {
                 method = "GET";
                 body = Body::Empty;
                 headers.retain(|(k, _)| {

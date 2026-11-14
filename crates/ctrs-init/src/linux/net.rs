@@ -388,7 +388,7 @@ impl Dhcp {
                     1 if len == 4 => mask = v.try_into().expect("4"),
                     3 if len >= 4 => router = v[..4].try_into().expect("4"),
                     54 if len == 4 => server = v.try_into().expect("4"),
-                    6 => dns = v.chunks_exact(4).map(|c| c.try_into().expect("4")).collect(),
+                    6 => dns = v.as_chunks::<4>().0.to_vec(),
                     _ => {}
                 }
                 i += 2 + len;
@@ -447,10 +447,16 @@ fn mac_of(name: &str) -> io::Result<[u8; 6]> {
         sys::check(libc::ioctl(sock.as_raw_fd(), libc::SIOCGIFHWADDR as libc::Ioctl, &mut req) as _, "hwaddr")?;
         let mut mac = [0u8; 6];
         for (d, s) in mac.iter_mut().zip(req.ifr_ifru.ifru_hwaddr.sa_data.iter()) {
-            *d = *s as u8;
+            *d = c_char_as_u8(*s);
         }
         Ok(mac)
     }
+}
+
+// c_char is unsigned on aarch64 and signed on x86_64; the cast is load-bearing on one of them.
+#[allow(clippy::unnecessary_cast)]
+fn c_char_as_u8(c: libc::c_char) -> u8 {
+    c as u8
 }
 
 /// The IPv6 gateway and prefix a bridge has, if its network has IPv6.
@@ -458,9 +464,10 @@ type Bridge6 = Option<([u8; 16], u8)>;
 
 /// Bridges that exist so far: name → (index, gateway (none when
 /// IPv6-only), prefix, IPv6).
+type Made6 = HashMap<String, (i32, Option<[u8; 4]>, u8, Bridge6)>;
 #[derive(Default)]
 pub struct Bridges {
-    made: HashMap<String, (i32, Option<[u8; 4]>, u8, Bridge6)>,
+    made: Made6,
 }
 
 impl Bridges {
@@ -535,10 +542,10 @@ impl Bridges {
         if let Err(e) = refresh_nat() {
             eprintln!("ctrs-init: NAT: {e}");
         }
-        if let Some((.., Some(_))) = self.made.remove(name) {
-            if let Err(e) = self.update_v6(None) {
-                eprintln!("ctrs-init: IPv6 NAT: {e}");
-            }
+        if let Some((.., Some(_))) = self.made.remove(name)
+            && let Err(e) = self.update_v6(None)
+        {
+            eprintln!("ctrs-init: IPv6 NAT: {e}");
         }
     }
 
