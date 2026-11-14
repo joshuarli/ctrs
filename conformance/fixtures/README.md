@@ -1,0 +1,3 @@
+Fixture contract. One `*.sh` per behavior, POSIX-ish bash, 60 s timeout expected (run under `perl -e 'alarm 60; exec @ARGV'` style if blocking). Each fixture runs against the engine at `$DOCKER_HOST` (a `unix://` socket) and exits 0 with `ok` on the last line, or exits non-zero with the reason. Fixtures must be self-cleaning (create and remove what they make; never touch anything outside the scratch engine data root) and must never reach OrbStack's socket, `/var/run/docker.sock`, or any docker context. Commit fixtures with the slice that needs them; a fixture that needs Linux root or a second host goes in `conformance/fixtures/` with `# needs: linux-root` in its header and is listed on the campaign's Needs environment list.
+
+Runner: `conformance/run.sh [filter]`
