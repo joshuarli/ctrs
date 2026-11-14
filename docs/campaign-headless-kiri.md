@@ -1,245 +1,185 @@
 # Campaign: extract and harden a headless Kiri core into ctrs
 
-**Status:** planned; execution may start immediately after the baseline is imported and proved.
-**Repository:** https://github.com/joshuarli/ctrs
-**Initial executable / temporary internal identifiers:** `kiri`
-**Eventually:** `ctrs`
-**Platforms:** macOS + Linux only; prioritize Apple Silicon, Linux aarch64 and x86_64. Mac Intel must compile if claimed as supported; runtime support requires a real runner.
+**Status:** ready to execute. Last accepted revision: `main` @ eda9170 (docs only). Accepted: none. Red: none. Parked: none. Next: **CTRS-01**. Resume: read this file, run CTRS-01, then the first unchecked slice in sequence. Do not wait for the owner; the standing grant is executed-until-completion (2026-11-13).
+
+**Repository:** https://github.com/joshuarli/ctrs · **Platforms:** macOS (Apple Silicon first; Intel must compile and is smoke-tested only on an Intel host, see N-4) + Linux (musl static; runtime proof parked, see N-1).
 **Objective:** the smallest credible, fast, headless, pure-Rust-oriented Docker-compatible container engine that directly exercises the Laputa stack. Not a general-purpose VM manager or another desktop app.
+**Reference for behavior:** the pinned Kiri (`docs/upstream.md`) as the port baseline, and upstream `docs/features.md` + `tests/e2e.sh` as the parity oracle. The reference for the Docker API surface is the API as implemented upstream (`crates/kiri/src/daemon/api.rs`, version 1.47).
 
-## 0. Ground truth, sources, and design constraints
+## Charter
 
-Research snapshot (November 13, 2026, Pacific time):
+- One writer. Parallel lanes only for the disjoint pairs named in **Sequence**, in worktrees at `.work/wt/<lane>`. Steering checkpoint after each accepted slice (see orchestrate's checkpoint): rewrite **Status** in place only.
+- Parity before optimization. Each slice ends on its acceptance command and the narrowest affected suite. Full `cargo test --workspace` at the Gates and at close. Red never lands on `main`; a slice red twice parks on branch `slice/CTRS-NN-*` with cause and retry condition. Failing item: cause before retry (root-cause), 3 attempts per slice max, then park.
+- Decide and keep going. Record only decisions a later slice depends on, in `docs/decisions.md`. Fix egregiously broken or slow things met on the way in their own commit, to these thresholds: `cargo check` warnings never increase; daemon idle RSS in smoke stays ≤ 30 MB; a host-socket-reachable-from-guest is a security defect, fix before anything else; a flaky check (>10% reruns) gets quarantined with its cause, not widened.
+- Execution grant covers in-repo work, local builds, the macOS VM, and the two approved OrbStack container builds (Decision O2). Pushing green commits to `origin/main` follows the owner's standing contract; never force-push, never push tags or releases. No CI changes. No system-wide installs (Homebrew, apt, launchd): service setup exists only as doc examples.
+- Every commit is a Conventional Commit; scope is the workstream (`baseline`, `headless`, `firewall`, `http`, `net`, `harden`, `release`). Item ID in the body. Code comments never cite this doc.
+- `.work/` is disposable scratch (gitignored). Evidence that must outlive the session is committed under `docs/`; raw logs stay in `.work/` and are summarized in the committed report.
+- Dependencies: named gates in Decision P6. Pin exactly. `default-features = false` where offered. No Tokio, no OpenSSL, no Hyper compatibility layer; Graviola/rustls TLS.
+- Owner decisions are answered in **Decisions**; the executor re-checks one only when evidence contradicts it, and records the contradiction.
 
-| Codebase | Snapshot to evaluate | Role |
-| --- | --- | --- |
-| [Kiri](https://github.com/libracoder/kiri) | `99b63c07fc003d3dcd8e03c76891ba747b5c984f` | Source engine and correctness/performance baseline |
-| [crabtables](https://github.com/laputa-systems/crabtables) | `38646b8f2f6ee7256c448849edda4459842a2e10` | Typed nf_tables/NAT/ruleset programming |
-| [smolith](https://github.com/laputa-systems/smolith) | `066bb8c9c609c66c271fc32f170181375e421551` | Smol runtime, h12tiny HTTP, futures-based I/O and Graviola TLS |
-| [smolvm](https://github.com/smol-machines/smolvm) | `146f3a5121c01a98bb894dc954e3c143a17c0084` | Optional microVM / userspace networking comparison |
-| [Lima](https://github.com/lima-vm/lima) | `55fb02294a4199dcc49db4946f6b126f94d4f3a9` | VM networking, mounts and port forwarding oracle |
-
-Record the actual Kiri source commit imported, its files, and its dependency lockfile in `docs/upstream.md`. Recheck snapshots before implementing a replacement; source can move after this document. Do not assert a benchmark, feature, fix, or qualification based on a README alone.
-
-**Important Kiri provenance and licensing:** retain upstream Apache-2.0 `LICENSE`, relevant `NOTICE` entries, source attribution, and third-party licenses. The Linux kernel is GPL-2.0; retain patches, build configuration, reproducible sources, corresponding-source offer and distribution compliance. Kiri explicitly excludes its *name and logo* from the software license. Temporarily keep historical `kiri` command names, crate/module names, socket identifiers and Docker context for development and migration; do not ship its logos or represent this public fork as an official Kiri build. Switch public branding to `ctrs` before a general release. Do not rush renaming wire protocols or data formats while extraction is in progress.
-
-**Non-negotiable invariants:**
+## Non-negotiable invariants
 
 1. No Windows, WSL2, GTK, WebKitGTK, AppKit desktop window, embedded web UI, Electron, updater, menu-bar app, Finder UI, or mandatory Docker installation at runtime.
 2. Linux executes containers directly using namespaces/cgroups/overlayfs. macOS uses one small Linux guest through Apple's **Virtualization.framework**. No mandatory QEMU, libkrun, systemd, dbus, containerd, dockerd, runc or shim.
-3. Keep a Docker Engine API-compatible Unix socket as a stable integration boundary; continue allowing an external Docker CLI/Compose/buildx during transition. No false claim that `kiri run` is independent: upstream `crates/kiri/src/docker.rs` presently executes an external `docker` CLI.
-4. Keep OCI image pull/store, image verification, volumes, bind mounts, container lifecycle, native TCP/UDP publish, DNS and restart behavior. Do not claim full Docker parity; track each supported API operation in an explicit conformance matrix.
-5. Prefer Rust, minimal transitive dependencies, static musl builds on Linux, Graviola/rustls rather than OpenSSL, smol/futures rather than introducing Tokio. Do not introduce async gratuitously into fast synchronous paths.
-6. Local Unix socket only by default; no remote TCP/MCP/control plane or public sharing. A Linux daemon grants root-equivalent authority to socket holders: permissions, credentials and tests are security boundaries.
-7. Every optimization or subsystem swap requires a passing behavioral oracle and comparable before/after measurements; document failed experiments as well as wins.
-8. One canonical engine/state machine. Avoid duplicate "raw"/daemon runtimes, shadow stores, two network controllers or a heavyweight general VM abstraction unless experiments demonstrate a real need.
+3. A Docker Engine API-compatible Unix socket stays a stable integration boundary; external Docker CLI/Compose/buildx keep working during transition. `kiri run` remains an external-docker delegation for the whole campaign; never describe it as independent of Docker.
+4. Keep OCI pull/store, digest verification, volumes, bind mounts, lifecycle, TCP/UDP publish, DNS, restart. No claim of full Docker parity; each supported operation is tracked in `docs/parity.md`.
+5. Prefer Rust, minimal transitive dependencies, static musl builds on Linux, Graviola/rustls rather than OpenSSL, smol/futures rather than introducing a second async runtime. No async in fast synchronous paths.
+6. Local Unix socket only. No remote TCP/MCP/control plane. A Linux daemon grants root-equivalent authority to socket holders: permissions, credentials and tests are security boundaries.
+7. Every optimization or subsystem swap requires a passing behavioral oracle and comparable before/after measurements; failed experiments are recorded like wins.
+8. One canonical engine/state machine. No duplicate "raw"/daemon runtimes, shadow stores, or two network controllers. (Upstream has no `kiri raw` at the pinned SHA; noted so nobody re-adds it.)
 
-## 1. Target architecture
+## Decisions
 
-```text
-  docker CLI / compose / buildx (optional)     eventual native ctrs CLI
-                       \                      /
-                        Unix Docker Engine API
-                                 |
-                 Kiri-derived core daemon/state machine
-                 |             |             |
-            OCI registry     volumes     network policy
-            + blob store       |        crabtables (nf_tables)
-                 |             |             |
-            host/guest transport + versioned protocol
-                                 |
-                  macOS                     Linux
-       Virtualization.framework       native root agent
-           minimal Linux VM                  |
-                  \                         /
-                   kiri-init: clone3, cgroups v2,
-                   namespaces, mounts, seccomp,
-                   rtnetlink, firewall/nat, exec/reap
-```
+### Owner decisions (2026-11-13; overruling one means editing this file and re-ordering dependent slices)
 
-Keep, subject to measured simplification:
+- **O1. No Linux this run.** All native-Linux proof is parked on **Needs environment** (N-1..N-4) and never blocks local work or campaign completion. macOS runtime proof (the guest VM) remains in scope.
+- **O2. Guest kernel build via OrbStack.** `cargo xtask kernel` / `cargo xtask disk` may run on OrbStack's docker engine (debian:trixie container, `kiri-kbuild`, `kiri-kbuild-x86_64` volumes created as needed). No other use of OrbStack: no existing containers/volumes/images are touched, no prune, no restart, contexts unchanged. The `kiri-kbuild*` volumes are deleted at close (CTRS-23). `docker ps -a` before/after is recorded in the slice evidence for CTRS-03.
+- **O3. Local artifacts only.** Notarization, public release, tags, registry publishes and the public `ctrs` rebrand go live only through the owner. The campaign produces local, ad-hoc artifacts plus manifests and owner instructions; it ends at Gate J (local) with rename applied in-repo.
+- **O4. License.** ctrs is Apache-2.0. New files: `Copyright 2026 Laputa Systems`. Kiri keep-notice attribution retained in `NOTICE` and `docs/upstream.md`.
+- **O5. Execution grant.** The owner opened execution of this campaign to completion after preflight (2026-11-13). OrbStack is not to be disturbed beyond O2.
 
-| Upstream location | Disposition |
+### Prescribed (from code, evidence, or sound practice; reversible with evidence)
+
+- **P1. Import mechanics.** File-tree copy of the pinned snapshot as the CTRS-01 commit; no `.git`, no submodule, no history join. Exclude `.github/` (upstream CI proves nothing at runtime and could auto-run on this public repo). Excluded paths are listed in `docs/upstream.md`. Pins are immutable; a bump is a deliberate, recorded decision there.
+- **P2. Provenance files.** `LICENSE` (Apache-2.0 full text), `NOTICE` (Kiri © its authors; Laputa Systems 2026; GPL-2.0 kernel offer retained), `docs/upstream.md` (pin SHA, import date, exclusions, carried patches, third-party inventory from `Cargo.lock`, procedure for evaluating upstream security fixes). Kiri's name/logo never ship; historical `kiri` identifiers stay during development (rename happens at CTRS-23, after Gates A–I).
+- **P3. Runtime identity.** `kiri` identifiers (crate, binary, env `KIRI_*`, context, data paths) are retained until the final rename slice (CTRS-23), which runs only after Gates A–I are green; the rename ships a `KIRI_*` → `CTRS_*` compat alias and an explicit, documented, reversible migration. Wire protocols and on-disk formats are not renamed in this campaign.
+- **P4. Verification surfaces.** The narrowest suite per slice; `cargo test --workspace` at milestones. The macOS runtime is verified locally: ad-hoc signed binary (entitlement `com.apple.security.virtualization`), engine pointed at scratch roots (`KIRI_DATA_DIR=$PWD/.work/tmp/...`, `KIRI_SOCKET=$PWD/.work/tmp/...`), external docker CLI driven with `DOCKER_HOST=unix://...` — never a created `docker context`, never OrbStack's socket. `conformance/smoke.sh` (committed, CTRS-04) is the round-trip oracle; `conformance/run.sh` runs the Docker API conformance fixtures. Engine smoke never reads or writes `~/.kiri` or `~/Kiri`.
+- **P5. Evidence.** Committed: `docs/upstream.md`, `docs/baseline.md`, `docs/decisions.md`, `docs/parity.md`, `docs/evidence/*.md`. Not committed: raw logs, benchmark CSVs, scratch roots — those live in `.work/` and are summarized. `bench/` is adapted to scratch roots and reused for measurements; upstream's Windows comparison files may be deleted.
+- **P6. Dependency gates (named).** Any added dependency (crabtables, h12tiny stack, laputa-smol) must keep: (a) `cargo check --workspace` wall time ≤ 120% of the unmodified-snapshot baseline (~14 s preflight measurement); (b) release binary (aarch64-apple-darwin) ≤ 110% of pre-swap size; (c) no OpenSSL, Tokio, or Hyper compatibility layer; (d) exact pins in `Cargo.lock`; (e) licenses limited to Apache-2.0/MIT/BSD-like; no GPL into the host engine. `cargo audit` runs per milestone if installed; `cargo deny` is not installed, so license inventory stays a manual `Cargo.lock` pass recorded in `docs/decisions.md`; findings are fixed or documented, never ignored silently.
+- **P7. crabtables pin.** Git dependency `rev = 38646b8f2f6ee7256c448849edda4459842a2e10`, typed API only, no `lang`/`json`/`tokio` features. Handwritten nf_tables in `crates/kiri-init/src/linux/netlink.rs` remains the default until Gate D is green. crabtables is switched with cargo feature `crabtables` only. Qualification evidence per CRAB-7: the **guest-kernel** profile is verifiable on this Mac (run the netns fixtures inside the booted VM, KVER 6.18.58); the **native-host** profile is parked as N-2. No cutover without both, or an owner ruling. The README/TODO contradiction (README: "no deployment profile qualified" vs TODO CRAB-7: image profile qualified, 102 cases, 100 pass, 2 intentional, CRAB-7-D3 deliberate) is reconciled in `docs/evidence/crabtables.md` before any cutover.
+- **P8. Deletion policy.** Delete, don't deprecate. Targets enumerated in CTRS-06/CTRS-07. Liveness proof = `cargo build --workspace` + `cargo tree` and symbol grep clean. No compat shims for removed subsystems. A deletion that fails the proof is reverted in its own commit.
+- **P9. Parity register.** `docs/parity.md` seeded from upstream `docs/features.md` ("What works") with IDs `P-001…`: behavior, source line, upstream proof (`tests/e2e.sh` or unit test path), ctrs status (`open` / `pass` / `fail` / `intentional-diff`), evidence link. Every Docker API operation the fork keeps must reach `pass` or a documented `intentional-diff` before Gate J. Breadth before depth; a behavior with no test is not done.
+- **P10. Commits and pushes.** Conventional Commits, scope per Charter; push green slice commits to `origin/main`; no force-push; no tags; no releases. `.work/` stays untracked via `.git/info/exclude`.
+- **P11. Autonomy bounds.** Delegated calls follow the Delegated list; everything else is either prescribed or fails loudly. Not allowed: changing a pinned toolchain component, changing `KVER` (6.18.58) without recording why, widening a public contract without an owner decision entry, weakening a check to make it pass.
+- **P12. Egregious-fix thresholds.** (as Charter) plus: SSH-agent forwarding, vsock isolation, and the `/var/run/docker.sock` non-interference are security invariants — violations are stop-the-line defects.
+- **P13. Performance.** Parity first. Measurements recorded in `docs/evidence/perf.md`: medians of ≥5 samples, p50/p95/p99, kernel+helper memory included, randomized/alternated order, no-change control. Optimization items land only after parity milestones; an optimization trading ≤5% regression for a qualifying security/quality gain must be justified in the commit body and `docs/decisions.md`.
+- **P14. Toolchain.** Stable rustc as installed (1.99.1 at preflight); `rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl` is required for CTRS-03/06 (reversible, local). Do not change nightly pins elsewhere; none exist here.
+- **P15. New-file header.** `// Copyright 2026 Laputa Systems` plus Apache-2.0 license reference. Imported files keep upstream headers. No Kiri logo/name as branding.
+- **P16. Host hygiene.** Engine and tests never open OrbStack's docker socket/context, never `/var/run/docker.sock`, never create a docker context, never write to `$HOME` outside `.work/` scratch. CTRS-04 and CTRS-08 prove `docker context ls` is byte-identical before/after.
+- **P17. Scratch layout.** All throwaway state under `.work/tmp/` (`smoke-data/`, `home/`, logs). `.work/` is gitignored; `.git/info/exclude` carries `.work/` (never committed). `KIRI_DATA_DIR`, `KIRI_SOCKET`, `DOCKER_HOST` always point there.
+- **P18. Preflight corrections folded in (2026-11-13).** Draft removed: `kiri raw` evaluation (no such code at the pin), "Recheck snapshots" (pins are immutable), committed benchmark logs under `.work/`, `.github/workflows` import, Windows/spec packaging tasks, `packaging/`, `contrib/`, `brand/`, UI tests/assets. Several upstream quirks verified at the pin and preserved: `docker.rs` delegates to the external docker CLI, `netlink.rs` hand-encodes nf_tables, `apple.rs:443` builds `VZNATNetworkDeviceAttachment`, `kiri-init` runs as root in the guest (and on a Linux host).
+- **P19. Time-boxes.** Each slice: 3 attempts, then park `slice/CTRS-NN-*` with cause and retry condition. A shared environment blocker (OrbStack down, kernel download failure) is one owner, one park, no parallel retry storms.
+
+### Delegated (executor decides inside the bound; record in `docs/decisions.md`)
+
+- **D1.** Conformance fixtures: shell + `docker` CLI + `curl --unix-socket`; no new test frameworks; the whole suite runs in <5 min.
+- **D2.** Typed-config surface (CTRS-09): no new on-disk formats; `vm.json` and `KIRI_*` compat preserved; new knobs are additive in `vm.json` with serde defaults.
+- **D3.** h12tiny pilot design (CTRS-15/16): per-connection smol reactor or a bounded worker pool, never a global executor behind a flag — pick per measurements; if no measurable win (p50/p99 outside noise), keep incumbents and record the negative result. Note: h12tiny-server 0.9.0 sits on `laputa-hyper-futures-lite =1.12.0-beta.1`; "no unnecessary Hyper layer" refers to *adding* one on top.
+- **D4.** Bench method (CTRS-17): no new host packages; `iperf3` is absent on this host, so use a small Rust probe under `bench/net/` (host↔guest, host↔container published port, container↔container, TCP/UDP, latency, DNS) or guest-side `apk add iperf3` inside the VM — never a host install; ≥5 samples; report spread.
+- **D5.** Firewall adapter (CTRS-12): typed API only; `OutcomeUnknown` surfaced to the caller, inspect-state-before-retry; compensating teardown per cross-subsystem change; ownership tags; old/foreign chain preservation. If `kiri-init`'s `cfg(linux)` gating defeats host-side unit tests for encoding equivalence, prove equivalence inside the guest VM (netns fixtures) or park CTRS-12 with cause — do not fake it on macOS.
+- **D6.** Issue fixes (CTRS-20): reproduce first, then fix or close with evidence; #50 (skb_segment guest Oops) may end as a documented known-issue with `--restart always` guidance; #199 (Rosetta/macOS 15) may be wontfix-by-apple; #121 (Testcontainers cmd) and #134 (Expect/100-continue) are expected to share the transport/API slice evidence.
+- **D7.** Cargo.lock churn: additive dependency changes only; no `cargo update -p` of unrelated crates; record reductions (ureq out, etc.) in `docs/decisions.md`.
+- **D8.** Worktree use: default serial; only the two named disjoint pairs may run as lanes under `.work/wt/` (CTRS-14 ∥ CTRS-17; CTRS-16 ∥ CTRS-18), with `perf-gate-ready -s` headroom.
+
+## Baseline (known red, loop timings)
+
+Known red at the pin (preflight, 2026-11-13, macOS 27.2, Apple Silicon, rustc 1.99.1): one pre-existing warning — dead code `parse_ipam` at `crates/kiri/src/daemon/network.rs:472`. No test run yet; CTRS-02 records it. `cargo check --workspace` on the unmodified snapshot: **13.98 s**. Snapshot fetch+checkout: ~2 s. `cargo test --workspace`: unmeasured — recorded in CTRS-02. Gate runs: Gate A (CTRS-05) · B (CTRS-08) · C (CTRS-10) · D (CTRS-13, guest-kernel half; native parked N-2) · E (CTRS-15/16) · F/G/H (CTRS-17/18/19) · I (CTRS-21) · J (CTRS-23).
+
+## Sequence
+
+Default: serial on `main`. IDs are stable. Size: S ≤ 30 min, M ≤ 2 h, L ≤ half a day of agent time (excluding long builds, which run in background). "Acceptance" is the slice's single local command unless noted; wider suites run at the Gates (Gate suite, see **Acceptance**). Named disjoint pairs eligible for parallel lanes: **(CTRS-14, CTRS-17)** and **(CTRS-16, CTRS-18)** — all else serial.
+
+### Phase A — provenance and a living reference
+
+| ID | Size | Owns | Prereq | Acceptance |
+| --- | --- | --- | --- | --- |
+| CTRS-01 Import + legal files. Copy tree at SHA `99b63c07fc003d3dcd8e03c76891ba747b5c984f` (file-level, no `.git`, no `.github/`); add `LICENSE`, `NOTICE`, `docs/upstream.md` (pin, exclusions, per-file exclusion manifest, third-party inventory from `Cargo.lock`, update/bump procedure). | S | whole tree, `LICENSE`, `NOTICE`, `docs/upstream.md` | — | `! -d .github`; `docs/upstream.md` contains the SHA and the exclusion manifest; every path `git ls-files` lists is either upstream or in the manifest; `LICENSE`/`NOTICE` present; `cargo metadata --no-deps` OK |
+| CTRS-02 Baseline record: build and unit-test unmodified snapshot; record timings, build graph (`cargo tree` count), release binary size, `cargo audit` result, and known-red (expected: `parse_ipam` warning only). | M | `docs/baseline.md` | 01 | `docs/baseline.md` lists every metric above with exact commands; `cargo test --workspace` exits 0 or every failure is listed as known-red |
+| CTRS-03 Boot assets: `cargo xtask guest` (initramfs), `cargo xtask kernel` + `cargo xtask disk` on OrbStack debian:trixie (O2; record `docker ps -a`/`docker volume ls` before+after). Record `Image`, `.config`, `initramfs.cpio`, `data.img` sizes and sha256 in `docs/baseline.md`. `guest/out/` stays gitignored. | M–L (kernel build ~10–30 min, background) | `guest/out/` (gitignored), `docs/baseline.md` | 01 | the three artifacts exist; sha256 recorded; OrbStack evidence shows no other resources touched; `kiri-kbuild` volumes noted for CTRS-23 cleanup |
+| CTRS-04 Signed headless smoke on Apple Silicon: `conformance/smoke.sh` (new, committed) — ad-hoc sign, scratch `KIRI_DATA_DIR`/`KIRI_SOCKET` under `.work/tmp/`, boot VM (KVER 6.18.58), `DOCKER_HOST=unix://… docker run --rm alpine true`, `exec`, `logs`, exit-code check, SIGTERM teardown; assert `docker context ls` unchanged and no `~/.kiri` writes. Record runtime metrics in `docs/baseline.md`: VM cold/warm boot, container create/start/remove, first workload run, HTTP API latency (≥5 samples), idle RSS. | M | `conformance/smoke.sh`, `conformance/`, `docs/baseline.md` | 03 | `conformance/smoke.sh` exits 0; VM boots; scratch root isolated; OrbStack untouched; metrics recorded |
+| CTRS-05 Harness + registers: `conformance/run.sh` (fixture plan runner, D1), `docs/parity.md` seeded from upstream `docs/features.md` as `P-001…` rows, `docs/decisions.md` seeded, `docs/architecture.md` (code map, from Reference below). | M | `conformance/`, `docs/` | 01 | `conformance/run.sh` exits 0 printing the plan; `docs/parity.md` has ≥40 `P-…` rows; `docs/decisions.md` exists |
+
+### Phase B — headless-only, no broken runtime paths
+
+| ID | Size | Owns | Prereq | Acceptance |
+| --- | --- | --- | --- | --- |
+| CTRS-06 Delete Windows/WSL/installer: `crates/kiri-win/`, `installer/`, `contrib/`, `packaging/`, `wsl.rs`, `tests/wsl.sh`, `tests/finder-mount.sh`. Keep `tests/linux-host.sh` (it documents N-1 for the owner; cannot run this run — mark in `docs/upstream.md`), Windows arms of xtask (`msi*`, `windows*`, `docker-win-arm64`), `scripts/windows-engine.sh`, `scripts/dmg-*`. | M | those paths + `xtask/` | 05 | `cargo check --workspace` and `cargo test --workspace` green; `rg -i 'wsl\|windows'` clean outside docs; smoke green |
+| CTRS-07 Delete UI and ancillary: `crates/kiri/src/ui/`, `objc2-app-kit`/`objc2-web-kit`/`objc2-core-text`/`gtk`/`webkit2gtk`/`javascriptcore-rs` deps + `window` feature, `update.rs`, `appwatch.rs`, `share.rs`, `crates/kiri-share-proto/`, `k8s.rs`, `kubeconfig.rs`, `machine.rs`, `usb*.rs` + `daemon/usb.rs`, `import.rs`, `scan.rs`, `flavor.rs`, `hostrelay.rs` **if it is Finder/NFS-only** (read first; SSH-agent forwarding stays — it is headless-relevant), `brand/`, `about.*`, `docs/images/`, `tests/ui/`, `scripts/{ui,i18n,dmg}-*.py`/`*.swift`, UI tests. Promise: keep `builds.rs`/`buildwith.rs` (BuildKit-in-a-container is a headless feature), keep `stale.rs` (stale-socket recovery), keep `bench/`. | L | those paths + `Cargo.toml`, `Cargo.lock`, `main.rs` call sites | 06 | `cargo build --workspace` green; `cargo tree` has no `objc2-app-kit`, `objc2-web-kit`, `gtk`, `webkit2gtk`, `javascriptcore-rs`; `rg -i 'ui::\|webkit\|gtk\|NSApplication'` clean outside docs; smoke green |
+| CTRS-08 Onboarding + lifecycle: foreground `kiri daemon` with no app assumptions; remove "press Start in the Kiri window" class messages (`rg -n 'press Start\|Kiri window'`); explicit optional service docs (`docs/launchd.md` example; foreground Linux invocation; no systemd requirement); create private data root + socket; never a docker context; SIGTERM exit ≤10 s; no stale VM/agent after exit (assert in smoke); adapt `tests/e2e.sh` to scratch env (`DOCKER_HOST`, scratch config, no `~/Kiri`, no Finder router); e2e green locally. | M | `main.rs`, `setup.rs`, `stale.rs`, `tests/e2e.sh`, `docs/launchd.md`, `conformance/smoke.sh` | 07 | clean-env smoke (`HOME=$PWD/.work/tmp/home`, system `PATH`) green; adapted `tests/e2e.sh` exits 0; SIGTERM teardown clean |
+
+**Gate B:** `DOCKER_HOST=unix://… docker run --rm alpine true`, `exec`, `logs`, published port, named volume, daemon restart cycle — all green; recorded in `docs/evidence/gate-b.md`.
+
+| CTRS-09 Typed config + engine lifecycle CLI: typed structs for data root/socket/cpus/memory/network mode/guest assets/policy/log level (serde, `vm.json` compat, env `KIRI_*` compat; D2); `kiri start`/`stop`/`status`/`restart` CLI independent of UI buttons (or confirm existing and type them); remove stringly leftovers; document explicit, reversible migration if any state format must change. | M | `crates/kiri/src/config.rs` (new), `boot.rs`, `vmcpu.rs`, `hostopts.rs`, `main.rs` | 08 | unit round-trip test on `vm.json` green; `kiri start|stop|restart|status --help` present; smoke green |
+| CTRS-10 Delegation audit: `kiri run`/`ps` keep external-docker delegation; add a unit test with a stub `docker` on `PATH` asserting argv + `DOCKER_HOST` set + `DOCKER_CONTEXT` unset; confirm one canonical engine path (no daemon/raw duplication); record remaining external delegations in `docs/architecture.md`. | S | `docker.rs`, `run.rs`, `client.rs`, new test | 09 | new unit test green; audit section committed |
+
+**Gate C:** clean env without any bundled docker binary; engine serves the Unix socket; with the CLI present, `DOCKER_HOST=unix://… docker version` works; CLI lifecycle clean with engine stopped.
+
+### Phase C — crabtables at the nftables boundary
+
+| CTRS-11 Firewall inventory: read `netlink.rs` end to end; write `docs/firewall.md` (every nft operation: IPv4/IPv6 masquerade, SNAT/DNAT/redirect, chains, priorities, ct state, bridge/veth ownership, cleanup, concurrency); define internal typed `FirewallPolicy → FirewallTransaction` (explicit netns, table/chain/rule ownership, version, rollback/`OutcomeUnknown`); write packet-level reference fixtures (`conformance/fixtures/netns-*.sh`). | M | `docs/firewall.md`, `conformance/fixtures/`, `crates/kiri-init/src/linux/firewall.rs` (new, interface only) | 07 | inventory covers every nft call site (grep-verified list); `cargo check -p kiri-init --target aarch64-unknown-linux-musl` green; fixtures committed, marked "needs Linux root" (N-2/Gate D) |
+| CTRS-12 crabtables adapter behind feature flag `crabtables` (P7): same semantics as the handwritten path; compare adapter selected by one cargo feature; record code size delta. | M–L | `crates/kiri-init/src/linux/firewall.rs`, `Cargo.toml`, `Cargo.lock` | 11 | `cargo check -p kiri-init --features crabtables --target aarch64-unknown-linux-musl` green; equivalence evidence per D5 (else park with cause); default build byte-identical behavior |
+| CTRS-13 Qualification evidence: run netns fixtures **inside the booted guest VM** (real 6.18.58, KVER pinned) via privileged alpine + `apk add nftables iproute2`; compare both adapters against `nft` (kernel ruleset, packet decisions, conntrack tuples, NAT mappings/replies, IPv6, updates under traffic, rejected batches); reconcile README/TODO claims in `docs/evidence/crabtables.md`. **Native-Linux half parks as N-2 (O1).** No cutover to crabtables by default (P7). | M | `conformance/fixtures/`, `docs/evidence/crabtables.md` | 04, 12 | evidence file records both adapters vs `nft` with commands; mismatch = adapter stays experimental; no host-wide firewall flush ever (verify fixture teardown) |
+
+**Gate D (split):** guest-kernel profile evidence above. Native-host profile = N-2. Until both, default stays handwritten nft; Gate D stays open on the Needs-environment list, and that is an honest recorded outcome, not a waiver.
+
+### Phase D — smolith / h12tiny, correctness first
+
+| CTRS-14 HTTP/1.1 interoperability oracle for the Docker API: fixtures for request limits, method handling, keep-alive/pipelining, slow headers, chunked framing, trailers, conflicting `Content-Length`, `Expect: 100-continue`, cancellation, streaming uploads, bounded-memory read; runner `conformance/http.sh` (D1) against a live scratch daemon. Upstream [#134](https://github.com/libracoder/kiri/issues/134) is the motivating defect. | L | `conformance/http/`, `conformance/http.sh` | 05 | all fixtures pass on the handwritten HTTP; deliberately corrupted framing fixture fails; suite <5 min |
+| CTRS-15 h12tiny-server pilot behind `h12tiny` cargo feature (D3): swap Docker API handling; qualify upgrade/hijack semantics for `attach`, `exec`, logs, large streaming tar uploads; compare per-connection smol reactor vs bounded blocking-thread pool; measure API p50/p99 + binary size + compile time before/after (docs/evidence/http.md). **If no measurable win: revert and record the negative result.** | L | `crates/kiri/src/daemon/http.rs`, `Cargo.toml`, `Cargo.lock` | 14 | Gate E evidence: HTTP oracle green under default **and** `h12tiny`; perf table recorded; worst-case p99 regression ≤5% or incumbent kept with note |
+| CTRS-16 Registry client pilot: `h12tiny-client-sync` with explicit Graviola/rustls provider + platform trust roots (D3); pull/push of pinned digests; bearer auth; multiarch resolution; redirects; partial/corrupt blob handling; digest verification intact. Compare against `ureq`. **If no measurable win: revert and record.** | L | `crates/kiri-image/src/connect.rs`, `registry.rs`, `Cargo.toml`, `Cargo.lock` | 14 | pulls/push of two pinned images green; corrupted-blob fixture fails closed with digest error; perf recorded; feature-gated, default = winner |
+
+**Gate E:** identical observable Docker API results on the declared matrix (streaming, exit status, binary payloads), no smuggling/DoS regression (oracle fixtures), registry digests verified. A transport swap that only prettifies the Cargo tree does not land.
+
+### Phase E — the real VM networking bottleneck (experiments, time-boxed)
+
+| CTRS-17 vzNAT breakdown (`docs/evidence/net.md`): Kiri already builds `VZNATNetworkDeviceAttachment` (`kiri-vmm/src/apple.rs:443`); Lima vzNAT is the same facility — Lima's 59.2/130 Gbit/s figures (M4 Max, [port docs](https://lima-vm.io/docs/config/port/)) are external reference points, not promises. Measure separately: host↔guest IP, host↔container published port, container↔Internet, container↔container, TCP small-request latency, UDP, DNS, IPv6, concurrent flows, NAT state, idle CPU, reconnection, Mac sleep/wake; TCP and UDP; bridged vs `none`. Diagnose the reported "VM NAT unreachable → vsock relay" behavior and stale DHCP/IP discovery. Default candidate is native vzNAT; `socket_vmnet` only if bridged/guest-reachable is otherwise unserved (D4). Any fix must show end-to-end improvement in a before/after pair; else revert. | L | `bench/net/`, docs/evidence/net.md, `apple.rs` DHCP/IP code if a fix lands | 04 | breakdown table with all axes + spread; sleep/wake row; the bottleneck named with evidence; fix (if any) lands as its own commit with before/after numbers |
+| CTRS-18 smolvm-network analysis (no code): `smolvm-network` is a smoltcp gateway over a libkrun-specific bridge — not a vzNAT drop-in; TSI needs kernel patches ([limitations](https://github.com/smol-machines/smolvm/blob/main/docs/limitations.md)). Paper analysis in `docs/experiments/smolvm-network.md`: host FDs per flow, port exhaustion, latency, memory, security boundary vs vzNAT + guest networking; which ideas (DNS caching, egress ACLs, socket relay) could attach to our design without libkrun. Adoption only behind a gate like Gate G: measured, narrow, written threat model. **Default outcome: no adoption.** | M | `docs/experiments/smolvm-network.md` | 17 | report exists with per-claim citations at the pinned SHA; explicit adopt/reject recommendation |
+| CTRS-19 microVM isolation research (no code): `docs/experiments/microvm-isolation.md` comparing per-task VZ microVM vs smolvm/libkrun vs native containers for untrusted agent workloads (boot cost, RAM at N parallel sandboxes, snapshots, mounts, secrets, networking). No default microVM mode, no new dependencies, no security claim beyond evidence (Gate H). | S–M | `docs/experiments/microvm-isolation.md` | 05 | report exists; explicit opt-in design only; nothing merged into the engine |
+
+**Gates F/G/H:** the standing verdict from CTRS-17/18/19 — ideally "vzNAT confirmed, no swap"; that is a successful outcome.
+
+### Phase F — make the fork better than upstream at the core things
+
+| CTRS-20 Issue triage against upstream pin: [#199](https://github.com/libracoder/kiri/issues/199) (Rosetta/macOS 15, likely `linux/amd64` SIGTRAP), [#50](https://github.com/libracoder/kiri/issues/50) (VM `skb_segment` Oops, `--restart always` relief), [#121](https://github.com/libracoder/kiri/issues/121) (Testcontainers command ignored), [#134](https://github.com/libracoder/kiri/issues/134) (Expect/100-continue — expected resolved by CTRS-14/15). Reproduce each inside the VM or close with evidence; D6 bounds. | L | the implicated source files per issue; `docs/issues.md` | 15 | each issue: fixed-with-test, not-reproducible, or documented known-issue with mitigation; full suite green |
+| CTRS-21 Security qualification: threat model kiri-init/root agent and socket (`docs/security.md`): capabilities, `--privileged`, seccomp allowlist differential fixtures (syscall-level, inside the VM — x32/compat, clone3, io_uring, capability matrix), namespace-failure paths, tar/unpack traversal, symlink races, mount propagation, host socket reachability from guest (must be unreachable), `--restart` loops, kill/crash at every lifecycle step, concurrent pulls, disk-full (scratch root), stale socket recovery, OOM, network rollback. Fail closed on unknown policy semantics. Honest pass/fail statement; no isolated-VM passes claimed as multi-tenant safety. | L | `seccomp.rs`, daemon policy code, `docs/security.md`, failure-injection harness `conformance/failure.sh` | 09 | fixtures green inside the VM; the matrix table in `docs/evidence/security.md` records each injected failure and cleanup result; no P0/P1 open |
+| CTRS-22 Release prep (local only, O3): ad-hoc signed macOS CLI artifact + manifest (sha256, sizes) under `.work/release/`; SBOM (`cargo tree` inventory + `docs/third-party.md`); notices; GPL kernel source offer intact; `docs/install.md` (macOS: ad-hoc binary + entitlement note; Linux: musl prerequisites, no systemd requirement, explicit root/cgroup v2 needs); compare against initial pin (binary sizes, idle/peak RSS incl. VM helper, cold/warm start, lifecycle p50/p95/p99, cold/hot image pulls, volume bind metadata throughput, dependency/LOC reduction) in `docs/evidence/release.md`; safe-uninstaller notes; **no rename here.** | M | `docs/install.md`, `docs/third-party.md`, `docs/evidence/release.md` | Gate I | manifests + SBOM committed; comparison table committed; uninstaller documented and checked on scratch roots |
+| CTRS-23 Close: rename per P3 (`ctrs` binary/context/env with `KIRI_*`→`CTRS_*` compat alias, migration doc + rollback; wire formats unchanged); delete remaining dead code (`dead-code-archaeology` pass; warnings = 0); final `docs/parity.md` sweep — every row `pass` or documented `intentional-diff` with owner sign-off; run an independent review (`review`/`ultrareview` equivalent) and fix P1/P2; delete `kiri-kbuild*` OrbStack volumes (O2); final gate suite + smoke; write `docs/evidence/closeout.md`. | L | rename surface, `docs/`, whole tree | CTRS-22 | both `ctrs` and `kiri` entrypoints work with the alias; parity register 100% resolved; repo builds clean from a fresh clone; closeout report committed |
+
+**Gate J:** Gates A–I green + rename landed + artifacts manifested. Public release deliberately absent (O3): it is an owner step (N-4).
+
+## Acceptance (deliverable → command)
+
+Beyond the per-slice commands: **Gate suite** = `cargo test --workspace && conformance/smoke.sh && conformance/run.sh` — run at Gates A–J and at close. **Parity** = `docs/parity.md` row coverage (goal: zero `open`). **Conformance matrix** maps deliverables to proof as follows (keep measurable qualifiers):
+
+| Axis | Proof (slice) |
 | --- | --- |
-| `crates/kiri-init` | Keep: agent, syscall/container lifecycle, security boundary |
-| `crates/kiri-vmm` | Keep: `apple.rs` VZ and `process.rs` Linux; consider renaming only after stabilization |
-| `crates/kiri-proto` | Keep: bounded host/guest wire protocol, explicit version negotiation |
-| `crates/kiri-image` | Keep initially: OCI image resolution, registry and content-addressed blobs |
-| `crates/kiri/src/daemon` | Keep core API/engine/volume/network modules, excise ancillary services |
-| `guest/kernel` | Keep minimal bootable kernel, config, patches and source compliance |
-| `crates/kiri/src/ui`, `crates/kiri-win` | Delete |
-| `installer/windows`, Windows build scripts, desktop packaging, UI tests/translations/assets | Delete |
-| `k8s`, `machine`, `share`, `usb`, `import`, app updater, Finder/NFS browsing, browser logins, proprietary domains/TLS CA | Delete by default; document any truly core dependency before deciding otherwise |
-| `crates/kiri/src/docker.rs` | Transitional adapter only; native Rust subcommands are later milestones |
+| Lifecycle (exit codes, exec/attach, TTY, logs, stop/kill/restart, pause, churn) | CTRS-04/08 smoke + adapted e2e; `conformance/run.sh` fixtures (CTRS-05+) |
+| OCI (indexes, arch select, digests, auth, save/load, retries) | CTRS-16 + adapted e2e image tests |
+| Docker API (framing, streaming/hijack, Testcontainers via [#121](https://github.com/libracoder/kiri/issues/121)) | CTRS-14/15/20; SDK/Testcontainers smoke documented in e2e |
+| Storage (overlayfs whiteouts, bind safety, durability, inotify propagation) | smoke named volume + bind row; e2e storage checks |
+| Network (bridges, DNS, IPv4/IPv6, NAT/conntrack, published TCP/UDP, tailnet CIDR collision — never hardcode 100.64.0.0/10; smolvm's 100.96.0.0/30 also sits there — detect conflicts/configurable private CIDR) | CTRS-17 measurements + guest-VM fixtures; tailnet row optional, record as unverified if no tailnet |
+| Host↔guest (VZ boot/poweroff, sleep/wake, DHCP change, vsock recovery, crash) | CTRS-04/08/17/21 |
+| Threat model (`--privileged`, seccomp, socket access, traversal, races, egress) | CTRS-21 |
+| Performance (real API `run --rm`, precreated start, Redis cold/steady, HTTP latency, DNS, iperf-class probes via D4, RSS/CPU) | CTRS-15/17/22 |
 
-Do not confuse the **two networking planes**:
-- **Inside the guest / native Linux:** each container's netns, bridge, veth, conntrack, nftables, IPAM. crabtables applies here and potentially to Linux host-owned container networking.
-- **macOS host ↔ Linux guest:** Apple's VZ virtio-net + NAT, versus vsock-based fallback/port relay. crabtables *cannot* replace this layer. Lima and smolvm offer different techniques for it.
+Experiment protocol (all perf rows): same hardware/OS/build, pinned OCI digest, warmed and cold sides separated, ≥5 samples with reported spread, randomized order, p50/p95/p99, no-change control. A negative result is a result. No new feature passes on unit tests alone: one differential fixture + one failure-mode test + one perf observation each.
 
-## 2. Workstream and execution order
+## Needs environment (owner-run; never blocks local work)
 
-Carry out the phases in order. Small parallel investigations are allowed, but only merge one independently testable change at a time. Track each task by its stable ID (`CTRS-01` etc.) and commit evidence under `.work/` or CI artifacts (do not commit large benchmark logs).
+| ID | What | Command the owner would run |
+| --- | --- | --- |
+| N-1 | Native Linux host run (musl artifacts + engine-as-host-container, `tests/linux-host.sh`) | On a Linux host with Docker: `cargo xtask linux && tests/linux-host.sh` |
+| N-2 | crabtables Gate D native-host profile (production kernel + nft ≥1.1 pair, root) | Linux root: build `guest` target, run `conformance/fixtures/netns-*.sh` for both adapters, then crabtables' qualified suite with `QUALIFY_STRICT=1` |
+| N-3 | x86_64 (Intel) boot smoke | Intel Mac or Intel VM: `cargo xtask host --arch x86_64 && conformance/smoke.sh`; kernel bzImage via O2 |
+| N-4 | Notarization + public `ctrs` release + rename go-live (O3) | Owner: `xcrun notarytool submit …`; tag; GitHub release; registry publishes |
+| N-5 | macOS 15 Rosetta amd64 path ([#199](https://github.com/libracoder/kiri/issues/199)) if Apple ships a fix | Rebuild + `docker --platform linux/amd64 run --rm alpine true` |
 
-### Phase A — Establish provenance and a living reference
+## Execution boundary and non-goals
 
-**CTRS-01: Import the actual runtime, not a marketing skeleton.**
+**Authorized:** in-repo edits; `cargo`/rustup target adds; ad-hoc signing; the macOS VM; OrbStack only per O2 (debian:trixie kernel/disk build containers + named `kiri-kbuild*` volumes, deleted at close); network pulls required for verification (e.g. `alpine`); pushing green commits to `origin/main` (P10).
+**Forbidden:** addressing OrbStack otherwise; `/var/run/docker.sock`; creating or editing docker contexts; writing outside the repo except `.work/` scratch and `~/Library/Caches`-style tool dirs cargo may use; any system-wide install; tags/releases; notarization; CI; formatters; deleting upstream provenance files.
+**Non-goals:** Windows/WSL; systemd packaging; remote control planes; public `kiri`-branded releases; full Docker API parity claims; multi-tenant untrusted isolation claims; upstream sync beyond the pinned SHA (bumps are deliberate decisions recorded in `docs/upstream.md`); performance work before parity (P13).
+**Contract changes for the owner to acknowledge (all planned, none silently applied):** KIRI_*→CTRS_* env alias at CTRS-23; `kiri`→`ctrs` binary rename with compat alias; Docker socket boundary unchanged; on-disk formats unchanged; `docs/upstream.md` records the fork relationship and GPL-2.0 kernel source offer.
 
-- Import a pinned upstream Kiri snapshot (prefer preserving relevant history where economical, otherwise a clearly attributed reproducible source snapshot); no submodule that silently follows upstream HEAD. Preserve all necessary kernel/build/test files, original licenses/notice, and upstream SHA.
-- First build and test *unmodified* Kiri at that SHA on the selected macOS and Linux targets. Baseline `cargo test`, smoke with a real Docker CLI and the upstream `tests/e2e.sh` and `tests/linux-host.sh`, and record failures and known flakes. Mac build must be signed with `com.apple.security.virtualization` entitlement.
-- Record build graph, binary/RSS sizes, kernel size, idle memory, VM cold/warm boot, container create/start/remove times, cold/hot image pulls, HTTP API latency, first workload run, volume bind metadata throughput, and port latency/throughput. Record machine/OS/kernel, warm/cold definitions, sample counts and exact commands.
-- Put reference Docker Engine conformance fixtures in a *separate* harness; running the upstream tests against the implementation is not sufficient evidence of parity.
-- Add `docs/upstream.md` with a source pin, carried patches, third-party inventory and procedure for evaluating upstream security fixes.
+## Reference (verified map, 2026-11-13)
 
-**Gate A:** a repeatable, checked-in baseline harness runs a container and returns its exit status, with output captured for both Docker and Kiri, and proves that data paths are isolated. If no macOS test machine is available, mark macOS runtime **unverified**, not passed.
+Pinned snapshots (all five resolve on GitHub; fetched at preflight):
 
-### Phase B — Headless-only, no broken runtime paths
+- Kiri `99b63c07fc003d3dcd8e03c76891ba747b5c984f` — "UI: Settings → Appearance" (2026-11-14T01:03Z). 462 paths, not truncated. `cargo check --workspace` green (13.98 s, rustc 1.99.1, one pre-existing warning).
+- crabtables `38646b8f2f6ee7256c448849edda4459842a2e10`; smolith `066bb8c9c609c66c271fc32f170181375e421551` (present: `crates/h12tiny-{core,server,client,client-sync,client-normalize}`, `h12tiny-server` has `upgrade` feature; seat: `laputa-smol` = smol; `laputa-hyper-futures-lite =1.12.0-beta.1`); smolvm `146f3a5121c01a98bb894dc954e3c143a17c0084` (`crates/smolvm-network/` present); Lima `55fb02294a41` (docs confirm vzNAT = VMNAT device facility; 59.2/130 Gbit/s M4 Max).
+- Kiri build: workspace `crates/{kiri,kiri-init,kiri-proto,kiri-vmm,kiri-image,kiri-win,kiri-share-proto}` + `xtask`; edition 2024; release profile `lto=fat, codegen-units=1, panic=abort`; guest agent target `aarch64-unknown-linux-musl` via rust-lld; entitlement `com.apple.security.virtualization`; kernel 6.18.58 from cdn.kernel.org + `guest/kernel/patches/000{1..4}-*.patch`; `docs/features.md` is the parity oracle; `tests/e2e.sh` expects a `kiri` context and `~/Kiri` (must be adapted, CTRS-08); `tests/linux-host.sh` needs a Linux host (N-1); upstream `.gitignore` covers `/target`, `/guest/out/`.
+- Known drift risk: Kiri ships monthly releases; re-pin only by recorded decision. crabtables README ("no deployment profile qualified") vs TODO CRAB-7 (image profile qualified; production pair open) is reconciled in CTRS-13.
 
-**CTRS-02: Delete all UI and Windows build/runtime code.**
+Keep/delete disposition (executed in CTRS-06/07): keep `kiri-init`, `kiri-vmm` (`apple.rs`/`process.rs`), `kiri-proto`, `kiri-image`, `daemon/` core (api, engine, volumes, network, ports, dns, pulls, mirror), `guest/kernel/`, adapted `xtask` (guest/kernel/disk/host/linux). Delete per CTRS-06/07 lists. `kiri-share-proto` goes with share. `cargo audit` present; `cargo deny` absent (P6). No `kiri raw` at the pin. Upstream issue references re-verified open at the pin: [#50](https://github.com/libracoder/kiri/issues/50), [#121](https://github.com/libracoder/kiri/issues/121), [#134](https://github.com/libracoder/kiri/issues/134), [#199](https://github.com/libracoder/kiri/issues/199).
 
-- Remove `ui` source, translations, WebKit/AppKit/GTK dependencies, Windows/WSL sources and installers. Keep only the ObjC bindings **required by Virtualization.framework**, not AppKit/WebKit.
-- Remove updater, app-bundle startup and launch assumptions; the foreground `kiri daemon` must work from a terminal without any GUI or login session. Make service installation explicit and optional (launchd example for macOS; supervisor-agnostic foreground invocation or optional OpenRC service on Linux; no mandatory systemd).
-- Onboarding should be shell-native: create a private data root and socket, create the Docker context only on explicit request, never hijack `/var/run/docker.sock` or another Docker context automatically.
-- Strip appwatch/Finder/NFS, Kubernetes, machine provisioning, Kiri Share, CA/local-domains, telemetry/uploaders, USB and other side facilities, checking reference edges rather than deleting at random.
-- Build an auditable dependency diff (Cargo tree/features). Ensure no `objc2-app-kit`, `objc2-web-kit`, GTK, WebKitGTK or Windows crates are linked into the headless artifacts.
-
-**Gate B:** Apple Silicon and native Linux run `docker --context kiri run --rm alpine true`, `exec`, `logs`, published ports, named volume, and a controlled daemon restart with no desktop components installed. The process actually exits cleanly on SIGTERM and leaves no stale resources.
-
-**CTRS-03: Consolidate executable and API boundaries.**
-
-- Retain one host executable plus version-pinned guest agent/kernel/disk resources; avoid duplicating a guest kernel inside every process or insisting on a single-file artifact before size measurements.
-- Make engine start/stop/status/restart possible with CLI commands, independent of a UI button. Remove or fix messages such as "press Start in the Kiri window."
-- Define typed config for data root, socket, CPU/memory, network mode, guest assets, policy, and logging. Preserve upstream env-var compatibility for now; avoid repeated stringly-typed CLI/config fields. State migration must be explicit and reversible.
-- Keep `kiri run`/`ps` delegated to optional external Docker CLI initially. Later native implementations should use the same Docker API client or typed domain operations, not an independent second engine.
-- Evaluate `kiri raw`: delete it if it duplicates daemon logic, or reduce it to a thin one-shot client using the canonical engine. Never have two authoritative image stores/container lifecycle implementations.
-- Replace platform-specific ad hoc command branching with tiny, explicit host/guest interfaces only where needed; do not overabstract for unsupported OSes.
-
-**Gate C:** run from a clean user environment with no bundled Docker binary, and still serve any installed Docker CLI via the Unix API socket; CLI diagnostics and lifecycle commands work when the daemon is stopped.
-
-### Phase C — Dogfood crabtables with kernel-level proofs
-
-**CTRS-04: Introduce crabtables at the nftables boundary.**
-
-Facts: Kiri's guest uses handwritten rtnetlink and nf_tables messages in `crates/kiri-init/src/linux/netlink.rs`. crabtables is a pure-Rust nftables/netfilter interface; it does **not** replace rtnetlink interface/route programming. Keep the working Kiri rtnetlink path initially. Target only the nftables ruleset owner and firewall/NAT operations.
-
-- Inventory every existing firewall operation and ruleset shape: IPv4/IPv6 masquerade, SNAT/DNAT/redirect, bridges, inbound published ports, forwarding, chain priorities, ct state, cleanup and concurrency. Establish packet-level reference fixtures before a swap.
-- Add an internal typed `FirewallPolicy` → `FirewallTransaction` interface with explicit network namespace, table/chain/rule ownership, version and rollback/`OutcomeUnknown` handling. Default to crabtables' **typed API** with no `lang`, `json` or `tokio` features unless necessary.
-- Implement a feature-switched comparison adapter: existing handwritten nft path versus crabtables. In each isolated topology, install semantically identical rules and compare both to `nft`: kernel rulesets, packet decisions, conntrack tuples, NAT mapping/replies, IPv6, policy updates while traffic is flowing and rejected-batch behavior.
-- **Atomicity requirement:** batch each dependent nftables change, but never pretend that combining nft operations atomically makes route/bridge/veth mutations atomic. Specify a compensating teardown protocol, ownership tags, failure recovery and reconciliation for cross-subsystem changes. If a kernel reply is lost after submission, surface "outcome unknown"; inspect state before retrying.
-- Exercise old/foreign chain preservation and idempotent cleanup; do not flush all host firewall state. A daemon crash must not leave a permissive or stranded bridge/NAT policy.
-- Respect `crabtables/TODO.md` and the CRAB-7 qualification process. Current documentation is inconsistent: README says no deployment profile qualified, while TODO records a **102-case qualified pinned-image profile** (100 pass, 2 intentional). Reproduce the suite, reconcile those claims, and qualify the *actual* ctrs kernel(s), architecture, nft version and rules required for this engine. An isolated image result is not production qualification.
-- Once equal or better, delete only the superseded **nf_tables** encoder code. Keep rtnetlink until a separately proven replacement exists.
-
-**Gate D:** strict, fresh, machine-readable NAT/conntrack/rollback evidence for both a native Linux host and Kiri's exact macOS guest kernel; no unknown-outcome silently treated as a rollback, no host-wide firewall mutation, no unexplained mismatches. Reject the crabtables cutover if the selected deployment profile is unqualified.
-
-### Phase D — Dogfood smolith and h12tiny without paying for abstraction
-
-**CTRS-05: Replace custom HTTP parser and registry HTTP selectively.**
-
-Upstream Kiri's host daemon has a custom Docker Engine HTTP implementation, and `kiri-image` uses `ureq`/rustls. Upstream issue [#134](https://github.com/libracoder/kiri/issues/134) documents `Expect: 100-continue` and chunked upload/trailer gaps. The objective is **correctness first, then lower overhead**, not reflexive async conversion.
-
-- Before changing transport, add a byte-exact HTTP/1.1 interoperability suite against Docker (request limits, method handling, keepalive/pipelining, slow headers, chunked framing, trailers, conflicting lengths, 100-continue, cancellation, streaming uploads and bounded memory).
-- Pilot `h12tiny-server`/`h12tiny-core` for Docker API handling; qualify HTTP upgrade/hijack semantics for `attach`, `exec`, logs and large streaming tar uploads. h12tiny-server has an `upgrade` feature; verify it meets Docker's duplex/connection lifetime behavior before enabling it.
-- Do not force every request through a global async executor. Compare per-connection blocking threads, smol's reactor and small bounded worker pools on real API workloads. Preserve the faster simpler design if there is no measurable win. Avoid Tokio dependencies and an unnecessary Hyper compatibility layer where the smallest h12tiny components suffice.
-- Pilot `h12tiny-client-sync` or `h12tiny-client` for the OCI registry client, with explicit Graviola/rustls provider and platform trust roots. Keep digest validation and proxy/auth/redirect semantics. Test Docker Hub and OCI registries, bearer auth, layers, manifests, multiarch resolution, partial downloads, retries, chunking, TLS errors and content-addressed store integrity.
-- Use the user's smolith workspace packages at pinned revisions via exact dependency names (`laputa-smol` as package, `smol` library; h12tiny modules). Do not copy the entire smolith monorepo into ctrs or silently float Git HEAD.
-- After passing the oracle, remove `ureq` and unused HTTP/TLS dependencies and record compile time, binary size, API p50/p99, throughput, allocation and CPU changes. No loss of TLS verification or trust-root handling.
-
-**Gate E:** identical observable Docker API results (including streaming, exit status and binary payloads) on the declared matrix, no request smuggling/DoS regression, registry digests verified, and perf evidence. Do not ship a transport swap that only makes Cargo tree prettier.
-
-### Phase E — Explore Lima, smolvm and the real VM networking bottleneck
-
-**CTRS-06: Benchmark the macOS VZ network that Kiri already has.**
-
-- Kiri already constructs a `VZNATNetworkDeviceAttachment` in `kiri-vmm/src/apple.rs`. Lima's `vzNAT` is **the same Apple framework facility**, not a new fast network driver to install. Lima's measured IP-address results (59.2 Gb/s forward, 130 Gb/s reverse on an M4 Max) are useful **external reference measurements**, not promises for ctrs on another machine or for published container ports.
-- Measure separately: host ↔ guest IP, host ↔ container published port, container ↔ Internet, container ↔ container, TCP small-request latency, UDP, DNS, IPv6, concurrent flows, NAT state, idle CPU and reconnection. Distinguish VM NIC from per-container netns/NAT and from Kiri's vsock port relay. Compare bridged and `--network none` cases.
-- Diagnose Kiri's reported "VM NAT network unreachable; relay published ports over vsock" behavior, stale DHCP/IP discovery, reconnect after Mac sleep and different port bind addresses. Avoid layering more proxies to mask a failing fast path.
-- Explore Lima's direct-IP/vzNAT path, guest-agent port discoverability, forwarding lifecycle and socket_vmnet. **Default candidate: native vzNAT**. `socket_vmnet` requires extra privileged helper/setup and is only justified for bridged/guest-reachable use cases not served by VZ NAT.
-- On native Linux, there is **no VM** and therefore no relevant host↔guest VZ performance optimization. Use rtnetlink/nftables and test host kernel forwarding instead.
-- Account for Tailscale: never hardcode a guest/bridge subnet overlapping tailnet routes, especially `100.64.0.0/10` (smolvm's default `100.96.0.0/30` sits there). Detect host route conflicts or offer a deterministic configurable private CIDR; measure nonconflicting IPv4/IPv6.
-- Validate bind mounts/virtiofs and host file-change propagation separately; network throughput alone is not a useful developer-workflow win.
-
-**Gate F:** a reproducible breakdown identifies the current bottleneck and justifies any code change with improved end-to-end container traffic, no regression in sleep/wake, recovery, DNS or published-port semantics.
-
-**CTRS-07: Evaluate smolvm as an optional *networking technique*, not the default VMM.**
-
-- smolvm is built on **libkrun** (Hypervisor.framework/KVM), unlike Kiri's native Apple Virtualization.framework approach. Its `smolvm-network` Rust crate implements a host-side **smoltcp** gateway over a **libkrun-specific frame bridge**, with TCP/UDP relays, DNS and egress policy. It is not a drop-in replacement for VZ's NAT device. It may add host sockets and packet copies, so do not assume it is faster.
-- Inspect both smolvm's userspace `virtio-net` backend and its default **TSI** socket path. TSI requires kernel-specific patches; importing it into Kiri's custom kernel would enlarge the maintenance burden and change networking semantics. No default TSI adoption.
-- Run an isolated proof-of-concept with the smolvm/libkrun backend *outside* the primary engine, or prototype a minimal compatible VZ frame interface only if available without a substantial new VMM. Do not require C/libkrun or whole `smolvm` in the shipping binary without a decisive result.
-- Potential value to investigate: protocol-aware DNS caching, explicit egress ACLs, traffic capture/replay, predictable sandbox networking, fast UNIX socket relay, file-change notification and branchable per-task VM state. Separate those capabilities from raw throughput.
-- Compare latency/throughput, per-flow FD usage, CPU, memory, guest kernel patches, security boundary, crashes and maintenance burden against VZ NAT and guest kernel networking. Test with long-lived, many-connection and short-lived traffic; smolvm's docs warn that each relay flow consumes host FDs and may hit macOS port/FD constraints.
-
-**Gate G:** adopt individual ideas only behind a measured, narrow interface. A whole libkrun/smolvm backend belongs in a separate optional experiment, not the standard Linux-container execution path.
-
-**CTRS-08: Evaluate optional per-workload microVM isolation only after the container engine is stable.**
-
-- smolvm's per-workload VM/branch/checkpoint model is materially different from Kiri's one-VM-many-containers approach. That could eventually be useful for running **untrusted coding agents**, but this is not a required Docker API capability.
-- Compare a minimal per-task VZ VM, smolvm/libkrun, and native Kiri containers for isolation, boot cost, RAM under N parallel sandboxes, snapshots/restore, host mounts, secret forwarding and networking. Keep this research as `docs/experiments/microvm-isolation.md` until it earns a feature.
-- Never silently switch a container request into a per-container VM; maintain an explicit security/runtime mode and do not weaken default container security to increase throughput.
-
-**Gate H:** no default microVM mode or new dependency without written threat model, perf/complexity evidence and a concrete use case.
-
-### Phase F — Make the fork better than upstream at the core things
-
-**CTRS-09: Harden and qualify the engine.**
-
-- Review Kiri open issues before each upstream pin, especially [#199](https://github.com/libracoder/kiri/issues/199) (Rosetta/macOS 15), [#50](https://github.com/libracoder/kiri/issues/50) (VM kernel crash/restart), [#121](https://github.com/libracoder/kiri/issues/121) (Testcontainers command handling), [#134](https://github.com/libracoder/kiri/issues/134) (HTTP framing). Verify reproducibly rather than copying a PR and assuming the fix is complete.
-- Threat-model Linux root daemon, admin-equivalent socket, host access, capability sets, `--privileged`, seccomp denylist versus allowlist, namespace setup failures, shared kernel attack surface, vsock access from guest, path traversal in tar/unpack, symlink races, mount propagation, image authenticity, corrupted local state, and network policy bypass.
-- Minimize privileges and broaden seccomp coverage only with syscall-level differential fixtures; custom filters need architecture/x32/compat, `clone3`, `io_uring` and capability matrix testing. Fail closed on unknown policy semantics rather than silently treating them as Docker-compatible.
-- Test kill/crash at every lifecycle step, daemon restart, host sleep/wake, VM kernel panic, orphan processes, incomplete volume/image writes, concurrent pulls, disk full, OOM, stale socket recovery, version mismatches, and network rollback.
-- Build untrusted-image / hostile-guest adversarial tests under isolated VMs. Protect test hosts: never grant the harness unrestricted privileges on a real workstation to "prove" isolation.
-- Maintain `cargo audit` / `cargo deny` (advisories, license policy, yanked crates), fuzz protocol/frame/HTTP/image parsing, deterministic rustfmt/clippy/lints and smoke with sanitizers where available.
-
-**Gate I:** independently reproducible security/compatibility evidence, no known critical escape or host-policy rollback failure, cleanup after all injected failures. Do not advertise safe untrusted multi-tenant isolation merely because tests pass.
-
-**CTRS-10: Shipping, sizes and final rename.**
-
-- Package a signed/notarized macOS command-line executable plus pinned guest kernel/initrd/data template, without a desktop bundle; retain `com.apple.security.virtualization` entitlement. For Linux: release reproducible static musl x86_64 and aarch64 `kiri`/`kiri-init` artifacts with clear kernel/cgroup/privilege prerequisites.
-- No Docker dependency to *build the Rust runtime*; the kernel-build/bootstrap tool may use a container during transition, but provide a verified direct source/toolchain path to eliminate a circular dependency. Never download unpinned rootfs/kernel code during a reproducible release.
-- Ship hashes, manifest, SBOM, provenance, third-party notices, guest GPL kernel source offer, reproducible build instructions and safe uninstaller. No automatic daemon installation, sudoers changes, insecure socket link or DNS injection.
-- Compare against initial source pin and latest upstream: binary sizes, resident/idle/peak memory (including VM helper), cold/warm startup, lifecycle p50/p95/p99, CPU, TCP/UDP/DNS, OCI image pull, storage operations, compatibility pass rates, dependency/LOC reduction, and boot asset size. Keep raw benchmark scripts/results.
-- Only after gates A–I: rename public application/CLI/context/env/data paths to `ctrs` with an explicit migration alias and rollback. Remove Kiri branded assets early; do not postpone trademark compliance to the first public binary release.
-
-**Gate J:** documented cross-platform install, reliable smoke, no GUI dependencies, legally compliant provenance, conformance and perf reports, and a migration-safe `ctrs` identity.
-
-## 3. Minimum conformance and benchmark matrix
-
-| Axis | Required examples and observations |
-| --- | --- |
-| Container lifecycle | Alpine true/false and exit codes, exec/attach/stdin/TTY, high-volume logs, stop/kill/restart/wait, pause/unpause, high churn and leak soak |
-| OCI | Manifest indexes, amd64/arm64 selection, image config labels/Cmd, digest verification, auth, partial/corrupt blobs, save/load, registry retries |
-| Docker API | HTTP/1.1 framing, SDK/Testcontainers, Unix socket permissions, streaming/hijack, CLI/Compose, BuildKit container driver |
-| Storage | ext4/overlayfs, layer whiteouts, mount path safety, named volumes, host bind directories, write durability, host↔guest inotify propagation |
-| Network | Default/user networks, bridge/none, veth/DNS, IPv4/IPv6, NAT/conntrack/rollback, TCP and UDP published ports, tailnet CIDR collision |
-| Host guest | VZ boot/poweroff, 1+ N containers, memory balloon, guest crash, Mac sleep/wake, DHCP/IP changes, vsock recovery |
-| Threat model | `--privileged`, seccomp, socket access, namespace ownership, symlink/race attacks, image traversal, network egress policy |
-| Performance | Real API `run --rm`, precreated start, Redis/Postgres cold/steady startup, HTTP small requests, DNS, iperf3, file metadata and transfers, RSS/CPU |
-
-**Experiment protocol:** same hardware/OS/build profile, pinned OCI digest, warmed and cold cases separately, repeat enough samples to report confidence/variance (not just one median), randomize/alternate experiment order, capture p50/p95/p99, include kernel and virtualization helper memory, collect syscall counters/profiles, and preserve a no-change control. Treat a negative result as useful. An optimization may trade a small regression for a major quality/security gain, but it must be explicitly justified with evidence.
-
-**No new feature passes with only unit tests:** at least one cross-implementation differential check, one failure-mode test, and one regression/perf benchmark are required. Changes to kernel config or custom patches require boot and compatibility validation for each advertised guest architecture.
-
-## 4. Operating rules for the coding campaign
-
-- Follow task IDs in order; every completed ID needs: changed paths, deleted dependencies/source, new tests, exact commands and environment, benchmark evidence, known residual risks and an honest pass/fail statement.
-- Use small commits directly on this repo's default branch if green and self-contained. If a change temporarily breaks the baseline, keep it on a short-lived working branch; do not leave `main` red. No speculative large rewrites before baseline evidence.
-- Parallelize independent research/benchmarks (crabtables behavior, h12tiny protocol, Lima/smolvm network), but do not swap both protocol and firewall in one commit. Bisectability is a feature.
-- Keep `docs/decisions.md`: accepted/rejected experiments and why. Prefer one canonical implementation over feature-flag proliferation once comparisons finish.
-- Maintain a compatibility ledger instead of saying "Docker-compatible" without a tested scope. Preserve the passing upstream E2E suite and extend it where it misses real SDK behavior.
-- Deletion is a goal, but measured reliability, security and end-to-end latency are the optimization objective. No unbounded caching, premature generic frameworks or new background daemons just to make components appear elegant.
-- When blocked by hardware or privilege, complete the independent source/refactor/tests work, record exactly which gate remains unverified, and do **not** waive the gate.
-
-## 5. Immediate first execution slice
-
-1. Import the pinned Kiri core and its legal/build/test assets; record source commit and dependency graph (CTRS-01).
-2. Get native Linux musl and Apple Silicon signed headless smoke operating against the same Docker API before removing modules.
-3. Delete Windows/GUI and ancillary subsystems in separate commits (CTRS-02), with smoke after each change.
-4. Make `kiri daemon` a first-class terminal entry point with no app lifecycle dependence; fix CLI-only start/stop/restart (CTRS-03).
-5. In parallel, build **read-only** spike reports for crabtables' production-kernel qualification, h12tiny Docker API framing, Lima vzNAT vs Kiri ports, and smolvm-network's VM bridge integration; only then choose the first substitution to merge.
-
-### Reference links
-
-- Kiri [architecture](https://github.com/libracoder/kiri/blob/main/docs/development.md), [feature matrix](https://github.com/libracoder/kiri/blob/main/docs/features.md), [source](https://github.com/libracoder/kiri)
-- crabtables [README and qualification status](https://github.com/laputa-systems/crabtables), [CRAB-7 qualification contract](https://github.com/laputa-systems/crabtables/blob/main/docs/rfc/CRAB-7-nft-differential-qualification.md), [TODO evidence](https://github.com/laputa-systems/crabtables/blob/main/TODO.md)
-- smolith [facade and HTTP crates](https://github.com/laputa-systems/smolith), [h12tiny architecture](https://github.com/laputa-systems/smolith/blob/main/docs/h12tiny/architecture.md)
-- Lima [VZ networking](https://lima-vm.io/docs/config/network/vznat/), [port-forward benchmarks](https://lima-vm.io/docs/config/port/), [managed VMnet](https://lima-vm.io/docs/config/network/vmnet/), [v2.3 networking update](https://www.cncf.io/blog/2026/11/08/lima-v2-3-native-on-windows-vmnet-on-linux-and-menu-tui/)
-- smolvm [runtime](https://github.com/smol-machines/smolvm), [smolvm-network](https://github.com/smol-machines/smolvm/tree/main/crates/smolvm-network), [limitations](https://github.com/smol-machines/smolvm/blob/main/docs/limitations.md), [security model](https://github.com/smol-machines/smolvm/blob/main/docs/security-model.md)
+Longer design material stays in `docs/` (linked from slices), not inlined here: `docs/upstream.md` (CTRS-01), `docs/architecture.md` (CTRS-05), `docs/firewall.md` (CTRS-11), `docs/security.md` (CTRS-21), `docs/decisions.md`, `docs/parity.md`, `docs/evidence/*`, `docs/experiments/*`.
