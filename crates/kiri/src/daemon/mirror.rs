@@ -23,7 +23,6 @@ use super::engine::Engine;
 /// Tried first, so a builder started by buildx after a daemon restart still
 /// finds the mirror its config names.
 const PORT: u16 = 47_391;
-const DEV_PORT: u16 = 47_392;
 
 static LISTENING: OnceLock<Option<u16>> = OnceLock::new();
 
@@ -60,7 +59,7 @@ fn save_token(path: &std::path::Path, token: &str) -> io::Result<()> {
 /// nothing while no build asks).
 pub fn start(engine: &Arc<Engine>) {
     LISTENING.get_or_init(|| {
-        let wanted = if crate::flavor::dev() { DEV_PORT } else { PORT };
+        let wanted = PORT;
         let listener = TcpListener::bind(("127.0.0.1", wanted)).or_else(|_| TcpListener::bind(("127.0.0.1", 0))).ok()?;
         let port = listener.local_addr().ok()?.port();
         let me = Arc::downgrade(engine);

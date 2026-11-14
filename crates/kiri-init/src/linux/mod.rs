@@ -15,7 +15,6 @@ mod relay;
 mod seccomp;
 mod sys;
 mod transport;
-mod usb;
 mod usage;
 mod volmount;
 

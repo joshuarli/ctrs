@@ -284,19 +284,6 @@ impl Places {
         let with = self.saved().unwrap_or(if other.is_some() { With::Docker } else { With::Kiri });
         json!({"type": "buildwith", "with": with.name(), "ask": self.ask(other), "engine": other, "taken": self.taken(), "ready": self.ready(), "builder": self.builder, "context": self.context})
     }
-
-    /// Uninstalling: Docker's builder back, the copy and `build.json` gone.
-    pub fn uninstall(&self) -> io::Result<()> {
-        self.give_back()?;
-        let path = self.instance(&self.context);
-        if self.copied(&read_json(&path)?) {
-            std::fs::remove_file(path)?;
-        }
-        match std::fs::remove_file(&self.state) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        }
-    }
 }
 
 fn docker_dir(home: &Path) -> PathBuf {
@@ -314,9 +301,9 @@ pub fn places() -> io::Result<Places> {
     Ok(Places {
         buildx: buildx_dir(&docker),
         docker,
-        state: home.join(crate::flavor::STATE.get()).join("build.json"),
-        builder: crate::builds::BUILDER.get().to_owned(),
-        context: crate::flavor::CONTEXT.get().to_owned(),
+        state: home.join(".kiri").join("build.json"),
+        builder: crate::builds::BUILDER.to_owned(),
+        context: "kiri".to_owned(),
     })
 }
 
@@ -325,7 +312,7 @@ pub fn places() -> io::Result<Places> {
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from).ok_or_else(|| io::Error::other("USERPROFILE is not set"))?;
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
     let docker = docker_dir(&home);
-    Ok(Places { buildx: buildx_dir(&docker), docker, state: local.join("Kiri").join("build.json"), builder: crate::builds::BUILDER.get().to_owned(), context: crate::flavor::CONTEXT.get().to_owned() })
+    Ok(Places { buildx: buildx_dir(&docker), docker, state: local.join("Kiri").join("build.json"), builder: crate::builds::BUILDER.to_owned(), context: "kiri".to_owned() })
 }
 
 /// The engine besides Kiri on this machine, by name, if there is one.
@@ -396,27 +383,6 @@ pub fn apply() -> io::Result<()> {
     places()?.apply(other_engine())
 }
 
-/// The window's or the CLI's choice.
-pub fn choose(with: With) -> io::Result<()> {
-    places()?.choose(with)
-}
-
-/// The window's `buildwith` event.
-pub fn event() -> String {
-    let other = other_engine();
-    match places() {
-        Ok(p) => p.status(other),
-        Err(e) => json!({"type": "buildwith", "error": e.to_string()}),
-    }
-    .to_string()
-}
-
-/// Whether the window should ask, and about which engine.
-pub fn ask() -> Option<&'static str> {
-    let other = other_engine();
-    places().ok().filter(|p| p.ask(other)).and(other)
-}
-
 /// `kiri build-with [docker|kiri]`: says which, or switches.
 #[cfg(unix)]
 pub fn cli(args: &[String]) -> io::Result<()> {
@@ -432,7 +398,7 @@ pub fn cli(args: &[String]) -> io::Result<()> {
     let s = p.status(other);
     let builder = &p.builder;
     match (s["with"].as_str(), other) {
-        (Some("kiri"), _) if !p.ready() => println!("docker build builds on Kiri once its builder `{builder}` is made (the window or `kiri setup` makes it while Kiri runs)"),
+        (Some("kiri"), _) if !p.ready() => println!("docker build builds on Kiri once its builder `{builder}` is made (`kiri build-with kiri` makes it)"),
         (Some("kiri"), Some(o)) => println!("docker build and docker compose build run on Kiri, whatever docker context is in use; the images are in Kiri, not {o}. `kiri build-with docker` switches back"),
         (Some("kiri"), None) => println!("docker build and docker compose build run on Kiri (builder `{builder}`)"),
         (_, o) => println!(
@@ -583,19 +549,8 @@ mod tests {
         write_json(&p.instance("kiri"), &foreign).unwrap();
         p.choose(With::Docker).unwrap();
         assert_eq!(read_json(&p.instance("kiri")).unwrap(), foreign);
-        p.uninstall().unwrap();
+        p.give_back().unwrap();
         assert!(p.instance("kiri").is_file());
     }
 
-    #[test]
-    fn uninstall_gives_everything_back() {
-        let d = scratch("uninstall");
-        let p = places(&d);
-        builder(&p);
-        p.apply(None).unwrap();
-        assert!(p.taken());
-        p.uninstall().unwrap();
-        assert_eq!(read_json(&p.config()).unwrap(), json!({}));
-        assert!(!p.current().exists() && !p.instance("kiri").exists() && !p.state.exists());
-    }
 }

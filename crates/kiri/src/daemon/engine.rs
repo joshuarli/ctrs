@@ -531,26 +531,6 @@ pub struct Engine {
     cpu_permyriad: std::sync::atomic::AtomicU32,
     /// `docker events`: recent ones for `--since`, and who is listening.
     events: Mutex<Events>,
-    /// Kubernetes LoadBalancer services published on the Mac's localhost:
-    /// (port, protocol) → its forward.
-    k8s_lb: Mutex<HashMap<(u16, String), super::ports::Forwards>>,
-    /// The cluster's pod and service ranges routed to the node, in which VM
-    /// (its link's address) and through which node address.
-    k8s_routes: Mutex<Option<(usize, [u8; 4])>>,
-    /// Shares of Kubernetes services and pods: the Mac port → its forward
-    /// to a cluster address. They go when the cluster does.
-    k8s_fwd: Mutex<HashMap<u16, super::ports::Forwards>>,
-}
-
-/// k3s's pod and service ranges, which `kiri k8s` leaves at their defaults.
-pub const K8S_RANGES: [([u8; 4], u8); 2] = [([10, 42, 0, 0], 16), ([10, 43, 0, 0], 16)];
-
-/// Whether an address is in the cluster's pod or service range.
-pub fn in_k8s_ranges(ip: [u8; 4]) -> bool {
-    K8S_RANGES.iter().any(|(net, bits)| {
-        let mask = u32::MAX << (32 - *bits as u32);
-        u32::from_be_bytes(ip) & mask == u32::from_be_bytes(*net)
-    })
 }
 
 /// Events kept for `docker events --since`.
@@ -624,9 +604,6 @@ impl Engine {
             oom_kills: std::sync::atomic::AtomicU64::new(0),
             cpu_permyriad: std::sync::atomic::AtomicU32::new(0),
             events: Mutex::new(Events::default()),
-            k8s_lb: Mutex::new(HashMap::new()),
-            k8s_routes: Mutex::new(None),
-            k8s_fwd: Mutex::new(HashMap::new()),
         });
         let _ = engine.me.set(Arc::downgrade(&engine));
         engine.load()?;
@@ -634,7 +611,6 @@ impl Engine {
         engine.start_cpu_meter();
         engine.start_sleeper();
         engine.start_clock();
-        engine.start_k8s_lb();
         Ok(engine)
     }
 
@@ -737,111 +713,6 @@ impl Engine {
         Ok((code, String::from_utf8_lossy(&out).into_owned()))
     }
 
-    /// `kiri k8s`: every LoadBalancer service gets its port on the Mac's
-    /// localhost, as OrbStack and Docker Desktop do. k3s's service load
-    /// balancer already serves the port on the node, so a forward to the
-    /// node container is all it takes. Checked every few seconds while the
-    /// cluster runs; forwards go when services or the cluster do.
-    fn start_k8s_lb(self: &Arc<Self>) {
-        let me = Arc::downgrade(self);
-        // `kiri k8s set --lan on` puts them on every interface; a change rebinds them.
-        let mut bound_on = String::new();
-        let _ = std::thread::Builder::new().name("kiri-k8s-lb".into()).spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(3));
-            let Some(engine) = me.upgrade() else { return };
-            let node = engine.lock().containers.values().find(|c| c.status == Status::Running && c.spec.labels.get("dev.kiri.k8s").is_some()).map(|c| (c.id.clone(), c.ip));
-            let Some((id, Some(ip))) = node else {
-                engine.k8s_lb.lock().unwrap_or_else(|e| e.into_inner()).clear();
-                engine.k8s_fwd.lock().unwrap_or_else(|e| e.into_inner()).clear();
-                if let Some((_, via)) = engine.k8s_routes.lock().unwrap_or_else(|e| e.into_inner()).take()
-                    && let Some(vm) = engine.awake()
-                {
-                    for (net, bits) in K8S_RANGES {
-                        let _ = vm.route(net, bits, via, false);
-                    }
-                }
-                continue;
-            };
-            engine.route_k8s(ip);
-            let query = r#"jsonpath={range .items[?(@.spec.type=="LoadBalancer")]}{range .spec.ports[*]}{.port}/{.protocol} {end}{end}"#;
-            let Ok((0, out)) = engine.exec_capture(&id, &["timeout", "-s", "KILL", "20", "kubectl", "get", "svc", "-A", "-o", query]) else { continue };
-            let wanted: Vec<(u16, String)> = out
-                .split_whitespace()
-                .filter_map(|p| {
-                    let (port, proto) = p.split_once('/')?;
-                    Some((port.parse().ok()?, proto.to_ascii_lowercase()))
-                })
-                .collect();
-            let Some(vm) = engine.awake() else { continue };
-            let host_ip = if crate::k8s::config().lan { "0.0.0.0" } else { "127.0.0.1" };
-            let mut lb = engine.k8s_lb.lock().unwrap_or_else(|e| e.into_inner());
-            if bound_on != host_ip {
-                lb.clear();
-                bound_on = host_ip.to_owned();
-            }
-            lb.retain(|k, _| wanted.contains(k));
-            for (port, proto) in wanted {
-                if lb.contains_key(&(port, proto.clone())) {
-                    continue;
-                }
-                let b = super::ports::Binding { container_port: port, proto: proto.clone(), host_ip: host_ip.into(), host_port: port };
-                match super::ports::start(vm.clone(), &format!("lb-{port}-{proto}"), &[b], ip) {
-                    Ok(fw) => {
-                        crate::diag::info!("Kubernetes service published", at = format!("{host_ip}:{port}/{proto}"));
-                        lb.insert((port, proto), fw);
-                    }
-                    Err(e) => crate::diag::warn!("Kubernetes service port not published", port = format!("{port}/{proto}"), error = e),
-                }
-            }
-        });
-    }
-
-    /// Routes the cluster's pod and service ranges to the node, so the
-    /// relay can reach a ClusterIP or a pod as it reaches a container: the
-    /// node's kube-proxy takes it from there. Again after the VM wakes (a new
-    /// VM has none) or the node's address changes.
-    fn route_k8s(&self, node: [u8; 4]) {
-        let Some(vm) = self.awake() else { return };
-        let key = (Arc::as_ptr(&vm) as usize, node);
-        let mut routes = self.k8s_routes.lock().unwrap_or_else(|e| e.into_inner());
-        if *routes == Some(key) {
-            return;
-        }
-        match K8S_RANGES.iter().try_for_each(|(net, bits)| vm.route(*net, *bits, node, true)) {
-            Ok(()) => *routes = Some(key),
-            // An older guest can't; shares of services just can't connect.
-            Err(e) => {
-                if routes.is_none() {
-                    crate::diag::warn!("Kubernetes ranges not routed; sharing a service needs a newer guest", error = e);
-                }
-                *routes = Some((0, node));
-            }
-        }
-    }
-
-    /// Kiri's own: a port on the Mac's loopback that reaches `ip:port` in
-    /// the cluster (a service's ClusterIP or a pod), for sharing it.
-    pub fn k8s_forward(&self, ip: [u8; 4], port: u16) -> Result<u16, Error> {
-        if !in_k8s_ranges(ip) || port == 0 {
-            return Err(Error::BadRequest("not an address in the Kubernetes cluster".into()));
-        }
-        let node = self.lock().containers.values().find(|c| c.status == Status::Running && c.spec.labels.get("dev.kiri.k8s").is_some()).and_then(|c| c.ip);
-        let Some(node) = node else { return Err(Error::Conflict("Kubernetes isn't running".into())) };
-        self.route_k8s(node);
-        let vm = self.vm()?;
-        let b = super::ports::Binding { container_port: port, proto: "tcp".into(), host_ip: "127.0.0.1".into(), host_port: 0 };
-        let fw = super::ports::start(vm, &format!("k8s-share-{port}"), &[b], ip)?;
-        let mac = fw.bound.first().map(|(_, _, p)| *p).unwrap_or(0);
-        crate::diag::info!("Kubernetes address forwarded for sharing", to = format!("{}:{port}", std::net::Ipv4Addr::from(ip)), at = format!("127.0.0.1:{mac}"));
-        self.k8s_fwd.lock().unwrap_or_else(|e| e.into_inner()).insert(mac, fw);
-        Ok(mac)
-    }
-
-    /// Closes a forward `k8s_forward` opened.
-    pub fn k8s_unforward(&self, mac: u16) {
-        self.k8s_fwd.lock().unwrap_or_else(|e| e.into_inner()).remove(&mac);
-    }
-
     fn start_sleeper(self: &Arc<Self>) {
         let idle: u64 = std::env::var("KIRI_IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
         if idle == 0 {
@@ -875,7 +746,7 @@ impl Engine {
             let (busy, parked) = {
                 let st = engine.lock();
                 let parked: Vec<String> = st.containers.values().filter(|c| c.status == Status::Running && c.paused && is_builder(c)).map(|c| c.id.clone()).collect();
-                let busy = st.containers.values().any(|c| c.status == Status::Running && !(c.paused && is_builder(c))) || st.execs.values().any(|e| e.running) || usb_attached();
+                let busy = st.containers.values().any(|c| c.status == Status::Running && !(c.paused && is_builder(c))) || st.execs.values().any(|e| e.running);
                 (busy, parked)
             };
             let quiet = quiet_for >= idle;
@@ -899,7 +770,7 @@ impl Engine {
     fn sleep_if_idle(&self) -> bool {
         let mut link = self.link.lock().unwrap_or_else(|e| e.into_inner());
         // Check under the lock: a request may have woken it.
-        let idle = !self.lock().containers.values().any(|c| c.status == Status::Running) && !usb_attached();
+        let idle = !self.lock().containers.values().any(|c| c.status == Status::Running);
         // Not `link.take().filter(..)`: that takes the VM first and drops it
         // when busy, which powers it off under whatever just started.
         if !idle {
@@ -994,7 +865,6 @@ impl Engine {
             self.stop(&id, self.stop_timeout(&id))?;
         }
         // Passed-through USB devices go back to the Mac, as containers stop.
-        detach_usb();
         if self.sleep_if_idle() {
             crate::diag::info!("VM stopped on request");
         }
@@ -2087,57 +1957,6 @@ impl Engine {
         self.lock_networks().allocate6(&n.name, super::network::parse_ip6(want), &avoid).map_err(Error::Conflict)
     }
 
-    /// Where `<host>` (a `*.kiri.localhost` name) should go: the container
-    /// and the ports that could be its web port (domains.rs picks one).
-    /// Names are the container name, or `<service>.<project>` for Compose
-    /// services.
-    pub fn route(&self, host: &str) -> Option<super::domains::Target> {
-        let host = host.split(':').next()?.to_ascii_lowercase();
-        let name = host.strip_suffix(".kiri.localhost").or_else(|| host.strip_suffix(".kiri.local"))?.to_owned();
-        let st = self.lock();
-        let c = st.containers.values().find(|c| {
-            c.status == Status::Running && {
-                let label = |k: &str| c.spec.labels.get(k).and_then(|v| v.as_str()).unwrap_or("");
-                let service = format!("{}.{}", label("com.docker.compose.service"), label("com.docker.compose.project"));
-                // `dev.kiri.domain=api.myapp` (comma-separated for several) picks the names.
-                let chosen = label(DOMAIN_LABEL).split(',').map(|d| own_name(d.trim())).any(|d| !d.is_empty() && d.eq_ignore_ascii_case(&name));
-                chosen || c.name.eq_ignore_ascii_case(&name) || service.eq_ignore_ascii_case(&name) || (name.len() >= 12 && c.id.starts_with(&name))
-            }
-        })?;
-        let ip = if c.spec.network_mode == "host" { [127, 0, 0, 1] } else { c.ip? };
-        Some(super::domains::Target {
-            ip,
-            id: c.id.clone(),
-            label: c.spec.labels.get("dev.kiri.http.port").and_then(|v| v.as_str()).and_then(|p| p.parse().ok()),
-            published: c.spec.ports.iter().filter(|b| b.proto != "udp").map(|b| b.container_port).collect(),
-            exposed: c.spec.exposed.clone(),
-        })
-    }
-
-    /// For the Finder view (macOS).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn fs_stat(&self, id: &str, path: &str) -> io::Result<super::vmlink::FileInfo> {
-        self.vm()?.fs_stat(id, path)
-    }
-
-    /// For the Finder view (macOS).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn fs_list(&self, id: &str, path: &str) -> io::Result<Vec<super::vmlink::FileInfo>> {
-        self.vm()?.fs_list(id, path)
-    }
-
-    /// For the Finder view (macOS).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn fs_read(&self, id: &str, path: &str, offset: u64, len: u32) -> io::Result<Vec<u8>> {
-        self.vm()?.fs_read(id, path, offset, len)
-    }
-
-    /// A stream into the guest relay towards `ip:port`.
-    pub fn relay_to(&self, ip: [u8; 4], port: u16) -> io::Result<kiri_vmm::VsockStream> {
-        let vm = self.vm()?;
-        super::ports::open_relay(&vm, ip, port)
-    }
-
     /// Opens a `docker cp` session with the guest for a container, running
     /// or not: the request frame is sent, the caller does the rest.
     pub fn copy(&self, key: &str, op: u8, path: &str, flags: u32) -> Result<kiri_vmm::VsockStream, Error> {
@@ -2153,17 +1972,6 @@ impl Engine {
         kiri_proto::encode_copy(&mut out, op, &id, path, flags, &layers);
         std::io::Write::write_all(&mut std::fs::File::from(stream.fd.try_clone()?), &out)?;
         Ok(stream)
-    }
-
-    /// Running containers' domains, for the router's "not found" page.
-    pub fn domains(&self) -> Vec<String> {
-        let suffix = if super::dns::installed() { "kiri.local" } else { "kiri.localhost" };
-        let mut v = self.each(|c| {
-            let chosen = c.spec.labels.get(DOMAIN_LABEL).and_then(|v| v.as_str()).map(|d| own_name(d.split(',').next().unwrap_or("").trim()).to_owned());
-            (c.status == Status::Running).then(|| format!("{}.{suffix}", chosen.filter(|d| !d.is_empty()).unwrap_or_else(|| c.name.clone())))
-        });
-        v.sort();
-        v
     }
 
     /// Containers attached to a network.
@@ -3102,15 +2910,6 @@ pub fn random_hex(bytes: usize) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// The label a container chooses its local names with.
-pub const DOMAIN_LABEL: &str = "dev.kiri.domain";
-
-/// `api.myapp`, from any of `api.myapp`, `api.myapp.kiri.local` or
-/// `api.myapp.kiri.localhost`.
-fn own_name(d: &str) -> &str {
-    d.strip_suffix(".kiri.localhost").or_else(|| d.strip_suffix(".kiri.local")).unwrap_or(d)
-}
-
 /// Docker's container-name rule: non-empty, `[a-zA-Z0-9_.-]` only. A name
 /// is a DNS label on user networks and part of `<name>.kiri.localhost`, so
 /// it must not carry spaces, slashes or control characters.
@@ -3194,18 +2993,6 @@ mod image_lookup_tests {
     }
 }
 
-#[cfg(test)]
-mod k8s_range_tests {
-    #[test]
-    fn only_the_clusters_pod_and_service_ranges_can_be_forwarded() {
-        assert!(super::in_k8s_ranges([10, 43, 42, 10]));
-        assert!(super::in_k8s_ranges([10, 42, 0, 17]));
-        assert!(!super::in_k8s_ranges([10, 44, 0, 1]));
-        assert!(!super::in_k8s_ranges([172, 17, 0, 4]));
-        assert!(!super::in_k8s_ranges([127, 0, 0, 1]));
-        assert!(!super::in_k8s_ranges([192, 168, 64, 1]));
-    }
-}
 
 /// Docker's `CloseMonitorChannel`: the monitor stops, and a container whose
 /// monitor has stopped reads as unhealthy.
@@ -3451,25 +3238,6 @@ mod net_opts_tests {
         assert!(super::net_opts(&old, None, "").is_empty());
     }
 }
-
-/// A passed-through USB device keeps the VM awake: sleeping would unplug it.
-#[cfg(target_os = "macos")]
-fn usb_attached() -> bool {
-    super::usb::any_attached()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn usb_attached() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-fn detach_usb() {
-    super::usb::detach_all();
-}
-
-#[cfg(not(target_os = "macos"))]
-fn detach_usb() {}
 
 #[cfg(test)]
 mod start_exit_tests {

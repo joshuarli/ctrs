@@ -31,9 +31,9 @@ impl Redactor {
         Redactor::new(std::env::var("HOME").ok(), Vec::new())
     }
 
-    /// For a report: also the Kiri Cloud token, when signed in.
+/// Tokens to scrub, added by the caller.
     pub fn for_user() -> Redactor {
-        Redactor::new(std::env::var("HOME").ok(), crate::share::read_config().token.into_iter().collect())
+        Redactor::new(std::env::var("HOME").ok(), Vec::new())
     }
 
     pub fn apply(&self, text: &str) -> String {

@@ -108,21 +108,6 @@ fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut BufRea
         ("POST", "/kiri/proxy") => return reply(w, set_proxy(req), 200),
         ("PUT", "/kiri/proxy/system") => return reply(w, set_host_proxy(req), 200),
         ("GET", "/kiri/resources") => return reply(w, Ok(resources(engine)), 200),
-        // Settings → Domains: the container-domain routers' ports.
-        ("GET", "/kiri/domains") => return reply(w, Ok(super::domains::report()), 200),
-        ("POST", "/kiri/domains") => return reply(w, set_domain_ports(req, engine), 200),
-        // USB passthrough (macOS: the root helper `kiri usb serve` connects here).
-        #[cfg(target_os = "macos")]
-        ("POST", "/kiri/usb") => return super::usb::attach(req, engine, w, r),
-        #[cfg(target_os = "macos")]
-        ("GET", "/kiri/usb") => return reply(w, Ok(super::usb::list(engine)), 200),
-        // Linux and WSL: where each of this machine's USB devices shows up.
-        #[cfg(not(target_os = "macos"))]
-        ("GET", "/kiri/usb/nodes") => return reply(w, Ok(crate::usb::host_nodes()), 200),
-        #[cfg(target_os = "macos")]
-        ("DELETE", p) if p.strip_prefix("/kiri/usb/").is_some_and(|l| !l.is_empty()) => {
-            return reply(w, super::usb::detach(p.strip_prefix("/kiri/usb/").unwrap_or_default()), 200);
-        }
         ("POST", "/kiri/resources") => return reply(w, set_resources(req).map(|()| resources(engine)), 200),
         ("POST", p) if p.strip_prefix("/kiri/containers/").and_then(|r| r.strip_suffix("/ports")).is_some_and(|id| !id.is_empty()) => {
             let id = p.strip_prefix("/kiri/containers/").and_then(|r| r.strip_suffix("/ports")).unwrap_or_default();
@@ -135,34 +120,9 @@ fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut BufRea
             let id = p.strip_prefix("/kiri/containers/").and_then(|r| r.strip_suffix("/listening")).unwrap_or_default();
             return reply(w, engine.listening(id).map(|(tcp, local)| json!({"tcp": tcp, "local": local})), 200);
         }
-        // Kiri's own: a loopback port reaching a Kubernetes service or pod,
-        // for Share. `{"ip": "10.43.0.5", "port": 80}` → `{"port": 50123}`.
-        ("POST", "/kiri/k8s/forward") => return reply(w, k8s_forward(req, engine), 200),
-        ("DELETE", p) if p.strip_prefix("/kiri/k8s/forward/").is_some_and(|n| n.parse::<u16>().is_ok()) => {
-            engine.k8s_unforward(p.strip_prefix("/kiri/k8s/forward/").and_then(|n| n.parse().ok()).unwrap_or(0));
-            return reply(w, Ok(Value::Null), 204);
-        }
         ("POST", p) if p.strip_prefix("/kiri/containers/").and_then(|r| r.strip_suffix("/env")).is_some_and(|id| !id.is_empty()) => {
             let id = p.strip_prefix("/kiri/containers/").and_then(|r| r.strip_suffix("/env")).unwrap_or_default();
             return reply(w, set_env(req, engine, id), 204);
-        }
-        // An image's page for kiri-win, whose window can't read the store
-        // inside WSL: its layers and its Grype scans (crate::scan), as the
-        // Mac's window reads them itself.
-        ("GET", "/kiri/images/layers") => return reply(w, crate::builds::image_layers(req.query("name").unwrap_or_default()).map_err(Error::Io), 200),
-        ("POST", "/kiri/images/scan") => return image_scan(req, w),
-        ("GET", "/kiri/images/scans") => return reply(w, crate::scan::history(req.query("name").unwrap_or_default()).map_err(Error::Io), 200),
-        ("GET", "/kiri/images/scan") => {
-            let at = req.query("at").and_then(|a| a.parse().ok());
-            return reply(w, crate::scan::open(req.query("name").unwrap_or_default(), at).map(Option::unwrap_or_default).map_err(Error::Io), 200);
-        }
-        ("GET", "/kiri/images/sbom") => {
-            let at = req.query("at").and_then(|a| a.parse().ok()).unwrap_or(0);
-            match crate::scan::sbom(req.query("name").unwrap_or_default(), at).and_then(std::fs::read) {
-                Ok(b) => http::respond(w, 200, "application/json", &b)?,
-                Err(e) => error(w, Error::Io(e))?,
-            }
-            return Ok(Next::KeepAlive);
         }
         ("GET", "/info") => return reply(w, Ok(info(engine)), 200),
         ("POST", "/build") => return super::builder::build(req, engine, w, r),
@@ -546,26 +506,6 @@ fn image_save(engine: &Engine, names: &[String], w: &mut UnixStream) -> io::Resu
     Ok(Next::KeepAlive)
 }
 
-/// Scans an image with Grype, streamed as JSON lines: `{phase, pct}` as it
-/// goes (crate::scan::scan's progress), then `{result}` or `{error}`.
-fn image_scan(req: &Request, w: &mut UnixStream) -> io::Result<Next> {
-    let line = |w: &mut UnixStream, v: Value| {
-        let mut s = v.to_string();
-        s.push('\n');
-        http::chunk(w, s.as_bytes())
-    };
-    http::begin_stream(w, 200, "application/json")?;
-    let r = crate::scan::scan(req.query("name").unwrap_or_default(), &mut |phase, pct| {
-        let _ = line(w, json!({"phase": phase, "pct": pct}));
-    });
-    line(w, match r {
-        Ok(res) => json!({"result": res}),
-        Err(e) => json!({"error": e.to_string()}),
-    })?;
-    http::end(w)?;
-    Ok(Next::KeepAlive)
-}
-
 /// `docker pull`, streamed as JSON progress lines like dockerd sends.
 /// `{"ports": [{"container_port": 80, "host_port": 8080, "proto": "tcp", "host_ip": ""}]}`;
 /// host_port 0 picks a free one.
@@ -592,11 +532,6 @@ fn set_host_proxy(req: &Request) -> Result<Value, Error> {
     let url = |k: &str| body[k].as_str().map(str::trim).filter(|v| !v.is_empty()).map(|v| if v.contains("://") { v.to_owned() } else { format!("http://{v}") });
     let no_proxy = body["no_proxy"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).map(str::to_owned).collect();
     super::proxy::set_host(super::proxy::Effective { http: url("http"), https: url("https"), no_proxy, pac: body["pac"].as_bool().unwrap_or(false) });
-    // kiri-win's relay to Windows' loopback: {"7892": 41234}. A kiri-win
-    // without one sends none, and proxies are dialled as set.
-    if let Some(relay) = body["relay"].as_object() {
-        super::proxy::set_relay(relay.iter().filter_map(|(k, v)| Some((k.parse().ok()?, u16::try_from(v.as_u64()?).ok()?))).collect());
-    }
     Ok(super::proxy::report())
 }
 
@@ -613,12 +548,6 @@ fn set_proxy(req: &Request) -> Result<Value, Error> {
     super::proxy::save(&json!({"mode": mode, "http": field("http"), "https": field("https"), "no_proxy": field("no_proxy"), "containers": body["containers"].as_bool().unwrap_or(false)}))
         .map_err(Error::Io)?;
     Ok(super::proxy::report())
-}
-
-fn set_domain_ports(req: &Request, engine: &Arc<Engine>) -> Result<Value, Error> {
-    let body: Value = serde_json::from_slice(&req.body).map_err(|e| Error::BadRequest(format!("invalid JSON: {e}")))?;
-    let port = |k: &str| body[k].as_u64().and_then(|p| u16::try_from(p).ok()).filter(|&p| p != 0).ok_or_else(|| Error::BadRequest(format!("{k} must be a port from 1 to 65535")));
-    super::domains::set_ports(engine, port("http")?, port("https")?).map_err(Error::Conflict)
 }
 
 fn set_resources(req: &Request) -> Result<(), Error> {
@@ -646,15 +575,6 @@ fn set_ports(req: &Request, engine: &Engine, id: &str) -> Result<Value, Error> {
     }
     engine.set_ports(id, ports)?;
     Ok(Value::Null)
-}
-
-/// Kiri's own: a container's whole environment, `NAME=value` each. A running
-/// container restarts with it; its files are kept.
-fn k8s_forward(req: &Request, engine: &Engine) -> Result<Value, Error> {
-    let body: Value = serde_json::from_slice(&req.body).map_err(|e| Error::BadRequest(format!("invalid JSON: {e}")))?;
-    let ip: std::net::Ipv4Addr = body["ip"].as_str().and_then(|s| s.parse().ok()).ok_or_else(|| Error::BadRequest("ip must be an IPv4 address".into()))?;
-    let port = body["port"].as_u64().and_then(|p| u16::try_from(p).ok()).ok_or_else(|| Error::BadRequest("port must be a port number".into()))?;
-    Ok(json!({"port": engine.k8s_forward(ip.octets(), port)?}))
 }
 
 fn set_env(req: &Request, engine: &Engine, id: &str) -> Result<Value, Error> {

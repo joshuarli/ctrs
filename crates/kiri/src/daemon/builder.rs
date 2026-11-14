@@ -60,7 +60,7 @@ static PULL: Mutex<()> = Mutex::new(());
 /// `buildx_buildkit_kiri-build0`: buildx's name for the BuildKit container
 /// of builder `kiri-build`'s first node.
 pub fn container_name() -> String {
-    format!("buildx_buildkit_{}0", crate::builds::BUILDER.get())
+    format!("buildx_buildkit_{}0", crate::builds::BUILDER)
 }
 
 fn volume_name() -> String {

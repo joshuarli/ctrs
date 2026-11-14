@@ -81,8 +81,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
         super::relay::listen_engine().inspect_err(|e| eprintln!("kiri-init: no engine socket for containers: {e}")).ok()
     };
     let copies = super::copy::listen()?;
-    // USB passthrough (VM only: on a Linux host containers see the host's devices).
-    let usb = if host_process { None } else { super::usb::listen().inspect_err(|e| eprintln!("kiri-init: no USB passthrough: {e}")).ok() };
     let udp = super::relay::listen_udp()?;
     let pressure = memory_pressure_trigger();
     let mut last_pressure = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -98,7 +96,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let mut frame = Vec::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     let mut chunk = vec![0u8; MAX_OUTPUT_CHUNK];
-    let mut fs_buf = Vec::new();
 
     loop {
         fds.clear();
@@ -115,7 +112,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
         fds.push(libc::pollfd { fd: ssh_agent.as_raw_fd(), events: libc::POLLIN, revents: 0 });
         fds.push(libc::pollfd { fd: engine_api.as_ref().map_or(-1, |l| l.as_raw_fd()), events: libc::POLLIN, revents: 0 });
         fds.push(libc::pollfd { fd: copies.as_raw_fd(), events: libc::POLLIN, revents: 0 });
-        fds.push(libc::pollfd { fd: usb.as_ref().map_or(-1, |l| l.as_raw_fd()), events: libc::POLLIN, revents: 0 });
         fds.push(libc::pollfd { fd: udp.as_raw_fd(), events: libc::POLLIN, revents: 0 });
         fds.push(libc::pollfd { fd: pressure.as_ref().map_or(-1, |f| f.as_raw_fd()), events: libc::POLLPRI, revents: 0 });
         fds.push(libc::pollfd { fd: term.as_ref().map_or(-1, |f| f.as_raw_fd()), events: libc::POLLIN, revents: 0 });
@@ -223,10 +219,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 while let Some(r) = super::relay::accept_udp(&udp) {
                     relays.push(r);
                 }
-                continue;
-            }
-            if let Some(l) = usb.as_ref().filter(|l| pfd.fd == l.as_raw_fd()) {
-                super::usb::accept(l);
                 continue;
             }
             if pfd.fd == copies.as_raw_fd() {
@@ -552,7 +544,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     }
                     None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
                 },
-                Ok(Msg::UsbNodesQuery) => kiri_proto::encode_usb_nodes(&mut out, &super::usb::nodes()),
                 Ok(Msg::ListenQuery { id }) => match running_pid(&procs, id) {
                     Some(pid) => kiri_proto::encode_listening(&mut out, &net::listening(pid)),
                     None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
@@ -612,33 +603,6 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                             Err(e) => Msg::Error(&format!("disconnect: {e}")).encode(&mut out),
                         }
                     }
-                    None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
-                },
-                Ok(Msg::FsStatRequest { id, path }) => match running_rootfs(&procs, paths, id) {
-                    Some(root) => match super::fsview::stat(&root, path) {
-                        Ok(meta) => {
-                            let name = path.rsplit('/').next().unwrap_or("");
-                            Msg::FsStat(super::fsview::entry(name, meta)).encode(&mut out)
-                        }
-                        Err(e) => Msg::Error(&format!("stat {path}: {e}")).encode(&mut out),
-                    },
-                    None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
-                },
-                Ok(Msg::FsListRequest { id, path }) => match running_rootfs(&procs, paths, id) {
-                    Some(root) => match super::fsview::list(&root, path) {
-                        Ok(list) => {
-                            let entries: Vec<_> = list.iter().map(|(n, m)| super::fsview::entry(n, *m)).collect();
-                            kiri_proto::encode_fs_list(&mut out, &entries)
-                        }
-                        Err(e) => Msg::Error(&format!("list {path}: {e}")).encode(&mut out),
-                    },
-                    None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
-                },
-                Ok(Msg::FsRead { id, path, offset, len }) => match running_rootfs(&procs, paths, id) {
-                    Some(root) => match super::fsview::read(&root, path, offset, len as usize, &mut fs_buf) {
-                        Ok(()) => Msg::FsData(&fs_buf).encode(&mut out),
-                        Err(e) => Msg::Error(&format!("read {path}: {e}")).encode(&mut out),
-                    },
                     None => Msg::Error(&format!("container {id} is not running")).encode(&mut out),
                 },
                 Ok(other) => Msg::Error(&format!("unexpected {other:?}")).encode(&mut out),

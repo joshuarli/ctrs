@@ -467,13 +467,14 @@ fn parse_ipam6(c: &serde_json::Value, subnet: &str) -> Result<Ipam6, String> {
     Ok(Ipam6 { subnet: net, prefix, gateway, ip_range, aux })
 }
 
-/// The `IPAM` object of a network create request: the default driver, at
-/// most one IPv4 and one IPv6 pool.
-pub fn parse_ipam(v: &serde_json::Value) -> Result<Option<Ipam>, String> {
+
+/// The IPv4 pool of a network create request, with the IPv6 entry too.
+/// Tests only: nothing in the engine calls it since the pin.
+#[cfg(test)]
+fn parse_ipam(v: &serde_json::Value) -> Result<Option<Ipam>, String> {
     parse_ipam_both(v).map(|(v4, _)| v4)
 }
 
-/// `parse_ipam`, with the IPv6 entry too.
 pub fn parse_ipam_both(v: &serde_json::Value) -> Result<(Option<Ipam>, Option<Ipam6>), String> {
     match v["Driver"].as_str().unwrap_or("") {
         "" | "default" => {}

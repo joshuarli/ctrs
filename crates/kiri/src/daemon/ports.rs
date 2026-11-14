@@ -399,11 +399,7 @@ pub fn start(vm: Arc<VmLink>, id: &str, bindings: &[Binding], target_ip: [u8; 4]
                     e
                 }
             };
-            // Kiri's own container-domain router on this port lets it go
-            // (domains::step_aside), and the bind goes again.
-            let bound = bind_socket(addr, b.proto == "udp").or_else(|e| {
-                if e.kind() == io::ErrorKind::AddrInUse && b.proto == "tcp" && port != 0 && super::domains::step_aside(port) { bind_socket(addr, false) } else { Err(e) }
-            });
+            let bound = bind_socket(addr, b.proto == "udp");
             let sock = match bound {
                 Ok(s) => s,
                 Err(e) if required => return Err(taken(e)),

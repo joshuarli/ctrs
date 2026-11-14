@@ -1,36 +1,20 @@
-//! `kiri diag`: Kiri's own log, read or followed, and the report to send us.
+//! `kiri diag`: Kiri's own log, read or followed, and a local report.
+//!
+//! The report is one text file: versions and the system, whether the
+//! engine runs, the last lines of every log and recent crash files, all
+//! through [`Redactor::for_user`]. Nothing is sent anywhere.
 //!
 //! The report is one text file: versions and the system, whether the
 //! engine runs, the last lines of every log, recent crash files and macOS's
 //! own crash reports for Kiri, all through [`Redactor::for_user`].
 //!
-//! # Kiri Cloud
-//!
-//! `kiri diag report --send` (and, only when the person turned crash
-//! reports on, each new crash file) goes to `POST /v1/reports` on the Kiri
-//! Share edge, as JSON of at most 1 MB:
-//!
-//! ```text
-//! {"kind":"crash"|"report","part":"ui"|"daemon"|"cli","app_version":"0.1.4",
-//!  "flavor":"kiri"|"kiri-dev","os":"macOS 26.1","arch":"aarch64",
-//!  "install_id":"<32 hex digits, kept in ~/.kiri/install_id>",
-//!  "created_at":"<RFC 3339>","text":"<the redacted report or crash>"}
-//! ```
-//!
-//! A report the person sends carries `Authorization: Bearer <token>` when
-//! signed in to Kiri Cloud, so it can be answered. A crash never does: it
-//! goes without the person's account. Crash uploads also leave out the image
-//! and container names their log lines name. It answers `201 {"id":"rep_…"}`, the id a person can quote to us. Crash
-//! files that went become `<name>.sent.txt`; any other answer leaves them
-//! for the next try.
-
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::redact::Redactor;
 use super::Part;
@@ -38,20 +22,17 @@ use crate::daemon::time;
 
 const USAGE: &str = "\
 usage: kiri diag logs [-f] [--ui|--engine|--cli] [--errors] [--op ID] [-n N]
-       kiri diag report [--out PATH] [--send]
+       kiri diag report [--out PATH]
 
 logs     Kiri's own log, oldest first: the window (--ui), the engine
          (--engine) and the command line (--cli), all three by default.
          --errors keeps warnings and errors; --op ID one window action's
          lines (the id an error's Details show); -n N lines (default 50);
          -f keeps printing new ones.
-report   One file to send us: versions, whether the engine runs, recent
-         log lines and crashes, with your home folder and any tokens taken
-         out. Saved to the Desktop (or --out PATH). --send also sends it to
-         Kiri Cloud and prints its id.";
+report   One file to attach when asking for help: versions, whether the
+         engine runs, recent log lines and crashes, with your home folder
+         and any tokens taken out. Saved to the Desktop (or --out PATH).";
 
-/// A report body may be at most this big.
-pub const MAX_BODY: usize = 1 << 20;
 /// Lines of each log in a report.
 const REPORT_LINES: usize = 300;
 /// How much of one log a report or `kiri diag logs` reads, from the end.
@@ -60,7 +41,6 @@ const TAIL_BYTES: u64 = 512 << 10;
 const LOG_BUDGET: usize = 120 << 10;
 const CRASHES: usize = 5;
 /// Log lines a crash upload carries: its part's last ones before it.
-const CRASH_LOG_LINES: usize = 200;
 const CRASH_BUDGET: usize = 48 << 10;
 const MAC_REPORTS: usize = 3;
 const MAC_REPORT_BUDGET: usize = 24 << 10;
@@ -249,7 +229,6 @@ fn logs_cli(args: &[String]) -> io::Result<()> {
 #[derive(Debug)]
 pub struct Facts {
     pub engine: String,
-    pub crash_reports: bool,
     pub created: SystemTime,
     /// The container list, when the person ticked it in the window.
     pub containers: Option<String>,
@@ -358,10 +337,9 @@ pub fn assemble(home: &Path, state: &Path, facts: &Facts, redactor: &Redactor) -
     let mut s = String::new();
     let _ = writeln!(s, "Kiri diagnostics report");
     let _ = writeln!(s, "Created:  {}", time::rfc3339(facts.created));
-    let _ = writeln!(s, "App:      {} {} ({}), made by the {}", crate::flavor::APP, env!("CARGO_PKG_VERSION"), crate::flavor::CONTEXT, super::part().name());
+    let _ = writeln!(s, "App:      {} {} ({}), made by the {}", "Kiri", env!("CARGO_PKG_VERSION"), "kiri", super::part().name());
     let _ = writeln!(s, "System:   {}", super::system().line());
     let _ = writeln!(s, "Engine:   {}", facts.engine);
-    let _ = writeln!(s, "Crash reports: {}", if facts.crash_reports { "sent automatically" } else { "not sent automatically" });
 
     for (part, title) in [(Part::Daemon, "engine"), (Part::Ui, "window"), (Part::Cli, "command line")] {
         let path = log_file(state, part);
@@ -418,8 +396,8 @@ pub fn assemble(home: &Path, state: &Path, facts: &Facts, redactor: &Redactor) -
 /// window may add the container list.
 pub fn report_text(containers: bool) -> io::Result<String> {
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| io::Error::other("HOME is not set"))?;
-    let state = home.join(crate::flavor::STATE.get());
-    let facts = Facts { engine: engine_line(), crash_reports: crash_reports_on(), created: SystemTime::now(), containers: containers.then(container_lines) };
+    let state = home.join(".kiri");
+    let facts = Facts { engine: engine_line(), created: SystemTime::now(), containers: containers.then(container_lines) };
     Ok(assemble(&home, &state, &facts, &Redactor::for_user()))
 }
 
@@ -451,12 +429,11 @@ pub fn reveal(path: &Path) {
 }
 
 fn report_cli(args: &[String]) -> io::Result<()> {
-    let (mut out, mut send_it) = (None, false);
+    let (mut out,) = (None,);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--out" | "-o" => out = Some(PathBuf::from(it.next().ok_or_else(|| io::Error::other("--out needs a path"))?)),
-            "--send" => send_it = true,
             _ => return Err(io::Error::other(USAGE)),
         }
     }
@@ -467,340 +444,14 @@ fn report_cli(args: &[String]) -> io::Result<()> {
     if !chosen {
         reveal(&path);
     }
-    if send_it {
-        let id = send("report", super::part(), SystemTime::now(), &text)?;
-        super::info!("report sent", id = id);
-        println!("sent to Kiri Cloud as {id}: quote it when you write to us");
-    }
     Ok(())
-}
-
-// ---------------------------------------------------------------- Kiri Cloud
-
-/// `~/.kiri/install_id`: 128 random bits in hex, made on first use, so
-/// reports from one Mac can be told apart without saying whose it is.
-pub fn install_id(state: &Path) -> String {
-    let path = state.join("install_id");
-    if let Ok(id) = std::fs::read_to_string(&path)
-        && id.trim().len() == 32
-        && id.trim().bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        return id.trim().to_owned();
-    }
-    let mut bytes = [0u8; 16];
-    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_err() {
-        // Not expected; the time and pid are still unlikely to repeat.
-        let seed = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0) ^ u128::from(std::process::id());
-        bytes = seed.to_le_bytes();
-    }
-    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    let _ = std::fs::create_dir_all(state);
-    let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path).and_then(|mut f| f.write_all(id.as_bytes()));
-    id
-}
-
-/// The upload's JSON, the text cut short (and marked) to keep it within
-/// [`MAX_BODY`].
-pub fn body(kind: &str, part: Part, created: SystemTime, text: &str, install_id: &str) -> Value {
-    let sys = super::system();
-    let mut text = text.to_owned();
-    loop {
-        let v = json!({
-            "kind": kind,
-            "part": part.name(),
-            "app_version": env!("CARGO_PKG_VERSION"),
-            "flavor": super::flavor(),
-            "os": sys.os,
-            "arch": sys.arch,
-            "install_id": install_id,
-            "created_at": time::rfc3339(created),
-            "text": text,
-        });
-        let size = v.to_string().len();
-        if size <= MAX_BODY {
-            return v;
-        }
-        const MARK: &str = "\n[… cut to fit 1 MB]\n";
-        let mut keep = text.len().saturating_sub(size - MAX_BODY + MARK.len() + 64);
-        while !text.is_char_boundary(keep) {
-            keep -= 1;
-        }
-        text.truncate(keep);
-        text.push_str(MARK);
-    }
-}
-
-/// Sends a report or crash; returns the id Kiri Cloud gave it.
-pub fn send(kind: &str, part: Part, created: SystemTime, text: &str) -> io::Result<String> {
-    let state = super::state_dir().ok_or_else(|| io::Error::other("HOME is not set"))?;
-    let body = body(kind, part, created, text, &install_id(&state));
-    // Only a report the person sends carries their sign-in; a crash never does.
-    let (status, v) = crate::share::post_report(&body, kind == "report")?;
-    let why = v["error"].as_str().map(|e| format!(": {e}")).unwrap_or_default();
-    match status {
-        200 | 201 => v["id"]
-            .as_str()
-            .filter(|id| !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
-            .map(str::to_owned)
-            .ok_or_else(|| io::Error::other("Kiri Cloud took the report but sent back no id")),
-        429 => Err(io::Error::other(format!("Kiri Cloud is taking no more reports for now (429){why}; try again later"))),
-        _ => Err(io::Error::other(format!("Kiri Cloud answered {status}{why}"))),
-    }
-}
-
-/// Whether the person turned on sending crash reports (`"crashReports":
-/// true` in `ui.json`, which the window's Settings write). Off by default.
-#[cfg(any(target_os = "macos", all(target_os = "linux", feature = "window")))]
-pub fn crash_reports_on() -> bool {
-    crate::ui::prefs()["crashReports"] == true
-}
-
-/// No window, no setting: a Linux host never sends crashes by itself.
-#[cfg(not(any(target_os = "macos", all(target_os = "linux", feature = "window"))))]
-pub fn crash_reports_on() -> bool {
-    false
-}
-
-/// When crash reports were turned on, in Unix seconds. 0 for a setting from
-/// before this was kept: those people's waiting crashes still go.
-#[cfg(any(target_os = "macos", all(target_os = "linux", feature = "window")))]
-fn crash_reports_since() -> u64 {
-    crate::ui::prefs()["crashReportsSince"].as_u64().unwrap_or(0)
-}
-
-#[cfg(not(any(target_os = "macos", all(target_os = "linux", feature = "window"))))]
-fn crash_reports_since() -> u64 {
-    0
-}
-
-/// Crash files waiting to go, oldest first: not sent, not being sent, and not
-/// from before `since`. Turning reports on doesn't send what came earlier,
-/// which includes crashes the person answered "Not now" to.
-fn pending(dir: &Path, since: u64) -> Vec<String> {
-    let waiting = |n: &String| !n.ends_with(".sent.txt") && !n.ends_with(".sending") && crash_name(n).is_some_and(|(t, _)| t >= since);
-    let mut names: Vec<String> = crash_files(dir).into_iter().filter(waiting).collect();
-    names.reverse();
-    names
-}
-
-/// Sends the crash files not sent yet, when the person opted in. Stops at
-/// the first failure: the rest wait for the next try.
-pub fn send_crashes() {
-    if !crash_reports_on() {
-        return;
-    }
-    let Some(dir) = super::crashes_dir() else { return };
-    // A sender that died mid-way leaves `.sending`: free it after a while.
-    for (path, t) in newest(&dir, |n| n.ends_with(".sending")) {
-        if t.elapsed().unwrap_or_default() > Duration::from_secs(600) {
-            let _ = std::fs::rename(&path, path.with_extension(""));
-        }
-    }
-    let redactor = Redactor::for_user();
-    for name in pending(&dir, crash_reports_since()) {
-        // Another process (the window and the engine both try) has it.
-        let Some(claimed) = claim(&dir, &name) else { continue };
-        if let Err(e) = send_claimed(&dir, &name, &claimed, &redactor) {
-            super::warn!("crash report not sent; it is tried again later", file = name, error = e);
-            break;
-        }
-    }
-}
-
-/// Takes a crash file for sending (`<name>.sending`), unless another
-/// sender has it.
-fn claim(dir: &Path, name: &str) -> Option<PathBuf> {
-    crash_name(name)?;
-    let claimed = dir.join(format!("{name}.sending"));
-    std::fs::rename(dir.join(name), &claimed).ok()?;
-    Some(claimed)
-}
-
-/// Sends a claimed crash file: sent, it becomes `<stem>.sent.txt` ending
-/// with its id; not, it goes back for the next try.
-fn send_claimed(dir: &Path, name: &str, claimed: &Path, redactor: &Redactor) -> io::Result<String> {
-    let (secs, part) = crash_name(name).ok_or_else(|| io::Error::other("not a crash file"))?;
-    let text = std::fs::read_to_string(claimed).unwrap_or_default();
-    let text = match super::state_dir() {
-        Some(state) => crash_upload(&state, secs, part, &text),
-        None => text,
-    };
-    match send("crash", part, UNIX_EPOCH + Duration::from_secs(secs), &redactor.apply(&text)) {
-        Ok(id) => {
-            let _ = std::fs::OpenOptions::new().append(true).open(claimed).and_then(|mut f| writeln!(f, "\nSent to Kiri Cloud as {id}"));
-            let sent = dir.join(format!("{}.sent.txt", name.strip_suffix(".txt").unwrap_or(name)));
-            let _ = std::fs::rename(claimed, sent);
-            super::info!("crash report sent", file = name, id = id);
-            Ok(id)
-        }
-        Err(e) => {
-            let _ = std::fs::rename(claimed, dir.join(name));
-            Err(e)
-        }
-    }
-}
-
-/// Log fields that name the person's images and containers.
-const NAME_FIELDS: [&str; 5] = ["image", "name", "container", "reference", "repo"];
-
-/// What a crash upload holds: the crash file, then the last lines its part
-/// logged up to the crash, without the image and container names they
-/// carry, wherever those appear.
-fn crash_upload(state: &Path, secs: u64, part: Part, text: &str) -> String {
-    let until = time::rfc3339(UNIX_EPOCH + Duration::from_secs(secs + 1));
-    let mut lines: Vec<Value> = read_lines(state, &[part], Filter::default(), 2000)
-        .into_iter()
-        .filter(|v| v["time"].as_str().is_some_and(|t| t < until.as_str()))
-        .collect();
-    lines.drain(..lines.len().saturating_sub(CRASH_LOG_LINES));
-    let mut s = text.trim_end().to_owned();
-    let _ = writeln!(s, "\n\n==== The last {} log lines before it ====", lines.len());
-    for l in &lines {
-        let _ = writeln!(s, "{}", render(l, true, false));
-    }
-    without_names(&s, &lines)
-}
-
-/// `text` with every image and container name that `lines` log taken out,
-/// longest first, so `web` doesn't leave half of `web-admin`.
-fn without_names(text: &str, lines: &[Value]) -> String {
-    let mut names: Vec<&str> = lines
-        .iter()
-        .flat_map(|v| NAME_FIELDS.iter().filter_map(move |k| v["fields"][*k].as_str()))
-        .map(str::trim)
-        .filter(|n| n.len() >= 3 && *n != "[redacted]")
-        .collect();
-    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
-    names.dedup();
-    names.into_iter().fold(text.to_owned(), |s, n| replace_whole(&s, n, "[name]"))
-}
-
-/// Every `name` in `s` that stands alone (not inside a longer word, so a
-/// container `web` leaves `webpki` be, but not `web.kiri.local`).
-fn replace_whole(s: &str, name: &str, with: &str) -> String {
-    let joins = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
-    let (mut out, mut last, mut from) = (String::with_capacity(s.len()), 0, 0);
-    while let Some(i) = s[from..].find(name).map(|i| i + from) {
-        let end = i + name.len();
-        if !joins(s[..i].chars().next_back()) && !joins(s[end..].chars().next()) {
-            out.push_str(&s[last..i]);
-            out.push_str(with);
-            last = end;
-        }
-        from = end;
-    }
-    out.push_str(&s[last..]);
-    out
-}
-
-/// The id a sent crash file ends with.
-fn sent_id(text: &str) -> Option<&str> {
-    text.lines().rev().find_map(|l| l.strip_prefix("Sent to Kiri Cloud as ")).map(str::trim).filter(|id| !id.is_empty())
-}
-
-/// Sends one crash file the person picked in the window, whether or not
-/// crash reports go by themselves. Returns its id.
-pub fn send_crash(name: &str) -> io::Result<String> {
-    let dir = super::crashes_dir().ok_or_else(|| io::Error::other("HOME is not set"))?;
-    if name.contains('/') || name.ends_with(".sending") || crash_name(name).is_none() {
-        return Err(io::Error::other("not a crash file"));
-    }
-    if name.ends_with(".sent.txt") {
-        let text = std::fs::read_to_string(dir.join(name))?;
-        return sent_id(&text).map(str::to_owned).ok_or_else(|| io::Error::other("it was sent, but its id isn't in the file"));
-    }
-    let claimed = claim(&dir, name).ok_or_else(|| io::Error::other("Kiri is sending it already"))?;
-    send_claimed(&dir, name, &claimed, &Redactor::for_user())
-}
-
-/// The window's Diagnostics: the newest `n` crash files with their
-/// message, where, whether they went (and the id), and the text.
-fn crash_list(dir: &Path, n: usize) -> Vec<Value> {
-    crash_files(dir)
-        .into_iter()
-        .take(n)
-        .filter_map(|name| {
-            let (secs, part) = crash_name(&name)?;
-            let text = std::fs::read_to_string(dir.join(&name)).unwrap_or_default();
-            let field = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).unwrap_or("").trim().to_owned();
-            Some(json!({
-                "name": name,
-                "part": part.name(),
-                "time": time::rfc3339(UNIX_EPOCH + Duration::from_secs(secs)),
-                "message": field("Message:"),
-                "location": field("Location:"),
-                "sent": name.ends_with(".sent.txt"),
-                "sending": name.ends_with(".sending"),
-                "id": sent_id(&text),
-                "text": first_bytes(&text, CRASH_BUDGET),
-            }))
-        })
-        .collect()
-}
-
-/// The page's `diagcrashes`.
-pub fn page_crashes(n: usize) -> Value {
-    let crashes = super::crashes_dir().map(|dir| crash_list(&dir, n)).unwrap_or_default();
-    json!({"type": "diagcrashes", "crashes": crashes})
-}
-
-/// Sends waiting crash files in the background after `delay`, then every
-/// `every` if given (the engine runs for days).
-pub fn spawn_crash_sender(delay: Duration, every: Option<Duration>) {
-    let _ = std::thread::Builder::new().name("kiri-crash-send".into()).spawn(move || {
-        std::thread::sleep(delay);
-        loop {
-            send_crashes();
-            match every {
-                Some(d) => std::thread::sleep(d),
-                None => return,
-            }
-        }
-    });
-}
-
-/// The newest crash since the window last opened, for the page's
-/// `lastcrash` event; remembers this opening. Nothing the first time.
-pub fn last_crash() -> Option<Value> {
-    let dir = super::crashes_dir()?;
-    let marker = dir.join(".window-opened");
-    let since: Option<u64> = std::fs::read_to_string(&marker).ok().and_then(|s| s.trim().parse().ok());
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(&marker, now.to_string());
-    let since = since?;
-    let names: Vec<String> = crash_files(&dir).into_iter().filter(|n| crash_name(n).is_some_and(|(t, _)| t >= since)).collect();
-    let name = names.first()?;
-    let (secs, part) = crash_name(name)?;
-    let text = std::fs::read_to_string(dir.join(name)).unwrap_or_default();
-    let message = text.lines().find_map(|l| l.strip_prefix("Message:")).unwrap_or("").trim().to_owned();
-    Some(json!({
-        "type": "lastcrash",
-        "name": name,
-        "id": sent_id(&text),
-        "part": part.name(),
-        "time": time::rfc3339(UNIX_EPOCH + Duration::from_secs(secs)),
-        "message": message,
-        "file": Redactor::home_only().apply(&dir.join(name).display().to_string()),
-        "count": names.len(),
-        "sent": name.ends_with(".sent.txt"),
-        "crashReports": crash_reports_on(),
-    }))
-}
-
-/// The page's `diaglogs`: the last `n` events, as their JSON objects; with
-/// `op`, only that action's lines, from the window and the engine.
-pub fn page_lines(part: &str, errors: bool, op: &str, n: usize) -> Value {
-    let parts = Part::parse(part).map_or_else(|| Part::ALL.to_vec(), |p| vec![p]);
-    let filter = Filter { errors, op: Some(op).filter(|o| !o.is_empty()) };
-    let lines = super::state_dir().map(|s| read_lines(&s, &parts, filter, n.clamp(1, 2000))).unwrap_or_default();
-    json!({"type": "diaglogs", "part": part, "op": op, "lines": lines})
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::Level;
     use super::*;
+    use std::time::UNIX_EPOCH;
 
     fn temp_home(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("kiri-report-{name}-{}", std::process::id()));
@@ -830,19 +481,6 @@ mod tests {
         assert_eq!(msgs(read_lines(&state, &[Part::Ui], Filter::default(), 50)), "b");
         assert_eq!(msgs(read_lines(&state, &Part::ALL, Filter { errors: false, op: Some("run-7c2e") }, 50)), "a,b");
         let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn crash_uploads_leave_out_image_and_container_names() {
-        let line = |msg: &str, fields: &[(&str, String)]| -> Value { serde_json::from_str(&super::super::json_line("2026-10-28T09:41:07.123Z", Level::Info, Part::Daemon, msg, fields)).unwrap() };
-        let lines = [
-            line("image pull failed", &[("image", "registry.acme.corp/secret-app:1.2".into()), ("error", "registry.acme.corp/secret-app:1.2: unauthorized".into())]),
-            line("container exited", &[("name", "web".into()), ("image", "nginx".into())]),
-        ];
-        let text = format!("panic at webpki: web.kiri.local is gone\n{}\n{}", render(&lines[0], true, false), render(&lines[1], true, false));
-        let out = without_names(&text, &lines);
-        assert!(!out.contains("secret-app") && !out.contains("acme") && !out.contains("nginx"), "{out}");
-        assert!(out.contains("webpki") && out.contains("[name].kiri.local") && out.contains("name=[name]"), "{out}");
     }
 
     #[test]
@@ -882,11 +520,11 @@ mod tests {
         std::fs::write(state.join("crashes/1792700000-ui.sent.txt"), "Kiri crash report\nMessage:  older\n").unwrap();
         std::fs::write(reports.join("kiri-2026-10-28-094107.ips"), format!("{{\"app_name\":\"kiri\",\"crashReporterKey\":\"ABCD-1234\"}}\n{{\"procPath\":\"{h}/Applications/Kiri.app\"}}")).unwrap();
         std::fs::write(reports.join("Safari-2026-10-28-094107.ips"), "not ours").unwrap();
-        let facts = Facts { engine: "not running".into(), crash_reports: false, created: UNIX_EPOCH + Duration::from_secs(1_792_800_000), containers: Some("web  nginx:alpine  Up 2 hours\n".into()) };
+        let facts = Facts { engine: "not running".into(), created: UNIX_EPOCH + Duration::from_secs(1_792_800_000), containers: Some("web  nginx:alpine  Up 2 hours\n".into()) };
         let text = assemble(&home, &state, &facts, &Redactor::new(Some(h.clone()), Vec::new()));
 
         assert!(text.starts_with("Kiri diagnostics report\nCreated:  2026-10-24T00:00:00"), "{text}");
-        assert!(text.contains("Engine:   not running") && text.contains("Crash reports: not sent automatically"));
+        assert!(text.contains("Engine:   not running"));
         assert!(text.contains("==== Log: engine (~/.kiri/logs/daemon.log) ===="));
         // The last 300 of 400 lines.
         assert!(text.contains("event 399 in ~/.kiri") && text.contains("event 100 in") && !text.contains("event 99 in"));
@@ -897,73 +535,8 @@ mod tests {
         assert!(text.find("1792800000-daemon").unwrap() < text.find("1792700000-ui").unwrap(), "newest crash first");
         assert!(text.contains("--- kiri-2026-10-28-094107.ips ---") && text.contains("~/Applications/Kiri.app") && !text.contains("Safari"));
         assert!(!text.contains("ABCD-1234") && !text.contains(&h), "{text}");
-        assert!(text.len() < MAX_BODY);
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    #[test]
-    fn bodies_follow_the_contract_and_fit() {
-        let created = UNIX_EPOCH + Duration::from_secs(1_792_800_000);
-        let v = body("crash", Part::Daemon, created, "text", "0123456789abcdef0123456789abcdef");
-        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-        for k in ["kind", "part", "app_version", "flavor", "os", "arch", "install_id", "created_at", "text"] {
-            assert!(keys.contains(&k), "{k} missing");
-        }
-        assert_eq!((v["kind"].as_str(), v["part"].as_str(), v["flavor"].as_str()), (Some("crash"), Some("daemon"), Some("kiri")));
-        assert_eq!(v["created_at"].as_str().unwrap()[..19], *"2026-10-24T00:00:00");
-        // Quotes and newlines double in JSON: still under 1 MB.
-        let big = "\"\n".repeat(700_000);
-        let v = body("report", Part::Cli, created, &big, "x");
-        assert!(v.to_string().len() <= MAX_BODY);
-        assert!(v["text"].as_str().unwrap().ends_with("[… cut to fit 1 MB]\n"));
-    }
 
-    #[test]
-    fn install_ids_are_made_once() {
-        let home = temp_home("install");
-        let a = install_id(&home);
-        assert_eq!(a.len(), 32);
-        assert_eq!(install_id(&home), a);
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn lists_crashes_with_their_ids() {
-        let home = temp_home("list");
-        std::fs::write(home.join("1792800000-daemon.txt"), "Kiri crash report\nLocation: vm/balloon.rs:212:41\nMessage:  boom\n").unwrap();
-        std::fs::write(home.join("1792700000-ui.sent.txt"), "Kiri crash report\nMessage:  older\n\nSent to Kiri Cloud as rep_51c0e8d4\n").unwrap();
-        std::fs::write(home.join(".window-opened"), "1").unwrap();
-        let list = crash_list(&home, 10);
-        assert_eq!(list.len(), 2);
-        assert_eq!((list[0]["part"].as_str(), list[0]["message"].as_str(), list[0]["location"].as_str()), (Some("daemon"), Some("boom"), Some("vm/balloon.rs:212:41")));
-        assert_eq!((list[0]["sent"].as_bool(), list[0]["id"].is_null()), (Some(false), true));
-        assert_eq!((list[1]["sent"].as_bool(), list[1]["id"].as_str()), (Some(true), Some("rep_51c0e8d4")));
-        assert_eq!(crash_list(&home, 1).len(), 1);
-        assert!(claim(&home, "notes.txt").is_none());
-        // An upload carries its part's lines up to the crash, not after.
-        let state = home.join(".kiri");
-        std::fs::create_dir_all(state.join("logs")).unwrap();
-        let log: Vec<String> = (0..250).map(|i| line(&format!("2026-10-24T00:{:02}:{:02}.000Z", i / 60, i % 60), Level::Info, Part::Daemon, &format!("e{i}"))).collect();
-        std::fs::write(state.join("logs/daemon.log"), log.join("\n") + "\n").unwrap();
-        let up = crash_upload(&state, 1_792_800_000 + 240, Part::Daemon, "Kiri crash report\n");
-        assert!(up.starts_with("Kiri crash report\n\n==== The last 200 log lines before it ====\n"), "{up}");
-        assert!(up.contains(" e240") && up.contains(" e41\n") && !up.contains(" e40\n") && !up.contains(" e241"), "{up}");
-        assert!(claim(&home, "1792800000-daemon.txt").is_some_and(|p| p.ends_with("1792800000-daemon.txt.sending")));
-        assert!(claim(&home, "1792800000-daemon.txt").is_none(), "claimed once");
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn crash_files_wait_oldest_first() {
-        let home = temp_home("pending");
-        for n in ["1792800000-daemon.txt", "1792700000-ui.txt", "1792600000-cli.sent.txt", "1792500000-ui.txt.sending", ".window-opened"] {
-            std::fs::write(home.join(n), "x").unwrap();
-        }
-        assert_eq!(pending(&home, 0), ["1792700000-ui.txt", "1792800000-daemon.txt"]);
-        // Crashes from before they were turned on stay here.
-        assert_eq!(pending(&home, 1_792_700_001), ["1792800000-daemon.txt"]);
-        assert_eq!(pending(&home, 1_792_800_000), ["1792800000-daemon.txt"]);
-        assert!(pending(&home, 1_792_800_001).is_empty());
-        let _ = std::fs::remove_dir_all(&home);
-    }
 }

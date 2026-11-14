@@ -8,9 +8,7 @@ mod api;
 mod binds;
 mod builder;
 pub mod dns;
-pub mod tls;
 pub mod proxy;
-mod domains;
 mod engine;
 mod filters;
 mod health;
@@ -21,14 +19,10 @@ mod http;
 mod logfile;
 mod names;
 mod network;
-#[cfg(target_os = "macos")]
-pub(crate) mod nfs;
 mod ops;
 pub(crate) mod ports;
 mod pulls;
 pub mod time;
-#[cfg(target_os = "macos")]
-mod usb;
 mod vmcpu;
 mod vmlink;
 mod volumes;
@@ -37,16 +31,15 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::diag;
 
-/// `~/.kiri` (`~/.kiri-dev` for Kiri Dev): the daemon's state (the CA key, proxy settings). Always under
-/// HOME: `KIRI_SOCKET` may point the socket anywhere, but it must not move
-/// private state into a directory another user can prepare.
+/// `~/.kiri`: the daemon's state. Always under HOME: `KIRI_SOCKET` may point the
+/// socket anywhere, but it must not move private state into a directory another user can prepare.
 pub fn state_dir() -> io::Result<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| io::Error::other("HOME is not set"))?;
-    Ok(home.join(crate::flavor::STATE.get()))
+    Ok(home.join(".kiri"))
 }
 
 /// `~/.kiri/run/docker.sock`, beside OrbStack's `~/.orbstack/run/docker.sock`.
@@ -55,7 +48,7 @@ pub fn socket_path() -> io::Result<PathBuf> {
         return Ok(PathBuf::from(s));
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| io::Error::other("HOME is not set"))?;
-    Ok(home.join(crate::flavor::STATE.get()).join("run/docker.sock"))
+    Ok(home.join(".kiri").join("run/docker.sock"))
 }
 
 /// Raises the soft open-file limit to the hard one, as Go does for dockerd.
@@ -134,45 +127,9 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     let store = kiri_image::Store::open(kiri_image::Store::default_root()?)?;
     let engine = engine::Engine::boot(store).inspect_err(|e| diag::error!("engine did not start", error = e))?;
     diag::info!("engine ready", version = env!("CARGO_PKG_VERSION"), ms = t0.elapsed().as_millis(), socket = format!("unix://{}", socket.display()));
-    // Crash files from earlier runs, if the person said they may go.
-    diag::report::spawn_crash_sender(Duration::from_secs(30), Some(Duration::from_secs(6 * 3600)));
-    // Container files in Finder, at ~/Kiri. A Linux host has them on its
-    // own disk already.
-    #[cfg(target_os = "macos")]
-    finder(&engine);
     kiri_image::set_proxy_source(proxy::for_registry);
     // The managed BuildKit stops itself when builds have been idle a while.
     builder::watch(engine.clone());
-    // A Kubernetes node the engine restarted gets its kubectl context.
-    crate::k8s::sync_at_start();
-    // Kiri Dev leaves *.kiri.local and ports 80 and 443 to the installed
-    // Kiri, unless given ports of its own (Settings → Domains, or
-    // KIRI_HTTP_PORT and KIRI_HTTPS_PORT).
-    let routers = !crate::flavor::dev() || domains::own_ports();
-    if crate::flavor::dev() {
-        if !routers {
-            diag::info!(format!("{}: container domains off (ports in Settings → Domains turn them on)", crate::flavor::APP));
-        }
-    } else if let Err(e) = dns::start() {
-        diag::warn!("*.kiri.local off", error = e);
-    }
-    if routers {
-        match domains::start_tls(engine.clone()) {
-            Ok(port) => diag::info!("HTTPS for container domains", port = port, trusted = tls::trusted()),
-            Err(e) => diag::warn!("HTTPS for container domains off", error = e),
-        }
-        match domains::start(engine.clone()) {
-            Ok(port) => diag::info!(format!(
-                "container domains on http://<name>.{}{}",
-                if dns::installed() { "kiri.local" } else { "kiri.localhost" },
-                if port == 80 { String::new() } else { format!(":{port}") }
-            )),
-            Err(e) => diag::warn!("container domains off", error = e),
-        }
-    }
-
-    watch_own_app(engine.clone(), socket.clone());
-
     let on_signal = engine.clone();
     let sock = socket.clone();
     std::thread::Builder::new().name("kiri-signals".into()).spawn(move || {
@@ -180,8 +137,6 @@ pub fn run(_args: &[String]) -> io::Result<()> {
         // SAFETY: waits on the blocked set; writes the signal number to `sig`.
         unsafe { libc::sigwait(&set, &mut sig) };
         diag::info!("engine shutting down", signal = sig);
-        #[cfg(target_os = "macos")]
-        nfs::unmount();
         let _ = std::fs::remove_file(&sock);
         on_signal.shutdown();
         // Give the guest a moment to power off before the VM is released.
@@ -212,40 +167,6 @@ pub fn run(_args: &[String]) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// When the app this daemon runs from is deleted (appwatch.rs): docker
-/// build handed back (buildwith.rs: what was there before; the choice
-/// stays, so the app taken up again takes it again), and the engine stops.
-fn watch_own_app(engine: std::sync::Arc<engine::Engine>, socket: std::path::PathBuf) {
-    crate::appwatch::watch(move |exe| {
-        diag::error!("the app this engine runs from was deleted; stopping and handing docker build back", path = exe.display());
-        if let Err(e) = crate::buildwith::places().and_then(|p| p.give_back()) {
-            diag::warn!("docker build not handed back", error = e);
-        }
-        #[cfg(target_os = "macos")]
-        nfs::unmount();
-        let _ = std::fs::remove_file(&socket);
-        engine.shutdown();
-        std::thread::sleep(Duration::from_millis(50));
-        // 0: launchd restarts the engine on failure only, and there is
-        // nothing left to restart.
-        std::process::exit(0);
-    });
-}
-
-/// Serves container files over NFS and mounts them at ~/Kiri.
-/// KIRI_NO_FINDER=1 skips the mount.
-#[cfg(target_os = "macos")]
-fn finder(engine: &std::sync::Arc<engine::Engine>) {
-    match nfs::start(engine.clone()) {
-        Ok(socket) if std::env::var_os("KIRI_NO_FINDER").is_none() => match nfs::mount(&socket) {
-            Ok(dir) => diag::info!("container files in Finder", at = dir.display()),
-            Err(e) => diag::warn!("Finder mount failed", error = e, nfs = socket.display()),
-        },
-        Ok(socket) => diag::info!("container files over NFS", at = socket.display()),
-        Err(e) => diag::warn!("container files off", error = e),
-    }
 }
 
 /// Gives `group` read-write access to the socket.

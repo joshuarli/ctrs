@@ -1,7 +1,6 @@
 //! `kiri ps`, `kiri run`, `kiri compose up`…: Docker's own commands, run
-//! by the docker CLI against Kiri's daemon, whatever docker context is
-//! selected. `kiri run -d --name web nginx` is `docker --context kiri run
-//! -d --name web nginx`.
+//! by the docker CLI against Kiri's daemon, over `DOCKER_HOST` (the URL of
+//! Kiri's Unix socket, set here — never a docker context).
 
 use std::io;
 #[cfg(unix)]
@@ -35,29 +34,11 @@ pub fn run(args: &[String]) -> io::Result<()> {
     cmd.args(args).env("DOCKER_HOST", format!("unix://{}", socket.display())).env_remove("DOCKER_CONTEXT");
     // With DOCKER_HOST and no context, buildx would pick the endpoint's own
     // docker-driver builder, which needs BuildKit inside the engine: name
-    // Kiri's, if buildx knows it (the window sets it up) and the person
-    // hasn't picked one.
-    if std::env::var_os("BUILDX_BUILDER").is_none() && buildx_knows(crate::builds::BUILDER.get()) {
-        cmd.env("BUILDX_BUILDER", crate::builds::BUILDER.get());
+    // Kiri's, if buildx knows it and the person hasn't picked one.
+    if std::env::var_os("BUILDX_BUILDER").is_none() && buildx_knows(crate::builds::BUILDER) {
+        cmd.env("BUILDX_BUILDER", crate::builds::BUILDER);
     }
     Err(cmd.exec())
-}
-
-/// On Windows: Kiri's docker.exe, beside this kiri.exe in
-/// %LOCALAPPDATA%\Kiri\bin (else one on PATH), with the `kiri` context
-/// setup made, which reaches the engine in WSL through kiri-win's pipe.
-/// Exits with docker's exit code.
-#[cfg(windows)]
-pub fn run(args: &[String]) -> io::Result<()> {
-    let beside = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("docker.exe"))).filter(|d| d.is_file());
-    let status = std::process::Command::new(beside.unwrap_or_else(|| "docker.exe".into()))
-        .args(["--context", crate::flavor::CONTEXT.get()])
-        .args(args)
-        .env_remove("DOCKER_HOST")
-        .env_remove("DOCKER_CONTEXT")
-        .status()
-        .map_err(|e| io::Error::other(format!("could not run docker.exe ({e}); open Kiri once to set it up")))?;
-    std::process::exit(status.code().unwrap_or(1))
 }
 
 /// buildx has a builder of this name: its instance file, in BUILDX_CONFIG,

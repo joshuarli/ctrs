@@ -27,34 +27,13 @@ pub enum Reply {
     Started(u32),
     Stats(Stats),
     Pong,
-    FsStat(FileInfo),
-    FsList(Vec<FileInfo>),
-    FsData(Vec<u8>),
     Ack,
     ContainerStats(kiri_proto::ContainerStats),
     Top(Vec<String>),
     Listening(Vec<String>),
-    UsbNodes(Vec<String>),
     Uplink([u8; 4], [u8; 4]),
     Error(String),
 }
-
-/// One file inside a container, as the file browser sees it.
-#[derive(Debug, Clone)]
-pub struct FileInfo {
-    pub name: String,
-    pub mode: u32,
-    pub size: u64,
-    pub mtime: i64,
-    pub mtime_nsec: u32,
-}
-
-impl From<kiri_proto::FsEntry<'_>> for FileInfo {
-    fn from(e: kiri_proto::FsEntry<'_>) -> FileInfo {
-        FileInfo { name: e.name.to_owned(), mode: e.mode, size: e.size, mtime: e.mtime, mtime_nsec: e.mtime_nsec }
-    }
-}
-
 
 /// Something a container did, routed to the engine.
 #[derive(Debug)]
@@ -208,18 +187,10 @@ impl VmLink {
                     Ok(Msg::Started { pid, .. }) => Reply::Started(pid),
                     Ok(Msg::Stats(s)) => Reply::Stats(s),
                     Ok(Msg::Pong(_)) => Reply::Pong,
-                    Ok(Msg::FsStat(e)) => Reply::FsStat(FileInfo::from(e)),
-                    Ok(Msg::FsList { count, raw }) => Reply::FsList(
-                        kiri_proto::fs_entries(count, raw)
-                            .map(FileInfo::from)
-                            .collect(),
-                    ),
-                    Ok(Msg::FsData(d)) => Reply::FsData(d.to_vec()),
                     Ok(Msg::Ack) => Reply::Ack,
                     Ok(Msg::ContainerStats(s)) => Reply::ContainerStats(s),
                     Ok(Msg::Top(lines)) => Reply::Top(lines.iter().map(str::to_owned).collect()),
                     Ok(Msg::Listening(lines)) => Reply::Listening(lines.iter().map(str::to_owned).collect()),
-                    Ok(Msg::UsbNodes(lines)) => Reply::UsbNodes(lines.iter().map(str::to_owned).collect()),
                     Ok(Msg::Uplink { ip, gateway }) => Reply::Uplink(ip, gateway),
                     Ok(Msg::Error(e)) => Reply::Error(e.to_owned()),
                     Ok(other) => Reply::Error(format!("unexpected message from guest: {other:?}")),
@@ -365,27 +336,11 @@ impl VmLink {
         }
     }
 
-    /// The container's LISTEN lines from /proc/net/tcp and tcp6.
     pub fn listening(&self, id: &str) -> io::Result<Vec<String>> {
         match self.call(|o| Msg::ListenQuery { id }.encode(o), None)? {
             Reply::Listening(lines) => Ok(lines),
             other => Err(io::Error::other(format!("expected Listening, got {other:?}"))),
         }
-    }
-
-    /// `PORT\tPATH\tWHAT` for the nodes of the USB devices attached to the
-    /// VM (`Msg::UsbNodes`).
-    pub fn usb_nodes(&self) -> io::Result<Vec<String>> {
-        match self.call(|o| Msg::UsbNodesQuery.encode(o), None)? {
-            Reply::UsbNodes(lines) => Ok(lines),
-            other => Err(io::Error::other(format!("expected UsbNodes, got {other:?}"))),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Routes `dst/prefix` through `via` in the VM, or removes that route.
-    pub fn route(&self, dst: [u8; 4], prefix: u8, via: [u8; 4], add: bool) -> io::Result<()> {
-        self.ack(|o| Msg::Route { dst, prefix, via, add }.encode(o))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -504,27 +459,6 @@ impl VmLink {
     /// A new stream to a port the guest agent listens on.
     pub fn connect(&self, port: u32) -> io::Result<kiri_vmm::VsockStream> {
         self.connector.connect(port)
-    }
-
-    pub fn fs_stat(&self, id: &str, path: &str) -> io::Result<FileInfo> {
-        match self.call(|o| Msg::FsStatRequest { id, path }.encode(o), None)? {
-            Reply::FsStat(f) => Ok(f),
-            other => Err(io::Error::other(format!("expected FsStat, got {other:?}"))),
-        }
-    }
-
-    pub fn fs_list(&self, id: &str, path: &str) -> io::Result<Vec<FileInfo>> {
-        match self.call(|o| Msg::FsListRequest { id, path }.encode(o), None)? {
-            Reply::FsList(v) => Ok(v),
-            other => Err(io::Error::other(format!("expected FsList, got {other:?}"))),
-        }
-    }
-
-    pub fn fs_read(&self, id: &str, path: &str, offset: u64, len: u32) -> io::Result<Vec<u8>> {
-        match self.call(|o| Msg::FsRead { id, path, offset, len }.encode(o), None)? {
-            Reply::FsData(d) => Ok(d),
-            other => Err(io::Error::other(format!("expected FsData, got {other:?}"))),
-        }
     }
 
     pub fn stats(&self) -> io::Result<Stats> {

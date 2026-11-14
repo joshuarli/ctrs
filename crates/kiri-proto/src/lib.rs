@@ -106,17 +106,6 @@ pub enum Msg<'a> {
     /// unpacked layer, by blob hex), `c` (a container's writable layer, by
     /// id) or `v` (a volume, by name). BYTES is what it takes on disk.
     Usage(StrList<'a>),
-    /// Host → guest: metadata of a path inside a running container's root
-    /// (symlinks are not followed). Answered by `FsStat` or `Error`.
-    FsStatRequest { id: &'a str, path: &'a str },
-    FsStat(FsEntry<'a>),
-    /// Host → guest: a directory's entries. Answered by `FsList` or `Error`.
-    FsListRequest { id: &'a str, path: &'a str },
-    /// Entries, each encoded as an `FsEntry`; iterate with [`fs_entries`].
-    FsList { count: u32, raw: &'a [u8] },
-    /// Host → guest: up to `len` bytes from `offset`. Answered by `FsData` or `Error`.
-    FsRead { id: &'a str, path: &'a str, offset: u64, len: u32 },
-    FsData(&'a [u8]),
     /// Guest → host: memory is tight right now (a PSI trigger fired); grow
     /// the VM's memory. No reply.
     MemoryPressure,
@@ -154,14 +143,6 @@ pub enum Msg<'a> {
     /// The container's `/proc/net/tcp` and `tcp6` lines in state LISTEN, as
     /// the kernel writes them.
     Listening(StrList<'a>),
-    /// Host → guest: where the USB devices passed through to the VM show
-    /// up. Answered by `UsbNodes` or `Error`; an older agent answers `Error`.
-    UsbNodesQuery,
-    /// One `PORT\tPATH\tWHAT` line per device node: PORT is the vhci port
-    /// the device was attached on (the agent's answer to it), PATH the node
-    /// (`/dev/ttyUSB0`, or a network interface's name), WHAT what it is
-    /// (`serial port`, `raw USB`, …).
-    UsbNodes(StrList<'a>),
     /// Host → guest: route `dst/prefix` through `via` in the VM (or remove
     /// that route), so the host's relay can reach addresses that live behind
     /// a container, such as a Kubernetes node's pods and services. Answered
@@ -188,9 +169,6 @@ pub const COPY_PORT: u32 = 1028;
 /// TCP frames it, and gets `u16 len | reply` back: one lookup per connection.
 pub const DNS_RELAY_PORT: u32 = 1037;
 
-/// vsock port of the guest's USB passthrough: one connection per device,
-/// `speed u32 | devid u32` then USB/IP (crates/kiri-init/src/linux/usb.rs).
-pub const USB_PORT: u32 = 1040;
 
 pub mod copy_op {
     pub const IN: u8 = 1;
@@ -240,7 +218,7 @@ pub fn encode_copy<S: AsRef<str>>(out: &mut Vec<u8>, op: u8, id: &str, path: &st
     });
 }
 
-/// One file's metadata, as the file browser needs it.
+/// One file's metadata, as `docker cp` reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FsEntry<'a> {
     pub name: &'a str,
@@ -262,22 +240,6 @@ fn put_entry(out: &mut Vec<u8>, e: &FsEntry<'_>) {
     put_u64(out, e.mtime as u64);
     put_u32(out, e.mtime_nsec);
     put_u64(out, e.ino);
-}
-
-/// Encodes an `FsList` reply from entries.
-pub fn encode_fs_list(out: &mut Vec<u8>, entries: &[FsEntry<'_>]) {
-    frame(out, kind::FS_LIST, |o| {
-        put_u32(o, entries.len() as u32);
-        for e in entries {
-            put_entry(o, e);
-        }
-    });
-}
-
-/// The entries of an `FsList`, without allocating.
-pub fn fs_entries<'a>(count: u32, raw: &'a [u8]) -> impl Iterator<Item = FsEntry<'a>> + 'a {
-    let mut r = Reader { buf: raw, pos: 0 };
-    (0..count).map_while(move |_| read_entry(&mut r).ok())
 }
 
 fn read_entry<'a>(r: &mut Reader<'a>) -> Result<FsEntry<'a>, DecodeError> {
@@ -635,12 +597,6 @@ mod kind {
     pub const RESIZE: u16 = 21;
     pub const EXEC: u16 = 22;
     pub const RETAIN: u16 = 23;
-    pub const FS_STAT_REQUEST: u16 = 24;
-    pub const FS_STAT: u16 = 25;
-    pub const FS_LIST_REQUEST: u16 = 26;
-    pub const FS_LIST: u16 = 27;
-    pub const FS_READ: u16 = 28;
-    pub const FS_DATA: u16 = 29;
     pub const MEMORY_PRESSURE: u16 = 30;
     pub const REMOVE_VOLUME: u16 = 31;
     pub const COPY: u16 = 32;
@@ -667,8 +623,6 @@ mod kind {
     pub const RETAIN_LAYERS: u16 = 73;
     pub const USAGE_QUERY: u16 = 74;
     pub const USAGE: u16 = 75;
-    pub const USB_NODES_QUERY: u16 = 76;
-    pub const USB_NODES: u16 = 77;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -745,11 +699,6 @@ pub fn encode_usage<S: AsRef<str>>(out: &mut Vec<u8>, lines: &[S]) {
 /// Encodes a `Top` reply from the sender's lines.
 pub fn encode_top<S: AsRef<str>>(out: &mut Vec<u8>, lines: &[S]) {
     frame(out, kind::TOP, |out| StrList::put(out, lines));
-}
-
-/// Encodes a `UsbNodes` reply from the sender's lines.
-pub fn encode_usb_nodes<S: AsRef<str>>(out: &mut Vec<u8>, lines: &[S]) {
-    frame(out, kind::USB_NODES, |out| StrList::put(out, lines));
 }
 
 /// Encodes a `Listening` reply from the sender's lines.
@@ -941,26 +890,6 @@ impl Msg<'_> {
                 put_u32(o, ids.count);
                 o.extend_from_slice(ids.raw);
             }),
-            Msg::FsStatRequest { id, path } => frame(out, kind::FS_STAT_REQUEST, |o| {
-                put_str(o, id);
-                put_str(o, path);
-            }),
-            Msg::FsStat(e) => frame(out, kind::FS_STAT, |o| put_entry(o, &e)),
-            Msg::FsListRequest { id, path } => frame(out, kind::FS_LIST_REQUEST, |o| {
-                put_str(o, id);
-                put_str(o, path);
-            }),
-            Msg::FsList { count, raw } => frame(out, kind::FS_LIST, |o| {
-                put_u32(o, count);
-                o.extend_from_slice(raw);
-            }),
-            Msg::FsRead { id, path, offset, len } => frame(out, kind::FS_READ, |o| {
-                put_str(o, id);
-                put_str(o, path);
-                put_u64(o, offset);
-                put_u32(o, len);
-            }),
-            Msg::FsData(d) => frame(out, kind::FS_DATA, |o| put_bytes(o, d)),
             Msg::MemoryPressure => frame(out, kind::MEMORY_PRESSURE, |_| {}),
             Msg::RemoveVolume { name } => frame(out, kind::REMOVE_VOLUME, |o| put_str(o, name)),
             Msg::RemoveBridge { bridge } => frame(out, kind::REMOVE_BRIDGE, |o| put_str(o, bridge)),
@@ -993,11 +922,6 @@ impl Msg<'_> {
                 o.extend_from_slice(lines.raw);
             }),
             Msg::ListenQuery { id } => frame(out, kind::LISTEN_QUERY, |o| put_str(o, id)),
-            Msg::UsbNodesQuery => frame(out, kind::USB_NODES_QUERY, |_| {}),
-            Msg::UsbNodes(lines) => frame(out, kind::USB_NODES, |o| {
-                put_u32(o, lines.count);
-                o.extend_from_slice(lines.raw);
-            }),
             Msg::Listening(lines) => frame(out, kind::LISTENING, |o| {
                 put_u32(o, lines.count);
                 o.extend_from_slice(lines.raw);
@@ -1228,19 +1152,6 @@ pub fn decode(frame: &[u8]) -> Result<Msg<'_>, DecodeError> {
         kind::RETAIN_LAYERS => Msg::RetainLayers(r.list()?),
         kind::USAGE_QUERY => Msg::UsageQuery,
         kind::USAGE => Msg::Usage(r.list()?),
-        kind::FS_STAT_REQUEST => Msg::FsStatRequest { id: r.str()?, path: r.str()? },
-        kind::FS_STAT => Msg::FsStat(read_entry(&mut r)?),
-        kind::FS_LIST_REQUEST => Msg::FsListRequest { id: r.str()?, path: r.str()? },
-        kind::FS_LIST => {
-            let count = r.u32()?;
-            let start = r.pos;
-            for _ in 0..count {
-                read_entry(&mut r)?;
-            }
-            Msg::FsList { count, raw: &r.buf[start..r.pos] }
-        }
-        kind::FS_READ => Msg::FsRead { id: r.str()?, path: r.str()?, offset: r.u64()?, len: r.u32()? },
-        kind::FS_DATA => Msg::FsData(r.bytes()?),
         kind::MEMORY_PRESSURE => Msg::MemoryPressure,
         kind::REMOVE_VOLUME => Msg::RemoveVolume { name: r.str()? },
         kind::REMOVE_BRIDGE => Msg::RemoveBridge { bridge: r.str()? },
@@ -1255,8 +1166,6 @@ pub fn decode(frame: &[u8]) -> Result<Msg<'_>, DecodeError> {
         kind::TOP => Msg::Top(r.list()?),
         kind::LISTEN_QUERY => Msg::ListenQuery { id: r.str()? },
         kind::LISTENING => Msg::Listening(r.list()?),
-        kind::USB_NODES_QUERY => Msg::UsbNodesQuery,
-        kind::USB_NODES => Msg::UsbNodes(r.list()?),
         kind::NET_ATTACH => Msg::NetAttach {
             id: r.str()?,
             ifname: r.str()?,
@@ -1399,10 +1308,6 @@ mod tests {
 
     #[test]
     fn fs_messages_survive_encoding() {
-        round(Msg::FsStatRequest { id: "c1", path: "/etc" });
-        round(Msg::FsStat(FsEntry { name: "etc", mode: 0o40755, size: 4096, mtime: 1_700_000_000, mtime_nsec: 5, ino: 77 }));
-        round(Msg::FsRead { id: "c1", path: "/etc/os-release", offset: 10, len: 4096 });
-        round(Msg::FsData(b"NAME=Alpine"));
         round(Msg::MemoryPressure);
         round(Msg::RemoveVolume { name: "pgdata" });
         round(Msg::RemoveBridge { bridge: "kiri3" });
@@ -1419,11 +1324,6 @@ mod tests {
         let Msg::Usage(lines) = decode(&buf).unwrap() else { panic!() };
         assert_eq!(lines.iter().collect::<Vec<_>>(), ["l 0a1b 4096", "c c1 0", "v data 12288"]);
         round(Msg::ListenQuery { id: "c1" });
-        round(Msg::UsbNodesQuery);
-        let mut buf = Vec::new();
-        encode_usb_nodes(&mut buf, &["0\t/dev/ttyUSB0\tserial port", "0\t/dev/bus/usb/003/002\traw USB"]);
-        let Msg::UsbNodes(lines) = decode(&buf).unwrap() else { panic!() };
-        assert_eq!(lines.iter().collect::<Vec<_>>(), ["0\t/dev/ttyUSB0\tserial port", "0\t/dev/bus/usb/003/002\traw USB"]);
         let mut buf = Vec::new();
         encode_listening(&mut buf, &["   0: 00000000:11D7 00000000:0000 0A"]);
         let Msg::Listening(lines) = decode(&buf).unwrap() else { panic!() };
@@ -1456,14 +1356,6 @@ mod tests {
         let mut again = Vec::new();
         Msg::Copy(c).encode(&mut again);
         assert_eq!(buf, again);
-        let mut buf = Vec::new();
-        let entries = [
-            FsEntry { name: "a", mode: 0o100644, size: 1, mtime: 2, mtime_nsec: 9, ino: 1 },
-            FsEntry { name: "b", mode: 0o40755, size: 3, mtime: 4, mtime_nsec: 0, ino: 2 },
-        ];
-        encode_fs_list(&mut buf, &entries);
-        let Msg::FsList { count, raw } = decode(&buf).unwrap() else { panic!() };
-        assert_eq!(fs_entries(count, raw).collect::<Vec<_>>(), entries);
     }
 
     #[test]

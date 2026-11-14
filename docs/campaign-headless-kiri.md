@@ -1,6 +1,6 @@
 # Campaign: extract and harden a headless Kiri core into ctrs
 
-**Status:** ready to execute. Last accepted revision: `main` @ eda9170 (docs only). Accepted: none. Red: none. Parked: none. Next: **CTRS-01**. Resume: read this file, run CTRS-01, then the first unchecked slice in sequence. Do not wait for the owner; the standing grant is executed-until-completion (2026-11-13).
+**Status:** CTRS-01…CTRS-07 accepted (import; baseline; guest assets; smoke; harness; Windows/WSL deletion; UI/Share/k3s/USB/telemetry deletion). Last verified 2026-11-14: smoke 15/15, `cargo test --workspace` 193 pass, `cargo check --workspace` zero warnings, `cargo audit` zero findings, OrbStack `junior-*` untouched. Red: none. Parked: none. Next: **CTRS-08**. Resume: read this file, run CTRS-08, then the next unchecked slice in sequence. Do not wait for the owner; the standing grant is executed-until-completion (2026-11-13).
 
 **Repository:** https://github.com/joshuarli/ctrs · **Platforms:** macOS (Apple Silicon first; Intel must compile and is smoke-tested only on an Intel host, see N-4) + Linux (musl static; runtime proof parked, see N-1).
 **Objective:** the smallest credible, fast, headless, pure-Rust-oriented Docker-compatible container engine that directly exercises the Laputa stack. Not a general-purpose VM manager or another desktop app.

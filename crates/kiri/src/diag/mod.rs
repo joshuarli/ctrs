@@ -151,8 +151,8 @@ thread_local! {
     static OP: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// A new op id, `run-7c2e`: what the window started, and 4 random hex
-/// digits, so one action's lines (window and engine) can be picked out.
+/// A new op id, `run-7c2e`: what the window started, and 4 random hex.
+#[cfg(test)]
 pub fn new_op(kind: &str) -> String {
     use std::hash::BuildHasher;
     let kind: String = kind.chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect();
@@ -196,7 +196,7 @@ pub fn op_header() -> String {
 pub fn state_dir() -> Option<PathBuf> {
     std::env::var_os("KIRI_STATE_DIR")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(crate::flavor::STATE.get())))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kiri")))
 }
 
 pub fn logs_dir() -> Option<PathBuf> {
@@ -467,12 +467,6 @@ pub fn system() -> System {
     System { os, build, arch: std::env::consts::ARCH, model }
 }
 
-/// `kiri` or `kiri-dev`, as an upload names the flavor (a feature app
-/// counts as Dev); crash files say the exact one.
-pub fn flavor() -> &'static str {
-    if crate::flavor::dev() { "kiri-dev" } else { "kiri" }
-}
-
 /// Writes a crash file (and an error line) on every panic, then lets the
 /// previous hook print as before. With `panic = "abort"` the process ends
 /// right after: everything here is synchronous.
@@ -529,9 +523,9 @@ pub fn crash_text(t: SystemTime, thread: &str, at: &str, message: &str, backtrac
          Command:  kiri {command}\n\
          \n\
          Backtrace:\n{backtrace}\n",
-        app = crate::flavor::APP,
+        app = "Kiri",
         version = env!("CARGO_PKG_VERSION"),
-        flavor = crate::flavor::CONTEXT,
+        flavor = "kiri",
         part = part().name(),
         time = crate::daemon::time::rfc3339(t),
         system = system().line(),
