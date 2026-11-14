@@ -2,7 +2,7 @@
 
 An experimental, aggressively headless macOS/Linux container-engine project based on the core of [Kiri](https://github.com/libracoder/kiri), with planned integration of [crabtables](https://github.com/laputa-systems/crabtables) and [smolith](https://github.com/laputa-systems/smolith).
 
-**Status: architecture/campaign only.** No container runtime has been imported or built here yet.
+**Status: extraction in progress.** The pinned Kiri runtime (Apache-2.0) is imported unmodified at commit `99b63c07fc003d3dcd8e03c76891ba747b5c984f`; see [the import record](docs/upstream.md). Design and sequencing live in [the implementation campaign](docs/campaign-headless-kiri.md).
 
 Read [the implementation campaign](docs/campaign-headless-kiri.md) before importing or modifying upstream code. The campaign defines the executable milestones, compatibility/security gates, and Lima/smolvm research experiments.
 
