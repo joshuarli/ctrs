@@ -141,12 +141,18 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     // socket group's watcher, on a Linux host) took the signal instead, and
     // the daemon died without a shutdown: the agent was killed with its
     // bridges and nftables table still in place.
+    // The VM-crash test hook exists only when the daemon is started with
+    // KIRI_TEST_VM_CRASH=1; production engines never handle the signal.
+    let vm_crash_hook = std::env::var_os("KIRI_TEST_VM_CRASH").is_some();
     // SAFETY: plain signal-mask calls on a local set.
     let set = unsafe {
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut set);
         libc::sigaddset(&mut set, libc::SIGINT);
         libc::sigaddset(&mut set, libc::SIGTERM);
+        if vm_crash_hook {
+            libc::sigaddset(&mut set, libc::SIGUSR2);
+        }
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
         set
     };
@@ -206,10 +212,15 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     builder::watch(engine.clone());
     let on_signal = engine.clone();
     let sock = socket.clone();
-    std::thread::Builder::new().name("kiri-signals".into()).spawn(move || {
+    std::thread::Builder::new().name("kiri-signals".into()).spawn(move || loop {
         let mut sig = 0;
         // SAFETY: waits on the blocked set; writes the signal number to `sig`.
         unsafe { libc::sigwait(&set, &mut sig) };
+        if sig == libc::SIGUSR2 {
+            diag::warn!("test hook: crashing the VM");
+            on_signal.crash_vm_for_test();
+            continue;
+        }
         diag::info!("engine shutting down", signal = sig);
         let _ = std::fs::remove_file(&sock);
         let _ = std::fs::remove_file(crate::config::pidfile(&sock));

@@ -215,6 +215,14 @@ impl VmLink {
         })
     }
 
+    /// Test-only: stops this VMs VM abruptly (Apple's `stop`, not an
+    /// orderly ACPI shutdown). The agent connection dies and the engine
+    /// takes the Lost path, exactly as killing the helper would. Only ever
+    /// this engine's VM.
+    pub fn crash_for_test(&self) {
+        self._vm.lock().unwrap_or_else(|e| e.into_inner()).force_stop();
+    }
+
     /// Sends one request and waits for its reply.
     fn call(&self, encode: impl FnOnce(&mut Vec<u8>), body: Option<(&Path, u64)>) -> io::Result<Reply> {
         let (tx, rx) = mpsc::sync_channel(1);

@@ -39,6 +39,19 @@ usage: kiri COMMAND          docker's commands, on Kiri: kiri run, ps, exec,
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Block the VM-crash test signal before any thread is spawned (diag::init
+    // spawns one); the daemon's signal thread sigwaits for it. Production
+    // engines never see this when the env var is unset.
+    #[cfg(unix)]
+    if std::env::var_os("KIRI_TEST_VM_CRASH").is_some() {
+        // SAFETY: plain signal-mask call on this thread, before any spawn.
+        unsafe {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGUSR2);
+            libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+        }
+    }
     // Which process this is, for its log and crash reports.
     #[cfg(unix)]
     diag::init(match args.first().map(String::as_str) {

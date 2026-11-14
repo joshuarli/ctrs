@@ -1220,6 +1220,19 @@ impl Engine {
         }
     }
 
+    /// Test-only: crashes this engine's VM the way a helper death does -
+    /// the agent connection dies, `Event::Lost` fires, restart policy runs.
+    /// Instance-scoped: only ever this engine's own VM. Available only
+    /// under KIRI_TEST_VM_CRASH=1 (see daemon::run's signal handler).
+    pub fn crash_vm_for_test(&self) {
+        let link = self.link.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(vm) = link.as_ref() {
+            vm.crash_for_test();
+        } else {
+            crate::diag::warn!("test hook: no VM to crash");
+        }
+    }
+
     /// Every second: read what the guest holds and, on the Mac, give it that
     /// plus headroom through the balloon, the rest back to macOS. Pressure
     /// events grow it at once in between. On a Linux host there is no
