@@ -14,17 +14,6 @@
 //!            (latest-mac-arm64.json)
 //!   linux    `kiri` and `kiri-init` for a Linux host, in target/linux/release
 //!            (built in a Linux container: needs a Docker engine, Kiri works)
-//!   windows  target/kiri-windows-x86_64: the x86-64 Linux engine for WSL2,
-//!            kiri-win.exe, the docker CLI, Compose and buildx, and the
-//!            scripts (contrib/windows: kiri.ps1, setup-tools.ps1, kiri-admin.ps1)
-//!   windows-dev  the same bundle with a debug kiri-win.exe for development
-//!   msi      windows + target/Kiri-<version>-x86_64.msi, the per-user installer
-//!            (installer/windows/kiri.wxs; needs the wix dotnet tool)
-//!   msi-pack the MSI from the bundle already in target/kiri-windows-x86_64
-//!            The four Windows tasks take `--arch arm64` for Windows on Arm:
-//!            target/kiri-windows-aarch64 and Kiri-<version>-arm64.msi
-//!   docker-win-arm64  only the arm64 docker.exe, built from docker/cli's
-//!            source (Docker publishes none), checked against its pin
 //!   all      guest + host
 //!
 //! `--arch x86_64` (or `intel`) makes guest, kernel, host, app, app-lite,
@@ -135,16 +124,6 @@ fn main() -> ExitCode {
         "disk" => disk(&root),
         "host" => host(&root, arch),
         "linux" => linux(&root),
-        "windows" | "windows-dev" | "msi" | "msi-pack" => match WinArch::from_args() {
-            Ok(win) => match task.as_str() {
-                "windows" => windows(&root, false, win),
-                "windows-dev" => windows(&root, true, win),
-                "msi" => windows(&root, false, win).and_then(|()| msi(&root, win)),
-                _ => msi(&root, win),
-            },
-            Err(e) => Err(e),
-        },
-        "docker-win-arm64" => docker_cli_arm64(&root.join("target/cli-cache")).map(|p| println!("{}", p.display())),
         "app" => app(&root, arch, false).map(drop),
         "app-lite" => app(&root, arch, true).map(drop),
         // `app-dev builds`: Kiri Builds.app, a Kiri Dev of its own for one feature.
@@ -164,7 +143,7 @@ fn main() -> ExitCode {
         "pack" => release(&root, &root.join(arch.app_dir(false)), arch),
         "all" => guest(&root, arch).and_then(|()| host(&root, arch)),
         _ => {
-            eprintln!("usage: cargo xtask <guest|kernel|disk|host|linux|windows|windows-dev|msi|msi-pack|docker-win-arm64|app|app-lite|app-dev|release|sign|pack|all> [--arch arm64]");
+            eprintln!("usage: cargo xtask <guest|kernel|disk|host|linux|app|app-lite|app-dev|release|sign|pack|all> [--arch arm64]");
             return ExitCode::FAILURE;
         }
     };
@@ -189,7 +168,7 @@ fn guest(root: &Path, arch: Arch) -> io::Result<()> {
     let target = arch.guest_target();
     // kiri-init is pure Rust: rust-lld links it against Rust's own musl, as
     // .cargo/config.toml does for arm64. Set here, not there, so the Linux
-    // and Windows engine builds (which link C) keep their own linker.
+    // engine build (which links C) keeps its own linker.
     run(Command::new(env!("CARGO"))
         .current_dir(root)
         .env("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "rust-lld")
@@ -283,7 +262,7 @@ fn host(root: &Path, arch: Arch) -> io::Result<()> {
 /// The Linux host build: native, in a Rust container, so C dependencies
 /// (ring) find a compiler. The cargo registry is cached in a volume.
 /// `--arch amd64` builds x86-64 binaries (on Apple silicon the container
-/// runs under Rosetta), for Linux PCs and WSL2 on Windows.
+/// runs under Rosetta).
 fn linux(root: &Path) -> io::Result<()> {
     let amd64 = std::env::args().skip(2).collect::<Vec<_>>().windows(2).any(|w| w[0] == "--arch" && (w[1] == "amd64" || w[1] == "x86_64"));
     linux_build(root, amd64)
@@ -313,362 +292,12 @@ fn linux_build(root: &Path, amd64: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Which Windows a bundle is for: x86-64 PCs, or Windows on Arm (Snapdragon
-/// laptops, a Windows 11 VM on a Mac), where WSL2's Linux is arm64 too.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum WinArch {
-    X64,
-    Arm64,
-}
-
-impl WinArch {
-    /// `--arch arm64` (or aarch64) after the task; x86-64 without one.
-    fn from_args() -> io::Result<WinArch> {
-        let args: Vec<String> = std::env::args().skip(2).collect();
-        match args.windows(2).find(|w| w[0] == "--arch").map(|w| w[1].as_str()) {
-            None | Some("x86_64" | "x64" | "amd64") => Ok(WinArch::X64),
-            Some("arm64" | "aarch64") => Ok(WinArch::Arm64),
-            Some(a) => Err(io::Error::other(format!("--arch {a}: Windows builds are x86_64 or arm64"))),
-        }
-    }
-
-    /// The machine this xtask runs on, which builds kiri-win without --target.
-    fn host() -> WinArch {
-        if cfg!(target_arch = "aarch64") { WinArch::Arm64 } else { WinArch::X64 }
-    }
-
-    /// The Linux engine's architecture: target/kiri-windows-<this>, the musl
-    /// target and Alpine's name for it.
-    fn linux(self) -> &'static str {
-        match self {
-            WinArch::X64 => "x86_64",
-            WinArch::Arm64 => "aarch64",
-        }
-    }
-
-    /// The MSI's name, as Windows says it (Kiri-<version>-arm64.msi).
-    fn msi(self) -> &'static str {
-        match self {
-            WinArch::X64 => "x86_64",
-            WinArch::Arm64 => "arm64",
-        }
-    }
-
-    /// `wix build -arch`: the package's Platform.
-    fn wix(self) -> &'static str {
-        match self {
-            WinArch::X64 => "x64",
-            WinArch::Arm64 => "arm64",
-        }
-    }
-
-    fn msvc(self) -> &'static str {
-        match self {
-            WinArch::X64 => "x86_64-pc-windows-msvc",
-            WinArch::Arm64 => "aarch64-pc-windows-msvc",
-        }
-    }
-
-    /// The update feed kiri-win of this architecture reads (crates/kiri-win/src/update.rs).
-    fn feed(self) -> &'static str {
-        match self {
-            WinArch::X64 => "latest-windows-x86_64.json",
-            WinArch::Arm64 => "latest-windows-arm64.json",
-        }
-    }
-}
-
-/// The Windows bundle, in target/kiri-windows-x86_64 (or -aarch64): what
-/// contrib/windows/kiri.ps1 installs. On Windows the Linux half is built
-/// with cargo in WSL (the default distro, with Rust installed); elsewhere
-/// as `linux --arch amd64` is, and kiri-win.exe needs the
-/// x86_64-pc-windows-gnu target and MinGW.
-fn windows(root: &Path, debug: bool, arch: WinArch) -> io::Result<()> {
-    // The static (musl) engine, which runs in Kiri Linux and in Ubuntu, and
-    // Kiri Linux itself (scripts/kiri-linux.sh), built in WSL: on Windows,
-    // the default distro, with Rust installed. zig cross-compiles, so
-    // either architecture builds in either WSL.
-    let linux = root.join(format!("target/linux-{}-musl", arch.linux()));
-    if !cfg!(windows) {
-        return Err(io::Error::other("the Windows bundle is built on Windows, in WSL"));
-    }
-    fs::create_dir_all(&linux)?;
-    let wsl = |path: &Path| -> io::Result<String> {
-        let out = Command::new("wsl.exe").args(["wslpath", "-a"]).arg(path.to_string_lossy().replace('\\', "/")).output()?;
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    };
-    let (src, out_dir) = (wsl(root)?, wsl(&linux)?);
-    run(Command::new("wsl.exe").args(["--", "bash", &format!("{src}/scripts/windows-engine.sh"), &src, &out_dir, arch.linux()]))?;
-    run(Command::new("wsl.exe").args(["--", "sh", &format!("{src}/scripts/kiri-linux.sh"), &src, &out_dir, &format!("{out_dir}/kiri-linux.tar.gz"), arch.linux()]))?;
-    // Assemble the bundle first: the engine, Kiri Linux, the docker CLI,
-    // Compose and buildx (pinned, checked, as Kiri.app bundles them) and the
-    // install scripts. kiri-win is built last, with the SHA-256 of each of
-    // these embedded, so setup can refuse a bundle file that was tampered
-    // with in the unzipped folder.
-    let out = root.join(format!("target/kiri-windows-{}", arch.linux()));
-    fs::create_dir_all(out.join("bin/cli-plugins"))?;
-    for b in ["kiri", "kiri-init", "kiri-linux.tar.gz"] {
-        fs::copy(linux.join(b), out.join(b))?;
-    }
-    let cache = root.join("target/cli-cache");
-    if arch == WinArch::Arm64 {
-        windows_arm64_cli(&cache, &out)?;
-    } else {
-        let (docker_v, docker_sum) = WIN_DOCKER_CLI;
-        let zip = fetch(&cache, &format!("docker-{docker_v}-windows.zip"), &cli_pins::win_docker_url(docker_v))?;
-        verify(&zip, docker_sum)?;
-        let unzip_dir = cache.join("docker-windows");
-        fs::create_dir_all(&unzip_dir)?;
-        // bsdtar reads zips (Windows and macOS have it as tar); GNU tar does not.
-        if cfg!(target_os = "linux") {
-            run(Command::new("unzip").args(["-o", "-q"]).arg(&zip).arg("docker/docker.exe").arg("-d").arg(&unzip_dir))?;
-        } else {
-            run(Command::new("tar").args(["-xf"]).arg(&zip).arg("-C").arg(&unzip_dir).arg("docker/docker.exe"))?;
-        }
-        fs::copy(unzip_dir.join("docker/docker.exe"), out.join("bin/docker.exe"))?;
-        let (compose_v, compose_sum) = WIN_COMPOSE;
-        let compose = fetch(&cache, &format!("docker-compose-windows-x86_64-{compose_v}.exe"), &cli_pins::win_compose_url(compose_v))?;
-        verify(&compose, compose_sum)?;
-        fs::copy(&compose, out.join("bin/cli-plugins/docker-compose.exe"))?;
-        let (buildx_v, buildx_sum) = WIN_BUILDX;
-        let buildx = fetch(&cache, &format!("buildx-{buildx_v}.windows-amd64.exe"), &cli_pins::win_buildx_url(buildx_v))?;
-        verify(&buildx, buildx_sum)?;
-        fs::copy(&buildx, out.join("bin/cli-plugins/docker-buildx.exe"))?;
-    }
-    fs::copy(root.join("contrib/wsl/install.sh"), out.join("install.sh"))?;
-    // The PowerShell scripts kiri-win runs, from their files beside it with
-    // -File: kiri.ps1 (update, uninstall), setup-tools.ps1 (setup's tools
-    // step) and kiri-admin.ps1 (the elevated steps: WSL, the DNS rule). Never
-    // script text inside kiri-win.exe, which Defender's heuristics take for
-    // a dropper (crates/kiri-win/src/win.rs).
-    for s in ["kiri.ps1", "setup-tools.ps1", "kiri-admin.ps1"] {
-        fs::copy(root.join("contrib/windows").join(s), out.join(s))?;
-    }
-    fs::copy(root.join("LICENSE"), out.join("LICENSE"))?;
-    fs::copy(root.join("NOTICE"), out.join("NOTICE"))?;
-    // bin\kiri.exe, the `kiri` command: Share on Windows itself, docker's
-    // commands through docker.exe, the engine's own by the `kiri` in WSL
-    // (crates/kiri/src/wsl.rs). Built before kiri-win, so its hash goes in
-    // the manifest too.
-    fs::copy(windows_exe(root, debug, arch, "kiri", None)?, out.join("bin/kiri.exe"))?;
-
-    // `name=sha256;…` for every file setup uses or kiri-win runs, embedded in kiri-win.exe.
-    let hashed = ["kiri", "kiri-init", "kiri-linux.tar.gz", "install.sh", "kiri.ps1", "setup-tools.ps1", "kiri-admin.ps1", "bin/docker.exe", "bin/kiri.exe", "bin/cli-plugins/docker-compose.exe", "bin/cli-plugins/docker-buildx.exe"];
-    let mut manifest = Vec::new();
-    for f in hashed {
-        manifest.push(format!("{f}={}", sha256(&out.join(f))?));
-    }
-    let manifest = manifest.join(";");
-    let exe = windows_exe(root, debug, arch, "kiri-win", Some(&manifest))?;
-    fs::copy(&exe, out.join("kiri-win.exe"))?;
-    println!("{}", out.display());
-    Ok(())
-}
-
-/// The arm64 docker CLI, Compose and buildx into `out`/bin, pinned as the
-/// x86-64 ones are; docker.exe is built, as Docker publishes none.
-fn windows_arm64_cli(cache: &Path, out: &Path) -> io::Result<()> {
-    let docker = docker_cli_arm64(cache)?;
-    fs::copy(&docker, out.join("bin/docker.exe"))?;
-    let (compose_v, compose_sum) = WIN_ARM64_COMPOSE;
-    let compose = fetch(cache, &format!("docker-compose-windows-aarch64-{compose_v}.exe"), &cli_pins::win_arm64_compose_url(compose_v))?;
-    verify(&compose, compose_sum)?;
-    fs::copy(&compose, out.join("bin/cli-plugins/docker-compose.exe"))?;
-    let (buildx_v, buildx_sum) = WIN_ARM64_BUILDX;
-    let buildx = fetch(cache, &format!("buildx-{buildx_v}.windows-arm64.exe"), &cli_pins::win_arm64_buildx_url(buildx_v))?;
-    verify(&buildx, buildx_sum)?;
-    fs::copy(&buildx, out.join("bin/cli-plugins/docker-buildx.exe"))?;
-    Ok(())
-}
-
-/// docker.exe for Windows on Arm, from docker/cli's source at the pinned
-/// commit, as its own scripts/build/binary builds it but with cgo off (the
-/// Windows CLI needs none) and every input fixed: the toolchain is the Go
-/// docker/cli's Dockerfile names, fetched by `go` itself (GOTOOLCHAIN,
-/// checked against sum.golang.org), the dependencies are the vendored ones
-/// in the commit, the paths trimmed and the build time the commit's. Go
-/// builds the same bytes that way on any host, so the result must match
-/// WIN_ARM64_DOCKER_SRC's SHA-256 like any download. Needs git and a Go of
-/// 1.21 or later on PATH; cached in target/cli-cache.
-fn docker_cli_arm64(cache: &Path) -> io::Result<PathBuf> {
-    let pin = &WIN_ARM64_DOCKER_SRC;
-    let exe = cache.join(format!("docker-{}-windows-arm64.exe", pin.version));
-    if exe.is_file() && sha256(&exe)? == pin.sha256 {
-        return Ok(exe);
-    }
-    let src = cache.join(format!("docker-cli-{}", pin.version));
-    // Checked out byte for byte: Git for Windows' core.autocrlf would turn the
-    // sources' LF into CRLF, and Go builds other bytes from them. A clone made
-    // without this setting is made again.
-    let lf = Command::new("git").arg("-C").arg(&src).args(["config", "--local", "core.autocrlf"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "false").unwrap_or(false);
-    if !src.join(".git").is_dir() || !lf {
-        let _ = fs::remove_dir_all(&src);
-        fs::create_dir_all(cache)?;
-        run(Command::new("git").args(["-c", "advice.detachedHead=false", "clone", "-q", "--config", "core.autocrlf=false", "--config", "core.eol=lf", "--depth", "1", "--branch", &format!("v{}", pin.version), cli_pins::DOCKER_CLI_GIT]).arg(&src))?;
-    }
-    let git = |args: &[&str]| -> io::Result<String> {
-        let o = Command::new("git").arg("-C").arg(&src).args(args).output()?;
-        if !o.status.success() {
-            return Err(io::Error::other(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&o.stderr).trim())));
-        }
-        Ok(String::from_utf8_lossy(&o.stdout).into_owned())
-    };
-    let head = git(&["rev-parse", "HEAD"])?;
-    if head.trim() != pin.commit {
-        return Err(io::Error::other(format!("{}: at {}, not docker/cli v{}'s {}; delete it and run again", src.display(), head.trim(), pin.version, pin.commit)));
-    }
-    // docker/cli is not a Go module yet: its scripts link go.mod and go.sum
-    // to vendor.mod and vendor.sum. Copies here (a symlink on Windows needs
-    // Developer Mode). Nothing else may differ from the commit, since an
-    // untracked .go file would be compiled in.
-    fs::copy(src.join("vendor.mod"), src.join("go.mod"))?;
-    fs::copy(src.join("vendor.sum"), src.join("go.sum"))?;
-    let status = git(&["status", "--porcelain", "--ignored"])?;
-    if let Some(l) = status.lines().find(|l| *l != "?? go.mod" && *l != "?? go.sum" && *l != "!! go.mod" && *l != "!! go.sum") {
-        return Err(io::Error::other(format!("{}: `{l}` is not docker/cli's commit; delete the folder and run again", src.display())));
-    }
-    let short = &pin.commit[..7];
-    let ldflags = format!(
-        "-buildid= -X \"github.com/docker/cli/cli/version.GitCommit={short}\" -X \"github.com/docker/cli/cli/version.BuildTime={}\" -X \"github.com/docker/cli/cli/version.Version={}\"",
-        pin.time, pin.version
-    );
-    let part = cache.join(format!("docker-{}-windows-arm64.exe.part", pin.version));
-    let mut go = Command::new("go");
-    go.current_dir(&src)
-        .env("GOTOOLCHAIN", pin.go)
-        .env("GOOS", "windows")
-        .env("GOARCH", "arm64")
-        .env("GOARM64", "v8.0")
-        .env("CGO_ENABLED", "0")
-        .env("GO111MODULE", "on")
-        .env("GOFLAGS", "-mod=vendor")
-        .env("GOWORK", "off")
-        .env("GOEXPERIMENT", "")
-        .args(["build", "-trimpath", "-buildvcs=false", "-tags", "grpcnotrace", "-ldflags", &ldflags, "-o"])
-        .arg(&part)
-        .arg("./cmd/docker");
-    run(&mut go)?;
-    let got = sha256(&part)?;
-    if got != pin.sha256 {
-        let _ = fs::remove_file(&part);
-        return Err(io::Error::other(format!("docker.exe for arm64 built from {} has SHA-256 {got}, expected {}", pin.commit, pin.sha256)));
-    }
-    fs::rename(&part, &exe)?;
-    Ok(exe)
-}
-
-/// The bytes of every file under a folder.
-fn dir_size(dir: &Path) -> io::Result<u64> {
-    let mut total = 0;
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let meta = entry.metadata()?;
-        total += if meta.is_dir() { dir_size(&entry.path())? } else { meta.len() };
-    }
-    Ok(total)
-}
-
-/// target/Kiri-<version>-x86_64.msi (or -arm64.msi): the per-user Windows
-/// installer (installer/windows/kiri.wxs) around the bundle in
-/// target/kiri-windows-x86_64 (or -aarch64). Both share one UpgradeCode, so
-/// either replaces the other (kiri.wxs says why); each has its own feed.
-/// Needs WiX 5 (`dotnet tool install -g wix`, with the UI and Util
-/// extensions: `wix extension add -g WixToolset.UI.wixext/5.0.2`,
-/// `WixToolset.Util.wixext/5.0.2`).
-/// Builds `package` (kiri-win, or kiri for bin\kiri.exe) for Windows on
-/// `arch` and returns its exe: natively on Windows, or the x86-64 one with
-/// MinGW elsewhere. `manifest` is the bundle's hashes, embedded in a
-/// release kiri-win.exe.
-fn windows_exe(root: &Path, debug: bool, arch: WinArch, package: &str, manifest: Option<&str>) -> io::Result<PathBuf> {
-    let mut build = Command::new(env!("CARGO"));
-    build.current_dir(root).args(["build", "-p", package, "--bin", package]);
-    if let Some(m) = manifest.filter(|_| !debug) {
-        build.env("KIRI_BUNDLE_SHA256", m);
-    }
-    if !debug {
-        build.arg("--release");
-    }
-    let mut dir = root.join("target");
-    if cfg!(windows) {
-        // The other architecture's kiri-win (arm64 from an x64 PC, or the
-        // reverse) needs its rustup target and Visual Studio's MSVC build
-        // tools for it ("MSVC ... ARM64 build tools").
-        if arch != WinArch::host() {
-            build.args(["--target", arch.msvc()]);
-            dir = dir.join(arch.msvc());
-        }
-    } else if arch == WinArch::Arm64 {
-        return Err(io::Error::other("the arm64 kiri-win.exe is built on Windows (or checked from here with cargo xwin)"));
-    } else {
-        build.args(["--target", "x86_64-pc-windows-gnu"]);
-        dir = dir.join("x86_64-pc-windows-gnu");
-    }
-    run(&mut build)?;
-    Ok(dir.join(if debug { "debug" } else { "release" }).join(format!("{package}.exe")))
-}
-
-fn msi(root: &Path, arch: WinArch) -> io::Result<()> {
-    let bundle = root.join(format!("target/kiri-windows-{}", arch.linux()));
-    if !bundle.join("kiri-win.exe").is_file() {
-        return Err(io::Error::other(format!("no bundle in {}: run cargo xtask windows (or msi) first", bundle.display())));
-    }
-    let version = env!("CARGO_PKG_VERSION");
-    let name = format!("Kiri-{version}-{}.msi", arch.msi());
-    let out = root.join("target").join(&name);
-    // The dialog art (brand/installer/windows, committed) gets this build's
-    // version stamped onto a copy in target/wix-assets, with System.Drawing
-    // only, so CI needs nothing beyond the checkout; if that fails the
-    // committed, unstamped bitmaps serve.
-    let assets = root.join("target/wix-assets");
-    let drawn = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-File"])
-        .arg(root.join("brand/installer/windows/make-bitmaps.ps1"))
-        .arg("-Stamp")
-        .arg("-Version")
-        .arg(version)
-        .arg("-Out")
-        .arg(&assets)
-        .status()
-        .is_ok_and(|s| s.success());
-    if !drawn {
-        eprintln!("xtask: make-bitmaps.ps1 -Stamp failed; using the committed installer bitmaps as they are");
-    }
-    // The ready page says what the install takes: the bundle's files, in
-    // the MB Apps & features uses (1024 by 1024).
-    let on_disk = dir_size(&bundle)? as f64 / (1024.0 * 1024.0);
-    let mut wix = Command::new("wix");
-    wix.current_dir(root.join("installer/windows"))
-        .args(["build", "-arch", arch.wix(), "-ext", "WixToolset.UI.wixext", "-ext", "WixToolset.Util.wixext"])
-        .arg("-d")
-        // Windows Installer takes numbers only: a test build's 0.1.8-dev.42 is 0.1.8.
-        .arg(format!("Version={}", version.split('-').next().unwrap_or(version)))
-        .arg("-d")
-        .arg(format!("Bundle={}", bundle.display()))
-        .arg("-d")
-        .arg(format!("Size={on_disk:.1} MB"));
-    if drawn {
-        wix.arg("-d").arg(format!("Assets={}", assets.display()));
-    }
-    run(wix.args(["-loc", "kiri.wxl", "-o"]).arg(&out).arg("kiri.wxs"))?;
-    // The update feed entry kiri-win reads (crates/kiri-win/src/update.rs),
-    // as `release` writes the Mac's.
-    let size = fs::metadata(&out)?.len();
-    let sum = sha256(&out)?;
-    let base = std::env::var("KIRI_RELEASE_BASE").unwrap_or_else(|_| "https://download.runkiri.com".to_owned());
-    let extra = feed_notes()?;
-    let feed = format!("{{\"version\":\"{version}\",\"url\":\"{base}/{name}\",\"sha256\":\"{sum}\",\"size\":{size}{extra}}}\n");
-    let feed_path = root.join("target").join(arch.feed());
-    fs::write(&feed_path, &feed)?;
-    println!("{} ({} KiB)\n{}", out.display(), size / 1024, feed_path.display());
-    Ok(())
-}
-
 /// The docker CLI tools bundled into Kiri.app, pinned.
 /// SHA-256s from the releases (GitHub's asset digests; the docker tarball
 /// as download.docker.com served it), checked before anything is bundled.
 #[path = "../../crates/kiri/src/cli_pins.rs"]
 mod cli_pins;
-use cli_pins::{WIN_ARM64_BUILDX, WIN_ARM64_COMPOSE, WIN_ARM64_DOCKER_SRC, WIN_BUILDX, WIN_COMPOSE, WIN_DOCKER_CLI};
+
 
 /// Downloads `url` into the cache once; returns the cached path.
 fn fetch(cache: &Path, name: &str, url: &str) -> io::Result<PathBuf> {
