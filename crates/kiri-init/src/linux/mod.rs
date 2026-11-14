@@ -4,6 +4,7 @@ mod container;
 mod devices;
 mod copy;
 mod dns;
+mod firewall;
 mod fsview;
 mod hostopts;
 mod inroot;
