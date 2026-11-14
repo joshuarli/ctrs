@@ -6,10 +6,8 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[dependencies]
-ctrs-proto = { path = "../ctrs-proto" }
-
 [target.'cfg(target_os = "linux")'.dependencies]
+ctrs-proto = { path = "../ctrs-proto" }
 flate2 = "1"
 libc = "0.2"
 ruzstd = "0.9"
