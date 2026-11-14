@@ -43,13 +43,14 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Install, uninstall | `docs/install.md` |
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
-| Remaining campaign slices (CTRS-22/23) | `docs/campaign-headless-ctrs.md` |
+| Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
 | Evidence: gate B | `docs/evidence/gate-b.md` |
 | Evidence: h12tiny HTTP pilot | `docs/evidence/http.md` |
 | Evidence: networking/vzNAT | `docs/evidence/net.md` |
 | Evidence: registry client pilot | `docs/evidence/registry.md` |
 | Evidence: security qualification | `docs/evidence/security.md` |
-| Evidence: release prep (artifact manifest) | `docs/evidence/release.md` |
+| Campaign closeout (Gate J, local) | `docs/evidence/closeout.md` |
+| Release prep (artifact manifest) | `docs/evidence/release.md` |
 | Experiment: smolvm-network analysis | `docs/experiments/smolvm-network.md` |
 | Experiment: microVM isolation research | `docs/experiments/microvm-isolation.md` |
