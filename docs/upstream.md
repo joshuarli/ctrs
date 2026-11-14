@@ -23,7 +23,7 @@ Everything upstream at the pin is imported except:
 - Workspace: `crates/{kiri,kiri-init,kiri-proto,kiri-vmm,kiri-image,kiri-win,kiri-share-proto}` + `xtask`; edition 2024; release profile `lto="fat"`, `codegen-units=1`, `panic="abort"`.
 - Guest agent: `crates/kiri-init`, target `aarch64-unknown-linux-musl` (rust-lld); runs as root in the guest (and on a Linux host); hand-encodes rtnetlink + nf_tables in `src/linux/netlink.rs` (no `nft`/`ip` helpers required at runtime).
 - Host VMM: `crates/kiri-vmm` — `apple.rs` (macOS, Virtualization.framework; builds `VZNATNetworkDeviceAttachment`, see `apple.rs:443`) and `process.rs` (Linux native; agent as a root child, vsock→unix sockets in `/run`).
-- Image/OCI: `crates/kiri-image`, registry client is `ureq` (to be evaluated in CTRS-16).
+- Image/OCI: `crates/kiri-image`, registry client is `h12tiny-client-sync` (CTRS-16 pilot found it slower than the incumbent; the owner overrode the verdict 2026-11-14 and ordered h12tiny everywhere, with the feature work to close the perf gap in laputa-systems/smolith).
 - Docker Engine API 1.47 over a local Unix socket: `crates/kiri/src/daemon/http.rs` hand-writes HTTP/1.1 (chunked, upgrades for `attach`; API version `1.47`).
 - `kiri run`/`ps`/… delegate to the external `docker` CLI against Kiri's socket (`crates/kiri/src/docker.rs`); the engine itself is the daemon. Not to be described as Docker-independent.
 - `tests/e2e.sh` expects a `kiri` docker context and a `~/Kiri` Finder folder (both absent in the headless fork; adapted in CTRS-08). `tests/linux-host.sh` requires a Linux host (Needs environment N-1).

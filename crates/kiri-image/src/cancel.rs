@@ -1,17 +1,14 @@
 //! Stopping a pull from another thread: the window's Cancel, or every
-//! `docker pull` waiting on it having hung up. Cancelling shuts down the
-//! registry connections the pull is reading (mid-read too, so a stalled
-//! CDN doesn't hold it for a minute), and the pull checks between chunks
-//! and layers, ending with [`crate::registry::Error::Cancelled`] before it
-//! records anything. Blobs it finished stay in the store for the next pull;
-//! a half-downloaded one is deleted with its writer.
+//! `docker pull` waiting on it having hung up. The pull checks between
+//! chunks and layers, ending with [`crate::registry::Error::Cancelled`]
+//! before it records anything; a stalled body read wakes at its read
+//! deadline (see transport.rs), so a cancelled pull does not hang forever.
+//! Blobs it finished stay in the store for the next pull; a half-downloaded
+//! one is deleted with its writer.
 
 use std::cell::RefCell;
-#[cfg(any(test, not(feature = "h12tiny")))]
-use std::io;
-use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// A pull's cancel switch. Clones share it.
@@ -21,8 +18,6 @@ pub struct Cancel(Arc<Inner>);
 #[derive(Debug, Default)]
 struct Inner {
     cancelled: AtomicBool,
-    /// The connections the pull's threads have read from, to shut down.
-    streams: Mutex<Vec<Weak<TcpStream>>>,
 }
 
 thread_local! {
@@ -35,14 +30,10 @@ impl Cancel {
         Cancel::default()
     }
 
-    /// Stops the pull: its connections are shut down now, and it ends at
-    /// its next check. Cancelling twice is harmless.
+    /// Stops the pull: it ends at its next check. Cancelling twice is
+    /// harmless.
     pub fn cancel(&self) {
         self.0.cancelled.store(true, Ordering::SeqCst);
-        let streams = std::mem::take(&mut *self.0.streams.lock().unwrap_or_else(|e| e.into_inner()));
-        for s in streams.iter().filter_map(Weak::upgrade) {
-            let _ = s.shutdown(Shutdown::Both);
-        }
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -68,21 +59,6 @@ impl Cancel {
         }
     }
 
-    /// Notes `stream` as one to shut down on cancel, or refuses it if the
-    /// pull is already cancelled. Checked under the lock [`Cancel::cancel`]
-    /// takes, so a connection is either refused or shut down, never missed.
-    #[cfg(any(test, not(feature = "h12tiny")))]
-    fn watch(&self, stream: &Arc<TcpStream>) -> io::Result<()> {
-        let mut streams = self.0.streams.lock().unwrap_or_else(|e| e.into_inner());
-        if self.is_cancelled() {
-            return Err(io::Error::other("pull cancelled"));
-        }
-        streams.retain(|s| s.strong_count() > 0);
-        if !streams.iter().any(|s| std::ptr::eq(s.as_ptr(), Arc::as_ptr(stream))) {
-            streams.push(Arc::downgrade(stream));
-        }
-        Ok(())
-    }
 }
 
 /// See [`Cancel::enter`]; puts back what the thread had before.
@@ -95,67 +71,9 @@ impl Drop for Entered {
     }
 }
 
-/// Called by a connection before each read and write: ties it to the pull
-/// this thread works for, if one, and fails once that is cancelled.
-#[cfg(any(test, not(feature = "h12tiny")))]
-pub(crate) fn watch(stream: &Arc<TcpStream>) -> io::Result<()> {
-    CURRENT.with(|c| match &*c.borrow() {
-        Some(cancel) => cancel.watch(stream),
-        None => Ok(()),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
-    use std::net::TcpListener;
-
-    #[test]
-    fn cancel_ends_a_read_that_is_waiting() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = Arc::new(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
-        // The server says nothing: the read would wait for ever.
-        let (_server, _) = listener.accept().unwrap();
-        let cancel = Cancel::new();
-        let reader = {
-            let (cancel, client) = (cancel.clone(), client.clone());
-            std::thread::spawn(move || {
-                let _on = cancel.enter();
-                watch(&client).unwrap();
-                let started = Instant::now();
-                let n = (&*client).read(&mut [0u8; 16]).unwrap_or(0);
-                (n, started.elapsed())
-            })
-        };
-        std::thread::sleep(Duration::from_millis(100));
-        cancel.cancel();
-        let (n, waited) = reader.join().unwrap();
-        assert_eq!(n, 0);
-        assert!(waited < Duration::from_secs(2), "{waited:?}");
-        // Once cancelled, a connection is refused outright.
-        let _on = cancel.enter();
-        assert!(watch(&client).is_err());
-    }
-
-    #[test]
-    fn a_thread_answers_only_to_the_pull_it_entered() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = Arc::new(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
-        let (a, b) = (Cancel::new(), Cancel::new());
-        a.cancel();
-        assert!(watch(&client).is_ok(), "no pull entered");
-        {
-            let _on = b.enter();
-            assert!(watch(&client).is_ok());
-            {
-                let _inner = a.enter();
-                assert!(watch(&client).is_err());
-            }
-            assert!(watch(&client).is_ok(), "back to b");
-        }
-        assert!(watch(&client).is_ok());
-    }
 
     #[test]
     fn sleep_wakes_on_cancel() {

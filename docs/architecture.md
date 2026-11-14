@@ -10,7 +10,7 @@ Verified against git state after CTRS-06/07 deletions (see `docs/upstream.md` fo
 | `kiri-init` | guest agent (PID 1): clone3, cgroups v2, namespaces, mounts, seccomp, netlink, exec/reap |
 | `kiri-vmm` | VMM backends: `apple.rs` (macOS, Virtualization.framework, `VZNATNetworkDeviceAttachment`) and `process.rs` (Linux native, agent as root child, vsock↔unix sockets) |
 | `kiri-proto` | bounded host↔guest wire protocol + version negotiation |
-| `kiri-image` | OCI resolution, registry client (currently `ureq` → pilot CTRS-16), content-addressed blob store |
+| `kiri-image` | OCI resolution, registry client (h12tiny-client-sync), content-addressed blob store |
 | `xtask` | build orchestration: `guest`, `kernel`, `disk`, `host`, `linux`, `all` |
 
 Deleted in CTRS-06/07: `kiri-win`, `kiri-share-proto`, `crates/kiri/src/ui/`, `wsl.rs`, `ui/` tests and assets, `brand/`, `about.*`, the `window` cargo feature, all desktop dependencies (`objc2-app-kit`, `objc2-web-kit`, `objc2-core-text`, `gtk`, `webkit2gtk`, `javascriptcore-rs`, `rustls`, `webpki-roots`, `rcgen`), the Wi-Fi `kiri share`/`Kiri Cloud` upload paths, the container-domain (`*.kiri.localhost`, TLS CA) machinery, the `~/Kiri` NFS Finder mount, USB passthrough, the Kubernetes (`k3s`) surface, the Linux-machines surface, `kiri setup` (docker-context creation, LaunchAgent, `/etc/resolver` install), the updater, the Builds/history window surface and BuildKit's unused host-side helpers. CTRS-10 additionally removed: the Windows-cfg arms in `main.rs`/`buildwith.rs`, the WSL path translation in `binds.rs` (with its `wslpath`/`/etc/wsl.conf` handling; the `-v` source parser is path-only now), `diag/report.rs`'s Finder reveal (`/usr/bin/open -R`), and `scripts/kiri-linux.sh`.

@@ -202,9 +202,10 @@ impl Default for Client {
     }
 }
 
-/// Where the program decides the proxy: `None` leaves ureq's default (the
-/// `HTTPS_PROXY` environment), `Some(None)` is no proxy, `Some(Some((url,
-/// skip)))` a proxy and the hosts that bypass it.
+/// Where the program decides the proxy: `None` leaves the transport's
+/// default handling, `Some(None)` is no proxy, `Some(Some((url, skip)))` a
+/// proxy and the hosts that bypass it. The registry transport applies no
+/// proxy settings; a program that sets a source is told so once.
 pub type ProxySource = fn() -> Option<Option<(String, Vec<String>)>>;
 static PROXY_SOURCE: std::sync::OnceLock<ProxySource> = std::sync::OnceLock::new();
 
@@ -213,23 +214,18 @@ pub fn set_proxy_source(f: ProxySource) {
     let _ = PROXY_SOURCE.set(f);
 }
 
-type ProxyChoice = Option<Option<(String, Vec<String>)>>;
-
-#[cfg(not(feature = "h12tiny"))]
-fn proxy(chosen: ProxyChoice) -> Option<Option<ureq::Proxy>> {
-    let Some((url, skip)) = chosen? else { return Some(None) };
-    let parsed = ureq::Proxy::new(&url).ok()?;
-    let mut b = ureq::Proxy::builder(parsed.protocol()).host(parsed.host()).port(parsed.port());
-    if let Some(u) = parsed.username() {
-        b = b.username(u);
-    }
-    if let Some(p) = parsed.password() {
-        b = b.password(p);
-    }
-    for s in &skip {
-        b = b.no_proxy(s);
-    }
-    b.build().ok().map(Some)
+/// The authority part of an absolute http(s) URL, without userinfo.
+fn host_of(url: &str) -> Option<String> {
+    let after = url.split_once("://")?.1;
+    let authority = after.split(['/', '?', '#']).next()?;
+    let authority = authority.rsplit('@').next()?;
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        // Keep the brackets: is_local expects `[::1]` for IPv6.
+        format!("[{}]", rest.split(']').next()?)
+    } else {
+        authority.split(':').next()?.to_owned()
+    };
+    (!host.is_empty()).then_some(host)
 }
 
 fn realm_is_secure(realm: &str, registry: &str) -> bool {
@@ -238,60 +234,21 @@ fn realm_is_secure(realm: &str, registry: &str) -> bool {
     }
     realm.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://"))
         && crate::reference::is_local(registry)
-        && realm.parse::<ureq::http::Uri>().ok().and_then(|u| u.authority().map(|a| a.host().to_owned())).is_some_and(|h| crate::reference::is_local(&h))
+        && host_of(realm).is_some_and(|h| crate::reference::is_local(&h))
 }
 
-/// How long an idle connection waits in the pool for the next request.
-/// Registries and their CDNs keep one open about a minute or more, and a
-/// reused connection saves the TCP and TLS handshakes: two round trips,
-/// 400 ms to Docker Hub from Europe, per host per pull.
-#[cfg(not(feature = "h12tiny"))]
-const IDLE: Duration = Duration::from_secs(90);
-
-/// The process's one transport, so its connection pool (ureq) outlives a
-/// pull. Built again only when the proxy settings change. With the
-/// `h12tiny` feature the h12tiny backend is selected instead; the proxy
-/// settings do not apply to it (it has none).
+/// The process's one transport, shared so a pull's connections are made
+/// once each. The h12tiny backend keeps no pool (every request pays
+/// TCP+TLS), so there is nothing to rebuild when the proxy settings
+/// change: they are not applied at all, and a program that sets a
+/// proxy source is warned about that once.
 fn shared_transport() -> Transport {
-    static T: Mutex<Option<(ProxyChoice, Transport)>> = Mutex::new(None);
-    let chosen = PROXY_SOURCE.get().and_then(|f| f());
-    let mut slot = T.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((c, t)) = slot.as_ref()
-        && *c == chosen
-    {
-        return t.clone();
+    static T: std::sync::OnceLock<Transport> = std::sync::OnceLock::new();
+    if PROXY_SOURCE.get().is_some() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| eprintln!("kiri: the registry transport has no proxy support; ignoring the proxy settings"));
     }
-    #[cfg(feature = "h12tiny")]
-    {
-        if PROXY_SOURCE.get().is_some() {
-            static WARNED: std::sync::Once = std::sync::Once::new();
-            WARNED.call_once(|| eprintln!("kiri: the h12tiny registry transport has no proxy support; ignoring the proxy settings"));
-        }
-        let t = Transport::shared_h12tiny();
-        *slot = Some((chosen, t.clone()));
-        return t;
-    }
-    #[cfg(not(feature = "h12tiny"))]
-    {
-    let mut cfg = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .timeout_connect(Some(Duration::from_secs(15)))
-        .max_idle_age(IDLE)
-        // Parallel layer downloads each hold a connection to the registry
-        // and one to its CDN; keep them all for the next pull.
-        .max_idle_connections(32)
-        .max_idle_connections_per_host(PARALLEL_LAYERS * 2)
-        .user_agent(concat!("kiri/", env!("CARGO_PKG_VERSION")));
-    if let Some(p) = proxy(chosen.clone()) {
-        cfg = cfg.proxy(p);
-    }
-    // Happy Eyeballs rather than ureq's one address after another, so an
-    // IPv6 address without a working route does not stall the pull.
-    let agent = ureq::Agent::with_parts(cfg.build(), crate::connect::connector(), ureq::unversioned::resolver::DefaultResolver::default());
-    let t = Transport::Ureq(agent);
-    *slot = Some((chosen, t.clone()));
-    t
-    }
+    T.get_or_init(Transport::shared_h12tiny).clone()
 }
 
 /// Bearer tokens (and Basic answers) by registry, repository, actions and
@@ -382,10 +339,6 @@ fn transient(e: &Error) -> bool {
         Error::Http(_) => true,
         Error::Status { status, .. } => *status >= 500 || *status == 408 || *status == 429,
         Error::Io(e) => {
-            // ureq's own errors (a timeout among them) come wrapped.
-            if let Some(u) = e.get_ref().and_then(|i| i.downcast_ref::<ureq::Error>()) {
-                return matches!(u, ureq::Error::Timeout(_) | ureq::Error::Io(_) | ureq::Error::ConnectionFailed | ureq::Error::HostNotFound);
-            }
             matches!(
                 e.kind(),
                 io::ErrorKind::TimedOut
@@ -405,15 +358,9 @@ fn transient(e: &Error) -> bool {
 fn stale(e: &Error) -> bool {
     const CLOSED: [io::ErrorKind; 4] = [io::ErrorKind::ConnectionReset, io::ErrorKind::ConnectionAborted, io::ErrorKind::BrokenPipe, io::ErrorKind::UnexpectedEof];
     match e {
-        Error::Io(e) => {
-            if let Some(u) = e.get_ref().and_then(|i| i.downcast_ref::<ureq::Error>()) {
-                return matches!(u, ureq::Error::Io(e) if CLOSED.contains(&e.kind()));
-            }
-            CLOSED.contains(&e.kind())
-        }
-        // The h12tiny backend connects fresh each time, so only a failure
-        // before any bytes were sent is worth one automatic retry.
-        #[cfg(feature = "h12tiny")]
+        Error::Io(e) => CLOSED.contains(&e.kind()),
+        // The backend connects fresh each time, so only a failure before any
+        // bytes were sent is worth one automatic retry.
         Error::Http(msg) => msg.starts_with("h12tiny Connect:") || msg.starts_with("h12tiny Timeout:"),
         _ => false,
     }
@@ -475,38 +422,13 @@ impl Client {
         }
         let known = CHALLENGES.lock().unwrap_or_else(|e| e.into_inner()).get(&r.registry).cloned();
         let Some(challenge) = known.or_else(|| (r.registry == "docker.io").then(|| DOCKER_HUB_CHALLENGE.to_owned())) else { return Ok(()) };
-        // The token pre-fetch is worth doing for either transport; the two
-        // pool-warming probes only pay off when connections can be reused.
-        if !self.transport.warms_pool() {
-            if let Ok((header, ttl)) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry) {
-                Self::remember_token(key, header, ttl);
-            }
-            return Ok(());
+        // The token pre-fetch is all that pays off when connections cannot
+        // be reused: a challenge already known lets the first request skip
+        // the 401 round trip.
+        if let Ok((header, ttl)) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry) {
+            Self::remember_token(key, header, ttl);
         }
-        let url = format!("{}/v2/", r.api_base());
-        std::thread::scope(|s| {
-            // Two connections: after the manifests, the config and the first
-            // layer are fetched at once.
-            let probes: Vec<_> = (0..2)
-                .map(|_| {
-                    let transport = self.transport.clone();
-                    let url = url.clone();
-                    s.spawn(move || transport.send(Request::get(url)).map(|r| r.discard()))
-                })
-                .collect();
-            if let Ok((header, ttl)) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry) {
-                Self::remember_token(key, header, ttl);
-            }
-            let mut failed = None;
-            for c in probes {
-                match c.join() {
-                    Ok(Ok(())) => return Ok(()),
-                    Ok(Err(e)) => failed = Some(e),
-                    Err(_) => {}
-                }
-            }
-            failed.map_or(Ok(()), Err)
-        })
+        Ok(())
     }
 
     /// The same client, authenticating as `credentials`.
@@ -707,7 +629,7 @@ impl Client {
 
     /// Downloads a blob, telling `on_bytes` how much has arrived every
     /// half MB, so a pull can show a progress bar. A connection that drops
-    /// or stalls ([`crate::connect::STALL`]) is resumed from where it got to
+    /// or stalls is resumed from where it got to
     /// (a `Range` request; from the start if the server ignores it), as
     /// Docker retries a layer, up to [`BLOB_TRIES`] times in a row without
     /// progress. Refuses bodies over `max` bytes, and stops (removing what
@@ -1306,16 +1228,7 @@ mod tests {
     }
 
     fn test_client() -> Client {
-        Client { transport: Transport::test_ureq(Duration::from_millis(300)), credentials: None }
-    }
-
-    #[cfg(feature = "h12tiny")]
-    fn test_client_h12tiny() -> Client {
         Client { transport: Transport::test_h12tiny(Duration::from_millis(300)), credentials: None }
-    }
-
-    fn named(client: &Client, name: &str) {
-        assert_eq!(client.transport.name(), name);
     }
 
     fn blob() -> (Vec<u8>, String) {
@@ -1355,15 +1268,7 @@ mod tests {
 
     #[test]
     fn a_stalled_blob_resumes_where_it_stopped() {
-        named(&test_client(), "ureq");
         stalled_resume_case(test_client());
-    }
-
-    #[cfg(feature = "h12tiny")]
-    #[test]
-    fn a_stalled_blob_resumes_where_it_stopped_h12tiny() {
-        named(&test_client_h12tiny(), "h12tiny");
-        stalled_resume_case(test_client_h12tiny());
     }
 
     fn no_range_case(client: Client) {
@@ -1394,15 +1299,7 @@ mod tests {
 
     #[test]
     fn a_server_without_ranges_sends_the_blob_again() {
-        named(&test_client(), "ureq");
         no_range_case(test_client());
-    }
-
-    #[cfg(feature = "h12tiny")]
-    #[test]
-    fn a_server_without_ranges_sends_the_blob_again_h12tiny() {
-        named(&test_client_h12tiny(), "h12tiny");
-        no_range_case(test_client_h12tiny());
     }
 
     fn never_arrives_case(client: Client) {
@@ -1422,15 +1319,7 @@ mod tests {
 
     #[test]
     fn a_blob_that_never_arrives_gives_up() {
-        named(&test_client(), "ureq");
         never_arrives_case(test_client());
-    }
-
-    #[cfg(feature = "h12tiny")]
-    #[test]
-    fn a_blob_that_never_arrives_gives_up_h12tiny() {
-        named(&test_client_h12tiny(), "h12tiny");
-        never_arrives_case(test_client_h12tiny());
     }
 
     fn cancelled_case(client: Client) {
@@ -1468,18 +1357,8 @@ mod tests {
 
     #[test]
     fn a_cancelled_download_stops_at_once_and_leaves_nothing() {
-        // Stalls only give up after 10 s: the cancel must not wait for that.
-        let client = Client { transport: Transport::test_ureq(Duration::from_secs(10)), credentials: None };
-        named(&client, "ureq");
-        cancelled_case(client);
-    }
-
-    #[cfg(feature = "h12tiny")]
-    #[test]
-    fn a_cancelled_download_stops_at_once_and_leaves_nothing_h12tiny() {
         // The h12tiny body read wakes at the stall; 1 s keeps the test quick.
         let client = Client { transport: Transport::test_h12tiny(Duration::from_secs(1)), credentials: None };
-        named(&client, "h12tiny");
         cancelled_case(client);
     }
 
@@ -1498,11 +1377,10 @@ mod tests {
 
     #[test]
     fn transient_failures_are_the_network_and_5xx() {
-        assert!(transient(&Error::Io(io::Error::other(ureq::Error::Timeout(ureq::Timeout::RecvBody)))));
+        assert!(transient(&Error::Http("h12tiny Timeout: recv body".to_string())));
         assert!(transient(&Error::Io(io::ErrorKind::ConnectionReset.into())));
         assert!(transient(&Error::Status { url: String::new(), status: 503, body: String::new() }));
         assert!(!transient(&Error::Status { url: String::new(), status: 404, body: String::new() }));
         assert!(!transient(&Error::Io(io::Error::new(io::ErrorKind::InvalidData, "digest mismatch"))));
-        assert!(!transient(&Error::Io(io::Error::other(ureq::Error::BodyExceedsLimit(10)))));
     }
 }

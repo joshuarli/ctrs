@@ -111,3 +111,19 @@ Two follow-ups recorded for CTRS-21: silent engine death struck twice more
 during this slice (both scratch engines went down between 09:49Z and
 10:01Z with zero log output, right after the warm-pull rmi/pull burst —
 strikes #6 and #7).
+
+## Addendum 2026-11-14 — owner override
+
+The decision above ("Keep ureq") was overridden by the owner same-day:
+"need to use h12tiny", landed as "flip default + remove ureq" (the owner's
+words when the regression cost was put to them with the numbers in hand).
+State after the flip, with the release build: `cargo test --workspace`
+185/0, `conformance/smoke.sh` 15/15, e2e 481/481 — all with the
+h12tiny-only registry path. The h12tiny HALF of the old A/B is now the
+production path; the ureq half and both A/B harnesses (seam `Transport`,
+`connect.rs`, socket-cancel) are deleted — the feature ask to recover the
+gap lives in laputa-systems/smolith now: pooling, Happy Eyeballs, proxy,
+automatic redirects, targeting parity-or-better vs the deleted incumbent.
+Proxy settings stopped applying (transport has none); the daemon warns
+once; `/system/proxy` settings are stored but not honored by pulls until
+the proxy work lands.

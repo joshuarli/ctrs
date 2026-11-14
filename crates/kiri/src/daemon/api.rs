@@ -549,13 +549,38 @@ fn set_proxy(req: &Request) -> Result<Value, Error> {
     let field = |k: &str| body[k].as_str().unwrap_or("").trim().to_owned();
     for k in ["http", "https"] {
         let v = field(k);
-        if mode == "custom" && !v.is_empty() && ureq::Proxy::new(&v).is_err() {
+        if mode == "custom" && !v.is_empty() && !valid_proxy_url(&v) {
             return Err(Error::BadRequest(format!("{k} proxy: not a proxy address: {v}")));
         }
     }
     super::proxy::save(&json!({"mode": mode, "http": field("http"), "https": field("https"), "no_proxy": field("no_proxy"), "containers": body["containers"].as_bool().unwrap_or(false)}))
         .map_err(Error::Io)?;
     Ok(super::proxy::report())
+}
+
+/// A proxy address the pull path could honor: http(s) with a host
+/// (optionally :port), or a bare host:port.
+fn valid_proxy_url(v: &str) -> bool {
+    let authority = |a: &str| {
+        let (host, port) = match a.rsplit_once(':') {
+            Some((h, p)) if p.bytes().all(|b| b.is_ascii_digit()) => (h, Some(p)),
+            _ => (a, None),
+        };
+        if host.is_empty() || host.contains(['/', '?', '#', '@', ' ']) {
+            return false;
+        }
+        port.is_none_or(|p| p.parse::<u16>().is_ok_and(|p| p >= 1))
+    };
+    match v.split_once("://") {
+        Some((scheme, rest)) => {
+            if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+                return false;
+            }
+            let a = rest.split(['/', '?', '#']).next().unwrap_or("");
+            !a.is_empty() && authority(a.rsplit('@').next().unwrap_or(""))
+        }
+        None => authority(v),
+    }
 }
 
 fn set_resources(req: &Request) -> Result<(), Error> {

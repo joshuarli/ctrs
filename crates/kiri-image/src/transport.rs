@@ -1,32 +1,26 @@
-//! The HTTP transport seam for the registry client (CTRS-16 pilot).
+//! The HTTP transport for the registry client.
 //!
 //! Everything above this module is transport-agnostic: the bearer-auth
 //! dance, the token and manifest caches, digest verification, multiarch
-//! selection, blob resume over `Range`. Two backends:
-//!
-//! - `ureq` (always compiled): the incumbent — Happy Eyeballs via
-//!   [`crate::connect`], a process-wide connection pool, redirects followed
-//!   by ureq itself (`RedirectAuthHeaders::Never`: no auth across hops).
-//! - `h12tiny` (feature `h12tiny`): h12tiny-client-sync 0.9.0 with explicit
-//!   Graviola + platform trust roots (fails closed if the trust store is
-//!   unreadable). No pool (every request pays TCP+TLS), no proxy, no
-//!   automatic redirects — this module resolves them, at most five hops,
-//!   dropping `Authorization` on every hop. Measured for CTRS-16;
-//!   experimental, not for production.
+//! selection, blob resume over `Range`. The backend is h12tiny-client-sync
+//! 0.9.0 with explicit Graviola + platform trust roots (fails closed if the
+//! trust store is unreadable). No pool (every request pays TCP+TLS), no
+//! proxy, no automatic redirects — this module resolves them, at most five
+//! hops, dropping `Authorization` on every hop. The owner picked this
+//! transport for stack coherence over measured pull speed (see
+//! docs/evidence/registry.md; the previous incumbent, ureq with a Happy
+//! Eyeballs connector and a process-wide pool, was deleted with it).
 //!
 //! Response bodies are consumed either wholesale with a limit
 //! (`bytes`/`text`) or streamed (`into_reader`, for blobs).
 
 use std::io::{self, Read};
 use std::path::PathBuf;
-#[cfg(feature = "h12tiny")]
 use std::sync::Arc;
-#[cfg(any(test, feature = "h12tiny"))]
 use std::time::Duration;
 
 /// How long one blocking body read may wait, before a stalled download
 /// is resumed from where it got to.
-#[cfg(feature = "h12tiny")]
 const STALL: Duration = Duration::from_secs(60);
 
 use crate::registry::Error;
@@ -127,14 +121,8 @@ pub(crate) fn with_query(url: &str, params: &[(&str, &str)]) -> String {
 }
 
 #[derive(Clone)]
-pub(crate) enum Transport {
-    #[cfg(any(test, not(feature = "h12tiny")))]
-    Ureq(ureq::Agent),
-    #[cfg(feature = "h12tiny")]
-    H12Tiny(Arc<H12TinyClient>),
-}
+pub(crate) struct Transport(Arc<H12TinyClient>);
 
-#[cfg(feature = "h12tiny")]
 pub(crate) struct H12TinyClient {
     client: h12tiny_client_sync::Client,
     /// How long one blocking body read may wait; blob downloads resume from
@@ -144,70 +132,25 @@ pub(crate) struct H12TinyClient {
 
 impl std::fmt::Debug for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            #[cfg(any(test, not(feature = "h12tiny")))]
-            Transport::Ureq(_) => f.write_str("Transport::Ureq"),
-            #[cfg(feature = "h12tiny")]
-            Transport::H12Tiny(_) => f.write_str("Transport::H12Tiny"),
-        }
+        f.write_str("Transport(h12tiny)")
     }
 }
 
 impl Transport {
-    /// Which backend this is, for tests and evidence.
-    #[cfg(test)]
-    pub fn name(&self) -> &'static str {
-        match self {
-            #[cfg(any(test, not(feature = "h12tiny")))]
-            Transport::Ureq(_) => "ureq",
-            #[cfg(feature = "h12tiny")]
-            Transport::H12Tiny(_) => "h12tiny",
-        }
-    }
-
-    /// Whether warming the pool ahead of a pull is worth doing (ureq: two
-    /// `/v2/` connections pay off once reused; h12tiny: connections do not
-    /// survive their body, so only the token pre-fetch matters).
-    pub fn warms_pool(&self) -> bool {
-        #[cfg(feature = "h12tiny")]
-        {
-            false
-        }
-        #[cfg(not(feature = "h12tiny"))]
-        {
-            true
-        }
-    }
-
     pub fn send(&self, req: Request) -> Result<Response, Error> {
-        match self {
-            #[cfg(any(test, not(feature = "h12tiny")))]
-            Transport::Ureq(agent) => ureq_send(agent, req),
-            #[cfg(feature = "h12tiny")]
-            Transport::H12Tiny(h12) => h12tiny_send(h12, req),
-        }
+        h12tiny_send(&self.0, req)
     }
 
-    /// The test client: Happy Eyeballs with a short budget, against a
-    /// loopback registry.
     #[cfg(test)]
-    pub fn test_ureq(stall: Duration) -> Transport {
-        let cfg = ureq::Agent::config_builder().http_status_as_error(false).build();
-        let agent = ureq::Agent::with_parts(cfg, crate::connect::connector_with(stall), ureq::unversioned::resolver::DefaultResolver::default());
-        Transport::Ureq(agent)
-    }
-
-    #[cfg(all(test, feature = "h12tiny"))]
     pub fn test_h12tiny(stall: Duration) -> Transport {
         let tls = h12tiny_client_sync::ClientTlsConfigBuilder::new().build().expect("system trust store loads");
         let client = h12tiny_client_sync::Client::builder().connect_timeout(stall).expect("connect timeout").tls_config(tls).build();
-        Transport::H12Tiny(Arc::new(H12TinyClient { client, stall }))
+        Transport(Arc::new(H12TinyClient { client, stall }))
     }
 
-    /// The shared h12tiny transport; the trust store is read once. A store
-    /// that cannot be read fails every HTTPS request, never silently
-    /// widened to embedded roots.
-    #[cfg(feature = "h12tiny")]
+    /// The shared transport; the trust store is read once. A store that
+    /// cannot be read fails every HTTPS request, never silently widened to
+    /// embedded roots.
     pub fn shared_h12tiny() -> Transport {
         static T: std::sync::OnceLock<Transport> = std::sync::OnceLock::new();
         T.get_or_init(|| {
@@ -215,12 +158,12 @@ impl Transport {
             match h12tiny_client_sync::ClientTlsConfigBuilder::new().build() {
                 Ok(tls) => {
                     let client = h12tiny_client_sync::Client::builder().connect_timeout(Duration::from_secs(15)).expect("connect timeout").tls_config(tls).build();
-                    Transport::H12Tiny(Arc::new(H12TinyClient { client, stall }))
+                    Transport(Arc::new(H12TinyClient { client, stall }))
                 }
                 Err(e) => {
                     eprintln!("kiri: h12tiny trust store unavailable ({e}); HTTPS registry requests will fail");
                     let client = h12tiny_client_sync::Client::builder().connect_timeout(Duration::from_secs(15)).expect("connect timeout").build();
-                    Transport::H12Tiny(Arc::new(H12TinyClient { client, stall }))
+                    Transport(Arc::new(H12TinyClient { client, stall }))
                 }
             }
         })
@@ -228,91 +171,8 @@ impl Transport {
     }
 }
 
-#[cfg(any(test, not(feature = "h12tiny")))]
-fn collect_ureq_headers(resp: &ureq::http::Response<ureq::Body>) -> Vec<(String, String)> {
-    resp.headers().iter().map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned())).collect()
-}
-
-/// Ureq transport errors travel inside `Error::Io` so `transient` and
-/// `stale` can downcast them (with the timeout and connection-reset kinds
-/// intact), exactly as they did before the seam.
-#[cfg(any(test, not(feature = "h12tiny")))]
-fn map_ureq(e: ureq::Error) -> Error {
-    Error::Io(io::Error::other(e))
-}
-
-#[cfg(any(test, not(feature = "h12tiny")))]
-fn finish_ureq(resp: ureq::http::Response<ureq::Body>) -> Result<Response, Error> {
-    let status = resp.status().as_u16();
-    let headers = collect_ureq_headers(&resp);
-    let reader = resp.into_parts().1.into_reader();
-    Ok(Response { status, headers, body: Some(Box::new(reader)) })
-}
-
-#[cfg(any(test, not(feature = "h12tiny")))]
-fn ureq_send(agent: &ureq::Agent, req: Request) -> Result<Response, Error> {
-    let with_headers = |mut r: ureq::RequestBuilder<ureq::typestate::WithoutBody>| -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        for (k, v) in &req.headers {
-            r = r.header(k, v);
-        }
-        r
-    };
-    match (req.method, req.body) {
-        ("GET", Body::Empty) => finish_ureq(with_headers(agent.get(&req.url)).call().map_err(map_ureq)?),
-        ("HEAD", Body::Empty) => finish_ureq(with_headers(agent.head(&req.url)).call().map_err(map_ureq)?),
-        ("POST", Body::Empty) => {
-            let with_headers = |mut r: ureq::RequestBuilder<ureq::typestate::WithBody>| -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-                for (k, v) in &req.headers {
-                    r = r.header(k, v);
-                }
-                r
-            };
-            finish_ureq(with_headers(agent.post(&req.url)).send_empty().map_err(map_ureq)?)
-        }
-        ("POST", Body::Form(form)) => {
-            let with_headers = |mut r: ureq::RequestBuilder<ureq::typestate::WithBody>| -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-                for (k, v) in &req.headers {
-                    r = r.header(k, v);
-                }
-                r
-            };
-            let encoded: Vec<(&str, &str)> = form.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-            finish_ureq(with_headers(agent.post(&req.url)).send_form(encoded).map_err(map_ureq)?)
-        }
-        ("POST" | "PUT", Body::Bytes(bytes)) => {
-            let with_headers = |mut r: ureq::RequestBuilder<ureq::typestate::WithBody>| -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-                for (k, v) in &req.headers {
-                    r = r.header(k, v);
-                }
-                r
-            };
-            let r = with_headers(if req.method == "POST" { agent.post(&req.url) } else { agent.put(&req.url) });
-            finish_ureq(r.send(&bytes[..]).map_err(map_ureq)?)
-        }
-        ("PUT", Body::File { path, content_type }) => {
-            let mut f = std::fs::File::open(&path).map_err(Error::Io)?;
-            let with_headers = |mut r: ureq::RequestBuilder<ureq::typestate::WithBody>| -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-                for (k, v) in &req.headers {
-                    r = r.header(k, v);
-                }
-                r
-            };
-            let mut r = with_headers(agent.put(&req.url));
-            if let Some(ct) = content_type
-                && !req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            {
-                r = r.header("Content-Type", ct);
-            }
-            finish_ureq(r.send(ureq::SendBody::from_reader(&mut f)).map_err(map_ureq)?)
-        }
-        (method, _) => Err(Error::Http(format!("unsupported request {method} in the transport"))),
-    }
-}
-
-#[cfg(feature = "h12tiny")]
 const H12_MAX_REDIRECTS: usize = 5;
 
-#[cfg(feature = "h12tiny")]
 fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     let location = location.trim();
     if location.starts_with("http://") || location.starts_with("https://") {
@@ -331,7 +191,6 @@ fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     Ok(format!("{scheme}://{authority}{dir}{location}"))
 }
 
-#[cfg(feature = "h12tiny")]
 fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
     use http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
     let mut method = req.method;
@@ -394,9 +253,8 @@ fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
             && let Some(location) = response_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.clone())
         {
             let new_url = resolve_redirect(&url, &location)?;
-            // Never forward credentials across a redirect hop (ureq's
-            // `RedirectAuthHeaders::Never`); the auth header names the
-            // previous origin, so drop it on every hop.
+            // Never forward credentials across a redirect hop; the auth
+            // header names the previous origin, so drop it on every hop.
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case(AUTHORIZATION.as_str()));
             if matches!(status, 301 | 302 | 303) && method != "HEAD" {
                 method = "GET";
@@ -415,7 +273,6 @@ fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
     Err(Error::Http(format!("too many redirects (more than {H12_MAX_REDIRECTS})")))
 }
 
-#[cfg(feature = "h12tiny")]
 impl From<h12tiny_client_sync::Error> for Error {
     fn from(e: h12tiny_client_sync::Error) -> Self {
         Error::Http(format!("h12tiny {:?}: {e}", e.kind()))
