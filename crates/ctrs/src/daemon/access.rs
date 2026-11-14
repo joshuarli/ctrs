@@ -582,8 +582,10 @@ mod tests {
         let _ = Command::new("groupdel").arg("ctrstestg").status();
         run(&["groupadd", "ctrstestg"]);
         run(&["useradd", "-M", "-G", "ctrstestg", "ctrstest"]);
-        let who = uid("ctrstest").unwrap();
-        assert!(members("ctrstestg").unwrap().contains(&"ctrstest".to_owned()));
+        let who = account_by_name(&CString::new("ctrstest").unwrap()).unwrap().unwrap().rec.pw_uid;
+        let g = group_by_name(&CString::new("ctrstestg").unwrap()).unwrap();
+        let listed_names: Vec<String> = names(&g.rec).iter().map(|n| n.to_string_lossy().into_owned()).collect();
+        assert!(listed_names.contains(&"ctrstest".to_owned()));
 
         let dir = Path::new("/dev/shm").join(format!("ctrs-gate-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
