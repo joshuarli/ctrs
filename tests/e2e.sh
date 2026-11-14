@@ -572,9 +572,14 @@ $D rmi kiri-test/alp:v1 >/dev/null 2>&1; rm -rf "$IMD"
 section "docker build (BuildKit in the VM)"
 BD=$(mktemp -d)
 # BuildKit builder for the engine under test, addressed by its endpoint,
-# never through a docker context.
+# never through a docker context. Re-point it every run: a scratch engine
+# gets a fresh socket, and a builder left over from an earlier run would
+# fail every build with no hint why.
 BX=${KIRI_BUILDER:-kiri-build-e2e}
-docker buildx inspect "$BX" >/dev/null 2>&1 || docker buildx create --name "$BX" --driver docker-container --driver-opt default-load=true "unix://$SOCK" >/dev/null
+# `rm -f` removes the config even when its endpoint is dead (it reports
+# failure either way); a fresh builder is then created on the socket.
+docker buildx rm -f "$BX" >/dev/null 2>&1 || true
+docker buildx create --name "$BX" --driver docker-container --driver-opt default-load=true "unix://$SOCK" >/dev/null
 printf 'FROM alpine\nRUN echo built > /built\nARG MSG=default\nRUN echo "$MSG" > /msg\nCOPY data.txt /data.txt\nCMD ["cat","/built","/msg","/data.txt"]\n' > "$BD/Dockerfile"
 echo "from context" > "$BD/data.txt"
 t build "importing to docker" bash -c "cd $BD && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --build-arg MSG=hello -t kiri-test/built . 2>&1"
