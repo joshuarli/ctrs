@@ -25,7 +25,12 @@ pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
     while let Some(req) = match http::read_request(&mut r, &mut w, streams_body) {
         Ok(x) => x,
         Err(e) => {
-            // Framing the client broke is not dispatched: say so, then close.
+            // A peer that went silent past the head deadline is dropped
+            // without an answer; a peer whose framing broke is told so.
+            if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) {
+                crate::diag::info!("connection dropped: no head within the deadline");
+                return Ok(());
+            }
             crate::diag::warn!("malformed HTTP request", error = e);
             let _ = http::error(&mut w, 400, "bad request framing");
             return Ok(());

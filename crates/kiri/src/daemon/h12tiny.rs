@@ -147,7 +147,9 @@ impl hyper::service::Service<hyper::Request<Incoming>> for Pilot {
             let headers: Vec<(String, String)> = parts.headers.iter().map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or("").to_owned())).collect();
             // The pilot only handles buffered bodies; route()'s reader is
             // never consulted for them.
-            let internal = http::Request::internal(&method, &path, &qrefs, body).with_headers(headers);
+            let internal = http::Request::internal(&method, &path, &qrefs, body)
+                .with_headers(headers)
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("framing: {e}").into() })?;
             let body_for_r = internal.body.clone();
             let mut r = BufReader::new(Cursor::new(body_for_r));
 

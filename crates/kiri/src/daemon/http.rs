@@ -21,6 +21,19 @@ const MAX_CHUNK_LINE: u64 = 64;
 const MAX_TRAILER_LINE: u64 = 8 << 10;
 const MAX_TRAILER_FIELDS: usize = 32;
 
+/// Request body framing, parsed exactly once from the head and carried on
+/// the request. The buffered and streamed readers both consume this value;
+/// nothing downstream reinterprets the header lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Framing {
+    /// No body.
+    Empty,
+    /// `Content-Length: n`.
+    ContentLength(u64),
+    /// `Transfer-Encoding: chunked`; the only coding Kiri reads.
+    Chunked,
+}
+
 #[derive(Debug)]
 pub struct Request {
     pub method: String,
@@ -29,6 +42,7 @@ pub struct Request {
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub(crate) framing: Framing,
 }
 
 impl Request {
@@ -52,16 +66,17 @@ impl Request {
 
     /// Replaces the headers after construction (the pilot fills them).
     #[cfg(feature = "h12tiny")]
-    pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> Request {
+    pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> io::Result<Request> {
+        self.framing = parse_framing(&headers)?;
         self.headers = headers;
-        self
+        Ok(self)
     }
 
     /// A request the daemon makes of itself (the managed builder's
     /// container create), so it goes through the same code as a client's.
     pub fn internal(method: &str, path: &str, query: &[(&str, &str)], body: Vec<u8>) -> Request {
         let query = query.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
-        Request { method: method.to_owned(), path: path.to_owned(), query, headers: Vec::new(), body }
+        Request { method: method.to_owned(), path: path.to_owned(), query, headers: Vec::new(), body, framing: Framing::Empty }
     }
 }
 
@@ -120,35 +135,36 @@ fn expects_continue(headers: &[(String, String)]) -> bool {
 /// Contradictory or invalid framing is rejected before dispatch: both
 /// framings at once, mismatched repeated Content-Length, a non-numeric
 /// value, or a Transfer-Encoding Kiri cannot read. Identical repeated
-/// Content-Length values are accepted.
-fn validate_framing(headers: &[(String, String)]) -> io::Result<()> {
+/// Content-Length values are accepted. `chunked` must be the only coding:
+/// a list of chunked codings (`chunked, chunked`) is rejected.
+fn parse_framing(headers: &[(String, String)]) -> io::Result<Framing> {
     let bad = || io::Error::new(io::ErrorKind::InvalidData, "invalid or contradictory framing");
-    let mut te = false;
+    let mut codings: Vec<&str> = Vec::new();
     let mut lengths: Vec<&str> = Vec::new();
     for (k, v) in headers {
         if k.eq_ignore_ascii_case("transfer-encoding") {
-            te = true;
-            for code in v.split(',') {
-                if !code.trim().eq_ignore_ascii_case("chunked") {
-                    return Err(bad());
-                }
-            }
+            codings.extend(v.split(',').map(str::trim));
         } else if k.eq_ignore_ascii_case("content-length") {
             lengths.push(v.trim());
         }
     }
-    if te && !lengths.is_empty() {
-        return Err(bad());
+    if !codings.is_empty() {
+        if codings.len() != 1 || !codings[0].eq_ignore_ascii_case("chunked") {
+            return Err(bad());
+        }
+        if !lengths.is_empty() {
+            return Err(bad());
+        }
+        return Ok(Framing::Chunked);
     }
-    if let Some(first) = lengths.first()
-        && lengths.iter().any(|l| l != first)
-    {
-        return Err(bad());
+    if let Some(first) = lengths.first() {
+        if lengths.iter().any(|l| l != first) {
+            return Err(bad());
+        }
+        let n: u64 = first.parse().map_err(|_| bad())?;
+        return Ok(Framing::ContentLength(n));
     }
-    for l in &lengths {
-        l.parse::<usize>().map_err(|_| bad())?;
-    }
-    Ok(())
+    Ok(Framing::Empty)
 }
 
 /// The request body reader: usually `BufReader<UnixStream>`, but the
@@ -166,7 +182,13 @@ impl<T: BufRead + std::any::Any> DynBufRead for T {
 /// Reads the next request on a connection. `Ok(None)` is a clean close.
 /// When `stream(method, path)` is true the body stays unread: the handler
 /// reads it through [`Body`].
+///
+/// The head is the only phase with a read deadline: a peer that connects
+/// and sends nothing must not hold the thread forever. The body and any
+/// upgraded stream keep no deadline, so legitimate long-running or idle
+/// streams (exec, attach) are never cut.
 pub fn read_request(r: &mut BufReader<UnixStream>, w: &mut UnixStream, stream: impl Fn(&str, &str) -> bool) -> io::Result<Option<Request>> {
+    r.get_ref().set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     // The request line and headers are read through a cap, so a client
     // cannot exhaust memory with an endless line. The body is read after.
     let (method, path, query, headers) = {
@@ -206,17 +228,18 @@ pub fn read_request(r: &mut BufReader<UnixStream>, w: &mut UnixStream, stream: i
         }
         (method, path, query, headers)
     };
-    validate_framing(&headers)?;
+    r.get_ref().set_read_timeout(None)?;
+    let framing = parse_framing(&headers)?;
     if expects_continue(&headers) {
         w.write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
         w.flush()?;
     }
     let streamed = stream(&method, &path);
-    let mut req = Request { method, path, query, headers, body: Vec::new() };
+    let mut req = Request { method, path, query, headers, body: Vec::new(), framing };
     if streamed {
         return Ok(Some(req));
     }
-    if req.header("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked")) {
+    if req.framing == Framing::Chunked {
         loop {
             // A chunk-size line is short hex (plus an optional ;extension).
             let n = read_chunk_size(r)? as usize;
@@ -232,10 +255,11 @@ pub fn read_request(r: &mut BufReader<UnixStream>, w: &mut UnixStream, stream: i
             r.read_exact(&mut req.body[start..])?;
             read_chunk_crlf(r)?;
         }
-    } else if let Some(len) = req.header("content-length").and_then(|v| v.parse::<usize>().ok()) {
-        if len > MAX_BODY {
+    } else if let Framing::ContentLength(len) = req.framing {
+        if len > MAX_BODY as u64 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "request body too large"));
         }
+        let len = len as usize;
         req.body.resize(len, 0);
         r.read_exact(&mut req.body)?;
     }
@@ -253,9 +277,11 @@ pub struct Body<'a> {
 
 impl<'a> Body<'a> {
     pub fn new(req: &Request, r: &'a mut dyn DynBufRead) -> Body<'a> {
-        let chunked = req.header("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
-        let left = if chunked { 0 } else { req.header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0) };
-        Body { r, chunked, left, done: !chunked && left == 0 }
+        match req.framing {
+            Framing::Chunked => Body { r, chunked: true, left: 0, done: false },
+            Framing::ContentLength(n) => Body { r, chunked: false, left: n, done: n == 0 },
+            Framing::Empty => Body { r, chunked: false, left: 0, done: true },
+        }
     }
 }
 
@@ -467,5 +493,60 @@ mod tests {
         assert_eq!(percent_decode("a+b"), "a b");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%7B%22a%22%3A1%7D"), "{\"a\":1}");
+    }
+}
+
+#[cfg(test)]
+mod framing_tests {
+    use super::{Framing, parse_framing};
+
+    fn h(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+    }
+
+    #[test]
+    fn repeated_chunked_is_rejected() {
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "chunked, chunked")])).is_err());
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "chunked"), ("Transfer-Encoding", "chunked")])).is_err());
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "Chunked")])).is_ok());
+    }
+
+    #[test]
+    fn any_non_chunked_coding_is_rejected() {
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "gzip, chunked")])).is_err());
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "gzip")])).is_err());
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "")])).is_err());
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "chunked,")])).is_err());
+    }
+
+    #[test]
+    fn te_and_cl_together_are_rejected() {
+        assert!(parse_framing(&h(&[("Transfer-Encoding", "chunked"), ("Content-Length", "4")])).is_err());
+    }
+
+    #[test]
+    fn identical_repeated_cl_is_accepted() {
+        assert_eq!(parse_framing(&h(&[("Content-Length", "4"), ("Content-Length", "4")])).unwrap(), Framing::ContentLength(4));
+        assert_eq!(parse_framing(&h(&[("Content-Length", " 4 "), ("Content-Length", "4")])).unwrap(), Framing::ContentLength(4));
+    }
+
+    #[test]
+    fn mismatched_or_nonnumeric_cl_is_rejected() {
+        assert!(parse_framing(&h(&[("Content-Length", "4"), ("Content-Length", "5")])).is_err());
+        assert!(parse_framing(&h(&[("Content-Length", "four")])).is_err());
+        assert!(parse_framing(&h(&[("Content-Length", "")])).is_err());
+        // u64 range is all this path needs; the reader caps the buffered size.
+        assert_eq!(parse_framing(&h(&[("Content-Length", "18446744073709551615")])).unwrap(), Framing::ContentLength(u64::MAX));
+    }
+
+    #[test]
+    fn no_framing_headers_is_empty() {
+        assert_eq!(parse_framing(&h(&[])).unwrap(), Framing::Empty);
+        assert_eq!(parse_framing(&h(&[("Host", "x")])).unwrap(), Framing::Empty);
+    }
+
+    #[test]
+    fn chunked_roundtrip_is_recognized_identically() {
+        assert_eq!(parse_framing(&h(&[("transfer-encoding", "chunked")])).unwrap(), Framing::Chunked);
     }
 }

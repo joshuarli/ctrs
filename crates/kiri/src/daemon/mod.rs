@@ -232,10 +232,18 @@ pub fn run(_args: &[String]) -> io::Result<()> {
 
     for conn in listener.incoming() {
         let Ok(conn) = conn else { continue };
+        // Bounded concurrency, counted from accept to thread end.
+        if API_CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= API_MAX_CONNECTIONS {
+            API_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            drop(conn);
+            diag::warn!("api connection refused at the limit", limit = API_MAX_CONNECTIONS);
+            continue;
+        }
         let engine = engine.clone();
         #[cfg(target_os = "linux")]
         let gate = gate.clone();
         let spawned = std::thread::Builder::new().name("kiri-api".into()).spawn(move || {
+            let _admission = ApiConnectionGuard;
             // Checked here, not in the accept loop: a slow user lookup holds up
             // this connection only.
             #[cfg(target_os = "linux")]
@@ -259,10 +267,24 @@ pub fn run(_args: &[String]) -> io::Result<()> {
             let _ = api::serve(conn, engine);
         });
         if let Err(e) = spawned {
+            API_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             diag::error!("cannot start a connection thread", error = e);
         }
     }
     Ok(())
+}
+
+/// The API's connection admission cap. Beyond it, a new connection is
+/// closed immediately; the client sees EOF, never a corrupted response.
+const API_MAX_CONNECTIONS: u64 = 256;
+static API_CONNECTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Releases one admission slot when the connection thread ends.
+struct ApiConnectionGuard;
+impl Drop for ApiConnectionGuard {
+    fn drop(&mut self) {
+        API_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Gives `group` read-write access to the socket.
