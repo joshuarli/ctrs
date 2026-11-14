@@ -1,6 +1,11 @@
 [alias]
 xtask = "run -q --package xtask --"
 
+# Unit tests must not write into the user's real ~/.kiri: diag::state_dir()
+# honors KIRI_STATE_DIR, and cargo's [env] passes it to test binaries.
+[env]
+KIRI_STATE_DIR = { value = ".work/tmp/kiri-test-state", relative = true }
+
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
 # The user's global cargo config injects -B/usr/local/libexec/mold into every

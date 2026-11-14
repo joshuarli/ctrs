@@ -191,9 +191,12 @@ pub fn op_header() -> String {
     op().map(|o| format!("X-Kiri-Op: {o}\r\n")).unwrap_or_default()
 }
 
-/// `~/.kiri` (`~/.kiri-dev` for Kiri Dev).
+/// State directory for logs/crashes/vm.json: `$KIRI_STATE_DIR` if set,
+/// else `~/.kiri` (`~/.kiri-dev` for Kiri Dev).
 pub fn state_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(crate::flavor::STATE.get()))
+    std::env::var_os("KIRI_STATE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(crate::flavor::STATE.get())))
 }
 
 pub fn logs_dir() -> Option<PathBuf> {
