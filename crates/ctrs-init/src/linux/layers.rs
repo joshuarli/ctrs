@@ -347,6 +347,21 @@ mod tests {
             eprintln!("skipped: needs root for mknod");
             return;
         }
+        let probe = scratch("wh-probe");
+        fs::create_dir_all(&probe).unwrap();
+        let probe_path = probe.join("dev");
+        // SAFETY: plain C library call.
+        match sys::cstr(&probe_path).and_then(|p| sys::mknod(&p, libc::S_IFCHR, 0, 0)) {
+            Ok(()) => {
+                let _ = fs::remove_file(&probe_path);
+            }
+            Err(_) => {
+                eprintln!("skipped: this environment forbids mknod of device 0:0");
+                let _ = fs::remove_dir_all(&probe);
+                return;
+            }
+        }
+        let _ = fs::remove_dir_all(&probe);
         use std::os::unix::fs::{FileTypeExt, MetadataExt};
         let dest = scratch("wh-ok");
         fs::create_dir_all(dest.join("etc")).unwrap();
