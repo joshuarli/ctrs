@@ -618,10 +618,12 @@ impl Engine {
         self.ceiling.store(ceiling, std::sync::atomic::Ordering::Relaxed);
         self.cpus.store(cpus, std::sync::atomic::Ordering::Relaxed);
         let t0 = std::time::Instant::now();
+        let console_file = self.store.root().join("vm-console.log");
         let guest = crate::guest::Guest::boot(&crate::guest::BootOptions {
             data_disk: true,
             memory_mib: Some(ceiling >> 20),
             cpus: Some(cpus),
+            console_file: Some(console_file),
             ..Default::default()
         })
         .inspect_err(|e| crate::diag::error!("VM did not boot", error = e))?;
@@ -1175,6 +1177,9 @@ impl Engine {
                 if !self.sleeping.load(std::sync::atomic::Ordering::SeqCst) {
                     self.save();
                     crate::diag::error!("the VM stopped unexpectedly; the next request boots a new one");
+                    if let Some(tail) = vm_console_tail(self.store.root()) {
+                        crate::diag::error!("the guest console tail", tail = tail);
+                    }
                     // A crashed VM: forget it, so the next request boots a fresh one.
                     if let Ok(mut link) = self.link.try_lock() {
                         *link = None;
@@ -3273,4 +3278,25 @@ mod start_exit_tests {
         assert_eq!(super::start_exit_code(&format!("{:?}", super::Error::Conflict("no free address left on network n".into()))), 128);
         assert_eq!(super::start_exit_code(&format!("{:?}", super::Error::NotFound("network x not found".into()))), 128);
     }
+}
+
+/// The last 32 KiB of the captured guest console, for the log when the VM
+/// dies unexpectedly. A kernel oops trace is the one artifact that says why.
+fn vm_console_tail(root: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = root.join("vm-console.log");
+    let len = std::fs::metadata(&path).ok()?.len();
+    let mut file = std::fs::File::open(&path).ok()?;
+    let start = len.saturating_sub(32 * 1024);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut buf).ok()?;
+    let mut s = String::from_utf8_lossy(&buf).into_owned();
+    if start > 0 {
+        if let Some(i) = s.find('\n') {
+            s.replace_range(..=i, "");
+        }
+    }
+    let s = s.trim().to_owned();
+    (!s.is_empty()).then_some(s)
 }

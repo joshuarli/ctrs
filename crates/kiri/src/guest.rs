@@ -16,6 +16,10 @@ use kiri_vmm::{Config, Event, Vm};
 pub struct BootOptions {
     /// Send the guest console to stdout.
     pub console: bool,
+    /// Keep the guest console in a file, replacing the previous boot's file
+    /// (the pre-capture content moves to `<path>.prev`). Used by the daemon
+    /// so a crashed guest's oops trace survives the VM.
+    pub console_file: Option<PathBuf>,
     /// Attach the persistent data disk (layers and containers). Without it
     /// the guest keeps them in memory, which is fine for a quick boot test.
     pub data_disk: bool,
@@ -58,7 +62,7 @@ impl Guest {
             kernel: PathBuf::new(),
             initrd: agent_binary(),
             cmdline: String::new(),
-            console: if opts.console { Some(io::stdout().as_fd().try_clone_to_owned()?) } else { None },
+            console: console_fd(opts)?,
             agent_port: kiri_proto::HOST_PORT,
             disk: None,
             share: None,
@@ -77,7 +81,7 @@ impl Guest {
         // swiotlb=noforce: the VM's virtio devices address all of memory, so
         // the kernel's 64 MB bounce buffer would sit there unused.
         let mut cmdline = String::from("console=hvc0 rdinit=/init panic=-1 rcupdate.rcu_expedited=1 swiotlb=noforce");
-        if !opts.console {
+        if !opts.console && opts.console_file.is_none() {
             cmdline.push_str(" quiet loglevel=0");
         }
         let cfg = Config {
@@ -86,7 +90,7 @@ impl Guest {
             kernel: dir.join(KERNEL),
             initrd: dir.join("initramfs.cpio"),
             cmdline,
-            console: if opts.console { Some(io::stdout().as_fd().try_clone_to_owned()?) } else { None },
+            console: console_fd(opts)?,
             agent_port: kiri_proto::HOST_PORT,
             disk: if opts.data_disk { Some(data_disk(&dir)?) } else { None },
             nat_mac: if opts.data_disk { Some(mac_address()?) } else { None },
@@ -156,6 +160,27 @@ impl Guest {
         self.conn.read_exact(&mut self.frame[4..])?;
         kiri_proto::decode(&self.frame).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))
     }
+}
+
+/// stdout for a debugging session, or the capture file rotated to `.prev`.
+fn console_fd(opts: &BootOptions) -> io::Result<Option<std::os::fd::OwnedFd>> {
+    if opts.console {
+        return Ok(Some(io::stdout().as_fd().try_clone_to_owned()?));
+    }
+    opts.console_file.as_deref().map(open_console_capture).transpose()
+}
+
+/// The capture file for one boot, with the last generation kept as `.prev`.
+fn open_console_capture(path: &std::path::Path) -> io::Result<std::os::fd::OwnedFd> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        let mut prev = path.as_os_str().to_os_string();
+        prev.push(".prev");
+        std::fs::rename(path, PathBuf::from(prev))?;
+    }
+    Ok(std::fs::OpenOptions::new().create(true).append(true).open(path)?.into())
 }
 
 /// The agent on a Linux host: `KIRI_AGENT`, else `kiri-init` beside `kiri`.

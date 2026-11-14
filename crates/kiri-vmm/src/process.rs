@@ -86,8 +86,13 @@ impl Vm {
         })?;
         let mut cmd = Command::new(&cfg.initrd);
         cmd.env("KIRI_AGENT_DIR", &dir).env_remove("KIRI_SOCKET");
-        if cfg.console.is_none() {
-            cmd.stdout(std::process::Stdio::null());
+        match cfg.console {
+            Some(fd) => {
+                cmd.stdout(std::process::Stdio::from(fd));
+            }
+            None => {
+                cmd.stdout(std::process::Stdio::null());
+            }
         }
         let child = Arc::new(Mutex::new(cmd.spawn().map_err(|e| io::Error::new(e.kind(), format!("starting {}: {e}", cfg.initrd.display())))?));
         let (waiter, tx) = (child.clone(), sender);
