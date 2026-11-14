@@ -31,10 +31,10 @@ use super::http::{self, Request};
 /// The image buildx's docker-container driver runs, by the tag it uses: an
 /// image already pulled under it is used as it is.
 pub const IMAGE: &str = "moby/buildkit:buildx-stable-1";
-/// What a fresh pull fetches: that tag's index on 2026-10-30 (BuildKit
-/// 0.2x), pinned so every ctrs builds with the same BuildKit. Stored under
-/// [`IMAGE`]. Moving the pin changes nothing for an image already pulled.
-const PINNED: &str = "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea";
+/// What a fresh pull fetches: the frozen `v0.35.0` index (QEMU 10.2.3,
+/// buildkitd f55949de), chosen at P0. Stored under [`IMAGE`]. Moving the pin
+/// changes nothing for an image already pulled.
+const PINNED: &str = "moby/buildkit@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb";
 /// Marks the container as ctrs's builder. It stays in `docker ps`, as
 /// buildx's does on any engine.
 const LABEL: &str = "dev.ctrs.builder";
@@ -167,28 +167,32 @@ pub fn set_settings(req: &Request) -> Result<(), Error> {
 // --- The container -------------------------------------------------------
 
 /// The BuildKit image, pulled (by [`PINNED`]) if it isn't here yet.
+///
+/// Provisioning does not trust the tag: buildx re-resolves
+/// `moby/buildkit:buildx-stable-1` against the registry on every builder
+/// init and the store replaces a tag's record by name, so the tag can
+/// displace whatever ctrs stored under it. The builder therefore runs from
+/// the pin's digest reference; the tag record is kept for visibility only.
 fn ensure_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_image::Image, Error> {
-    if let Some(i) = engine.image(IMAGE)? {
+    if let Some(i) = engine.image(PINNED)? {
         return Ok(i);
     }
     let _p = PULL.lock().unwrap_or_else(|e| e.into_inner());
     // Pulled meanwhile by whoever had the lock.
-    if let Some(i) = engine.image(IMAGE)? {
+    if let Some(i) = engine.image(PINNED)? {
         return Ok(i);
     }
-    say(&format!("Pulling {IMAGE} for ctrs's builder"));
+    say(&format!("Pulling {PINNED} for ctrs's builder"));
     let reference = Reference::parse(PINNED).map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
     let pulled = Client::new()
         .pull(&engine.store, &reference, &Platform::host_linux(), &|_| {})
-        .map_err(|e| Error::Io(io::Error::other(format!("pulling {IMAGE}: {e}"))))?;
+        .map_err(|e| Error::Io(io::Error::other(format!("pulling {PINNED}: {e}"))))?;
+    // Visibility under the tag buildx asks for; the builder itself uses
+    // the digest reference.
     let name = Reference::parse(IMAGE).map(|r| r.short()).unwrap_or_else(|_| IMAGE.to_owned());
     engine.store.put_image(ctrs_image::Image { name: name.clone(), ..pulled.clone() })?;
-    // Known by its tag only: the blobs stay, the tagged record uses them.
-    if pulled.name != name {
-        let _ = engine.store.remove_image(&pulled.name);
-    }
     engine.emit_image("pull", &pulled.config_digest, &name);
-    engine.image(IMAGE)?.ok_or_else(|| Error::Io(io::Error::other(format!("{IMAGE} vanished after its pull"))))
+    engine.image(PINNED)?.ok_or_else(|| Error::Io(io::Error::other(format!("{PINNED} vanished after its pull"))))
 }
 
 /// The body of the builder's create: what buildx's docker-container driver
@@ -196,7 +200,7 @@ fn ensure_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_image
 /// buildkitd flag), without a restart policy, since it starts on demand.
 fn create_body() -> Value {
     json!({
-        "Image": IMAGE,
+        "Image": PINNED,
         "Cmd": ["--allow-insecure-entitlement=network.host"],
         "Labels": {LABEL: "1"},
         "HostConfig": {

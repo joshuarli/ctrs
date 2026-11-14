@@ -1,9 +1,12 @@
 # ARM64 builds on AMD64 Linux — evidence
 
-Date: 2026-11-14. Verdict: **P0 baseline established; BuildKit v0.35.0
-chosen as the pin candidate (not yet qualified); no slice beyond P0 has
-landed. Every "Needs environment" row below is unproven until its command
-passes.**
+Date: 2026-11-14. Verdict: **P0 done; S1 done. The managed builder now runs
+the frozen v0.35.0 candidate and the compatibility suite is green (both
+entry points, AMD64 control, ARM64 musl/glibc). Handler-free (binfmt-
+independent) proof is unavailable on this host: one global binfmt_misc
+instance serves every namespace, so BuildKit treats arm64 as "supported"
+and no isolated namespace can be emptied. That proof remains Needs
+environment.**
 
 This file is the parity register for the slices in `qemu-accel.md`. Rows
 name the case, the proof command and the evidence. Nothing here is a claim
@@ -120,9 +123,72 @@ line; no `v0.35.x` patch exists yet. The observed unrelated host builder
 `buildx_buildkit_musl-publish0` (BuildKit v0.34.2, QEMU 10.2.3, running; not
 ctrs-owned, not a pin source) was probed read-only and left alone.
 
+`moby/buildkit:buildx-stable-1` (the historical tag) points at
+`sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe`
+today (v0.34.2 content; the tag lags v0.35.0). A pull-by-tag of the moving
+tag can never durably represent the frozen pin.
+
 The managed image identity will be defined once in `daemon/builder.rs`
 (index-to-index, manifest-to-manifest, config-to-image-ID), per S2. A tag or
-version string alone never proves identity.
+version string alone never proves identity. Provisioning no longer depends
+on the tag (see S1 below).
+
+## S1 — foreign builds through both entry points (2026-11-14, landed)
+
+`bash tests/arm64-build.sh --case compatibility` is **green** (39 s after
+provisioning, 24 checks): AMD64 native control and ARM64 musl/glibc
+shell/child/script via **buildx** (`--builder ctrs-build`, default-load)
+and via ctrs's **classic POST /build** (`DOCKER_BUILDKIT=0 docker build`).
+All six builds executed the fixture's guest script; computed
+`sha256("ctrs-arm64-qualification\n")` matched the fixture contract in
+every build; child exit status propagated (a nonzero child fails the
+build); the loaded image's `/bin/busybox` (musl) and `/bin/dash` (glibc)
+ELFs report `e_machine 0xb7` (ARM64) for the ARM64 images and `0x3e` for
+AMD64; loaded image metadata reports `linux/arm64` / `linux/amd64`.
+Live-process evidence during a deliberately slow marker RUN captured
+`/usr/bin/qemu-aarch64 /bin/sh … arm64-qualification-slow-marker` in the
+host process table. Host binfmt registrations were fingerprinted
+before/after every run and were unchanged. The managed builder is
+`v0.35.0 f55949de` (asserted via `buildkitd --version` inside it).
+
+Findings that S2/S3 must deal with (not fixed in S1):
+
+- **Provisioning no longer reads the tag.** `ensure_image()` used to
+  return a tagged local image before considering `PINNED`, and the store
+  replaces a tag's record by name — while buildx re-resolves the moving
+  `buildx-stable-1` tag on every builder init. On this host that silently
+  displaced the pin (first S1 runs qualified v0.34.2, not v0.35.0). The
+  managed builder now provisions from the pin's digest reference; the tag
+  record is kept for visibility only. `create_body` uses the digest
+  reference as well, so the container always carries pin content.
+- **First create per builder gets a transient 400, then buildx's retry
+  succeeds** (both the intercepted and the plain path, reproducible). The
+  tag pull completes and 1 ms later the first `POST /containers/create`
+  is rejected; the immediate retry is accepted. Root cause not yet
+  established; the request-failure WARN line logs neither query nor body,
+  which is a diagnostics gap (see S2). It does not corrupt anything, but
+  it makes every fresh builder bring-up log a spurious 400.
+- **`docker build` without a builder flag silently selects a default
+  docker-container builder** pulling `moby/buildkit:buildx-stable-1` (the
+  moving tag), bypassing `ctrs-build`. Plain builds must pin
+  `--builder ctrs-build`; classic must force `DOCKER_BUILDKIT=0`.
+- **BuildKit's `SupportedPlatforms` probes binfmt support** (it chroots a
+  small static foreign binary). On hosts with a working qemu-aarch64
+  registration — like this one — BuildKit considers `linux/arm64`
+  "supported" and serves RUN steps directly through the host handler, no
+  argv-wrapping, **bundled emulator unused**. The `emulator-mount`
+  marker (`yes`/no) distinguishes the two backends in every build log; the
+  runner asserts `no` for amd64 and records which backend served arm64.
+- **binfmt_misc is one global instance on this host.** A fresh private
+  mount namespace mounting a new binfmt_misc still shows the host's
+  registrations (`qemu-aarch64`); the shared handler services every
+  namespace. Handler-free qualification is unavailable here and is
+  reported as such by `--require-no-binfmt` (which fails closed).
+- `docker cp` of a file behind merged-`/usr` symlinks (`/bin/dash` →
+  `/usr/bin/dash`) logs one 400 GET-archive before succeeding. Benign;
+  noted for S2/S3 diagnostics.
+- `buildx-stable-1` today is v0.34.2 content; v0.35.0 is newer and the
+  tag lags upstream `[Latest]`. Record when re-checking the pin.
 
 ## Harness: `tests/linux-host.sh` (P0 change)
 
@@ -148,7 +214,7 @@ pre-ownership `die` is side-effect free.
 | Proof | Prerequisite and command | status |
 | --- | --- | --- |
 | AMD64 Linux ctrs runtime | Root-capable isolated namespaces/cgroup environment; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` | **passed 2026-11-14, twice, 28/28** (isolated prefix/ports/config; SIGTERM log preservation verified) |
-| No foreign host handlers | Fresh dedicated AMD64 host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt` | **unavailable here** (host has `qemu-aarch64` POCF; `--require-no-binfmt` fails closed as designed). Handler independence for the S1 suite must be probe-proven inside a fresh privileged namespace, else it stays unavailable |
+| No foreign host handlers | Fresh dedicated AMD64 host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt`; runner must fail closed if any foreign handler can service the test | **Unavailable on this host (2026-11-14): one global binfmt_misc instance serves every namespace; a fresh private-mount instance still shows `qemu-aarch64` POCF. The ordinary compatibility case passed with a host handler visible (and says so per backend). `--require-no-binfmt` fails closed, exit 1, creating nothing. The bundled-emulator path was never exercised here — it needs a dedicated host or VM without a foreign handler** |
 | macOS regression | Apple Silicon macOS; `cargo test --workspace`, `cargo xtask all`, `conformance/smoke.sh` | **not available on this host** |
 | Performance | Idle AMD64 machine passing both perf-gate checks; `bash bench/arm64-build.sh --samples 5 --all-states` | **unavailable here** (S6; host is loaded actively-used workstation; also macOS CI-only gates not applicable) |
 | Hosted CI result | Separately authorized push/run | **not authorized by this campaign** |
@@ -158,7 +224,7 @@ pre-ownership `die` is side-effect free.
 
 | deliverable | case / command | status |
 | --- | --- | --- |
-| native AMD64; ARM64 musl/glibc via both entry points | `--case compatibility` (S1) | not implemented |
+| native AMD64; ARM64 musl/glibc via both entry points | `--case compatibility` (S1) | **passing 2026-11-14 (24 checks; 6 builds + process evidence; host handler visible, unproven independent)** |
 | managed identity, reconciliation, ownership | `--case identity` (S2) | not implemented |
 | pull/build/export/load/inspect metadata | `--case platform` (S3) | not implemented |
 | native compilers, static AArch64 output | `--case cross` (S4) | not implemented |
