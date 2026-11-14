@@ -1,12 +1,14 @@
 # ARM64 builds on AMD64 Linux — evidence
 
-Date: 2026-11-14. Verdict: **P0 done; S1 done. The managed builder now runs
-the frozen v0.35.0 candidate and the compatibility suite is green (both
-entry points, AMD64 control, ARM64 musl/glibc). Handler-free (binfmt-
-independent) proof is unavailable on this host: one global binfmt_misc
-instance serves every namespace, so BuildKit treats arm64 as "supported"
-and no isolated namespace can be emptied. That proof remains Needs
-environment.**
+Date: 2026-11-14. Verdict: **P0 done; S1 done; S2 done. The managed
+builder now reconciles a stopped stale builder to the frozen v0.35.0
+pin (fresh provisioning, cache preserved), refuses actionably on stale
+running/paused and foreign same-name containers, reports
+desired/actual/tag/upgrade diagnostics, and the identity suite is green.
+Handler-free (binfmt-independent) proof is unavailable on this host: one
+global binfmt_misc instance serves every namespace, so BuildKit treats
+arm64 as "supported" and no isolated namespace can be emptied. That
+proof remains Needs environment.**
 
 This file is the parity register for the slices in `qemu-accel.md`. Rows
 name the case, the proof command and the evidence. Nothing here is a claim
@@ -209,10 +211,108 @@ by-name container the run had not created; refusal now clears names and
 removes only the run's own scratch before the trap is installed, and every
 pre-ownership `die` is side-effect free.
 
-## Needs environment (statuses at P0)
+## S2 — managed identity, safe reconciliation, diagnostics (2026-11-14, landed)
+
+`bash tests/arm64-build.sh --case identity` is **green** (40 checks,
+~45–60 s after provisioning, warm cache): fresh install; first-build
+provisioning; matching stop/restart reuse (container id unchanged, cache
+reused); stale tag record detected and never consulted; stale *stopped*
+builder replaced by the next build; cache volume sentinel preserved across
+replacement and across remove-and-recreate (interrupted replacement); old
+(stale) container ids unresolvable after replacement; a stale tag, a stale
+stopped container, a foreign same-name container (refused actionably by
+build, start and exec with `dev.ctrs.builder` named), failed pull on upgrade
+(stale builder preserved, pull error surfaced to the caller), DNS-blackhole
+restore verified, two simultaneous callers producing exactly one builder,
+buildx against the reconciled builder, host/harness docker contexts
+unchanged, and a final `GET /ctrs/builder` reporting `matches_desired:true`,
+`upgrade:"none"`. `--case compatibility` re-verified **24/24** on the S2
+artifacts; `cargo test -p ctrs daemon` **131 passed**; `cargo check
+--workspace` clean.
+
+The upgrade drift a previous release would have produced is simulated in the
+runner by forging the builder's record in the engine's state store
+(`containers.json`) while the harness daemon is stopped, then restarting it:
+the next build sees a stale-stopped owned builder and reconciles it. This is
+the only drift state plantable through public means, and it is honest about
+what it is. Not plantable end-to-end, and covered by unit tests instead:
+
+- **Stale running/paused refused with live work.** A record whose container
+  died is reconciled to `exited` at daemon boot (`was_running → Exited`,
+  `exit 255`, `vm_stopped`), and `paused` is not persisted, so a stale
+  running/paused builder cannot exist across the only transition that
+  produces stale images (a ctrs upgrade). The refusal paths
+  (`before_start`, `exec_session_gate`, build admission) exist and fire
+  before any mutation; the classifier matrix for them is unit-tested
+  (`assessment_matrix`, including paused and foreign), and the e2e run
+  asserts the refusal text for the stopped-builder exec gate and for the
+  foreign build/start/exec gates. Nothing in this tree stops, pauses or
+  removes a running/paused stale builder; sessions drain.
+
+Findings (S2 scope):
+
+- **Provisioning re-verifies the pin under the lifecycle boundary before
+  any remove/create**, purely locally (record triple + config-blob hash +
+  os/arch); registry I/O never happens under `ENSURE`. `desired_image`
+  re-pulls a record that fails verification instead of erroring on it
+  forever (a pre-review defect: every build would have failed the same
+  way). `create_locked` refuses to create without local verification.
+- **A failed pull on upgrade leaves the previous state untouched.** With
+  the pin record removed (`docker rmi` by digest) and DNS blackholed inside
+  the harness, the build failed citing the pin's digest; the stale builder
+  and the cache volume were intact; restoring DNS let the next build pull
+  and reconcile. ctrs does not create the replacement before the pin
+  verifies.
+- **`docker restart` gates before mutating.** A paused foreign or stale
+  builder is refused with no stop, unpause, or signal sent (previously the
+  stop ran first; a stale running builder would have been SIGTERMed,
+  replaced and reported 409). A stale stopped builder replaces with the
+  pin behind a 409 "not applied — retry" boundary; a removed id is never
+  reported as restarted. A nonexistent id maps to NotFound (404) by the
+  error table.
+- **buildx against a stale running/paused builder gets the actionable
+  error at create time** (not a bare "name in use"), in addition to the
+  start- and exec-gate refusals; the classic path self-heals a stale
+  stopped builder (next build replaces it).
+- **Diagnostics** (`GET /ctrs/builder`, read-only, never pulls/starts/
+  mutates): `desired` (pin triple + source provenance), `actual` (present,
+  name, short id, state, paused, owned, image_ref, image_id,
+  `matches_desired`, `buildkit_version`, `emulator_version`, `created`),
+  `tag` (`moby/buildkit:buildx-stable-1` record vs pin:
+  `matches_pin` — the stale-tag detector; observed `false` on this host,
+  provisioning unaffected), `upgrade`/`upgrade_detail`
+  (`none`/`pending`/`conflict`), `capability` (`unknown` with reason;
+  advertised platforms are not verification). Version strings are
+  cryptographic observations of the verified image id (the frozen pin),
+  else `unknown`.
+- **Diagnostics hygiene**: request-failure lines now carry method, path
+  and (re-encoded) query on 4xx/5xx; a rejected builder create logs the
+  error and the builder name (the client body is not logged; ctrs's own
+  internal create logs its fixed template body). Query values can no
+  longer forge log fields. This is the fix for the S1-flagged transient
+  first-create 400 diagnostics gap — the root cause is still open, but
+  the next occurrence will carry the query.
+- **The VM-sleep path now only pauses/stops ctrs-owned builders**
+  (`dev.ctrs.builder=1`); a foreign same-name builder is treated as an
+  ordinary container (never frozen, stopped or paused by ctrs's idle
+  watcher). User-owned buildx builders on a ctrs engine lose idle-pause
+  and will keep the VM awake — the conservative choice, recorded as an
+  owner-visible trade-off.
+- **Independent review** (read-only, uncommitted S2 diff): three High
+  defects (provisioning dead-end after a corrupt record; restart
+  mutating before the ownership gate; reconcile creating without local
+  verification under the boundary), two Medium, three Low — all fixed and
+  re-verified; nothing else held up.
+- The failed-pull phase surfaced two harness defects (cp onto the
+  bind-mounted `/etc/resolv.conf` — fixed by write-through restore with a
+  post-restore check; stale-digest-rmi ordering after the forge — fixed),
+  no product defects.
+
+## Needs environment (statuses at P0+S2)
 
 | Proof | Prerequisite and command | status |
 | --- | --- | --- |
+| Live-drain of a stale running/paused builder end-to-end | A stale builder with live sessions kept running across a ctrs upgrade — unreachable on this host: a dead "running" record reconciles to exited at daemon boot (exit 255), and `paused` is not persisted. The refusal gates fire before any mutation; the classifier matrix is unit-tested (`assessment_matrix`) | **Unreachable end-to-end with today's product semantics (see S2 findings); unit matrix only** |
 | AMD64 Linux ctrs runtime | Root-capable isolated namespaces/cgroup environment; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` | **passed 2026-11-14, twice, 28/28** (isolated prefix/ports/config; SIGTERM log preservation verified) |
 | No foreign host handlers | Fresh dedicated AMD64 host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt`; runner must fail closed if any foreign handler can service the test | **Unavailable on this host (2026-11-14): one global binfmt_misc instance serves every namespace; a fresh private-mount instance still shows `qemu-aarch64` POCF. The ordinary compatibility case passed with a host handler visible (and says so per backend). `--require-no-binfmt` fails closed, exit 1, creating nothing. The bundled-emulator path was never exercised here — it needs a dedicated host or VM without a foreign handler** |
 | macOS regression | Apple Silicon macOS; `cargo test --workspace`, `cargo xtask all`, `conformance/smoke.sh` | **not available on this host** |
@@ -225,7 +325,7 @@ pre-ownership `die` is side-effect free.
 | deliverable | case / command | status |
 | --- | --- | --- |
 | native AMD64; ARM64 musl/glibc via both entry points | `--case compatibility` (S1) | **passing 2026-11-14 (24 checks; 6 builds + process evidence; host handler visible, unproven independent)** |
-| managed identity, reconciliation, ownership | `--case identity` (S2) | not implemented |
+| managed identity, reconciliation, ownership | `--case identity` (S2) | **passing 2026-11-14 (40 checks; fresh install, matching reuse, stale tag, stale stopped replace, failed pull, interrupt recovery, simultaneous callers, foreign conflict, cache sentinel, buildx path; host/harness contexts unchanged)** |
 | pull/build/export/load/inspect metadata | `--case platform` (S3) | not implemented |
 | native compilers, static AArch64 output | `--case cross` (S4) | not implemented |
 | cancel/failure/cleanup, emulator diagnostics | `--case lifecycle` (S5) | not implemented |

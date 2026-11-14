@@ -2918,9 +2918,16 @@ fn note_removed(st: &mut State, id: &str, code: i32) {
     }
 }
 
-/// A BuildKit daemon that buildx runs for its docker-container driver.
+/// A BuildKit daemon that buildx runs for its docker-container driver,
+/// owned by ctrs (name prefix and ctrs's builder label). ctrs never
+/// freezes, stops or pauses a foreign same-name container on the sleep
+/// path: pause is reversible, stop destroys state — neither is ctrs's
+/// call for a container it does not own.
 fn is_builder(c: &Container) -> bool {
-    c.name.starts_with("buildx_buildkit_")
+    if !c.name.starts_with("buildx_buildkit_") {
+        return false;
+    }
+    c.spec.labels.as_object().is_some_and(|l| l.get("dev.ctrs.builder").is_some_and(|v| v == "1"))
 }
 
 fn resolve(st: &State, key: &str) -> Result<String, Error> {

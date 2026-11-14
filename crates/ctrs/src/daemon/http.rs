@@ -50,6 +50,21 @@ impl Request {
         self.query.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
     }
 
+    /// The query, for diagnostics: `a=1&b=2`, decoded and re-encoded so a
+    /// value can never forge another log field. Never contains credentials
+    /// (auth rides in headers, which are never logged).
+    pub fn query_string(&self) -> String {
+        fn encode(s: &str) -> String {
+            s.bytes()
+                .map(|b| match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+                    _ => format!("%{b:02X}"),
+                })
+                .collect()
+        }
+        self.query.iter().map(|(k, v)| if v.is_empty() { encode(k) } else { format!("{}={}", encode(k), encode(v)) }).collect::<Vec<_>>().join("&")
+    }
+
     /// Every value of a repeated key (`names=a&names=b`).
     pub fn queries<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a str> + 'a {
         self.query.iter().filter(move |(k, _)| k == key).map(|(_, v)| v.as_str())
@@ -363,24 +378,25 @@ fn reason(status: u16) -> &'static str {
 
 thread_local! {
     /// The request this connection thread is answering, for the log.
-    static SERVING: std::cell::RefCell<(String, String)> = const { std::cell::RefCell::new((String::new(), String::new())) };
+    static SERVING: std::cell::RefCell<(String, String, String)> = const { std::cell::RefCell::new((String::new(), String::new(), String::new())) };
 }
 
 /// Notes the request being answered: a failure status written for it is
-/// logged with its method and path (never its query or body).
-pub fn serving(method: &str, path: &str) {
-    SERVING.with(|s| *s.borrow_mut() = (method.to_owned(), path.to_owned()));
+/// logged with its method, path and (re-encoded) query; never headers, body
+/// or credentials.
+pub fn serving(method: &str, path: &str, query: &str) {
+    SERVING.with(|s| *s.borrow_mut() = (method.to_owned(), path.to_owned(), query.to_owned()));
 }
 
 /// Engine API failures in the log: 5xx as errors, 4xx as warnings, except
 /// 404s, which clients use to ask (does this image exist yet?).
 fn note_failure(status: u16) {
     SERVING.with(|s| {
-        let (method, path) = &*s.borrow();
+        let (method, path, query) = &*s.borrow();
         match status {
-            404 => crate::diag::debug!("request failed", method = method, path = path, status = status),
-            400..=499 => crate::diag::warn!("request failed", method = method, path = path, status = status),
-            _ => crate::diag::error!("request failed", method = method, path = path, status = status),
+            404 => crate::diag::debug!("request failed", method = method, path = path, query = query.as_str(), status = status),
+            400..=499 => crate::diag::warn!("request failed", method = method, path = path, query = query.as_str(), status = status),
+            _ => crate::diag::error!("request failed", method = method, path = path, query = query.as_str(), status = status),
         }
     });
 }

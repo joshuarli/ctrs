@@ -39,7 +39,7 @@ pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
         // The window's action this request is part of: the engine's lines
         // for it carry the same op.
         let _op = req.header("X-Ctrs-Op").filter(|o| crate::diag::valid_op(o)).map(|o| crate::diag::enter_op(o.to_owned()));
-        http::serving(&req.method, &req.path);
+        http::serving(&req.method, &req.path, &req.query_string());
         // Ctrs's own window checks in every few seconds; that isn't use, and
         // counting it would keep the VM from ever sleeping while it's open.
         if req.header("X-Ctrs-Background").is_none() {
@@ -166,6 +166,9 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
         }
         ("POST", "/containers/create") => {
             if let Some(made) = super::builder::create_for_buildx(engine, req.query("name")) {
+                if let Err(e) = &made {
+                    crate::diag::warn!("builder create rejected", name = req.query("name").unwrap_or(""), error = format!("{e:?}"));
+                }
                 return reply(w, made, 201);
             }
             return reply(w, create(req, engine), 201);
@@ -205,22 +208,42 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
         match (m, action) {
             ("GET", "json") => return reply(w, container_inspect(engine, id), 200),
             ("POST", "start") => {
-                super::builder::before_start(engine, id);
-                return reply(w, engine.start(id).map(|()| Value::Null), 204);
+                use super::builder::BuilderBoot;
+                match super::builder::before_start(engine, id) {
+                    BuilderBoot::Clean => return reply(w, engine.start(id).map(|()| Value::Null), 204),
+                    BuilderBoot::Replaced => {
+                        return reply(w, Err(Error::Conflict("ctrs's builder was replaced with the pinned image while starting; the request was not applied — retry the build".into())), 409);
+                    }
+                    BuilderBoot::Conflict(e) => return reply(w, Err(e), 409),
+                }
             }
             ("POST", "stop") => {
                 let t = stop_timeout(req, engine, id);
                 return reply(w, engine.stop(id, t).map(|()| Value::Null), 204);
             }
             ("POST", "restart") => {
-                let t = stop_timeout(req, engine, id);
-                let r = engine.stop(id, t).and_then(|()| {
-                    // Wait for the exit to be recorded before starting again.
-                    engine.wait(id, "not-running")?;
-                    super::builder::before_start(engine, id);
-                    engine.start(id)
-                });
-                return reply(w, r.map(|()| Value::Null), 204);
+                use super::builder::BuilderBoot;
+                // The ownership/stale gate runs before any mutation: a
+                // paused foreign or stale builder is refused untouched,
+                // instead of being SIGTERMed first.
+                match super::builder::before_start(engine, id) {
+                    BuilderBoot::Clean => {
+                        let t = stop_timeout(req, engine, id);
+                        let stopped = engine.stop(id, t).and_then(|()| {
+                            // Wait for the exit to be recorded before starting again.
+                            engine.wait(id, "not-running")?;
+                            Ok(())
+                        });
+                        match stopped {
+                            Ok(()) => return reply(w, engine.start(id).map(|()| Value::Null), 204),
+                            Err(e) => return reply(w, Err(e), 409),
+                        }
+                    }
+                    BuilderBoot::Replaced => {
+                        return reply(w, Err(Error::Conflict("ctrs's builder was replaced with the pinned image while restarting; the request was not applied — retry the build".into())), 409);
+                    }
+                    BuilderBoot::Conflict(e) => return reply(w, Err(e), 409),
+                }
             }
             ("POST", "kill") => {
                 let r = parse_signal(req.query("signal").filter(|s| !s.is_empty()).unwrap_or("KILL")).and_then(|sig| engine.kill(id, sig));
@@ -2154,6 +2177,11 @@ fn resize(req: &Request, engine: &Engine, key: &str) -> Result<(), Error> {
 
 fn exec_create(req: &Request, engine: &Engine, key: &str) -> Result<Value, Error> {
     let body: Value = serde_json::from_slice(&req.body).map_err(|e| Error::BadRequest(format!("invalid JSON: {e}")))?;
+    // The managed builder refuses new sessions while it is stale or foreign;
+    // draining sessions are untouched.
+    if let Some(e) = super::builder::exec_session_gate(engine, key) {
+        return Err(e);
+    }
     let config = ExecConfig {
         console_size: console_size(&body["ConsoleSize"]),
         argv: strings(&body["Cmd"]).unwrap_or_default(),

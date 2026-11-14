@@ -21,20 +21,74 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use ctrs_image::{Client, Platform, Reference};
+use ctrs_image::{Client, Reference};
 use ctrs_proto::Stream;
 
 use super::api::{self, Next};
 use super::engine::{Engine, Error, ExecConfig, Status};
 use super::http::{self, Request};
 
-/// The image buildx's docker-container driver runs, by the tag it uses: an
-/// image already pulled under it is used as it is.
+/// The image buildx's docker-container driver runs, by the tag it uses. A
+/// ctrs-owned builder never depends on it: provisioning resolves the
+/// immutable pin, not this mutable tag.
 pub const IMAGE: &str = "moby/buildkit:buildx-stable-1";
-/// What a fresh pull fetches: the frozen `v0.35.0` index (QEMU 10.2.3,
-/// buildkitd f55949de), chosen at P0. Stored under [`IMAGE`]. Moving the pin
-/// changes nothing for an image already pulled.
+/// The frozen managed identity (2026-11-14): the index of
+/// `moby/buildkit:v0.35.0`, its per-platform manifests and configs, and the
+/// version they report. Index to index, manifest to manifest, config to
+/// container image ID — a tag or version string never proves identity.
 const PINNED: &str = "moby/buildkit@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb";
+const PINNED_VERSION: &str = "v0.35.0";
+const PINNED_EMULATOR: &str = "QEMU 10.2.3";
+
+struct ManagedIdentity {
+    os_arch: &'static str,
+    index: &'static str,
+    manifest: &'static str,
+    config: &'static str,
+}
+
+const IDENTITY_AMD64: ManagedIdentity = ManagedIdentity {
+    os_arch: "linux/amd64",
+    index: "sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb",
+    manifest: "sha256:a521fc1fd903a46c611c733dd692548512232fba2e0386d6055846a903d05a71",
+    config: "sha256:04715b97f7210e7d3fa070701cc44fbd15b2bfceeecf060b2bbba8237c60a9fb",
+};
+const IDENTITY_ARM64: ManagedIdentity = ManagedIdentity {
+    os_arch: "linux/arm64",
+    index: "sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb",
+    manifest: "sha256:7dc61a9fab7c7f5a50b1cdbbefa4180829e68c6c0172206eb54ad934de097ddf",
+    config: "sha256:8429389a5051c2dd8247d6d78f82e8960e03e7e9935561d202c6f9cf05a0e016",
+};
+
+/// The managed identity selected for this host, by the same rule the pull
+/// uses to pick a platform out of the index.
+fn managed() -> &'static ManagedIdentity {
+    match ctrs_image::Platform::host_linux().architecture.as_str() {
+        "arm64" | "aarch64" => &IDENTITY_ARM64,
+        _ => &IDENTITY_AMD64,
+    }
+}
+
+/// What BuildKit version a container runs, by its verified image ID (the
+/// config digest of the image it was created from); `unknown` for custom
+/// images. This is a cryptographic observation, not a probe.
+fn buildkit_version_of(image_id: &str) -> &'static str {
+    if image_id == IDENTITY_AMD64.config || image_id == IDENTITY_ARM64.config {
+        PINNED_VERSION
+    } else {
+        "unknown"
+    }
+}
+
+/// The bundled emulator version for an image ID, as above; custom images
+/// report `unknown`.
+fn emulator_version_of(image_id: &str) -> &'static str {
+    if image_id == IDENTITY_AMD64.config || image_id == IDENTITY_ARM64.config {
+        PINNED_EMULATOR
+    } else {
+        "unknown"
+    }
+}
 /// Marks the container as ctrs's builder. It stays in `docker ps`, as
 /// buildx's does on any engine.
 const LABEL: &str = "dev.ctrs.builder";
@@ -71,10 +125,112 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// The builder container, if there is one: (id, status).
-fn find(engine: &Engine) -> Option<(String, Status)> {
-    let name = container_name();
-    engine.each(|c| (c.name == name).then(|| (c.id.clone(), c.status))).into_iter().next()
+/// The builder container as one record, or none. Owned means carrying
+/// ctrs's builder label at create time.
+#[derive(Debug, Clone)]
+pub struct BuilderSnapshot {
+    pub id: String,
+    pub name: String,
+    pub status: Status,
+    pub paused: bool,
+    /// The image reference the container was created from.
+    pub image: String,
+    /// The image ID the container was created from: the config digest.
+    pub image_id: String,
+    pub owned: bool,
+    pub created: SystemTime,
+}
+
+fn snapshot(c: &super::engine::Container) -> BuilderSnapshot {
+    BuilderSnapshot {
+        id: c.id.clone(),
+        name: c.name.clone(),
+        status: c.status,
+        paused: c.paused,
+        image: c.spec.image.clone(),
+        image_id: c.spec.image_id.clone(),
+        owned: c.spec.labels.as_object().is_some_and(|l| l.get(LABEL).is_some_and(|v| v == "1")),
+        created: c.created,
+    }
+}
+
+/// The builder snapshot for a name or container id (id prefixes of 12+),
+/// or none.
+fn snapshot_for(engine: &Engine, key: &str) -> Option<BuilderSnapshot> {
+    let key = key.trim_start_matches('/');
+    engine
+        .each(|c| (c.name == key || c.id == key || (key.len() >= 12 && c.id.starts_with(key))).then(|| snapshot(c)))
+        .into_iter()
+        .next()
+}
+
+fn find(engine: &Engine) -> Option<BuilderSnapshot> {
+    snapshot_for(engine, &container_name())
+}
+
+/// What the engine holds against the managed pin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Assessment {
+    /// No builder container.
+    Fresh,
+    /// ctrs-owned and created from the pinned image.
+    Matching,
+    /// ctrs-owned, stopped, created from something else.
+    StaleStopped,
+    /// ctrs-owned, running, created from something else.
+    StaleRunning,
+    /// ctrs-owned, paused, created from something else.
+    StalePaused,
+    /// A container of the builder's name without ctrs's builder label.
+    Foreign,
+}
+
+fn classify(snap: Option<&BuilderSnapshot>) -> Assessment {
+    let Some(s) = snap else { return Assessment::Fresh };
+    if !s.owned {
+        return Assessment::Foreign;
+    }
+    if s.image_id == managed().config {
+        return Assessment::Matching;
+    }
+    // A paused container is never in the replaceable set, whatever its
+    // status says (the record could predate the status fix).
+    if s.paused {
+        return Assessment::StalePaused;
+    }
+    match s.status {
+        Status::Running => Assessment::StaleRunning,
+        _ => Assessment::StaleStopped,
+    }
+}
+
+/// The actionable refusal for stale builders: what runs, what is pinned,
+/// what to do. Reused by every admission gate.
+fn stale_upgrade_error(s: &BuilderSnapshot, note: &str) -> Error {
+    let m = managed();
+    let run = buildkit_version_of(&s.image_id);
+    let running = match (s.status, s.paused) {
+        (Status::Running, true) => "paused",
+        (Status::Running, false) => "running",
+        _ => "stopped",
+    };
+    let image = &s.image_id[..19.min(s.image_id.len())];
+    Error::Conflict(format!(
+        "ctrs's builder is {running} BuildKit {run} (image {image}), not the pinned {version} ({manifest}); {note}: stop it (docker stop {name}) and the next build replaces it with the pin. Existing work is unaffected",
+        image = image,
+        manifest = &m.manifest[..19],
+        version = PINNED_VERSION,
+        name = s.name,
+    ))
+}
+
+fn foreign_error(s: &BuilderSnapshot) -> Error {
+    Error::Conflict(format!(
+        "container {name} ({id}) exists without ctrs's builder label ({label}=1); refusing to replace or start it: remove it yourself to let ctrs provision its builder, or select a different buildx builder for custom images",
+        name = s.name,
+        id = &s.id[..12.min(s.id.len())],
+        label = LABEL,
+    ))
 }
 
 // --- Settings ----------------------------------------------------------
@@ -129,14 +285,77 @@ fn config_toml(limit: u64, registries: &str) -> String {
     )
 }
 
-/// `GET /ctrs/builder`: the settings and the builder's state.
+fn desired_json() -> Value {
+    let m = managed();
+    json!({
+        "image": PINNED, "version": PINNED_VERSION, "emulator": PINNED_EMULATOR,
+        "index_digest": m.index, "selected_manifest": m.manifest, "config_digest": m.config, "platform": m.os_arch,
+        "source": "moby/buildkit tag v0.35.0 commit f55949dea4f03bb9d85b73e9afc9a609291289db (GitHub Actions run 43069750854, 2026-11-11)",
+    })
+}
+
+fn actual_json(snap: &BuilderSnapshot) -> Value {
+    let m = managed();
+    json!({
+        "present": true, "name": snap.name, "id": &snap.id[..12.min(snap.id.len())],
+        "state": snap.status.as_str(), "paused": snap.paused,
+        "owned": snap.owned, "image_ref": snap.image, "image_id": snap.image_id,
+        "matches_desired": snap.image_id == m.config,
+        "buildkit_version": buildkit_version_of(&snap.image_id),
+        "emulator_version": emulator_version_of(&snap.image_id),
+        "created": snap.created.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+    })
+}
+
+/// The local tag record, read-only and independent of the pin: a pull of
+/// `moby/buildkit:buildx-stable-1` through ctrs writes this record, and it
+/// may well name something other than the pinned image. Provisioning never
+/// consults it; diagnostics report it so the drift is visible.
+fn tag_json(engine: &Engine) -> Value {
+    let record = tag_record_name();
+    match engine.image(&record) {
+        Ok(Some(i)) => json!({
+            "record": record, "present": true, "image_id": i.config_digest,
+            "matches_pin": i.config_digest == managed().config,
+        }),
+        Ok(None) => json!({"record": record, "present": false}),
+        Err(e) => json!({"record": record, "present": false, "error": e.to_string()}),
+    }
+}
+
+/// `GET /ctrs/builder`: the settings and the builder's state. Read-only:
+/// never pulls, starts or mutates the builder. Identity fields report a
+/// cryptographic match or the honest `unknown`/`pending`/`conflict`.
 pub fn settings_report(engine: &Engine) -> Value {
     let s = settings();
-    let state = find(engine).map(|(_, st)| st.as_str()).unwrap_or("none");
+    let snap = find(engine);
+    let state = snap.as_ref().map(|r| r.status.as_str()).unwrap_or("none");
+    let assessment = classify(snap.as_ref());
+    let (upgrade, upgrade_detail) = match assessment {
+        Assessment::Fresh => ("none", ""),
+        Assessment::Matching => ("none", ""),
+        Assessment::StaleStopped => ("pending", "the next build replaces the stopped builder with the pin"),
+        Assessment::StaleRunning | Assessment::StalePaused => (
+            "pending",
+            "the builder runs a stale image with live sessions: stop it (docker stop buildx_buildkit_ctrs-build0) and the next build replaces it with the pin",
+        ),
+        Assessment::Foreign => (
+            "conflict",
+            "the container exists without ctrs's builder label; remove it yourself to let ctrs provision, or use a separate buildx builder for custom images",
+        ),
+    };
     json!({
         "cache_gb": s["cache_gb"], "default_cache_gb": default_cache(disk_total()) / GB, "cache_limit": cache_limit(),
         "idle_secs": idle_secs(), "image": IMAGE, "container": container_name(), "volume": volume_name(), "state": state,
         "overridden": std::env::var_os("CTRS_BUILD_CACHE_GB").is_some() || std::env::var_os("CTRS_BUILDER_IDLE_SECS").is_some(),
+        "desired": desired_json(),
+        "actual": snap.as_ref().map(actual_json).unwrap_or_else(|| json!({"present": false})),
+        "tag": tag_json(engine),
+        "upgrade": upgrade, "upgrade_detail": upgrade_detail,
+        "capability": {
+            "status": "unknown",
+            "reason": "not probed on this engine; advertised platforms are not verification. Run bash tests/arm64-build.sh --case compatibility for evidence (see docs/evidence/arm64-build.md)",
+        },
     })
 }
 
@@ -166,33 +385,100 @@ pub fn set_settings(req: &Request) -> Result<(), Error> {
 
 // --- The container -------------------------------------------------------
 
-/// The BuildKit image, pulled (by [`PINNED`]) if it isn't here yet.
-///
-/// Provisioning does not trust the tag: buildx re-resolves
-/// `moby/buildkit:buildx-stable-1` against the registry on every builder
-/// init and the store replaces a tag's record by name, so the tag can
-/// displace whatever ctrs stored under it. The builder therefore runs from
-/// the pin's digest reference; the tag record is kept for visibility only.
-fn ensure_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_image::Image, Error> {
-    if let Some(i) = engine.image(PINNED)? {
+/// The tag record for the pin (visibility only; provisioning uses [`PINNED`]).
+fn tag_record_name() -> String {
+    Reference::parse(IMAGE).map(|r| r.short()).unwrap_or_else(|_| IMAGE.to_owned())
+}
+
+/// The pinned triple must match, byte for byte: index, selected manifest and
+/// config digest, and the record's platform.
+fn verify_pin_record(i: &ctrs_image::Image) -> Result<(), Error> {
+    let m = managed();
+    if i.index_digest.as_deref() != Some(m.index) {
+        return Err(Error::Io(io::Error::other(format!("builder image record has index {}, want {}", i.index_digest.as_deref().unwrap_or("none"), m.index))));
+    }
+    if i.digest != m.manifest {
+        return Err(Error::Io(io::Error::other(format!("builder image record has manifest {}, want {}", &i.digest[..19.min(i.digest.len())], &m.manifest[..19]))));
+    }
+    if i.config_digest != m.config {
+        return Err(Error::Io(io::Error::other(format!("builder image record has config {}, want {}", &i.config_digest[..19.min(i.config_digest.len())], &m.config[..19]))));
+    }
+    if i.platform != m.os_arch {
+        return Err(Error::Io(io::Error::other(format!("builder image record has platform {}, want {}", i.platform, m.os_arch))));
+    }
+    Ok(())
+}
+
+/// The config blob must hash to the manifest's config digest, and the layer
+/// count must match the config's diff_ids.
+fn verify_config_blob(engine: &Engine, i: &ctrs_image::Image) -> Result<(), Error> {
+    let bytes = engine
+        .store
+        .read_config(&i.config_digest)
+        .map_err(|e| Error::Io(io::Error::other(format!("reading the builder image config: {e}"))))?;
+    let actual = ctrs_image::store::sha256_digest(&bytes);
+    if actual != i.config_digest {
+        return Err(Error::Io(io::Error::other(format!("builder image config hashes to {actual}, want {}", &i.config_digest[..19.min(i.config_digest.len())]))));
+    }
+    let cfg: Value = serde_json::from_slice(&bytes).map_err(|e| Error::Io(io::Error::other(format!("builder image config is not JSON: {e}"))))?;
+    if let Some(n) = cfg["rootfs"]["diff_ids"].as_array().map(|a| a.len()) {
+        if n != i.layers.len() {
+            return Err(Error::Io(io::Error::other(format!("builder image config names {n} layers, the record has {}", i.layers.len()))));
+        }
+    }
+    if cfg["os"].as_str() != Some("linux") {
+        return Err(Error::Io(io::Error::other(format!("builder image config has os {}, want linux", cfg["os"].as_str().unwrap_or("missing")))));
+    }
+    let arch = cfg["architecture"].as_str().unwrap_or_default();
+    let want_arch = managed().os_arch.rsplit('/').next().unwrap_or("");
+    if arch != want_arch {
+        return Err(Error::Io(io::Error::other(format!("builder image config has architecture {arch}, want {want_arch}"))));
+    }
+    Ok(())
+}
+
+/// The pinned image, verified; no network. `Err` whenever the record or
+/// its bytes do not check out — pure local verification, safe under any
+/// boundary.
+fn verified_pin(engine: &Engine) -> Result<ctrs_image::Image, Error> {
+    let Some(i) = engine.image(PINNED)? else {
+        return Err(Error::Io(io::Error::other(format!("the pinned builder image for {PINNED} is not in the store"))));
+    };
+    verify_pin_record(&i)?;
+    verify_config_blob(engine, &i)?;
+    Ok(i)
+}
+
+/// The pinned image, verified; pulled when missing or unusable. Registry
+/// I/O — callers must invoke this outside [`ENSURE`]. A record that does
+/// not verify is replaced by a fresh pull; if the pull fails, the previous
+/// state (the record, the container, the volume) is untouched.
+fn desired_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_image::Image, Error> {
+    if let Ok(i) = verified_pin(engine) {
         return Ok(i);
     }
     let _p = PULL.lock().unwrap_or_else(|e| e.into_inner());
     // Pulled meanwhile by whoever had the lock.
-    if let Some(i) = engine.image(PINNED)? {
+    if let Ok(i) = verified_pin(engine) {
         return Ok(i);
     }
-    say(&format!("Pulling {PINNED} for ctrs's builder"));
+    if engine.image(PINNED)?.is_some() {
+        say(&format!("ctrs's builder image record for {PINNED} did not verify; pulling it again"));
+    } else {
+        say(&format!("Pulling {PINNED} for ctrs's builder"));
+    }
     let reference = Reference::parse(PINNED).map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
     let pulled = Client::new()
-        .pull(&engine.store, &reference, &Platform::host_linux(), &|_| {})
+        .pull(&engine.store, &reference, &ctrs_image::Platform::host_linux(), &|_| {})
         .map_err(|e| Error::Io(io::Error::other(format!("pulling {PINNED}: {e}"))))?;
-    // Visibility under the tag buildx asks for; the builder itself uses
-    // the digest reference.
-    let name = Reference::parse(IMAGE).map(|r| r.short()).unwrap_or_else(|_| IMAGE.to_owned());
+    verify_pin_record(&pulled)?;
+    verify_config_blob(engine, &pulled)?;
+    // Visibility under the tag buildx asks for; the builder itself runs
+    // from the digest reference.
+    let name = tag_record_name();
     engine.store.put_image(ctrs_image::Image { name: name.clone(), ..pulled.clone() })?;
     engine.emit_image("pull", &pulled.config_digest, &name);
-    engine.image(PINNED)?.ok_or_else(|| Error::Io(io::Error::other(format!("{PINNED} vanished after its pull"))))
+    Ok(pulled)
 }
 
 /// The body of the builder's create: what buildx's docker-container driver
@@ -211,31 +497,110 @@ fn create_body() -> Value {
     })
 }
 
-fn create(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, Error> {
-    ensure_image(engine, say)?;
+/// What a start/create request should do with the builder.
+pub enum BuilderBoot {
+    /// Not the managed builder, or already the pinned one: proceed.
+    Clean,
+    /// The stopped builder was replaced with the pin while this request was
+    /// in flight; the id the caller holds no longer exists.
+    Replaced,
+    /// The builder is stale or foreign; the caller must refuse the request.
+    Conflict(Error),
+}
+
+/// ENSURE held by the caller. Creates the builder container from the
+/// verified pinned image. The pin is verified locally under the boundary
+/// (pure disk, no registry I/O): a caller that skipped the pre-boundary
+/// check — e.g. a stopped builder that flipped stale mid-request — still
+/// cannot create from an unverified store record.
+fn create_locked(engine: &Engine, _say: &mut dyn FnMut(&str)) -> Result<String, Error> {
+    verified_pin(engine)?;
     let name = container_name();
+    if find(engine).is_some() {
+        return Err(Error::Conflict(format!("ctrs's builder ({name}) already exists")));
+    }
     let req = Request::internal("POST", "/containers/create", &[("name", &name)], create_body().to_string().into_bytes());
-    let made = api::create(&req, engine)?;
+    let made = match api::create(&req, engine) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::diag::warn!("builder create rejected", name = name.as_str(), error = format!("{e:?}"), body = create_body().to_string());
+            return Err(e);
+        }
+    };
     crate::diag::info!("builder created", name = name);
     let id = made["Id"].as_str().unwrap_or_default().to_owned();
-    // Before its first start, whoever starts it (buildx, for one).
     write_config(engine, &id);
     Ok(id)
 }
 
-/// `POST /containers/<builder>/start` from buildx (its docker-container
-/// driver starts the container itself): the config is written first, as
-/// for the daemon's own starts, so the mirror address and the cache limit
-/// are today's, not whatever the container was made with (an older ctrs's
-/// mirror address, a bridge gateway that has since moved).
-pub fn before_start(engine: &Engine, key: &str) {
-    let Some((id, status)) = find(engine) else { return };
-    let key = key.trim_start_matches('/');
-    if status == Status::Running || !(key == container_name() || (key.len() >= 6 && id.starts_with(key))) {
-        return;
-    }
+/// Replaces a stopped, ctrs-owned, stale builder with the pinned image.
+/// The pin is pulled and verified BEFORE anything is removed; a failure
+/// leaves the previous state untouched. Registry I/O — callers must not
+/// hold [`ENSURE`] while this pulls. Returns the new container id.
+fn replace_stale(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, Error> {
+    desired_image(engine, say)?;
     let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
-    write_config(engine, &id);
+    // Recheck under the boundary: somebody may have replaced it meanwhile.
+    let Some(now) = find(engine) else {
+        return create_locked(engine, say);
+    };
+    match classify(Some(&now)) {
+        Assessment::Matching => return Ok(now.id),
+        Assessment::StaleStopped => {
+            verified_pin(engine)?;
+        }
+        Assessment::Foreign => return Err(foreign_error(&now)),
+        Assessment::StaleRunning | Assessment::StalePaused => return Err(stale_upgrade_error(&now, "an upgrade is already in flight")),
+        Assessment::Fresh => return create_locked(engine, say),
+    }
+    engine.remove(&now.id, true, false)?;
+    create_locked(engine, say)
+}
+
+/// Whether a request targeting this id concerns the managed builder.
+fn is_managed_key(engine: &Engine, key: &str) -> Option<BuilderSnapshot> {
+    let rec = snapshot_for(engine, key)?;
+    (rec.name == container_name()).then_some(rec)
+}
+
+/// `POST /containers/<builder>/start` (and `restart`) from buildx: write
+/// the config when it is already the pinned one; replace a stopped stale
+/// builder with the pin under the same boundary as classic starts; refuse
+/// everything else actionably. Never touches a running or paused builder.
+pub fn before_start(engine: &Engine, key: &str) -> BuilderBoot {
+    let Some(rec) = is_managed_key(engine, key) else {
+        return BuilderBoot::Clean;
+    };
+    match classify(Some(&rec)) {
+        Assessment::Matching | Assessment::Fresh => {
+            write_config(engine, &rec.id);
+            BuilderBoot::Clean
+        }
+        Assessment::StaleStopped => match replace_stale(engine, &mut |_| {}) {
+            Ok(_) => BuilderBoot::Replaced,
+            Err(e) => BuilderBoot::Conflict(e),
+        },
+        Assessment::StaleRunning | Assessment::StalePaused => {
+            BuilderBoot::Conflict(stale_upgrade_error(&rec, "new work is refused"))
+        }
+        Assessment::Foreign => BuilderBoot::Conflict(foreign_error(&rec)),
+    }
+}
+
+/// New sessions against the managed builder are refused while it is stale
+/// or foreign; draining sessions are untouched. `None` = proceed.
+pub fn exec_session_gate(engine: &Engine, key: &str) -> Option<Error> {
+    let rec = is_managed_key(engine, key)?;
+    match classify(Some(&rec)) {
+        Assessment::Matching | Assessment::Fresh => None,
+        Assessment::StaleStopped => Some(Error::Conflict(
+            "ctrs's builder is stopped and stale; the next build replaces it; retry".to_string(),
+        )),
+        Assessment::StaleRunning | Assessment::StalePaused => {
+            Some(stale_upgrade_error(&rec, "new sessions are refused"))
+        }
+        Assessment::Foreign => Some(foreign_error(&rec)),
+    }
 }
 
 /// The garbage collector's limits, for buildkitd's next start.
@@ -278,44 +643,97 @@ fn hide_amd64_qemu(engine: &Engine, id: &str) {
 /// Only a build makes it: buildx looking the container up (`docker buildx
 /// ls`, `inspect`, the window's Builds view) makes and pulls nothing, so a
 /// fresh ctrs has no builder, image or cache volume until the first build.
-/// None for any other name, or when the builder exists (the usual 409).
+/// None for any other name, for a builder that is present and usable, or
+/// when the builder exists as buildx will find it (the usual 409).
 pub fn create_for_buildx(engine: &Engine, name: Option<&str>) -> Option<Result<Value, Error>> {
     if name.map(|n| n.trim_start_matches('/')) != Some(container_name().as_str()) {
         return None;
     }
-    let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
-    if find(engine).is_some() {
-        return None;
+    // Registry I/O outside [`ENSURE`]; the state is rechecked under it.
+    if matches!(classify(find(engine).as_ref()), Assessment::Fresh | Assessment::StaleStopped) {
+        if let Err(e) = desired_image(engine, &mut |_| {}) {
+            return Some(Err(e));
+        }
     }
-    Some(create(engine, &mut |_| {}).map(|id| json!({"Id": id, "Warnings": []})))
+    let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
+    let now = find(engine);
+    let outcome = match classify(now.as_ref()) {
+        Assessment::Fresh => create_locked(engine, &mut |_| {}).map(|id| json!({"Id": id, "Warnings": []})),
+        Assessment::StaleStopped => {
+            // The pin is pulled and verified outside the boundary; verify it
+            // again locally under it (a stop may have flipped a stale running
+            // builder to stale stopped meanwhile). Removal and recreation
+            // are atomic under the boundary.
+            let rec = now.expect("StaleStopped has a record");
+            if let Err(e) = verified_pin(engine) {
+                return Some(Err(e));
+            }
+            engine.remove(&rec.id, true, false).and_then(|()| create_locked(engine, &mut |_| {})).map(|id| json!({"Id": id, "Warnings": []}))
+        }
+        Assessment::Matching => return None,
+        Assessment::StaleRunning | Assessment::StalePaused => {
+            // buildx would otherwise report a bare "container name already
+            // in use": give it the actionable version.
+            Err(stale_upgrade_error(&now.expect("stale has a record"), "new work is refused"))
+        }
+        Assessment::Foreign => Err(foreign_error(&now.expect("Foreign has a record"))),
+    };
+    Some(outcome)
 }
 
 /// The builder, made if need be, started and answering. `say` hears what
 /// takes a while (a pull, a start).
 fn ensure_running(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, Error> {
-    if find(engine).is_none() {
-        // Before the lock: a pull must not hold the builder up for others.
-        ensure_image(engine, say)?;
+    // Registry I/O outside the boundary, only when the pin is needed.
+    if matches!(classify(find(engine).as_ref()), Assessment::Fresh | Assessment::StaleStopped) {
+        desired_image(engine, say)?;
     }
     let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
-    let (id, status) = match find(engine) {
-        Some(found) => found,
-        None => (create(engine, say)?, Status::Created),
+    let Some(rec0) = find(engine) else {
+        // Still fresh under the boundary.
+        let id = create_locked(engine, say)?;
+        return start_or_resume(engine, &id, say);
     };
-    if status != Status::Running {
-        write_config(engine, &id);
-        say("Starting ctrs's builder (BuildKit)");
-        engine.start(&id)?;
-    } else if engine.is_paused(&id) {
-        engine.pause(&id, false)?;
+    match classify(Some(&rec0)) {
+        Assessment::Matching => start_or_resume(engine, &rec0.id, say),
+        Assessment::StaleStopped => {
+            // The pin was pulled and verified outside the boundary; verify it
+            // again locally under it (a concurrent stop may have flipped a
+            // stale running builder to stale stopped meanwhile).
+            verified_pin(engine)?;
+            engine.remove(&rec0.id, true, false)?;
+            let id = create_locked(engine, say)?;
+            start_or_resume(engine, &id, say)
+        }
+        Assessment::StaleRunning | Assessment::StalePaused => Err(stale_upgrade_error(&rec0, "new builds are refused")),
+        Assessment::Foreign => Err(foreign_error(&rec0)),
+        Assessment::Fresh => {
+            // The record vanished between the check and the boundary; treat as fresh.
+            let id = create_locked(engine, say)?;
+            start_or_resume(engine, &id, say)
+        }
     }
+}
+
+/// Starts (or resumes) the builder and waits for it to answer; shared by
+/// the fresh-create and matching paths.
+fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str)) -> Result<String, Error> {
+    let needs_start = engine.with(id, |c| c.status != Status::Running).unwrap_or(true);
+    if needs_start {
+        write_config(engine, id);
+        say("Starting ctrs's builder (BuildKit)");
+        engine.start(id)?;
+    } else if engine.is_paused(id) {
+        engine.pause(id, false)?;
+    }
+    let id = id.to_owned();
     LAST_USE.store(now_secs(), Ordering::Relaxed);
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Ok((0, _)) = engine.exec_capture(&id, &["buildctl", "debug", "workers"]) {
             return Ok(id);
         }
-        if find(engine).is_none_or(|(_, s)| s != Status::Running) || Instant::now() > deadline {
+        if find(engine).is_none_or(|r| r.status != Status::Running) || Instant::now() > deadline {
             let text: Vec<u8> = engine.logs(&id, false).ok().flatten().map(|l| l.past.tail(Some(5)).flat_map(|r| r.data).collect()).unwrap_or_default();
             let text = String::from_utf8_lossy(&text);
             let tail: Vec<&str> = text.lines().collect();
@@ -335,10 +753,21 @@ pub fn watch(engine: Arc<Engine>) {
         std::thread::sleep(Duration::from_secs(15));
         let Some(engine) = me.upgrade() else { return };
         let idle = idle_secs();
-        let Some((id, Status::Running)) = find(&engine) else {
+        let Some(snap) = find(&engine) else {
             LAST_USE.store(0, Ordering::Relaxed);
             continue;
         };
+        if snap.status != Status::Running {
+            LAST_USE.store(0, Ordering::Relaxed);
+            continue;
+        }
+        // A stale or foreign builder is never paused under the owner's work;
+        // keeping it running is the pending-upgrade contract's business.
+        if classify(Some(&snap)) != Assessment::Matching {
+            LAST_USE.store(0, Ordering::Relaxed);
+            continue;
+        }
+        let id = snap.id;
         // Paused already: once something resumes it, it gets a full idle
         // time again (counted from the first look at it running).
         if engine.is_paused(&id) {
@@ -1004,7 +1433,11 @@ fn parse_prune(text: &str) -> (Vec<String>, u64) {
 /// `system df`'s BuildCache: BuildKit's records while the builder runs
 /// (asking a stopped one would start it); none otherwise.
 pub fn cache(engine: &Engine) -> Value {
-    let Some((id, Status::Running)) = find(engine) else { return json!([]) };
+    let Some(snap) = find(engine) else { return json!([]) };
+    if snap.status != Status::Running || classify(Some(&snap)) != Assessment::Matching {
+        return json!([]);
+    }
+    let id = snap.id;
     let _busy = Busy::new();
     match engine.exec_capture(&id, &["buildctl", "du", "--format", "{{json .}}"]) {
         Ok((0, text)) => du_rows(&text),
@@ -1033,6 +1466,92 @@ fn du_rows(text: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snap(owned: bool, status: Status, paused: bool, image_id: &str) -> BuilderSnapshot {
+        BuilderSnapshot {
+            id: "abc123def456abc123def456abc123def456abc123def456abc123de".into(),
+            name: container_name(),
+            status,
+            paused,
+            image: if image_id == managed().config { PINNED.into() } else { IMAGE.into() },
+            image_id: image_id.into(),
+            owned,
+            created: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        }
+    }
+
+    fn image_record(index: Option<&str>, manifest: &str, config: &str, platform: &str) -> ctrs_image::Image {
+        ctrs_image::Image {
+            name: PINNED.into(),
+            digest: manifest.into(),
+            index_digest: index.map(str::to_owned),
+            config_digest: config.into(),
+            layers: Vec::new(),
+            size: 0,
+            platform: platform.into(),
+            created: String::new(),
+            pulled_at: 0,
+            config: ctrs_image::RunConfig::default(),
+        }
+    }
+
+    #[test]
+    fn assessment_matrix() {
+        let m = managed();
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(m.os_arch, "linux/amd64");
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(m.os_arch, "linux/arm64");
+
+        assert_eq!(classify(None), Assessment::Fresh);
+        assert_eq!(classify(Some(&snap(true, Status::Running, false, m.config))), Assessment::Matching);
+        assert_eq!(classify(Some(&snap(true, Status::Exited, false, m.config))), Assessment::Matching);
+        assert_eq!(classify(Some(&snap(true, Status::Running, true, m.config))), Assessment::Matching);
+
+        let stale = format!("sha256:{}", "0".repeat(64));
+        assert_eq!(classify(Some(&snap(true, Status::Created, false, &stale))), Assessment::StaleStopped);
+        assert_eq!(classify(Some(&snap(true, Status::Exited, false, &stale))), Assessment::StaleStopped);
+        assert_eq!(classify(Some(&snap(true, Status::Running, false, &stale))), Assessment::StaleRunning);
+        assert_eq!(classify(Some(&snap(true, Status::Running, true, &stale))), Assessment::StalePaused);
+
+        assert_eq!(classify(Some(&snap(false, Status::Running, false, m.config))), Assessment::Foreign);
+        assert_eq!(classify(Some(&snap(false, Status::Exited, false, &stale))), Assessment::Foreign);
+    }
+
+    #[test]
+    fn versions_come_from_the_verified_image_id() {
+        assert_eq!(buildkit_version_of(IDENTITY_AMD64.config), "v0.35.0");
+        assert_eq!(buildkit_version_of(IDENTITY_ARM64.config), "v0.35.0");
+        assert_eq!(buildkit_version_of(&format!("sha256:{}", "f".repeat(64))), "unknown");
+        assert_eq!(emulator_version_of(IDENTITY_AMD64.config), "QEMU 10.2.3");
+        assert_eq!(emulator_version_of(IDENTITY_ARM64.config), "QEMU 10.2.3");
+        assert_eq!(emulator_version_of(&format!("sha256:{}", "f".repeat(64))), "unknown");
+    }
+
+    #[test]
+    fn pin_records_must_match_the_whole_triple() {
+        let m = managed();
+        let good = image_record(Some(m.index), m.manifest, m.config, m.os_arch);
+        assert!(verify_pin_record(&good).is_ok());
+
+        let wrong_index = image_record(Some(&format!("sha256:{}", "1".repeat(64))), m.manifest, m.config, m.os_arch);
+        assert!(verify_pin_record(&wrong_index).is_err());
+        let missing_index = image_record(None, m.manifest, m.config, m.os_arch);
+        assert!(verify_pin_record(&missing_index).is_err());
+        let wrong_manifest = image_record(Some(m.index), &format!("sha256:{}", "2".repeat(64)), m.config, m.os_arch);
+        assert!(verify_pin_record(&wrong_manifest).is_err());
+        let wrong_config = image_record(Some(m.index), m.manifest, &format!("sha256:{}", "3".repeat(64)), m.os_arch);
+        assert!(verify_pin_record(&wrong_config).is_err());
+        let wrong_platform = image_record(Some(m.index), m.manifest, m.config, "linux/arm");
+        assert!(verify_pin_record(&wrong_platform).is_err());
+    }
+
+    #[test]
+    fn buildkitd_identity_is_the_frozen_candidate() {
+        assert_eq!(PINNED_VERSION, "v0.35.0");
+        assert_eq!(IDENTITY_AMD64.index, IDENTITY_ARM64.index);
+        assert!(PINNED.contains(IDENTITY_AMD64.index));
+    }
 
     /// BuildKit looks the emulator up by name and skips it when it isn't
     /// executable, so the file taking its place must be a plain 0644 file.
