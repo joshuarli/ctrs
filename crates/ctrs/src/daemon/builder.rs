@@ -323,9 +323,77 @@ fn tag_json(engine: &Engine) -> Value {
     }
 }
 
+/// The bundled ARM64 emulator BuildKit ships inside the pinned image for
+/// RUN steps with no host binfmt handler. Its presence is the difference
+/// between "community builders usually fail on arm64 silently" and a crisp
+/// capability error; the lifecycle runner injects faults against it in
+/// disposable harness builder state.
+const EMULATOR_PATH: &str = "/usr/bin/buildkit-qemu-aarch64";
+
+/// Read-only probe: presence, executability and ELF magic. Nothing else is
+/// read; nothing is mutated.
+fn emulator_probe_script() -> String {
+    format!(
+        "p={EMULATOR_PATH}; [ -e \"$p\" ] || {{ echo missing; exit 0; }}; [ -x \"$p\" ] || {{ echo nonexec; exit 0; }}; m=$(head -c 4 \"$p\" | od -An -tx1 | tr -d ' \\n'); if [ \"$m\" = 7f454c46 ]; then echo ok; else echo corrupt; fi"
+    )
+}
+
+fn emulator_absent(engine_name: &str, why: &str) -> Value {
+    json!({
+        "status": "absent",
+        "reason": format!("{EMULATOR_PATH} {why}; arm64 RUN steps cannot start on a host without a binfmt handler"),
+        "remediation": format!("rebuild the managed builder from the pinned image: docker stop {engine_name} && docker rm {engine_name}; the next build re-provisions it"),
+    })
+}
+
+fn parse_emulator_probe(out: &str, engine_name: &str) -> Value {
+    match out.lines().last().map(str::trim).unwrap_or("") {
+        "ok" => json!({
+            "status": "ok",
+            "reason": "",
+            "detail": "the builder's bundled aarch64 emulator is present, executable and an ELF binary",
+        }),
+        "missing" => emulator_absent(engine_name, "is missing"),
+        "nonexec" => emulator_absent(engine_name, "is not executable"),
+        "corrupt" => json!({
+            "status": "unusable",
+            "reason": format!("{EMULATOR_PATH} is not an ELF binary; arm64 RUN steps cannot start on a host without a binfmt handler"),
+            "remediation": format!("rebuild the managed builder from the pinned image: docker stop {engine_name} && docker rm {engine_name}; the next build re-provisions it"),
+        }),
+        other => json!({
+            "status": "unknown",
+            "reason": format!("reading the builder's emulator state was inconclusive ({other:?})"),
+            "remediation": format!("re-run GET /ctrs/builder while the builder is running (docker start {engine_name})"),
+        }),
+    }
+}
+
+/// Read-only probe of the managed builder. When the builder is not running
+/// the emulator's state is not observable; nothing is started or changed.
+fn capability_json(engine: &Engine, state: &str) -> Value {
+    if state != "running" {
+        return json!({
+            "status": "unknown",
+            "reason": format!("the builder is {state}; the bundled emulator is only observable while it is running (nothing was started or changed)"),
+        });
+    }
+    let name = container_name();
+    let script = emulator_probe_script();
+    match engine.exec_capture(&name, &["sh", "-c", &script]) {
+        Ok((_, out)) => parse_emulator_probe(&out, &name),
+        Err(e) => json!({
+            "status": "unknown",
+            "reason": format!("the probe exec into the managed builder failed: {e:?}"),
+            "remediation": format!("check `docker exec {name} sh -c 'test -x {EMULATOR_PATH}'` and re-run GET /ctrs/builder"),
+        }),
+    }
+}
+
 /// `GET /ctrs/builder`: the settings and the builder's state. Read-only:
 /// never pulls, starts or mutates the builder. Identity fields report a
-/// cryptographic match or the honest `unknown`/`pending`/`conflict`.
+/// cryptographic match or the honest `unknown`/`pending`/`conflict`;
+/// `capability` is observed from the builder while it is running and is
+/// `unknown` otherwise.
 pub fn settings_report(engine: &Engine) -> Value {
     let s = settings();
     let snap = find(engine);
@@ -352,10 +420,7 @@ pub fn settings_report(engine: &Engine) -> Value {
         "actual": snap.as_ref().map(actual_json).unwrap_or_else(|| json!({"present": false})),
         "tag": tag_json(engine),
         "upgrade": upgrade, "upgrade_detail": upgrade_detail,
-        "capability": {
-            "status": "unknown",
-            "reason": "not probed on this engine; advertised platforms are not verification. Run bash tests/arm64-build.sh --case compatibility for evidence (see docs/evidence/arm64-build.md)",
-        },
+        "capability": capability_json(engine, state),
     })
 }
 
@@ -1569,6 +1634,25 @@ mod tests {
         assert_eq!(&archive[100..108], b"0000644\0");
         assert_eq!(archive[156], b'0');
         assert_eq!(&archive[124..136], b"00000000000\0");
+    }
+
+    #[test]
+    fn emulator_probe_reports_each_fault() {
+        let ok = parse_emulator_probe("ok\n", "buildx_buildkit_ctrs-build0");
+        assert_eq!(ok["status"], "ok");
+        let absent = parse_emulator_probe("missing\n", "buildx_buildkit_ctrs-build0");
+        assert_eq!(absent["status"], "absent");
+        assert!(absent["reason"].as_str().unwrap().contains("missing"));
+        assert!(absent["remediation"].as_str().unwrap().contains("buildx_buildkit_ctrs-build0"));
+        let nonexec = parse_emulator_probe("nonexec\n", "buildx_buildkit_ctrs-build0");
+        assert_eq!(nonexec["status"], "absent");
+        let corrupt = parse_emulator_probe("corrupt\n", "buildx_buildkit_ctrs-build0");
+        assert_eq!(corrupt["status"], "unusable");
+        assert!(corrupt["remediation"].as_str().unwrap().contains("re-provisions"));
+        let unprobed = parse_emulator_probe("garbage\n", "buildx_buildkit_ctrs-build0");
+        assert_eq!(unprobed["status"], "unknown");
+        let empty = parse_emulator_probe("", "buildx_buildkit_ctrs-build0");
+        assert_eq!(empty["status"], "unknown");
     }
 
     fn req(query: &[(&str, &str)]) -> Request {

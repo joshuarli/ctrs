@@ -37,6 +37,40 @@ jobs:
       - name: Test
         run: cargo test --workspace --lib --tests --no-fail-fast
 
+  arm64-compat:
+    name: ARM64 qualification (AMD64 to ARM64)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The qualification RUN steps for arm64 execute under a binfmt handler;
+      # ubuntu runners ship none by default. This does not (and cannot) prove
+      # handler independence — the runner reports which backend served each
+      # build; handler-free proof stays Needs environment.
+      - name: Register QEMU binfmt handlers
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Install Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install --profile minimal "$channel"
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ubuntu-26.04-arm64-qual
+      - name: Build the Linux engine (native AMD64)
+        env:
+          CARGO_ENCODED_RUSTFLAGS: ''
+        run: cargo xtask linux --arch amd64
+      - name: Run the ARM64 qualification runner
+        env:
+          CARGO_ENCODED_RUSTFLAGS: ''
+        run: bash tests/arm64-build.sh --case environment compatibility platform cross identity lifecycle
+
   linux-musl:
     name: Test (Linux ${{ matrix.arch }} musl)
     runs-on: ${{ matrix.runner }}

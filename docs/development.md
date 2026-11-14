@@ -83,6 +83,7 @@ buildx ─────┘    Docker Engine API          owns the VM             
 | `guest/kernel` | kernel config and patches |
 | `conformance/` | `smoke.sh` (engine round-trip), `run.sh` (API fixtures) |
 | `tests/e2e.sh` | the Docker compatibility suite, against a running engine |
+| `tests/arm64-build.sh` | the ARM64-on-AMD64 qualification runner (`environment`, `compatibility`, `identity`, `platform`, `cross`, `lifecycle` cases) |
 | `tests/linux-host.sh` | the Linux host build, driven in a privileged container |
 | `xtask` | build tasks |
 
@@ -91,4 +92,12 @@ buildx ─────┘    Docker Engine API          owns the VM             
 `conformance/smoke.sh` boots the VM with scratch roots and round-trips a
 container. `tests/e2e.sh` runs the full compatibility suite against a
 running engine (see its header). `cargo test --workspace` runs the unit
-suite.
+suite (as root; the `ctrs-init` layers tests need chown to uid/gid 0, so
+on unprivileged hosts run them in a root container — CI does this).
+`tests/arm64-build.sh --case compatibility` runs the ARM64-on-AMD64
+qualification suite in a disposable, isolated environment; `--case
+lifecycle` covers concurrent builds, cancellation, worker failure, failed
+target execution, daemon restart with cache reuse, and the bundled
+emulator's diagnostics (see `docs/evidence/arm64-build.md`).
+`binfmt` handler-free proof is unavailable on hosts where the handlers
+are global; the runner fails closed under `--require-no-binfmt`.

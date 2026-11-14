@@ -1,19 +1,21 @@
 # ARM64 builds on AMD64 Linux — evidence
 
-Date: 2026-11-14. Verdict: **P0 done; S1 done; S2 done; S3 done; S4 done. The
-managed builder now reconciles a stopped stale builder to the frozen
-v0.35.0 pin (fresh provisioning, cache preserved), refuses actionably on
-stale running/paused and foreign same-name containers, reports
-desired/actual/tag/upgrade diagnostics, and platform requests are
-normalized to one canonical path with config verification before any
-record is published. The identity suite (40 checks) and the platform
-suite (14 checks) are green. ARM64 release artifacts are cross-built on
-the build platform with a pinned toolchain (no target emulator); the
-custom `--case cross` suite (25 checks) is green. Handler-free
-(binfmt-independent) proof is unavailable on this host: one global
-binfmt_misc instance serves every namespace, so BuildKit treats arm64 as
-"supported" and no isolated namespace can be emptied. That proof remains
-Needs environment.**
+Date: 2026-11-14. Verdict: **P0 done; S1 done; S2 done; S3 done; S4 done; S5
+done. The managed builder now reconciles a stopped stale builder to the
+frozen v0.35.0 pin (fresh provisioning, cache preserved), refuses
+actionably on stale running/paused and foreign same-name containers,
+reports desired/actual/tag/upgrade diagnostics (capability now observed
+from the running builder), and platform requests are normalized to one
+canonical path with config verification before any record is published.
+The identity suite (40 checks), the platform suite (14 checks) and the
+lifecycle suite (35 checks — concurrency, cancellation, worker failure,
+failed target execution, daemon restart, emulator-fault diagnostics) are
+green. ARM64 release artifacts are cross-built on the build platform
+with a pinned toolchain (no target emulator); the cross suite (25
+checks) is green. Handler-free (binfmt-independent) proof is unavailable
+on this host: one global binfmt_misc instance serves every namespace, so
+BuildKit treats arm64 as "supported" and no isolated namespace can be
+emptied. That proof remains Needs environment.**
 
 This file is the parity register for the slices in `qemu-accel.md`. Rows
 name the case, the proof command and the evidence. Nothing here is a claim
@@ -465,7 +467,104 @@ exercised on the fixture. macOS keeps its intentional ARM64 default; the
 root `Dockerfile` and release.yml were pinned but not re-exercised here
 (release builds belong to S7 and the macOS/CI environments).
 
-## Needs environment (statuses at P0–S4)
+## S5 — lifecycle hardening and CI parity (2026-11-14, landed)
+
+`bash tests/arm64-build.sh --case lifecycle` is **green** (35 checks):
+
+- **Concurrent builds, distinct architecture tags** — classic builds of
+  amd64 and arm64 in parallel, both green, both image metadata correct.
+- **Cancellation** via `POST /build/cancel?id=` — the RUN step's
+  `sleep 20` process is observed, then cancelled; no build process
+  remains within the 60 s deadline (1 s observed); the cancelled build
+  publishes no image (asserted two ways: no tag, and BuildKit's
+  completion marker `arm64-qualification-slow-done` absent from the
+  client stream); the engine keeps answering; a subsequent build
+  succeeds.
+- **Worker failure** — `docker stop` of the managed builder mid-build:
+  the build fails (exit 1), the builder record is kept, and
+  `ensure_running` reuses the stopped matching builder; the rebuild
+  succeeds.
+- **Failed target execution** — `RUN exit 23` surfaces exit code 23
+  through the classic build's error; no image is published; native
+  amd64 builds remain functional.
+- **Daemon restart** — the harness engine is fully restarted; it answers
+  within 60 s; the rebuild succeeds and hits the build cache (`CACHED`).
+- **Emulator diagnostics (fault injection)** — missing / non-executable
+  / corrupt bundled emulator, injected only into the disposable harness
+  builder, restored after each fault: `GET /ctrs/builder` reports
+  `absent` / `absent` / `unusable` with the remediation text; native
+  amd64 builds stay functional; restore round-trips to `ok`.
+
+Mutation verification (restored after each, nothing committed):
+
+- **Cancellation** (product mutation: SIGINT/pkill removed from
+  `cancel()` in `daemon/builder.rs`) — the case failed on
+  "build ran to completion despite the cancel (slow-done marker present)"
+  and "cancelled build published …", twice, including once against the
+  corrected marker fixture.
+- **Worker-failure recovery** (product mutation: the `Matching` arm of
+  `ensure_running` refusing to reuse the stopped matching builder) —
+  the case failed immediately in the concurrent reuse path; caught
+  before the worker-failure section, on the same mechanism. (No
+  narrower line-level seam exists — `ensure_running`'s Matching arm is
+  also the fresh-provisioning path.)
+- **Emulator diagnostics** (product mutation: corrupt reported as `ok`) —
+  the case failed on "diagnostics for the corrupt emulator do not report
+  unusable" and "diagnostics lack the remediation text".
+- Failed target execution, concurrency, restart/cache — no one-line
+  product mutation isolates those assertions (BuildKit owns the cache;
+  the exit-code assertion is pinned to the observed error shape); they
+  were verified end to end, not mutation-verified.
+- The first version of the completion-marker check false-fired on
+  BuildKit's step description (the Dockerfile text contains the marker);
+  the fixture now splits the marker so the description never matches.
+
+What changed:
+
+- **`GET /ctrs/builder` `capability` is now observed** from the running
+  managed builder instead of a static `unknown`: a read-only probe
+  (presence, executability, ELF magic of the bundled emulator) reports
+  `ok` / `absent` (missing or non-executable, with remediation naming
+  the owned builder's rebuild) / `unusable` (not an ELF binary) /
+  `unknown` (builder stopped, or probe inconclusive). The probe never
+  pulls, starts or mutates anything; the parser is unit-tested
+  (`daemon::builder::tests`, 132 passed).
+- **One AMD64→ARM64 CI job** (`arm64-compat`, `ubuntu-26.04`) in
+  `.github/workflows/ci.yml` builds the AMD64 engine
+  (`cargo xtask linux --arch amd64`) and invokes the same qualification
+  runner (`--case environment compatibility platform cross identity
+  lifecycle`). QEMU binfmt handlers are registered on the ephemeral
+  runner via the digest-pinned `docker/setup-qemu-action` (v4.4.0,
+  `99012661954931238ded8c8b007157a8430204e1`). This is the
+  emulator-present happy path, not handler independence, and it has
+  **never been executed** — no push was authorized by this campaign.
+  Anonymous Docker Hub pulls can 429 the job (the pin cannot be mirrored
+  without changing digests).
+- Docs: `docs/development.md` (layout + verification) updated;
+  `docs/architecture.md` unchanged (its builder line stays accurate).
+
+Handler-free proof remains Needs environment (binfmt isolation probe
+reports `shared` on this host — one global binfmt_misc instance serves
+every namespace). `--require-no-binfmt` fails closed. The lifecycle
+emulator-injection assertions cover diagnostics and native-build
+functionality only, not "arm64 RUN fails without the emulator".
+
+The first green run reported 34 checks; the completion-marker check was
+added after it. Its first version false-fired on BuildKit's step
+description (the Dockerfile text contains the marker); the fixture now
+splits the marker (`arm64-qualification-slow-""done`) so the description
+never matches. Re-verified on the final S5 tree (mutation-restored):
+`--case environment` ok; `--case compatibility` 24/24; `--case identity`
+40/40; `--case platform` 14/14; `--case cross` 25/25; `--case lifecycle`
+35/35; `bash tests/arm64-build.sh --all` **160/160**; `tests/linux-host.sh`
+**28/28**; `cargo test --workspace` as root in the CI image
+(`rust:1.100.0-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb`,
+`CI=true`, linux/amd64): **296 passed, 0 failed**. On the unprivileged
+host, 6 `ctrs-init` tests fail (`linux::layers::*`, `linux::dns::*`):
+chown to uid/gid 0 is not permitted for this user; pre-existing,
+unrelated to this slice; CI (root) is the authority.
+
+## Needs environment (statuses at P0–S5)
 
 | Proof | Prerequisite and command | status |
 | --- | --- | --- |
@@ -485,7 +584,7 @@ root `Dockerfile` and release.yml were pinned but not re-exercised here
 | managed identity, reconciliation, ownership | `--case identity` (S2) | **passing 2026-11-14 (40 checks; fresh install, matching reuse, stale tag, stale stopped replace, failed pull, interrupt recovery, simultaneous callers, foreign conflict, cache sentinel, buildx path; host/harness contexts unchanged)** |
 | pull/build/export/load/inspect metadata | `--case platform` (S3) | **passing 2026-11-14 (14 checks; aliases/v8, disagreement and single-manifest pulls fail closed, save/load round trip, OCI export descriptors, multi-platform load refusal)** |
 | native compilers, static AArch64 output | `--case cross` (S4) | **passing 2026-11-14 (25 checks; xtask aliases/refusals, default AMD64 execution, explicit ARM64 output, host-native builds of both fixtures, target execution, static AArch64, per-arch outputs/caches)** |
-| cancel/failure/cleanup, emulator diagnostics | `--case lifecycle` (S5) | not implemented |
+| cancel/failure/cleanup, emulator diagnostics | `--case lifecycle` (S5) | **passing 2026-11-14 (35 checks; concurrency, cancellation, worker failure, failed target execution, daemon restart + cache reuse, emulator fault injection; mutation-verified)** |
 | equivalent-work benchmark | `bench/arm64-build.sh` (S6) | not implemented |
 | static binaries, checksums, local manifest | S7 commands | not implemented |
 | environment prerequisites | `--case environment` | **passing 2026-11-14 (22 ok, 0 missing, 0.2–1 s)** |

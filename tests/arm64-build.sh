@@ -6,6 +6,7 @@
 #   bash tests/arm64-build.sh --case identity
 #   bash tests/arm64-build.sh --case platform
 #   bash tests/arm64-build.sh --case cross
+#   bash tests/arm64-build.sh --case lifecycle
 #   bash tests/arm64-build.sh --case environment --require-no-binfmt
 #   bash tests/arm64-build.sh --all
 #   bash tests/arm64-build.sh --list
@@ -35,7 +36,7 @@ FAIL=0
 UNAVAILABLE=0
 
 usage() {
-  sed -n '2,17p' "$0" >&2
+  sed -n '2,18p' "$0" >&2
   exit 2
 }
 
@@ -891,6 +892,311 @@ case_cross() {
   return 1
 }
 
+case_lifecycle() {
+  echo "== lifecycle"
+  local t0=$SECONDS
+  local life_rc=0
+
+  [ "$(uname -m)" = x86_64 ] || { note_unavailable "lifecycle: AMD64 host required"; return 1; }
+
+  BIN=${BIN:-$ROOT/target/linux-x86_64/release}
+  [ -x "$BIN/ctrs" ] || { miss "AMD64 artifacts at $BIN (build: cargo xtask linux --arch amd64)"; return 1; }
+
+  local iso_state
+  iso_state=$(binfmt_isolation_probe) || iso_state=unavailable
+  local emulator_proof=1
+  [ "$iso_state" = isolated ] && emulator_proof=0
+  if [ "$REQUIRE_NO_BINFMT" = 1 ] && [ "$emulator_proof" != 0 ]; then
+    miss "binfmt isolation unavailable ($iso_state); handler-free proof refused"
+    return 1
+  fi
+
+  ISO_PKGS="docker-cli curl docker-cli-buildx"
+  local life_prefix=${PREFIX:-ctrs-life-$$-$RANDOM}
+  local tag_amd="ctrsaccel/life-amd64:$$" tag_arm="ctrsaccel/life-arm64:$$"
+  local tag_cancel="ctrsaccel/life-cancel:$$" tag_after="ctrsaccel/life-after-cancel:$$"
+  local tag_fail="ctrsaccel/life-fail-target:$$" tag_worker="ctrsaccel/life-worker:$$"
+  local tag_cache="ctrsaccel/life-cache:$$"
+  source "$ROOT/tests/lib/isolated-env.sh"
+  iso_endpoint_check
+  iso_bin_check
+  iso_prepare "$life_prefix"
+  iso_trap_install
+  iso_start || { miss "harness engine did not answer in 60 s"; ISO_PRESERVE=1; return 1; }
+  local SOCK=unix:///root/.local/share/ctrs/run/docker.sock
+  isoc() { iso_engine_cmd "$*"; }
+  [ "$(isoc "docker version --format '{{.Server.Os}}/{{.Server.Arch}}'")" = "linux/amd64" ] \
+    && ok "isolated engine linux/amd64" \
+    || { miss "isolated engine did not report linux/amd64"; ISO_PRESERVE=1; return 1; }
+
+  if ! isoc "docker buildx create --name ctrs-build --driver docker-container --driver-opt default-load=true $SOCK" >/dev/null 2>&1; then
+    miss "buildx create ctrs-build"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  ok "buildx ctrs-build created"
+
+  echo "-- concurrent builds (distinct architecture tags)"
+  if ! isoc "mkdir -p /lc-concurrent && printf 'FROM %s\nRUN echo lifecycle-concurrency-ok\n' \"$BASE_ALPINE\" > /lc-concurrent/Dockerfile"; then
+    miss "concurrent-build context setup failed"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  ( isoc "DOCKER_BUILDKIT=0 docker build --platform linux/amd64 -t $tag_amd /lc-concurrent" > "$WORK/concurrent-amd64.log" 2>&1; echo $? > "$WORK/concurrent-amd64.rc" ) &
+  ( isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t $tag_arm /lc-concurrent" > "$WORK/concurrent-arm64.log" 2>&1; echo $? > "$WORK/concurrent-arm64.rc" ) &
+  wait
+  local rc_amd rc_arm
+  rc_amd=$(cat "$WORK/concurrent-amd64.rc")
+  rc_arm=$(cat "$WORK/concurrent-arm64.rc")
+  if [ "$rc_amd" = 0 ] && grep -qF "Successfully built" "$WORK/concurrent-amd64.log"; then
+    ok "concurrent amd64 build succeeded"
+  else
+    miss "concurrent amd64 build failed (log: $WORK/concurrent-amd64.log)"; tail -4 "$WORK/concurrent-amd64.log" | sed 's/^/    /'; life_rc=1
+  fi
+  if [ "$rc_arm" = 0 ] && grep -qF "Successfully built" "$WORK/concurrent-arm64.log"; then
+    ok "concurrent arm64 build succeeded"
+  else
+    miss "concurrent arm64 build failed (log: $WORK/concurrent-arm64.log)"; tail -4 "$WORK/concurrent-arm64.log" | sed 's/^/    /'; life_rc=1
+  fi
+  local meta_amd meta_arm
+  meta_amd=$(isoc "docker image inspect -f '{{.Os}}/{{.Architecture}}' $tag_amd" 2>&1)
+  meta_arm=$(isoc "docker image inspect -f '{{.Os}}/{{.Architecture}}' $tag_arm" 2>&1)
+  [ "$meta_amd" = "linux/amd64" ] && ok "tag $tag_amd reports linux/amd64" || { miss "tag $tag_amd reports: $meta_amd"; life_rc=1; }
+  [ "$meta_arm" = "linux/arm64" ] && ok "tag $tag_arm reports linux/arm64" || { miss "tag $tag_arm reports: $meta_arm"; life_rc=1; }
+
+  echo "-- slow build fixture (cancellation / worker failure)"
+  if ! isoc "mkdir -p /lc-slow && printf 'FROM %s\nRUN echo arm64-qualification-slow-marker && sleep 20 && echo arm64-qualification-slow-\"\"done\n' \"$BASE_ALPINE\" > /lc-slow/Dockerfile && tar -C /lc-slow -cf /lc-slow/ctx.tar Dockerfile"; then
+    miss "slow-build context setup failed"
+    ISO_PRESERVE=1
+    return 1
+  fi
+
+  echo "-- cancellation (POST /build/cancel, 60 s deadline)"
+  isoc "timeout 150 curl -sN --unix-socket /root/.local/share/ctrs/run/docker.sock -X POST 'http://localhost/build?t=$tag_cancel&platform=linux/arm64&buildid=life-cancel-$$' -H 'Content-Type: application/x-tar' --data-binary @/lc-slow/ctx.tar" > "$WORK/cancel.log" 2>&1 &
+  local client_pid=$!
+  local ready procs i
+  ready=0
+  for i in $(seq 90); do
+    procs=$(isoc "docker exec $MANAGED pgrep -af 'sleep 20' 2>/dev/null || true")
+    [ -n "$procs" ] && { ready=1; break; }
+    sleep 0.5
+  done
+  if [ "$ready" = 1 ]; then
+    ok "slow build reached its RUN step"
+  else
+    miss "slow build never reached its RUN step (log: $WORK/cancel.log)"
+    kill $client_pid 2>/dev/null; wait $client_pid 2>/dev/null || true
+    ISO_PRESERVE=1
+    return 1
+  fi
+  local cancel_t=$SECONDS
+  isoc "curl -sN --unix-socket /root/.local/share/ctrs/run/docker.sock -X POST 'http://localhost/build/cancel?id=life-cancel-$$'" > "$WORK/cancel-req.log" 2>&1
+  local seen=""
+  for i in $(seq 120); do
+    procs=$(isoc "docker exec $MANAGED pgrep -af 'buildctl|sleep 20' 2>/dev/null || true")
+    [ -z "$procs" ] && { seen=1; break; }
+    sleep 0.5
+  done
+  local cancel_dt=$((SECONDS - cancel_t))
+  wait $client_pid 2>/dev/null || true
+  if grep -qF "arm64-qualification-slow-done" "$WORK/cancel.log"; then
+    miss "build ran to completion despite the cancel (slow-done marker present)"
+    life_rc=1
+  else
+    ok "build did not run to completion (slow-done marker absent)"
+  fi
+  if [ -n "$seen" ]; then
+    ok "build interrupted within the 60 s cancellation deadline (${cancel_dt}s)"
+  else
+    miss "build processes still running ${cancel_dt}s after cancel: $procs"
+    life_rc=1
+  fi
+  local tags
+  tags=$(isoc "docker images --format '{{.Repository}}:{{.Tag}}'")
+  case "$tags" in
+    *"life-cancel:"*) miss "cancelled build published $tag_cancel"; life_rc=1 ;;
+    *) ok "cancelled build published no image" ;;
+  esac
+  isoc "docker ps" >/dev/null 2>&1 && ok "engine answered after cancellation" || { miss "engine did not answer after cancellation"; life_rc=1; }
+  if isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t $tag_after /lc-slow" > "$WORK/after-cancel.log" 2>&1 && grep -qF "Successfully built" "$WORK/after-cancel.log"; then
+    ok "a subsequent build succeeds after cancellation"
+  else
+    miss "subsequent build failed after cancellation (log: $WORK/after-cancel.log)"
+    tail -4 "$WORK/after-cancel.log" | sed 's/^/    /'
+    life_rc=1
+  fi
+
+  echo "-- worker failure mid-build"
+  isoc "DOCKER_BUILDKIT=0 docker build --no-cache --platform linux/arm64 -t $tag_worker /lc-slow" > "$WORK/worker.log" 2>&1 &
+  local wpid=$!
+  local wready=0
+  for i in $(seq 90); do
+    procs=$(isoc "docker exec $MANAGED pgrep -af 'sleep 20' 2>/dev/null || true")
+    [ -n "$procs" ] && { wready=1; break; }
+    sleep 0.5
+  done
+  if [ "$wready" = 1 ]; then
+    if isoc "docker stop $MANAGED" >/dev/null 2>&1; then
+      ok "managed builder stopped mid-build (worker failure injected)"
+    else
+      miss "could not stop the managed builder"
+      life_rc=1
+    fi
+  else
+    miss "worker-failure build never reached its RUN step (log: $WORK/worker.log)"
+    life_rc=1
+  fi
+  wait $wpid
+  local wrc=$?
+  [ $wrc != 0 ] && ok "build failed when its worker died (exit $wrc)" || { miss "build unexpectedly succeeded after the worker died (log: $WORK/worker.log)"; life_rc=1; }
+  local ps_a
+  ps_a=$(isoc "docker ps -a --format '{{.Names}}'")
+  case "$ps_a" in
+    *"$MANAGED"*) ok "builder record kept after worker failure" ;;
+    *) miss "builder record lost after worker failure"; life_rc=1 ;;
+  esac
+  if isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t ctrsaccel/life-worker2:$$ /lc-slow" > "$WORK/worker2.log" 2>&1 && grep -qF "Successfully built" "$WORK/worker2.log"; then
+    ok "build succeeds once the worker is restarted (ensure_running reuses the stopped matching builder)"
+  else
+    miss "build did not recover after worker failure (log: $WORK/worker2.log)"
+    tail -4 "$WORK/worker2.log" | sed 's/^/    /'
+    life_rc=1
+  fi
+
+  echo "-- failed target execution"
+  if ! isoc "mkdir -p /lc-fail && printf 'FROM %s\nRUN echo arm64-qualification-fail-marker; exit 23\n' \"$BASE_ALPINE\" > /lc-fail/Dockerfile"; then
+    miss "fail-target context setup failed"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  local fail_out fail_rc
+  fail_out=$(isoc "DOCKER_BUILDKIT=0 docker build --no-cache --platform linux/arm64 -t $tag_fail /lc-fail" 2>&1)
+  fail_rc=$?
+  if [ $fail_rc != 0 ] && printf '%s\n' "$fail_out" | grep -qE 'exit code[:=]? ?23|exit 23'; then
+    ok "failed RUN surfaces the target exit code 23"
+  else
+    miss "failed target execution: rc=$fail_rc, output: $(printf '%s\n' "$fail_out" | tail -3 | tr '\n' ' ')"
+    life_rc=1
+  fi
+  tags=$(isoc "docker images --format '{{.Repository}}:{{.Tag}}'")
+  case "$tags" in
+    *"life-fail-target:"*) miss "failed build published $tag_fail"; life_rc=1 ;;
+    *) ok "failed build published no image" ;;
+  esac
+  if isoc "DOCKER_BUILDKIT=0 docker build --platform linux/amd64 -t ctrsaccel/life-native-ok:$$ /lc-concurrent" > "$WORK/native-ok.log" 2>&1 && grep -qF "Successfully built" "$WORK/native-ok.log"; then
+    ok "native amd64 build remains functional after the target failure"
+  else
+    miss "native amd64 build failed after the target failure (log: $WORK/native-ok.log)"
+    life_rc=1
+  fi
+
+  echo "-- cache reuse across a daemon restart"
+  if ! isoc "mkdir -p /lc-cache && printf 'FROM %s\nRUN echo lifecycle-cache-warm > /warm\nRUN echo lifecycle-cache-sentinel > /sentinel\n' \"$BASE_ALPINE\" > /lc-cache/Dockerfile"; then
+    miss "cache context setup failed"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  if ! isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t $tag_cache /lc-cache" > "$WORK/cache-1.log" 2>&1; then
+    miss "cache-warming build failed (log: $WORK/cache-1.log)"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  if ! "$D" restart "$CONTAINER" >/dev/null 2>&1; then
+    miss "harness daemon restart failed"
+    ISO_PRESERVE=1
+    return 1
+  fi
+  local ready_again=0
+  for i in $(seq 60); do
+    "$D" exec "$CONTAINER" sh -c 'DOCKER_HOST=unix:///root/.local/share/ctrs/run/docker.sock docker version' >/dev/null 2>&1 && { ready_again=1; break; }
+    sleep 1
+  done
+  if [ "$ready_again" = 1 ]; then
+    ok "daemon answered after restart"
+  else
+    miss "daemon did not answer within 60 s of the restart"
+    life_rc=1
+  fi
+  if isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t $tag_cache /lc-cache" > "$WORK/cache-2.log" 2>&1; then
+    ok "build after daemon restart succeeded"
+  else
+    miss "post-restart build failed (log: $WORK/cache-2.log)"
+    tail -4 "$WORK/cache-2.log" | sed 's/^/    /'
+    life_rc=1
+  fi
+  grep -qF "CACHED" "$WORK/cache-2.log" && ok "build cache hit after daemon restart" || { miss "no CACHED lines in the post-restart build (log: $WORK/cache-2.log)"; life_rc=1; }
+
+  echo "-- emulator diagnostics (fault injection in disposable builder state)"
+  if [ "$emulator_proof" != 0 ]; then
+    info "binfmt isolation not provable on this host ($iso_state): the bundled emulator is not exercised; arm64 RUN fault-injection proof stays Needs environment"
+    if [ "$REQUIRE_NO_BINFMT" = 1 ]; then
+      miss "handler-free proof unavailable ($iso_state)"
+      life_rc=1
+    fi
+  fi
+  # Fault injection valid wherever the harness builder runs: diagnostics are
+  # read-only probes of the disposable builder's filesystem.
+  local emu=/usr/bin/buildkit-qemu-aarch64
+  if isoc "docker exec $MANAGED sh -c 'test -e $emu'"; then
+    for fault in missing nonexec corrupt; do
+      isoc "docker exec $MANAGED sh -c 'cp $emu ${emu}.qual-bak'" >/dev/null 2>&1 || { miss "could not back up the bundled emulator"; life_rc=1; continue; }
+      case "$fault" in
+        missing) isoc "docker exec $MANAGED sh -c 'rm $emu'" >/dev/null 2>&1 || miss "could not remove the emulator for the $fault fault" ;;
+        nonexec) isoc "docker exec $MANAGED sh -c 'chmod 000 $emu'" >/dev/null 2>&1 || miss "could not chmod the emulator for the $fault fault" ;;
+        corrupt) isoc "docker exec $MANAGED sh -c 'printf garbage-not-elf > ${emu}.qual-corrupt && cp ${emu}.qual-corrupt $emu && chmod 755 $emu && rm -f ${emu}.qual-corrupt'" >/dev/null 2>&1 || miss "could not corrupt the emulator for the $fault fault" ;;
+      esac
+      local diag_fault
+      diag_fault=$(isoc "curl -s --unix-socket /root/.local/share/ctrs/run/docker.sock http://localhost/ctrs/builder")
+      case "$fault" in
+        missing|nonexec)
+          case "$diag_fault" in
+            *'"status":"absent"'*) ok "diagnostics name the missing capability ($fault)" ;;
+            *) miss "diagnostics for the $fault emulator do not report absent: $(printf '%s' "$diag_fault" | tail -c 200)"; life_rc=1 ;;
+          esac ;;
+        corrupt)
+          case "$diag_fault" in
+            *'"status":"unusable"'*) ok "diagnostics name the corrupt emulator as unusable" ;;
+            *) miss "diagnostics for the corrupt emulator do not report unusable: $(printf '%s' "$diag_fault" | tail -c 200)"; life_rc=1 ;;
+          esac ;;
+      esac
+      case "$diag_fault" in
+        *'"remediation":"rebuild the managed builder from the pinned image'*) ok "diagnostics carry the remediation ($fault)" ;;
+        *) miss "diagnostics for the $fault emulator lack the remediation text"; life_rc=1 ;;
+      esac
+      if isoc "DOCKER_BUILDKIT=0 docker build --platform linux/amd64 -t ctrsaccel/life-native-$fault:$$ /lc-concurrent" > "$WORK/native-emu.log" 2>&1 && grep -qF "Successfully built" "$WORK/native-emu.log"; then
+        ok "native amd64 build remains functional ($fault emulator)"
+      else
+        miss "native amd64 build failed with the $fault emulator (log: $WORK/native-emu.log)"
+        life_rc=1
+      fi
+      isoc "docker exec $MANAGED sh -c 'cp ${emu}.qual-bak $emu && chmod 755 $emu && rm -f ${emu}.qual-bak'" >/dev/null 2>&1 || { miss "could not restore the bundled emulator after the $fault fault"; life_rc=1; }
+      local diag_ok
+      diag_ok=$(isoc "curl -s --unix-socket /root/.local/share/ctrs/run/docker.sock http://localhost/ctrs/builder")
+      case "$diag_ok" in
+        *'"status":"ok"'*) ok "diagnostics report the emulator ok after restore ($fault)" ;;
+        *) miss "diagnostics did not report ok after restoring the emulator ($fault): $(printf '%s' "$diag_ok" | tail -c 200)"; life_rc=1 ;;
+      esac
+    done
+  else
+    info "bundled emulator not found in the managed builder ($emu); fault injection skipped"
+  fi
+
+  echo "-- cleanup"
+  local remaining
+  remaining=$(isoc "docker ps -a --format '{{.Names}}'")
+  [ -n "$remaining" ] && info "containers after the case: $(printf '%s' "$remaining" | tr '\n' ' ')"
+  isoc "docker rmi -f $tag_amd $tag_arm $tag_cancel $tag_after $tag_fail $tag_worker ctrsaccel/life-worker2:$$ $tag_cache ctrsaccel/life-native-ok:$$ ctrsaccel/life-native-missing:$$ ctrsaccel/life-native-nonexec:$$ ctrsaccel/life-native-corrupt:$$" >/dev/null 2>&1 || true
+
+  info "lifecycle checked in $((SECONDS - t0))s"
+  if [ $life_rc = 0 ]; then
+    ok "lifecycle case passed"
+    return 0
+  fi
+  miss "lifecycle case failed"
+  ISO_PRESERVE=1
+  return 1
+}
+
 EXPECTED_SHA256=dd59e62b7ce111e08c38cfdc945da204e9014e078ef1fcfae9b0dabbc3543e17
 
 # sha256("ctrs-arm64-qualification\n"): the fixture contract with
@@ -1120,7 +1426,7 @@ run_case() {
     identity)      case_identity ;;
     platform)      case_platform ;;
     cross)         case_cross ;;
-    lifecycle)     note_unavailable "lifecycle (planned: S5)" ;;
+    lifecycle)     case_lifecycle ;;
   esac
 }
 
