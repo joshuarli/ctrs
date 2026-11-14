@@ -19,6 +19,21 @@ Measured 2026-11-13 on macOS 27.2 (Apple Silicon), rustc 1.99.1 stable. Commands
 
 Follow-up commits: `b96e7e3` bumps rustix 1.1.5 → 1.1.6 (RUSTSEC-2026-0486); `cargo audit` afterwards reports only the two GTK-side advisories deleted in CTRS-07.
 
+## Guest boot assets (CTRS-03, 2026-11-13)
+
+`cargo xtask guest` (initramfs), `cargo xtask kernel` (kernel 6.18.58, patches 0001–0004, `allnoconfig` with `kiri.config`) and `cargo xtask disk` (sparse data disk):
+
+| Artifact | Size | sha256 |
+| --- | --- | --- |
+| `guest/out/Image` (arm64, uncompressed) | 19,269,640 | `79da52cd3d7c8a6d3d3659933cbc8e701407866cfe58ca700901d981898024c0` |
+| `guest/out/initramfs.cpio` | 1,641,148 | `1c7da0308ac061b73415f240b8c56bc56d520253505e8679ec0788b49be4f7e1` |
+| `guest/out/data.img` (sparse 64 GiB) | 68719476736 logical | `84214422e1abe985a279715fee101231c26e4a10ce8c7101f6eac67ff42ca824` |
+| `guest/out/.config` | 88,062 | — |
+
+Build method: `CARGO_ENCODED_RUSTFLAGS="" cargo xtask guest` (see decisions.md re: global mold rustflags). Kernel/disk built inside OrbStack's docker per Decision O2 — only `debian:trixie` containers with `--rm`; the user's `junior-*` containers were untouched; `docker ps -a`/`docker volume ls` before/after differ solely by the `kiri-kbuild` volume (kept for rebuilds; deleted at CTRS-23). `guest/out/` is gitignored.
+
+VM cold/warm boot times are not yet measurable without a running engine; recorded at CTRS-04.
+
 ## Security audit at the pin (`cargo audit`, DB fetched 2026-11-13)
 
 Three advisories, all on dependencies that are removed or fixed by the campaign:
