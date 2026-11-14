@@ -1,4 +1,4 @@
-# Security model — ctrs (a headless Kiri)
+# Security model — ctrs (a headless ctrs)
 
 Date: 2026-11-14. Status: honest statement of what is and is not protected,
 with the evidence for each claim (see `docs/evidence/security.md`). Nothing
@@ -12,32 +12,32 @@ guest's kernel.
 
 | Component | Runs as | Sees | Talks to |
 | --- | --- | --- | --- |
-| `kiri` daemon | host user (usually the login user; root on Linux) | Docker API socket, its data root (`~/.kiri/data` / `KIRI_DATA_DIR`), registry credentials | the VM over vsock, the guest agent, the Mac's resolvers |
+| `ctrs` daemon | host user (usually the login user; root on Linux) | Docker API socket, its data root (`~/.local/share/ctrs/data` / `CTRS_DATA_DIR`), registry credentials | the VM over vsock, the guest agent, the Mac's resolvers |
 | macOS VM (VZ) | VZ XPC helper process per VM | guest memory (shares host page cache for virtiofs) | the daemon |
-| `kiri-init` (agent) in the guest | root in the guest kernel | the guest kernel; the host only through framed vsock messages | the daemon; netns per container |
+| `ctrs-init` (agent) in the guest | root in the guest kernel | the guest kernel; the host only through framed vsock messages | the daemon; netns per container |
 | container | uid inside the guest's user namespace | its rootfs, its netns | outbound network (via the guest's NAT/conntrack), the DNS relay |
 
 The two trust boundaries, in order of strength:
 
 1. host ↔ guest (VZ hardware virtualization): the host's memory and devices
    are not guest-addressable. The guest reaches the host only as a vsock
-   peer answering fixed, typed frames (`kiri-proto`) — never shared memory.
+   peer answering fixed, typed frames (`ctrs-proto`) — never shared memory.
 2. guest ↔ container (namespaces + cgroups + seccomp): weaker. Root in a
    container is root in the guest's user namespace. This boundary exists to
    contain accident, not an adversary with a kernel exploit.
 
 ## Attack surface, and what closes it
 
-### The daemon socket (`KIRI_SOCKET`, `~/.kiri/run/docker.sock`)
+### The daemon socket (`CTRS_SOCKET`, `~/.local/share/ctrs/run/docker.sock`)
 
 - `0600` permissions; Linux hosts may grant a group with
-  `KIRI_SOCKET_GROUP` (checked per connection, not only at connect).
+  `CTRS_SOCKET_GROUP` (checked per connection, not only at connect).
 - Two daemons may not share a data root: an `flock(2)` on `<root>/.lock`
   refuses the second engine at boot (added CTRS-21). Before it, two engines
   on one root interleaved blob writes silently.
 - The stale socket is unlinked and rebound on boot; the socket path is
   never created before `0700` state directories exist.
-- The API is the full Docker surface Kiri implements — including
+- The API is the full Docker surface ctrs implements — including
   `--privileged` creation — so whoever can touch the socket can run code
   in the VM. It is a *user* boundary, not a hardening layer.
 - The HTTP parser is hand-written (CTRS-14/15): 100-continue, framing
@@ -47,10 +47,10 @@ The two trust boundaries, in order of strength:
   per-chunk CRLF). A framing failure answers `400 bad request framing` and
   closes rather than executing a misparsed next request.
 
-### The guest agent (`kiri-init`)
+### The guest agent (`ctrs-init`)
 
 Runs as root in the guest. Everything it accepts arrives as a framed vsock
-message with a typed opcode (`kiri-proto`); malformed frames are dropped.
+message with a typed opcode (`ctrs-proto`); malformed frames are dropped.
 It does no path lookup it was not asked to do: image unpacks are confined
 to the container's rootfs with the `tar` crate's traversal rules *plus* a
 fail-closed check (CTRS-21): an entry whose path escapes the layer root
@@ -179,7 +179,7 @@ primary LAN segment.
 
 - No claim of multi-tenant isolation. One daemon, one user, one trust
   domain; containers are not a boundary against a guest-kernel exploit.
-- No seccomp profile for the *agent* itself (`kiri-init` is root by
+- No seccomp profile for the *agent* itself (`ctrs-init` is root by
   design; it is the container's warden, not a tenant).
 - No integrity enforcement beyond the app sandbox: an attacker who
   replaces the binary runs their own daemon.
@@ -197,7 +197,7 @@ primary LAN segment.
 
 ## Secrets
 
-- `KIRI_SOCKET` (socket) is `0600`; the data root is `0700`.
+- `CTRS_SOCKET` (socket) is `0600`; the data root is `0700`.
 - Registry credentials live in the docker CLI credential store (OS
-  keychain), passed per request, never written by Kiri.
+  keychain), passed per request, never written by ctrs.
 - No secret is ever injected into the VM by this engine.

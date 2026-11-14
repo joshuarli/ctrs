@@ -1,15 +1,15 @@
 #!/bin/bash
 # Reference fixture: masquerade on the uplink (docs/firewall.md, "postrouting").
 #
-# Builds a bridge the way kiri-init does, an upstream network, the reference
-# `ip kiri_ref_masq` table by hand (via the nft(8) tool, not kiri-init's wire
+# Builds a bridge the way ctrs-init does, an upstream network, the reference
+# `ip ctrs_ref_masq` table by hand (via the nft(8) tool, not ctrs-init's wire
 # encoding), and checks the *packet-level* result: the upstream server sees
 # the host's uplink address, not the container's.
 #
 # NEEDS LINUX ROOT (network namespaces, nftables, veth). Not executed on the
 # macOS development host; CTRS-13 runs it inside the Linux guest. Do not run
 # on a shared host without care: it adds and removes network namespaces and
-# one nftables table named kiri_ref_masq.
+# one nftables table named ctrs_ref_masq.
 #
 # Usage:  sudo conformance/fixtures/netns-masquerade.sh
 set -eu
@@ -17,19 +17,19 @@ command -v ip >/dev/null || { echo "needs iproute2"; exit 2; }
 command -v nft >/dev/null || { echo "needs nftables"; exit 2; }
 
 NAME=${0##*/}
-CLIENT=kfw-masq-c; UP=kfw-masq-up; BR=kiri-masq0; UPIF=kfw-masq-u0
+CLIENT=kfw-masq-c; UP=kfw-masq-up; BR=ctrs-masq0; UPIF=kfw-masq-u0
 cleanup() {
   ip netns del "$CLIENT" 2>/dev/null || true
   ip netns del "$UP" 2>/dev/null || true
   ip link del "$BR" 2>/dev/null || true
   ip link del "$UPIF" 2>/dev/null || true
-  nft delete table ip kiri_ref_masq 2>/dev/null || true
+  nft delete table ip ctrs_ref_masq 2>/dev/null || true
   rm -f /tmp/kfw-masq-peer
 }
 trap cleanup EXIT
 cleanup
 
-# The client network (a Kiri bridge), and an upstream namespace.
+# The client network (a ctrs bridge), and an upstream namespace.
 ip link add "$BR" type bridge
 ip addr add 198.18.0.1/24 dev "$BR"
 ip link set "$BR" up
@@ -54,9 +54,9 @@ ip netns exec "$UP" ip addr add 203.0.113.2/24 dev eth0
 ip netns exec "$UP" ip link set eth0 up
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-nft add table ip kiri_ref_masq
-nft add chain ip kiri_ref_masq postrouting '{ type nat hook postrouting priority 100; policy accept; }'
-nft add rule ip kiri_ref_masq postrouting oifname "$UPIF" masquerade
+nft add table ip ctrs_ref_masq
+nft add chain ip ctrs_ref_masq postrouting '{ type nat hook postrouting priority 100; policy accept; }'
+nft add rule ip ctrs_ref_masq postrouting oifname "$UPIF" masquerade
 
 # The upstream server logs the peer it sees.
 ip netns exec "$UP" python3 - <<'EOF' &

@@ -1,10 +1,10 @@
 [alias]
 xtask = "run -q --package xtask --"
 
-# Unit tests must not write into the user's real ~/.kiri: diag::state_dir()
-# honors KIRI_STATE_DIR, and cargo's [env] passes it to test binaries.
+# Unit tests must not write into the user's real ~/.local/share/ctrs: diag::state_dir()
+# honors CTRS_STATE_DIR, and cargo's [env] passes it to test binaries.
 [env]
-KIRI_STATE_DIR = { value = ".work/tmp/kiri-test-state", relative = true }
+CTRS_STATE_DIR = { value = ".work/tmp/ctrs-test-state", relative = true }
 
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"

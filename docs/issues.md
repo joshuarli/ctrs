@@ -18,7 +18,7 @@ scratch daemon.
 `docker-entrypoint.sh` died at `line 4: 1: unbound variable` (the image's
 `Cmd` never reached the process).
 
-Root cause: Kiri's create path mapped `Cmd: []` (the empty array) to
+Root cause: ctrs's create path mapped `Cmd: []` (the empty array) to
 `Some(vec![])` and kept it, so the image's `Cmd` was never restored.
 testcontainers (docker-java `ContainerDef.java`) always serializes
 `Cmd: new String[0]` — an explicit empty array, never a missing key. Moby's
@@ -34,11 +34,11 @@ if len(userConf.Entrypoint) == 0 {
 ```
 
 so with `Cmd: []` the image's `Cmd` is restored and the container runs the
-image's intended command; Kiri's `strings()` short-circuited that fallback.
+image's intended command; ctrs's `strings()` short-circuited that fallback.
 The CLI path (`docker run`) sends no `Cmd` key at all and worked, which is
 why the UI-run container was fine while the testcontainers one was not.
 
-Fix: `merge_entry_cmd()` in `crates/kiri/src/daemon/api.rs` — a missing or
+Fix: `merge_entry_cmd()` in `crates/ctrs/src/daemon/api.rs` — a missing or
 EMPTY Entrypoint falls back to the image's entrypoint; a missing or empty
 Cmd falls back to the image's Cmd, unless an Entrypoint was given (an
 explicit Entrypoint drops the image's Cmd — Docker semantics, kept). Table
@@ -125,14 +125,14 @@ fixed, by design:**
   emitted into the daemon log when the VM stops unexpectedly.
 
 Mitigation: any restart-critical container is restarted on *daemon*
-restart (restart the Kiri engine and it comes back — same path as
+restart (restart the ctrs engine and it comes back — same path as
 Docker's own daemon restart), and since CTRS-21 a VM death with a live
 daemon restarts `always`/`unless-stopped` containers by itself. An oops
 that panics the guest leaves its trace in `<data root>/vm-console.log`
 and in the daemon log (last 32 KiB). If the Oops recurs, report
 "guest kernel BUG at net/core/skbuff.c:4854 in skb_segment on ip_forward"
 against kernel 6.18.58 — a kernel-side (or virtio-net feature-side) fix,
-not a Kiri one. CTRS-04 crash parity is unaffected: the VM recovers on the
+not a ctrs one. CTRS-04 crash parity is unaffected: the VM recovers on the
 next request (sleep/wake measured 149–155 ms, CTRS-17).
 
 ## #199 — linux/amd64 containers crash: "rosetta error: unhandled auxillary vector type 29"
@@ -142,14 +142,14 @@ not engine-dependent.**
 
 - Host: macOS 27.2 (26B123). Mechanism confirmed in-tree:
   `VZLinuxRosettaDirectoryShare` + binfmt_misc `:rosetta:M::…:CF`
-  (`kiri-init/src/linux/mod.rs:385`), registered when Rosetta is installed.
+  (`ctrs-init/src/linux/mod.rs:385`), registered when Rosetta is installed.
 - Repro attempts (all pass, exit 0): `uname -m` on `linux/amd64` images
   `alpine:3.20`, `debian:bookworm-slim`, `ubuntu:24.04` — prints `x86_64`.
   The reporter's host was macOS 15.8.3 (24H241), where Rosetta appears not
   to tolerate `AT_RSEQ_ALIGN` (auxv type 29, rseq ABI v2, emitted by
   kernels ≥ 6.15).
 - The guest kernel (6.18.58) is identical in both reports; the delta is
-  the host's Rosetta. No Kiri-side code change can sanitize an auxv entry
+  the host's Rosetta. No ctrs-side code change can sanitize an auxv entry
   before Rosetta traps on it (binfmt `CF` executes rosetta directly on the
   amd64 image; filtering would require an injected setuid helper in the
   guest exec path — unverifiable on this host and disproportionate).
@@ -159,5 +159,5 @@ host is already fixed by its macOS version. Users on macOS 15.8.3 should
 upgrade macOS (this exact auxv crash is absent on 27.2); running amd64
 images through another runtime remains a workaround. Retest when Apple
 ships any Rosetta update (tracked alongside N-5 in the needs-owner list).
-CTRS-17-note: Kiri's Rosetta share is i.e. unrelated to the vsock/NAT
+CTRS-17-note: ctrs's Rosetta share is i.e. unrelated to the vsock/NAT
 finding; amd64 works where the host Rosetta cooperates.

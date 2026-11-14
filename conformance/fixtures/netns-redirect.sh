@@ -2,10 +2,10 @@
 # Reference fixture: the host.docker.internal redirect (docs/firewall.md,
 # "prerouting", redirect rule, and "input", host_relay_guard).
 #
-# A container on a Kiri bridge resolves host.docker.internal to the
+# A container on a ctrs bridge resolves host.docker.internal to the
 # reserved 198.19.248.254; connections to it must land on the host's
 # listener at :1026 (redirect), and only those (packets arriving on a
-# non-Kiri interface must not be redirected).
+# non-ctrs interface must not be redirected).
 #
 # NEEDS LINUX ROOT. Not executed on the macOS development host; CTRS-13
 # runs it inside the Linux guest.
@@ -16,13 +16,13 @@ command -v ip >/dev/null || { echo "needs iproute2"; exit 2; }
 command -v nft >/dev/null || { echo "needs nftables"; exit 2; }
 
 NAME=${0##*/}
-C=kfw-redir-c; X=kfw-redir-x; BR=kiri-redir0; XBR=elsewhere0
+C=kfw-redir-c; X=kfw-redir-x; BR=ctrs-redir0; XBR=elsewhere0
 cleanup() {
   ip netns del "$C" 2>/dev/null || true
   ip netns del "$X" 2>/dev/null || true
   ip link del "$BR" 2>/dev/null || true
   ip link del "$XBR" 2>/dev/null || true
-  nft delete table ip kiri_ref_redir 2>/dev/null || true
+  nft delete table ip ctrs_ref_redir 2>/dev/null || true
 }
 trap cleanup EXIT
 cleanup
@@ -62,16 +62,16 @@ for conn, _ in iter(lambda: s.accept(), None):
 SERVER=$!
 sleep 0.3
 
-nft add table ip kiri_ref_redir
-nft add chain ip kiri_ref_redir prerouting '{ type nat hook prerouting priority -100; policy accept; }'
-nft add rule ip kiri_ref_redir prerouting iifname "kiri*" ip daddr 198.19.248.254 tcp dport 1026 redirect to :1026
+nft add table ip ctrs_ref_redir
+nft add chain ip ctrs_ref_redir prerouting '{ type nat hook prerouting priority -100; policy accept; }'
+nft add rule ip ctrs_ref_redir prerouting iifname "ctrs*" ip daddr 198.19.248.254 tcp dport 1026 redirect to :1026
 
-hit=$(ip netns exec "$C" python3 -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect(("198.19.248.254", 1026)); print(s.recv(64).decode())' 2>&1) || { echo "FAIL: kiri-bridge redirect not delivered: $hit"; kill $SERVER 2>/dev/null; exit 1; }
+hit=$(ip netns exec "$C" python3 -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect(("198.19.248.254", 1026)); print(s.recv(64).decode())' 2>&1) || { echo "FAIL: ctrs-bridge redirect not delivered: $hit"; kill $SERVER 2>/dev/null; exit 1; }
 miss_rc=0
 miss=$(ip netns exec "$X" python3 -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect(("198.19.248.254", 1026)); print(s.recv(64).decode())' 2>&1) || miss_rc=$?
 kill $SERVER 2>/dev/null || true; wait $SERVER 2>/dev/null || true
-echo "kiri bridge: $hit"
-echo "non-kiri bridge: rc=$miss_rc out=${miss:-<no response, as expected>}"
+echo "ctrs bridge: $hit"
+echo "non-ctrs bridge: rc=$miss_rc out=${miss:-<no response, as expected>}"
 [ "$hit" = "kfw-redir-ok" ] || { echo "FAIL: redirect marker wrong"; exit 1; }
-[ "$miss_rc" != 0 ] || { echo "FAIL: non-kiri interface was redirected"; exit 1; }
+[ "$miss_rc" != 0 ] || { echo "FAIL: non-ctrs interface was redirected"; exit 1; }
 echo "PASS: $NAME"

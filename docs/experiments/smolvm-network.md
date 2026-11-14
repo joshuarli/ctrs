@@ -11,8 +11,8 @@ Inputs (all pinned; paths/line numbers verified at the pin):
   — `crates/smolvm-network/` (identical to current main `e2aa564a` / v1.35.0
   except the crate version bump; `git diff` shows only `Cargo.toml`).
 - libkrun `171e502379b513d0f15d4edf1c27e518f33ba58d` (2026-11-13) — `README.md`.
-- Kiri (this repo, CTRS-01…17 head): `crates/kiri/src/daemon/{dns.rs,ports.rs}`,
-  `crates/kiri-init/src/linux/relay.rs`, `docs/evidence/net.md`.
+- ctrs (this repo, CTRS-01…17 head): `crates/ctrs/src/daemon/{dns.rs,ports.rs}`,
+  `crates/ctrs-init/src/linux/relay.rs`, `docs/evidence/net.md`.
 
 smolvm-network is **not** a vzNAT drop-in. It is a userspace TCP/IP stack
 (smoltcp 0.13) in the VMM process, terminating every guest flow and relaying
@@ -27,7 +27,7 @@ plus sockets of type SOCK_STREAM/SOCK_DGRAM and AF_INET/AF_INET6/AF_UNIX only.
 
 ## Host resources per flow and port exhaustion
 
-| Concern | smolvm-network (virtio-net) | Kiri (VZNAT + vsock fallback) |
+| Concern | smolvm-network (virtio-net) | ctrs (VZNAT + vsock fallback) |
 | --- | --- | --- |
 | host FDs per guest TCP flow | 1 host `TcpStream` (host-facing) + ≈1 wake-pipe/channel set; the guest-facing smoltcp socket holds no FD. Published ports: 1 accept socket per `-p HOST:GUEST` (`lib.rs` `TcpPortListeners` — "one accept thread for every `-p HOST:GUEST`") | 0 per egress flow (the guest kernel owns them; host kernel tracks conntrack only). Published ports: 1 host socket per client connection; vsock relay path additionally holds the guest-relay stream pair |
 | per-process FD cap | macOS `kern.maxfilesperproc` = 10,240 on an 8 GB Mac → "a Mac machine holds about 9,900 connections at once" (`docs/limitations.md:35-36`); Linux ~524,288, `SMOLVM_TCP_RELAY_CAPACITY` caps machine at 65,536 open TCP connections (`docs/limitations.md:40`) | not applicable to VZNAT egress (no VMM sockets); published ports capped by host sockets, not by a VM-wide table (1024-session cap per UDP relay, `relay.rs`) |
@@ -40,7 +40,7 @@ Memory estimate (derived from code constants, not measured): full tier ≈0.5–
 per active flow in the VMM (two 256 KiB smoltcp buffers + relay/channel
 buffers + kernel socket buffers); tens of thousands of full-tier flows = tens
 of GB. smolvm mitigates past 1024 flows with the 16 KiB tier (still ≈0.5 MB
-worst case with channel capacity). Kiri VZNAT holds none of this.
+worst case with channel capacity). ctrs VZNAT holds none of this.
 
 ## Latency and correctness shape
 
@@ -71,7 +71,7 @@ for any userspace relay, not the kernel path.
   there; smolvm's own header says TSI is *rejected* for policy-bearing
   machines because "its libkrun filter has not enforced the equivalent policy
   in empirical tests" (`egress.rs:3-6`).
-- Kiri: VZNAT attachment is off the VMM data path entirely (device only;
+- ctrs: VZNAT attachment is off the VMM data path entirely (device only;
   DNAT/conntrack in the guest kernel, which is the isolation boundary for the
   container model anyway). The vsock relay is the same *class* of trust
   (userspace proxy of guest streams) but is bounded to published ports and is
@@ -82,7 +82,7 @@ for any userspace relay, not the kernel path.
 ## Which ideas could attach to our design without libkrun
 
 1. **DNS answer cache in the daemon's vsock DNS relay** — attachable, honest
-   design candidate. Kiri's relay (`crates/kiri/src/daemon/dns.rs`) has no
+   design candidate. ctrs's relay (`crates/ctrs/src/daemon/dns.rs`) has no
    cache: every lookup pays the Mac's resolver round trip (measured p50
    1.63 ms) and a concurrent burst fans out 1:1. smolvm's cache
    (`dns_cache.rs`) is a good template: keyed on the lowercased question +
@@ -90,7 +90,7 @@ for any userspace relay, not the kernel path.
    cached; positive TTL = smallest record TTL (capped 300 s), negative =
    SOA's, nothing else cached; entries live in the VMM process only (a
    fork/branch starts empty); sits *behind* the policy so a cached answer can
-   never authorize a disallowed name. Kiri differences: no policy layer, so
+   never authorize a disallowed name. ctrs differences: no policy layer, so
    the "behind the allow-list" invariant does not exist — the cache would be
    unscoped, and a cache that serves stale answers after the host's network
    changes (sleep/wake, new vmnet) is a correctness bug class; flushing on
@@ -107,7 +107,7 @@ for any userspace relay, not the kernel path.
    allow-host names via DNS interception with *learned* IPs (TTL clamp
    [60 s, 3600 s], `egress.rs:30-31`), a private-floor block with explicit
    exceptions (`with_private_floor`), protocol rules, denial logging, and a
-   replacement path that can only narrow. For Kiri this would be a new opt-in
+   replacement path that can only narrow. For ctrs this would be a new opt-in
    feature (`--egress-allow` or a daemon config), not a default; it interacts
    with CTRS-13's adapter work and with tailnet/private-subnet collisions
    (don't hardcode 100.96.0.0/10 — smolvm's own choice; detect host routes).
@@ -124,12 +124,12 @@ for any userspace relay, not the kernel path.
    policy enforcement in empirical tests per smolvm's own note; mutually
    exclusive with VZNAT. Rejected.
 5. **Small-buffer tier past N flows** (`FULL_BUFFER_CONNECTIONS` pattern) —
-   fine pattern to steal for Kiri's vsock relay allocation policy if published
-   ports become fd-heavy, but it solves a problem we have not measured; Kiri
+   fine pattern to steal for ctrs's vsock relay allocation policy if published
+   ports become fd-heavy, but it solves a problem we have not measured; ctrs
    uses bounded per-stream buffers already. Note only.
 6. **Mediated egress** (token-authenticated preamble + external decider,
    `smolvm_protocol::mediated_egress`) — requires a VMM-resident decider and
-   protocol changes; Kiri's boundary is the guest, not a host-service
+   protocol changes; ctrs's boundary is the guest, not a host-service
    sideband. Skip.
 
 ## Explicit recommendation
@@ -181,7 +181,7 @@ authorized for implementation.
   "It's limited to SOCK_DGRAM and SOCK_STREAM … AF_INET, AF_INET6 and
   AF_UNIX"; "virtio-vsock + TSI" proxy model; "you should apply on the VMM
   whatever restrictions you want to apply on the guest".
-- this repo: `crates/kiri/src/daemon/dns.rs` (no cache; 1,500 ms/resolver,
-  3,500 ms budget, 256 concurrent relays); `crates/kiri/src/daemon/ports.rs`
+- this repo: `crates/ctrs/src/daemon/dns.rs` (no cache; 1,500 ms/resolver,
+  3,500 ms budget, 256 concurrent relays); `crates/ctrs/src/daemon/ports.rs`
   (NAT fast path + vsock fallback); `docs/evidence/net.md` (CTRS-17 matrix);
-  `crates/kiri-init/src/linux/relay.rs` (fallback relay).
+  `crates/ctrs-init/src/linux/relay.rs` (fallback relay).

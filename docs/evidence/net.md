@@ -2,7 +2,7 @@
 
 Date: 2026-11-14. Verdict: **published ports on this machine ride the vsock
 relay, not vmnet — macOS Local Network privacy blocks the NAT/DNAT path for
-unsigned binaries (and for the dev `kiri` daemon itself). The one concrete
+unsigned binaries (and for the dev `ctrs` daemon itself). The one concrete
 defect found and fixed is the guest agent answering `UplinkQuery` from a
 boot-time cached DHCP lease forever; it now reads the kernel's live default
 route + primary address. vzNAT as such was not stress-qualified here: the
@@ -15,7 +15,7 @@ hardware.**
 - macOS, Apple Silicon; Mac on `bridge102` at `192.168.64.1/24` (vmnet NAT
   is 192.168.64.0/24 — same facility as Lima's vzNAT). Guest eth0
   `192.168.64.20/24`, default via `192.168.64.1`.
-- Engine: `target/release/kiri` (CTRS-16 head), guest initramfs rebuilt with
+- Engine: `target/release/ctrs` (CTRS-16 head), guest initramfs rebuilt with
   the live-route agent fix (1,538 KiB; `cargo xtask guest`).
 - Containers: `--network host` for engine-net measurements, `--network bridge`
   (172.17.0.0/16) for container tests, `fd00:dead::/64` for the v6 bridge.
@@ -32,7 +32,7 @@ are exempt. Verified in this session:
 | `nc` (connect) | works | `nc -v 192.168.64.20 5201` → "succeeded" |
 | `curl` (connect) | connect ok, transfer fails (err 56) | |
 | python (pyenv, `/usr/bin/python3` both) | `EHOSTUNREACH` | all builds, all ports, TCP and UDP |
-| `kiri` dev daemon (unsigned) | `EHOSTUNREACH` | logged as `VM's NAT network is unreachable… over vsock` |
+| `ctrs` dev daemon (unsigned) | `EHOSTUNREACH` | logged as `VM's NAT network is unreachable… over vsock` |
 
 Consequence: the engine's published-port fast path (Mac → vmnet →
 guest-kernel DNAT → container) is **unreachable for development builds on
@@ -80,7 +80,7 @@ filter's shape, not the vmnet hardware.
 
 ## The stale-DHCP defect and its fix
 
-`Kiri` reported "published ports over vsock" because vmnet was unreachable,
+`ctrs` reported "published ports over vsock" because vmnet was unreachable,
 but a second, independent defect lurked behind the same symptom: the guest
 agent answered `UplinkQuery` from a **boot-time cached DHCP lease forever**,
 with no lease renewal anywhere (`Dhcp::timeout_ms` returns −1 once Bound).
@@ -88,11 +88,11 @@ If vmnet re-leased without a VM restart (walk into another vmnet, host
 network change), the host would keep relaying/d-natting at a dead address
 and published ports would ride vsock or fail silently.
 
-Fix landed in this slice (`crates/kiri-init/src/linux/netlink.rs` +
+Fix landed in this slice (`crates/ctrs-init/src/linux/netlink.rs` +
 `agent.rs`): `UplinkQuery` now issues `RTM_GETROUTE` (dst 0.0.0.0/0, main
 table, unicast) and `RTM_GETADDR` (scope-universe primary IFA_LOCAL) and
 answers with the live kernel state; the lease remains only as the
-pre-DHCP-bind fallback. `cargo check -p kiri-init --target
+pre-DHCP-bind fallback. `cargo check -p ctrs-init --target
 aarch64-unknown-linux-musl` is clean. The guest was rebuilt (1,538 KiB) and
 the fix verified live: VM boots in 161 ms, published HTTP answers 20/20
 200 OK. Honest scope note: the renewal path itself (dhcp client never
@@ -131,14 +131,14 @@ through the vsock relay on this machine, as before).
   `tests/e2e.sh` 480 passed, 0 failed, 0 skipped** with the new guest
   agent. A first attempt on the pre-existing scratch engine reported 9
   failures, all environmental: (a) the eight `build-*` checks used a stale
-  user-level buildx builder `kiri-build-e2e` (endpoint
+  user-level buildx builder `ctrs-build-e2e` (endpoint
   `.work/tmp/e2e.sock`, no longer exists — `docker buildx inspect` exits 0,
   so the harness never recreated it; removed with`docker buildx rm -f`),
   (b) `filter-ancestor` saw 3 alpine containers because of a leftover bench
   container in the shared scratch root. No code change was involved; the
   re-run after cleanup is the 480/0/0 figure.
 - `cargo test --workspace` 192 pass; `cargo check --workspace` clean;
-  musl check `-p kiri-init` clean; smoke was 15/15 with the CTRS-16 binary
+  musl check `-p ctrs-init` clean; smoke was 15/15 with the CTRS-16 binary
   and the VM was exercised end-to-end by the above.
 - Two VM boot anomalies this session, both self-clearing: "storage device
   attachment is invalid" on a boot raced with the old VM's shutdown

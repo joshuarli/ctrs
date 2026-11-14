@@ -1,0 +1,39 @@
+[package]
+name = "ctrs"
+description = "Tiny, fast container runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ctrs-image = { path = "../ctrs-image" }
+ctrs-proto = { path = "../ctrs-proto" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+# gzip uploads to PUT /containers/{id}/archive (DDEV sends them).
+flate2 = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+ctrs-vmm = { path = "../ctrs-vmm" }
+h12tiny-server = { version = "0.9.0", default-features = false, features = ["http1"], optional = true }
+h12tiny-core = { version = "0.9.0", optional = true }
+async-net = { version = "2", optional = true }
+futures-lite = { version = "2", optional = true }
+hyper = { version = "=1.12.0-beta.1", package = "laputa-hyper-futures-lite", default-features = false, optional = true }
+
+
+# The tests read back the tar archives the managed builder writes.
+[dev-dependencies]
+tar = "0.4"
+
+
+[features]
+default = []
+## CTRS-15 pilot: HTTP/1.1 API serving via h12tiny (per-connection reactor).
+h12tiny = ["dep:h12tiny-server", "dep:h12tiny-core", "dep:async-net", "dep:futures-lite", "dep:hyper"]
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 # CTRS-21 failure injection: kills the engine and the VM at lifecycle
 # points, fills the image store's filesystem, OOMs a container, and forces
 # the rollback paths. Every section uses its own scratch data root and
-# socket under .work/tmp/ (never ~/.kiri, never a docker context) and
+# socket under .work/tmp/ (never ~/.local/share/ctrs, never a docker context) and
 # starts a fresh recovery engine on the same root to check what survived.
 #
 # Needs: the host binary built and signed (`cargo xtask host`), the docker
@@ -26,8 +26,8 @@ step() { printf -- '== %s (%s)\n' "$1" "$(date +%H:%M:%S)" | tee -a "$LOG"; }
 : >"$LOG"
 
 command -v docker >/dev/null || { echo 'docker CLI not on PATH' >&2; exit 2; }
-BIN=$ROOT/target/release/kiri
-[ -x "$BIN" ] || { echo 'target/release/kiri missing; run cargo xtask host' >&2; exit 2; }
+BIN=$ROOT/target/release/ctrs
+[ -x "$BIN" ] || { echo 'target/release/ctrs missing; run cargo xtask host' >&2; exit 2; }
 
 # Each scenario leaves at most one hdiutil mount behind via the trap.
 FULL_MNT=""
@@ -51,7 +51,7 @@ fresh_engine() {
   EH_PIDFILE=$PREFIX-$name.pid
   # The root is absent on purpose: a fresh install must create and validate it.
   rm -rf "$EH_DATA" "$EH_SOCK" "$EH_PIDFILE"
-  env "$@" KIRI_DATA_DIR="$EH_DATA" KIRI_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
+  env "$@" CTRS_DATA_DIR="$EH_DATA" CTRS_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
   EH_PID=$!
   engines+=("$EH_PID")
   local i
@@ -68,7 +68,7 @@ recovery_engine() { # like fresh_engine but keeps the root and the stale socket
   local name=$1
   EH_DATA=$PREFIX-$name-data
   EH_SOCK=$PREFIX-$name.sock
-  KIRI_DATA_DIR="$EH_DATA" KIRI_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
+  CTRS_DATA_DIR="$EH_DATA" CTRS_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
   EH_PID=$!
   engines+=("$EH_PID")
   local i
@@ -192,7 +192,7 @@ step 'S6: disk-full on the image store (hdiutil 64 MiB volume, symlinked in)'
 if fresh_engine s6; then
   IMG="$PREFIX-full-store.sparseimage"; FULL_MNT="$PREFIX-full-mnt"
   rm -rf "$IMG" "$FULL_MNT"; mkdir -p "$FULL_MNT"
-  if hdiutil create -size 64m -fs APFS -type SPARSE -volname kiri-full "$IMG" >/dev/null 2>&1 &&
+  if hdiutil create -size 64m -fs APFS -type SPARSE -volname ctrs-full "$IMG" >/dev/null 2>&1 &&
      hdiutil attach -mountpoint "$FULL_MNT" -nobrowse "$IMG" >/dev/null 2>&1; then
     mkdir -p "$FULL_MNT/blobs/sha256" "$FULL_MNT/tmp"
     rm -rf "$EH_DATA/blobs" "$EH_DATA/tmp"
@@ -291,10 +291,10 @@ else bad 'S10 first engine did not come up'; fi
 
 step 'S12: VM death with the daemon alive restarts policy containers'
 # The crash is injected through the crashed engine's OWN test hook
-# (KIRI_TEST_VM_CRASH=1 + SIGUSR2): the daemon crashes its own VM via the
+# (CTRS_TEST_VM_CRASH=1 + SIGUSR2): the daemon crashes its own VM via the
 # Lost path. No other engine's VM is ever signalled. A sentinel engine
 # running beside it proves the scoping.
-if fresh_engine s12 KIRI_TEST_VM_CRASH=1; then
+if fresh_engine s12 CTRS_TEST_VM_CRASH=1; then
   EH_PID_S12=$EH_PID; EH_SOCK_S12=$EH_SOCK; EH_DATA_S12=$EH_DATA
   load_alpine
   dockq run -d --name ctrs21-f12 --restart unless-stopped public.ecr.aws/docker/library/alpine:latest sleep 300 >/dev/null 2>&1

@@ -3,7 +3,7 @@
 # Creates a private scratch data root + socket under .work/tmp/, boots the
 # VM (kernel guest/out/Image, initramfs.cpio), and round-trips through the
 # external docker CLI against the engine's Unix socket. Never touches
-# OrbStack, /var/run/docker.sock, docker contexts, or ~/.kiri.
+# OrbStack, /var/run/docker.sock, docker contexts, or ~/.local/share/ctrs.
 #
 # Usage: conformance/smoke.sh
 set -u
@@ -24,7 +24,7 @@ t0=$(date +%s)
 command -v docker >/dev/null || { echo 'docker CLI not on PATH' >&2; exit 2; }
 
 STATE_BEFORE=""
-[ ! -e "$HOME/.kiri" ] || STATE_BEFORE=$(find "$HOME/.kiri" -name '*.log' -o -name '*.txt' 2>/dev/null | sort | xargs stat -f '%m %N' 2>/dev/null | sort)
+[ ! -e "$HOME/.local/share/ctrs" ] || STATE_BEFORE=$(find "$HOME/.local/share/ctrs" -name '*.log' -o -name '*.txt' 2>/dev/null | sort | xargs stat -f '%m %N' 2>/dev/null | sort)
 CTX_BEFORE=$(docker context ls --format '{{.Name}}|{{.Current}}' 2>/dev/null | sort)
 
 step 'clean scratch'
@@ -35,7 +35,7 @@ rm -f "$SOCK"
 
 step 'build + ad-hoc sign host binary'
 if cargo xtask host >>"$LOG" 2>&1; then
-  BIN=$ROOT/target/release/kiri
+  BIN=$ROOT/target/release/ctrs
   [ -x "$BIN" ] && ok 'host binary built + signed' || bad 'host binary missing'
 else
   bad 'xtask host'
@@ -46,23 +46,23 @@ if [ -n "$BIN" ]; then
   step 'per-instance lifecycle (two engines, concurrent starts, stale pidfile)'
   LIFE=$WORK/smoke-life
   rm -rf "$LIFE"; mkdir -p "$LIFE"
-  # Two engines in one directory: distinct pidfiles, no shared kiri.pid.
-  KIRI_SOCKET="$LIFE/a.sock" KIRI_DATA_DIR="$LIFE/a-data" HOME="$LIFE/home-a" "$BIN" daemon >>"$LOG" 2>&1 &
+  # Two engines in one directory: distinct pidfiles, no shared ctrs.pid.
+  CTRS_SOCKET="$LIFE/a.sock" CTRS_DATA_DIR="$LIFE/a-data" HOME="$LIFE/home-a" "$BIN" daemon >>"$LOG" 2>&1 &
   LA=$!
-  KIRI_SOCKET="$LIFE/b.sock" KIRI_DATA_DIR="$LIFE/b-data" HOME="$LIFE/home-b" "$BIN" daemon >>"$LOG" 2>&1 &
+  CTRS_SOCKET="$LIFE/b.sock" CTRS_DATA_DIR="$LIFE/b-data" HOME="$LIFE/home-b" "$BIN" daemon >>"$LOG" 2>&1 &
   LB=$!
   for i in $(seq 1 60); do [ -S "$LIFE/a.sock" ] && [ -S "$LIFE/b.sock" ] && break; sleep 1; done
-  if [ -f "$LIFE/a.sock.pid" ] && [ -f "$LIFE/b.sock.pid" ] && [ ! -e "$LIFE/kiri.pid" ]; then
+  if [ -f "$LIFE/a.sock.pid" ] && [ -f "$LIFE/b.sock.pid" ] && [ ! -e "$LIFE/ctrs.pid" ]; then
     pa=$(cut -d' ' -f1 "$LIFE/a.sock.pid"); pb=$(cut -d' ' -f1 "$LIFE/b.sock.pid")
-    if [ "$pa" = "$LA" ] && [ "$pb" = "$LB" ]; then ok 'two engines, two pidfiles, no shared kiri.pid'; else bad "pidfiles do not match the engines (got $pa/$LA $pb/$LB)"; fi
+    if [ "$pa" = "$LA" ] && [ "$pb" = "$LB" ]; then ok 'two engines, two pidfiles, no shared ctrs.pid'; else bad "pidfiles do not match the engines (got $pa/$LA $pb/$LB)"; fi
   else
     bad 'per-instance pidfiles missing'
   fi
   # Concurrent starts on one endpoint: both report the same engine.
   mkdir -p "$LIFE/home-c"
-  KIRI_SOCKET="$LIFE/c.sock" KIRI_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-1.log" 2>&1 &
+  CTRS_SOCKET="$LIFE/c.sock" CTRS_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-1.log" 2>&1 &
   C1=$!
-  KIRI_SOCKET="$LIFE/c.sock" KIRI_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-2.log" 2>&1 &
+  CTRS_SOCKET="$LIFE/c.sock" CTRS_DATA_DIR="$LIFE/c-data" HOME="$LIFE/home-c" "$BIN" engine start >"$LIFE/start-2.log" 2>&1 &
   C2=$!
   wait $C1; r1=$?
   wait $C2; r2=$?
@@ -70,7 +70,7 @@ if [ -n "$BIN" ]; then
   pid2=$(grep -oE 'pid [0-9]+' "$LIFE/start-2.log" | head -1 | awk '{print $2}')
   if [ "$r1" = 0 ] && [ "$r2" = 0 ] && [ -n "$pid1" ] && [ "$pid1" = "$pid2" ]; then ok "concurrent starts converged on one engine (pid $pid1)"; else bad "concurrent starts diverged (rc $r1/$r2 pids $pid1/$pid2)"; fi
   # One engine stops; the other is untouched.
-  if KIRI_SOCKET="$LIFE/a.sock" HOME="$LIFE/home-a" "$BIN" engine stop >>"$LOG" 2>&1 && kill -0 "$LB" 2>/dev/null; then
+  if CTRS_SOCKET="$LIFE/a.sock" HOME="$LIFE/home-a" "$BIN" engine stop >>"$LOG" 2>&1 && kill -0 "$LB" 2>/dev/null; then
     ok 'engine stop is per-instance; the sibling engine lives'
   else
     bad 'engine stop hurt the sibling engine or failed'
@@ -79,7 +79,7 @@ if [ -n "$BIN" ]; then
   sleep 300 &
   SLEEP=$!
   printf '%s 12345\n' "$SLEEP" > "$LIFE/d.sock.pid"
-  out=$(KIRI_SOCKET="$LIFE/d.sock" HOME="$LIFE/home-d" "$BIN" engine stop 2>&1); rc=$?
+  out=$(CTRS_SOCKET="$LIFE/d.sock" HOME="$LIFE/home-d" "$BIN" engine stop 2>&1); rc=$?
   if [ "$rc" != 0 ] && kill -0 "$SLEEP" 2>/dev/null; then
     ok 'live foreign pid in the pidfile is refused, not signalled'
   else
@@ -91,11 +91,11 @@ if [ -n "$BIN" ]; then
   DEAD=$!
   wait "$DEAD"
   printf '%s 12345\n' "$DEAD" > "$LIFE/e.sock.pid"
-  out=$(KIRI_SOCKET="$LIFE/e.sock" HOME="$LIFE/home-e" "$BIN" engine stop 2>&1); rc=$?
+  out=$(CTRS_SOCKET="$LIFE/e.sock" HOME="$LIFE/home-e" "$BIN" engine stop 2>&1); rc=$?
   if [ "$rc" = 0 ] && [ ! -e "$LIFE/e.sock.pid" ]; then ok 'stale pidfile for a dead pid is removed, never signalled'; else bad "stale pidfile: rc $rc, out: $out"; fi
   # Startup failure before publication: read-only parent, nonexistent root.
   mkdir -p "$LIFE/ro"; chmod 555 "$LIFE/ro"
-  out=$(KIRI_SOCKET="$LIFE/f.sock" KIRI_DATA_DIR="$LIFE/ro/data" HOME="$LIFE/home-f" "$BIN" engine start 2>&1); rc=$?
+  out=$(CTRS_SOCKET="$LIFE/f.sock" CTRS_DATA_DIR="$LIFE/ro/data" HOME="$LIFE/home-f" "$BIN" engine start 2>&1); rc=$?
   chmod 755 "$LIFE/ro"
   if [ "$rc" != 0 ] && [ ! -e "$LIFE/f.sock.pid" ] && [[ "$out" == *startup* ]]; then
     ok 'startup failure is reported and the pidfile is never published'
@@ -108,7 +108,7 @@ if [ -n "$BIN" ]; then
   rm -rf "$LIFE"
 
   step 'start daemon (scratch roots)'
-  KIRI_DATA_DIR="$DATA" KIRI_SOCKET="$SOCK" HOME="$HOME_DIR" "$BIN" daemon >>"$LOG" 2>&1 &
+  CTRS_DATA_DIR="$DATA" CTRS_SOCKET="$SOCK" HOME="$HOME_DIR" "$BIN" daemon >>"$LOG" 2>&1 &
   DPID=$!
   i=0
   for i in $(seq 1 90); do [ -S "$SOCK" ] && break; sleep 1; done
@@ -160,17 +160,17 @@ if [ -n "$BIN" ]; then
   i=0
   for i in $(seq 1 10); do kill -0 "$DPID" 2>/dev/null || break; sleep 1; done
   if kill -0 "$DPID" 2>/dev/null; then bad 'daemon did not exit within 10s of SIGTERM'; kill -9 "$DPID"; else ok "daemon exited after ${i}s"; fi
-  pgrep -f 'kiri-init' >/dev/null && bad 'stale kiri-init process' || ok 'no stale agent'
+  pgrep -f 'ctrs-init' >/dev/null && bad 'stale ctrs-init process' || ok 'no stale agent'
 
   step 'host hygiene'
   CTX_AFTER=$(env -u DOCKER_HOST -u DOCKER_CONTEXT docker context ls --format '{{.Name}}|{{.Current}}' 2>/dev/null | sort)
   [ "$CTX_BEFORE" = "$CTX_AFTER" ] && ok 'docker contexts unchanged' || bad 'docker contexts CHANGED'
   STATE_AFTER=""
-  [ ! -e "$HOME/.kiri" ] || STATE_AFTER=$(find "$HOME/.kiri" -name '*.log' -o -name '*.txt' 2>/dev/null | sort | xargs stat -f '%m %N' 2>/dev/null | sort)
+  [ ! -e "$HOME/.local/share/ctrs" ] || STATE_AFTER=$(find "$HOME/.local/share/ctrs" -name '*.log' -o -name '*.txt' 2>/dev/null | sort | xargs stat -f '%m %N' 2>/dev/null | sort)
   if [ "$STATE_BEFORE" = "$STATE_AFTER" ]; then
-    ok '~/.kiri untouched'
+    ok '~/.local/share/ctrs untouched'
   else
-    bad '~/.kiri was written: '"$(diff <(printf '%s\n' "$STATE_BEFORE") <(printf '%s\n' "$STATE_AFTER") | tail -3 | tr '\n' ' ')"
+    bad '~/.local/share/ctrs was written: '"$(diff <(printf '%s\n' "$STATE_BEFORE") <(printf '%s\n' "$STATE_AFTER") | tail -3 | tr '\n' ' ')"
   fi
 fi
 

@@ -1,12 +1,12 @@
 #!/bin/bash
 # CTRS-21 seccomp differential fixture. Builds the probe for the engine
-# under test (default KIRI_SOCKET), runs the syscall battery under every
+# under test (default CTRS_SOCKET), runs the syscall battery under every
 # security mode, and asserts the matrix matches the documented filter
-# (Kiri's deny-list + per-capability relaxation; vsock and io_uring stay
+# (ctrs's deny-list + per-capability relaxation; vsock and io_uring stay
 # denied for everyone). Exits non-zero on any mismatch.
 set -u
 cd "$(dirname "$0")/../.."
-SOCK=${KIRI_SOCKET:?set KIRI_SOCKET to the engine socket}
+SOCK=${CTRS_SOCKET:?set CTRS_SOCKET to the engine socket}
 export DOCKER_HOST="unix://$SOCK"
 unset DOCKER_CONTEXT
 TAG=ctrs21/seccomp-probe

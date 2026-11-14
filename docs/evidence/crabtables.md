@@ -1,7 +1,7 @@
 # CTRS-13 — In-VM qualification evidence (2026-11-14)
 
-Environment: scratch Kiri daemon (pinned guest, `Image` `9366868a…`, kernel
-6.18.58, nftables v1.0.9 in-guest), engine at `KIRI_SOCKET=.work/tmp/ctrs13.sock`,
+Environment: scratch ctrs daemon (pinned guest, `Image` `9366868a…`, kernel
+6.18.58, nftables v1.0.9 in-guest), engine at `CTRS_SOCKET=.work/tmp/ctrs13.sock`,
 data root `.work/tmp/ctrs13-data`. OrbStack untouched throughout (`junior-*`
 healthy, contexts unchanged). The guest VM was rebuilt from current source
 before this work (`cargo xtask guest`: initramfs
@@ -10,32 +10,32 @@ before this work (`cargo xtask guest`: initramfs
 
 ## 1. The engine's live table, in the guest
 
-`nft list table ip kiri` (privileged container, `--network host`):
+`nft list table ip ctrs` (privileged container, `--network host`):
 
 - bridge network present: postrouting `oif eth0 masquerade`; prerouting
   redirect rules (`198.19.248.254` → `:1026`, dns/53); forward filter
-  (`oifname != "kiri*"`, ct state, ct status dnat, per-bridge accept, drop);
+  (`oifname != "ctrs*"`, ct state, ct status dnat, per-bridge accept, drop);
   input guards (localnet `127/8` fresh-connection drop, relay-port drop) —
   matches `docs/firewall.md` exactly.
 - published port 18081: prerouting gained two high-port DNAT rules from the
   gateway (`iif eth0 ip saddr 192.168.64.1 ip daddr 192.168.64.14 tcp dport
   61000/61001 dnat to 172.17.0.2:80`) and postrouting gained
-  `iif eth0 ip saddr 192.168.64.1 oifname "kiri*" masquerade fully-random`.
+  `iif eth0 ip saddr 192.168.64.1 oifname "ctrs*" masquerade fully-random`.
   (VM-mode published ports are TCP-only; UDP and IPv6 published ports are
   relayed by the daemon, never DNATed.)
 - IPv6 network `ctrs13v6` (fd00:dead::/64) with a v6 container attached:
-  `ip6 kiri` appeared with the NAT66 postrouting rule
-  (`ip6 saddr fd00:dead::/64 oifname != "kiri*" masquerade`) and the v6
-  forward filter with `kiri1`. After container/network removal, the
-  `ip6 kiri` table is destroyed (verified) and the v4 table is back to the
-  kiri0-only state.
+  `ip6 ctrs` appeared with the NAT66 postrouting rule
+  (`ip6 saddr fd00:dead::/64 oifname != "ctrs*" masquerade`) and the v6
+  forward filter with `ctrs1`. After container/network removal, the
+  `ip6 ctrs` table is destroyed (verified) and the v4 table is back to the
+  ctrs0-only state.
 - **Doc correction (CTRS-13):** `published_masq_rule` lives in **postrouting**
   (verified live), not prerouting as first documented. `docs/firewall.md`
   updated; the CTRS-11 diagram line for the relay redirect was corrected the
   same way (any TCP dport, not `tcp dport 1026`).
 
 Command shape: `docker run --privileged --network host --rm alpine:3.20 sh -c
-'apk add --no-cache nftables >/dev/null 2>&1; nft list table ip kiri'`.
+'apk add --no-cache nftables >/dev/null 2>&1; nft list table ip ctrs'`.
 
 ## 2. Reference fixtures, in-VM
 
@@ -50,7 +50,7 @@ alpine:3.20 sh -c 'apk add --no-cache nftables iproute2 python3 bash >/dev/null
 | netns-dnat.sh | PASS | LAN → host `203.0.113.1:8080` → DNAT → `198.18.0.2:80`; needed a default route in the server ns (fixture bug, fixed) |
 | netns-forward-filter.sh | PASS | same-bridge OK; cross-bridge dropped (expected timeout traceback in log, rc ≠ 0) |
 | netns-localnet.sh | PASS | rewritten (below): guard match semantics via nft counters |
-| netns-redirect.sh | PASS | kiri* bridge + reserved address redirected; other bridge refused |
+| netns-redirect.sh | PASS | ctrs* bridge + reserved address redirected; other bridge refused |
 
 `netns-localnet.sh`** rewrite:** the original fixture expected a container
 packet to `127.0.0.0/8` to be delivered to a host-local sink when only
@@ -92,11 +92,11 @@ EQUIVALENT (IPv6 table)
 Both tables byte-match after normalization (handles ignored); the IPv6
 masq prefix and `fib daddr type local` cmp encoding match exactly.
 
-**How to re-run:** `cargo test -p kiri-init --target aarch64-unknown-linux-musl
+**How to re-run:** `cargo test -p ctrs-init --target aarch64-unknown-linux-musl
 --features crabtables -- --ignored --nocapture crabtables_matches_reference`
 inside a scratch netns as root (`unshare -n linux --privileged` shell in the
-VM), then dump both tables with `nft -j list table ip{,6} kiri`. The test
-destroys/recreates the `kiri` table — never run it in the engine's netns.
+VM), then dump both tables with `nft -j list table ip{,6} ctrs`. The test
+destroys/recreates the `ctrs` table — never run it in the engine's netns.
 The driver/normalizer used here are in the session scratch (`compare-netns.sh`,
 `compare-invm.sh`, `normalize.py` under `.work/tmp/`, not committed).
 
@@ -146,5 +146,5 @@ divergence list with written justification.
 - UDP published ports are relayed, IPv6 published ports are relayed: no
   kernel DNAT for either in the VM (daemon userland path), matching the
   `docs/firewall.md` inventory and the live dump.
-- `iifname`/`oifname "kiri*"` is a 4-byte prefix match; a bridge named
-  `kirix` would match (acceptable; kiri bridges are `kiri<N>`, owned).
+- `iifname`/`oifname "ctrs*"` is a 4-byte prefix match; a bridge named
+  `ctrsx` would match (acceptable; ctrs bridges are `ctrs<N>`, owned).

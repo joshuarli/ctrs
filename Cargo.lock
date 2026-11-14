@@ -216,6 +216,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrs"
+version = "0.0.0"
+dependencies = [
+ "async-net",
+ "ctrs-image",
+ "ctrs-proto",
+ "ctrs-vmm",
+ "flate2",
+ "futures-lite",
+ "h12tiny-core",
+ "h12tiny-server",
+ "laputa-hyper-futures-lite",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+]
+
+[[package]]
+name = "ctrs-image"
+version = "0.0.0"
+dependencies = [
+ "h12tiny-client-sync",
+ "http",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+]
+
+[[package]]
+name = "ctrs-init"
+version = "0.0.0"
+dependencies = [
+ "crabtables",
+ "ctrs-proto",
+ "flate2",
+ "libc",
+ "ruzstd",
+ "tar",
+]
+
+[[package]]
+name = "ctrs-proto"
+version = "0.0.0"
+
+[[package]]
+name = "ctrs-vmm"
+version = "0.0.0"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "libc",
+ "objc2",
+ "objc2-foundation",
+ "objc2-virtualization",
+]
+
+[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -552,66 +612,6 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "kiri"
-version = "0.0.0"
-dependencies = [
- "async-net",
- "flate2",
- "futures-lite",
- "h12tiny-core",
- "h12tiny-server",
- "kiri-image",
- "kiri-proto",
- "kiri-vmm",
- "laputa-hyper-futures-lite",
- "libc",
- "serde",
- "serde_json",
- "sha2",
- "tar",
-]
-
-[[package]]
-name = "kiri-image"
-version = "0.0.0"
-dependencies = [
- "h12tiny-client-sync",
- "http",
- "serde",
- "serde_json",
- "sha2",
- "tar",
-]
-
-[[package]]
-name = "kiri-init"
-version = "0.0.0"
-dependencies = [
- "crabtables",
- "flate2",
- "kiri-proto",
- "libc",
- "ruzstd",
- "tar",
-]
-
-[[package]]
-name = "kiri-proto"
-version = "0.0.0"
-
-[[package]]
-name = "kiri-vmm"
-version = "0.0.0"
-dependencies = [
- "block2",
- "dispatch2",
- "libc",
- "objc2",
- "objc2-foundation",
- "objc2-virtualization",
 ]
 
 [[package]]

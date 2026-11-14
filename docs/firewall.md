@@ -1,7 +1,7 @@
-# Firewall — the nf_tables configuration `kiri-init` maintains
+# Firewall — the nf_tables configuration `ctrs-init` maintains
 
 Scope: every nftables message the agent builds, by hand, in
-`crates/kiri-init/src/linux/netlink.rs` — there is no `nft` binary, no
+`crates/ctrs-init/src/linux/netlink.rs` — there is no `nft` binary, no
 iptables, no iptables-nft. The file is the only place that speaks
 `NETLINK_NETFILTER`; the configuration is always the whole table, replaced
 atomically. This inventory was written against the tree at the CTRS-11
@@ -38,7 +38,7 @@ end for completeness.
 `send()` call. The kernel applies it as one transaction: if any message is
 refused, none are.
 
-Table replacement is `DESTROYTABLE kiri` + `NEWTABLE` + chains + rules in
+Table replacement is `DESTROYTABLE ctrs` + `NEWTABLE` + chains + rules in
 the same batch (`NFT_MSG_DESTROYTABLE` = like DELTABLE but no error when
 absent, Linux 6.3+). The comment in `install_nat_from` says it correctly:
 *destroying it in the same batch keeps the old one if anything below is
@@ -58,16 +58,16 @@ Attribute numbering follows the nftables UAPI: `NFTA_TABLE_NAME` = 1,
 ## Table layout
 
 ```text
-table ip kiri {                                  # created iff the engine manages any network
+table ip ctrs {                                  # created iff the engine manages any network
   chain postrouting { type nat hook postrouting priority 100; policy accept;
     oif <uplink> masquerade
     # VM mode with >=1 published TCP port:
-    iif <uplink> ip saddr <gateway> oifname "kiri*" masquerade fully-random
+    iif <uplink> ip saddr <gateway> oifname "ctrs*" masquerade fully-random
   }
   chain prerouting { type nat hook prerouting priority -100; policy accept;
     # VM mode (redirect=true):
-    iifname "kiri*" meta l4proto tcp ip daddr 198.19.248.254 redirect to :1026   # HOST_RELAY_PORT
-    iifname "kiri*" udp dport 53 ip daddr 198.19.248.254 redirect to :53           # dns_redirect_rule
+    iifname "ctrs*" meta l4proto tcp ip daddr 198.19.248.254 redirect to :1026   # HOST_RELAY_PORT
+    iifname "ctrs*" udp dport 53 ip daddr 198.19.248.254 redirect to :53           # dns_redirect_rule
     iif <uplink> ip saddr <gateway> fib daddr type local                           # published TCP ports,
       ip daddr != 127.0.0.0/8 tcp dport <hp> dnat to <ip>:<p>                      #   from the Mac only
     # Linux host mode (redirect=false):
@@ -79,14 +79,14 @@ table ip kiri {                                  # created iff the engine manage
     # host mode: per published port (tcp and udp), same match as prerouting
   }
   chain forward    { type filter hook forward priority 0; policy accept;
-    oifname != "kiri*" accept
+    oifname != "ctrs*" accept
     ct state established,related accept
     ct status dnat accept
-    iifname "kiriN" oifname "kiriN" accept   # one per bridge, whole name
+    iifname "ctrsN" oifname "ctrsN" accept   # one per bridge, whole name
     drop
   }
   chain input      { type filter hook input priority 0; policy accept;
-    iifname "kiri*" ip daddr 127.0.0.0/8 \
+    iifname "ctrs*" ip daddr 127.0.0.0/8 \
       ct state & (established|related) == 0 ct status & dnat == 0 drop
     # VM mode only:
     tcp dport 1026 ct status & dnat == 0 drop
@@ -95,9 +95,9 @@ table ip kiri {                                  # created iff the engine manage
 ```
 
 ```text
-table ip6 kiri {                                 # created iff an IPv6 network exists
+table ip6 ctrs {                                 # created iff an IPv6 network exists
   chain postrouting { type nat hook postrouting priority 100; policy accept;
-    ip6 saddr <subnet>/<prefix> oifname != "kiri*" masquerade   # one per IPv6 network (NAT66)
+    ip6 saddr <subnet>/<prefix> oifname != "ctrs*" masquerade   # one per IPv6 network (NAT66)
   }
   chain forward    { … same as IPv4, family NFPROTO_IPV6 … }
 }
@@ -118,7 +118,7 @@ rules, not by chain policy.
    once at `host_uplink()`; in the VM at `uplink()` boot.
 2. VM mode, only with ≥1 published TCP port: `published_masq_rule()` —
    `meta iif <uplink> (NFT_META_IIF = 4)` `and` `payload saddr <gateway>`
-   `and` `oifname "kiri*"` `masq fully-random`
+   `and` `oifname "ctrs*"` `masq fully-random`
    (`NFTA_MASQ_FLAGS = NF_NAT_RANGE_PROTO_RANDOM_FULLY (16)`).
    The Mac's connections to a published port arrive at the container from
    the bridge gateway on a fresh port, like Docker's userland proxy; a Mac
@@ -127,16 +127,16 @@ rules, not by chain policy.
    postrouting, not prerouting as first drafted here.
 
 ### prerouting (IPv4, VM mode)
-1. `redirect_rule(…, from_bridges = true)`: `iifname "kiri*"` (4-byte prefix
+1. `redirect_rule(…, from_bridges = true)`: `iifname "ctrs*"` (4-byte prefix
    cmp against `BRIDGE_PREFIX`) `ip daddr 198.19.248.254` (payload network
    header +16, 4 bytes) `l4proto tcp` → immediate reg 1 = `HOST_RELAY_PORT`,
    `redir`. Connections from a container to the reserved address land on the
    host's listener. The `iifname` constraint is what keeps the LAN (on a
    Linux host with the same reserved address routed elsewhere) from being
    redirected.
-2. `dns_redirect_rule(HOST_ADDR)`: `iifname "kiri*" udp dport 53 ip daddr
+2. `dns_redirect_rule(HOST_ADDR)`: `iifname "ctrs*" udp dport 53 ip daddr
    <HOST_ADDR> redirect to :53`. A kind-node resolv.conf rewrite of
-   127.0.0.11 → host.docker.internal:53 hits Kiri's embedded DNS on the
+   127.0.0.11 → host.docker.internal:53 hits ctrs embedded DNS on the
    bridge's gateway.
 3. Per published **TCP** port, `dnat_rule_from("prerouting", d, Some((uplink,
    gateway)))`: `meta iif (NFT_META_IIF = 4) == <uplink>` **and** payload
@@ -174,12 +174,12 @@ published container, as Docker does).
 ### forward (both families)
 Policy accept, explicit rules in order:
 
-1. `oifname != "kiri*" accept` — traffic not headed into a Kiri bridge is
+1. `oifname != "ctrs*" accept` — traffic not headed into a ctrs bridge is
    not judged; a Linux host's other forwarding stays as it was.
 2. `ct state established,related accept` (NF_CT_STATE_BIT STATE=0,
    mask `1<<1 | 1<<2`, `bitwise`/`cmp neq 0`).
 3. `ct status dnat accept` (IPS_DST_NAT = `1<<5`) — published ports pass.
-4. One `iifname "kiriN" oifname "kiriN" accept` per bridge, whole IFNAMSIZ
+4. One `iifname "ctrsN" oifname "ctrsN" accept` per bridge, whole IFNAMSIZ
    (NUL-padded 16 bytes), as written for every bridge in `MADE_BRIDGES`.
 5. `drop` — everything else headed into a bridge dies.
 
@@ -193,12 +193,12 @@ Docker. `fib daddr . iif oif` was deliberately avoided: WSL2 kernels lack
 table is rebuilt whenever a bridge comes or goes.
 
 ### input (IPv4)
-1. `localnet_guard()` — `iifname "kiri*" ip daddr 127.0.0.0/8
+1. `localnet_guard()` — `iifname "ctrs*" ip daddr 127.0.0.0/8
    ct state & (established|related) == 0 ct status & dnat == 0 drop`.
    With `route_localnet` set on a bridge (kube-proxy does), a container
    sending to the host's loopback would be delivered to host-local
    services (the CVE-2020-8558 hole). Replies and DNATed packets pass;
-   fresh container→127.0.0.1 dies. Kiri itself never sets `route_localnet`
+   fresh container→127.0.0.1 dies. ctrs itself never sets `route_localnet`
    (loopback connections to published ports go through the daemon's relay).
 2. `host_relay_guard(HOST_RELAY_PORT)` (VM mode only) — `tcp dport 1026
    ct status & dnat == 0 drop`: the host.docker.internal listener takes
@@ -209,7 +209,7 @@ table is rebuilt whenever a bridge comes or goes.
 
 ### IPv6 (whole table, NAT66)
 `masq6_rule` per IPv6 network: `ip6 saddr <subnet>/<prefix> oifname !=
-"kiri*" masquerade` (payload network +8, 16 bytes, `bitwise` with an
+"ctrs*" masquerade` (payload network +8, 16 bytes, `bitwise` with an
 arbitrary-prefix mask, `cmp eq`). Matched by source because an input
 interface is not known yet at `postrouting`. The **forward** chain is the
 IPv4 one built by `forward_filter_in(NFPROTO_IPV6)` (no IPv6-only
@@ -224,7 +224,7 @@ state is process-local (`V6_SAVED`), not on-disk.
 
 ## Chain/rule ownership and cleanup
 
-- The table is `kiri` (v4) and `kiri` (v6), owned solely by kiri-init;
+- The table is `ctrs` (v4) and `ctrs` (v6), owned solely by ctrs-init;
   nothing else names them. Another engine's tables (`docker`, `libvirt`,
   `firewalld`) are never opened, listed or flushed. Within the table,
   chains are created with `NLM_F_CREATE` (EEXIST is fine — the whole table
@@ -233,8 +233,8 @@ state is process-local (`V6_SAVED`), not on-disk.
 - Forward-filter rules are the only per-bridge rules: they are rebuilt on
   every bridge add/remove (`refresh_nat()` → `install_nat_from` with the
   same NAT image and the current bridge list). Bridge removal deletes
-  `kiriN` and its addresses and routes; the rebuilt table then has no
-  `same_bridge(kiriN)` accept and the `oifname != "kiri*"` rule no longer
+  `ctrsN` and its addresses and routes; the rebuilt table then has no
+  `same_bridge(ctrsN)` accept and the `oifname != "ctrs*"` rule no longer
   matters for it.
 - `remove_host_network()` (clean stop, Linux host) deletes all bridges
   this agent made (`MADE_BRIDGES`), destroys the ip table, destroys the
@@ -243,8 +243,8 @@ state is process-local (`V6_SAVED`), not on-disk.
 - **Crash:** a hard-killed agent leaves both tables behind on a Linux
   host. The stale DNAT entries point at container addresses that are gone;
   traffic to those published ports disappears into `dnat` and gets RST/
-  dropped, and `ip kiri` lingers until removed by hand (`nft delete table
-  ip kiri`) or by the next clean `remove_host_network()` on boot. No path
+  dropped, and `ip ctrs` lingers until removed by hand (`nft delete table
+  ip ctrs`) or by the next clean `remove_host_network()` on boot. No path
   currently removes it at startup. This is a known gap, and the reason
   CTRS-11 defines a transaction type with an explicit outcome instead of a
   fire-and-forget batch.
@@ -254,7 +254,7 @@ state is process-local (`V6_SAVED`), not on-disk.
 Single-threaded at the granularity of the batch: one agent process, one
 `Netlink` socket per operation. `NAT` (last image) and `MADE_BRIDGES` are
 process-local `Mutex`es; `NO_FIB4`/`V6_SAVED` are atomics/mutex. Two
-kiri-init processes on one host race on the shared `kiri` table — last
+ctrs-init processes on one host race on the shared `ctrs` table — last
 writer wins, and each writer's image is self-contained, so no half-built
 state is visible, but the loser's published ports vanish. There is no
 cross-process lock and no generation counter; the table is treated as
@@ -275,9 +275,9 @@ passes rule 4).
 2. UDP published ports are not DNATed in the VM (daemon relays them) and
    are DNATed only in Linux-host mode; IPv6 published ports are never
    DNATed by the kernel anywhere.
-3. `iifname`/`oifname "kiri*"` is a 4-byte prefix match: a bridge named
-   `kirifoo` that is not Kiri's would match. Bridges are named `kiri<N>`
-   from Kiri's own sequence.
+3. `iifname`/`oifname "ctrs*"` is a 4-byte prefix match: a bridge named
+   `ctrsfoo` that is not ctrs.s would match. Bridges are named `ctrs<N>`
+   from ctrs.s own sequence.
 4. Rebuild-on-change means published ports and networks cannot be applied
    incrementally; very large port/network counts rebuild the whole table
    on every change.

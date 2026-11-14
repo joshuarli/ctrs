@@ -6,7 +6,7 @@
 # instance identity (pid, data root, socket, kernel boot id), the number of
 # VM generations the engine went through, and the last log lines before the
 # end. A clean SIGTERM stop is success; any other death exits 1 with a
-# report. Never touches OrbStack, docker contexts, or ~/.kiri.
+# report. Never touches OrbStack, docker contexts, or ~/.local/share/ctrs.
 #
 # Usage: conformance/watch.sh   (env: WATCH_SECONDS=600, WATCH_CHURN=1)
 set -u
@@ -27,11 +27,11 @@ CHURN=${WATCH_CHURN:-1}
 ALPINE=public.ecr.aws/docker/library/alpine:latest
 
 command -v docker >/dev/null || { echo 'docker CLI not on PATH' >&2; exit 2; }
-BIN=$ROOT/target/release/kiri
-[ -x "$BIN" ] || { echo 'target/release/kiri missing; run cargo xtask host' >&2; exit 2; }
+BIN=$ROOT/target/release/ctrs
+[ -x "$BIN" ] || { echo 'target/release/ctrs missing; run cargo xtask host' >&2; exit 2; }
 
 : >"$LOG"
-KIRI_DATA_DIR="$DATA" KIRI_SOCKET="$SOCK" HOME="$HOME_DIR" "$BIN" daemon >>"$LOG" 2>&1 &
+CTRS_DATA_DIR="$DATA" CTRS_SOCKET="$SOCK" HOME="$HOME_DIR" "$BIN" daemon >>"$LOG" 2>&1 &
 DPID=$!
 START=$(date +%s)
 boot_id=$(sysctl -n kern.boottime 2>/dev/null || echo unknown)

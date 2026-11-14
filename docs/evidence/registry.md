@@ -2,13 +2,13 @@
 
 Date: 2026-11-14. Verdict: **no win — `ureq` stays the registry transport;
 `h12tiny-client-sync` remains behind the `h12tiny` cargo feature of
-`kiri-image` (`registry-h12tiny` in `kiri`), off by default.**
+`ctrs-image` (`registry-h12tiny` in `ctrs`), off by default.**
 
 ## Design
 
 Behind `--features h12tiny` (off by default; the default build is
 byte-identical in behavior to before the slice), the registry client
-(`crates/kiri-image/src/registry.rs`) talks to registries through a new
+(`crates/ctrs-image/src/registry.rs`) talks to registries through a new
 transport seam (`src/transport.rs`): `Transport` (cloneable; `Ureq` or
 `H12Tiny`), `Request`/`Response`, bodies as `Empty` / `Form` / `Bytes` /
 `File { path }` (streamed from disk, reopened per redirect hop). Everything
@@ -39,7 +39,7 @@ backoff, digest verification, multiarch selection — is transport-agnostic.
   blob; a blob that never arrives gives up after `BLOB_TRIES`; a cancel
   mid-body stops at once and removes the partial blob (the h12tiny path
   wakes its body read at the configured stall; ureq's socket is shut down
-  by the cancel). 45 tests green (`cargo test -p kiri-image --features h12tiny`);
+  by the cancel). 45 tests green (`cargo test -p ctrs-image --features h12tiny`);
   8 consecutive clean runs after fixing a race the new tests exposed:
   the ureq and h12tiny variants of a test shared one temp root and deleted
   each other's partial blobs (each test now gets its own).
@@ -56,7 +56,7 @@ backoff, digest verification, multiarch selection — is transport-agnostic.
   `digest mismatch: expected sha256:2dd1…, got sha256:54f8…` on **both**
   engines — fails closed, no image recorded.
 - `conformance/smoke.sh` 15/15 with the default binary; `cargo test
-  --workspace` 192 pass; musl `-p kiri-init` check clean (full-workspace
+  --workspace` 192 pass; musl `-p ctrs-init` check clean (full-workspace
   musl check is not a gate: `ring` wants `aarch64-linux-musl-gcc`, absent
   on this machine — preexisting, unrelated to this slice).
 
@@ -90,7 +90,7 @@ handshake is paid at least twice per pull. This is structural, not tunable.
 
 ## Size and supply chain
 
-`target/release/kiri`: 4,061,680 B (default, as before) vs 5,036,224 B
+`target/release/ctrs`: 4,061,680 B (default, as before) vs 5,036,224 B
 (h12tiny registry) = **+974,544 B (+24.0 %)**. New lock entries
 (feature-only; never built by the default build): h12tiny-client-sync /
 -normalize / -tls-system 0.9.0 (MIT), rustls-graviola 0.4.0 (Apache-2.0 /
@@ -103,7 +103,7 @@ Keep ureq. The pilot demonstrates the seam works end to end (pulls, push,
 corruption, resume, cancel) but the candidate transport loses on every
 measured workload that moves bytes, at +24 % binary and a second trust
 path. Reverting the flag is one Cargo feature; the pilot stays in tree
-behind `kiri-image/h12tiny` as a documented negative result. Revisiting
+behind `ctrs-image/h12tiny` as a documented negative result. Revisiting
 requires a candidate with connection pooling for unix-socket-adjacent
 registries and a measurable pull-time win.
 

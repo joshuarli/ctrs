@@ -1,7 +1,7 @@
 #!/bin/bash
 # Reference fixture: the localnet guard (docs/firewall.md, "input",
 # localnet_guard). CVE-2020-8558 class defense-in-depth: a packet from a
-# container arriving on a Kiri bridge with destination 127.0.0.0/8 must not
+# container arriving on a ctrs bridge with destination 127.0.0.0/8 must not
 # be accepted by host-local services.
 #
 # What this kernel (6.18.58) does: packets with destination 127.0.0.0/8
@@ -21,11 +21,11 @@ command -v ip >/dev/null || { echo "needs iproute2"; exit 2; }
 command -v nft >/dev/null || { echo "needs nftables"; exit 2; }
 
 NAME=${0##*/}
-C=kfw-ln-c; BR=kiri-ln0
+C=kfw-ln-c; BR=ctrs-ln0
 cleanup() {
   ip netns del "$C" 2>/dev/null || true
   ip link del "$BR" 2>/dev/null || true
-  nft delete table ip kiri_ref_ln 2>/dev/null || true
+  nft delete table ip ctrs_ref_ln 2>/dev/null || true
   rm -f /tmp/kfw-ln-got
 }
 trap cleanup EXIT
@@ -95,13 +95,13 @@ wait "$SERVER" || true
 echo "control: packet to 198.18.9.1 delivered"
 rm -f /tmp/kfw-ln-got
 
-# The guard: fresh packets from a Kiri bridge to 127/8 are dropped.
-nft add table ip kiri_ref_ln
-nft add chain ip kiri_ref_ln input '{ type filter hook input priority 0; policy accept; }'
-nft add rule ip kiri_ref_ln input iifname "kiri*" ip daddr 127.0.0.0/8 'ct state & ( established | related ) == 0' 'ct status & dnat == 0' counter drop
+# The guard: fresh packets from a ctrs bridge to 127/8 are dropped.
+nft add table ip ctrs_ref_ln
+nft add chain ip ctrs_ref_ln input '{ type filter hook input priority 0; policy accept; }'
+nft add rule ip ctrs_ref_ln input iifname "ctrs*" ip daddr 127.0.0.0/8 'ct state & ( established | related ) == 0' 'ct status & dnat == 0' counter drop
 
 # A same-shape packet to a non-loopback address still passes the chain.
-nft add rule ip kiri_ref_ln input iifname "kiri*" counter accept
+nft add rule ip ctrs_ref_ln input iifname "ctrs*" counter accept
 host_sink 198.18.9.1; SERVER=$!
 sleep 0.2
 inject 198.18.9.1
@@ -118,7 +118,7 @@ set +e
 wait "$SERVER"
 guard_rc=$?
 set -e
-drops=$(nft list chain ip kiri_ref_ln input | awk '/ct status.*counter/ && /drop/ { for (i=1;i<NF;i++) if ($i=="counter" && $(i+1)=="packets") print $(i+2) }')
+drops=$(nft list chain ip ctrs_ref_ln input | awk '/ct status.*counter/ && /drop/ { for (i=1;i<NF;i++) if ($i=="counter" && $(i+1)=="packets") print $(i+2) }')
 echo "attack packet: sink rc=$guard_rc; guard drop counter=$drops"
 [ ! -f /tmp/kfw-ln-got ] || { echo "FAIL: packet to 127.0.0.1 was delivered"; exit 1; }
 [ "${drops:-0}" -ge 1 ] || { echo "FAIL: the guard drop rule did not match the attack packet"; exit 1; }

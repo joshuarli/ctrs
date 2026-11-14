@@ -2,9 +2,9 @@
 # Reference fixture: published port via DNAT (docs/firewall.md, "prerouting",
 # Linux-host mode) and the forward filter's ct-status-dnat accept.
 #
-# Topology: a "container" netns on a Kiri-like bridge (198.18.0.0/24), a
+# Topology: a "container" netns on a ctrs-like bridge (198.18.0.0/24), a
 # host uplink to a "LAN" netns (203.0.113.0/24), and the reference tables
-# kiri_ref_dnat + the filter chain by hand. The LAN netns dials the host's
+# ctrs_ref_dnat + the filter chain by hand. The LAN netns dials the host's
 # uplink address:8080; the packet is prerouted into the container:80.
 #
 # NEEDS LINUX ROOT. Not executed on the macOS development host; CTRS-13
@@ -16,13 +16,13 @@ command -v ip >/dev/null || { echo "needs iproute2"; exit 2; }
 command -v nft >/dev/null || { echo "needs nftables"; exit 2; }
 
 NAME=${0##*/}
-LAN=kfw-dnat-lan; SRV=kfw-dnat-srv; BR=kiri-dnat0; LANIF=kfw-dnat-l0
+LAN=kfw-dnat-lan; SRV=kfw-dnat-srv; BR=ctrs-dnat0; LANIF=kfw-dnat-l0
 cleanup() {
   ip netns del "$LAN" 2>/dev/null || true
   ip netns del "$SRV" 2>/dev/null || true
   ip link del "$BR" 2>/dev/null || true
   ip link del "$LANIF" 2>/dev/null || true
-  nft delete table ip kiri_ref_dnat 2>/dev/null || true
+  nft delete table ip ctrs_ref_dnat 2>/dev/null || true
 }
 trap cleanup EXIT
 cleanup
@@ -53,14 +53,14 @@ ip netns exec "$LAN" ip link set eth0 up
 ip netns exec "$LAN" ip route add default via 203.0.113.1
 
 echo 1 > /proc/sys/net/ipv4/ip_forward
-nft add table ip kiri_ref_dnat
-nft add chain ip kiri_ref_dnat prerouting '{ type nat hook prerouting priority -100; policy accept; }'
-nft add chain ip kiri_ref_dnat forward '{ type filter hook forward priority 0; policy accept; }'
-nft add rule ip kiri_ref_dnat prerouting ip daddr 203.0.113.1 tcp dport 8080 dnat to 198.18.0.2:80
-nft add rule ip kiri_ref_dnat forward ct state { established, related } accept
-nft add rule ip kiri_ref_dnat forward ct status dnat accept
-nft add rule ip kiri_ref_dnat forward iifname "$BR" oifname "$BR" accept
-nft add rule ip kiri_ref_dnat forward drop
+nft add table ip ctrs_ref_dnat
+nft add chain ip ctrs_ref_dnat prerouting '{ type nat hook prerouting priority -100; policy accept; }'
+nft add chain ip ctrs_ref_dnat forward '{ type filter hook forward priority 0; policy accept; }'
+nft add rule ip ctrs_ref_dnat prerouting ip daddr 203.0.113.1 tcp dport 8080 dnat to 198.18.0.2:80
+nft add rule ip ctrs_ref_dnat forward ct state { established, related } accept
+nft add rule ip ctrs_ref_dnat forward ct status dnat accept
+nft add rule ip ctrs_ref_dnat forward iifname "$BR" oifname "$BR" accept
+nft add rule ip ctrs_ref_dnat forward drop
 
 # The container serves a marker.
 ip netns exec "$SRV" python3 - <<'EOF' &

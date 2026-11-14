@@ -11,9 +11,9 @@ engine (for the `debian:trixie` build container); any engine works.
 CARGO_ENCODED_RUSTFLAGS="" cargo xtask guest   # guest/out/initramfs.cpio
 CARGO_ENCODED_RUSTFLAGS="" cargo xtask kernel  # guest/out/Image      (needs a Docker engine)
 CARGO_ENCODED_RUSTFLAGS="" cargo xtask disk    # guest/out/data.img   (needs a Docker engine)
-cargo xtask host      # target/release/kiri, signed with the virtualization entitlement
+cargo xtask host      # target/release/ctrs, signed with the virtualization entitlement
 cargo xtask all       # guest + host
-cargo xtask linux     # kiri and kiri-init as static musl binaries (Linux host build; see docs/upstream.md and N-1)
+cargo xtask linux     # ctrs and ctrs-init as static musl binaries (Linux host build; see docs/upstream.md and N-1)
 ```
 
 `CARGO_ENCODED_RUSTFLAGS=""` is required on hosts whose global cargo config
@@ -27,24 +27,24 @@ with the same container build.
 ## Use
 
 ```sh
-./target/release/kiri daemon &              # serves ~/.kiri/run/docker.sock; boots on first use
-DOCKER_HOST=unix://$HOME/.kiri/run/docker.sock docker run --rm alpine echo hello
-docker buildx create --name kiri-build --driver docker-container \
+./target/release/ctrs daemon &              # serves ~/.local/share/ctrs/run/docker.sock; boots on first use
+DOCKER_HOST=unix://$HOME/.ctrs/run/docker.sock docker run --rm alpine echo hello
+docker buildx create --name ctrs-build --driver docker-container \
   --driver-opt default-load=true unix:///absolute/path/to/run/docker.sock   # for docker build
-SOAK=600 KIRI_SOCKET=.work/tmp/smoke.sock tests/e2e.sh    # full suite + 600-run leak soak
+SOAK=600 CTRS_SOCKET=.work/tmp/smoke.sock tests/e2e.sh    # full suite + 600-run leak soak
 ```
 
-Docker's commands also work as `kiri` commands, always against the daemon
-socket whatever docker context is selected: `kiri run`, `kiri ps`, `kiri
-exec`, `kiri logs`, `kiri compose up`. They run the docker CLI with
+Docker's commands also work as `ctrs` commands, always against the daemon
+socket whatever docker context is selected: `ctrs run`, `ctrs ps`, `ctrs
+exec`, `ctrs logs`, `ctrs compose up`. They run the docker CLI with
 `DOCKER_HOST=unix://…` and `DOCKER_CONTEXT` stripped. Nothing in the
 daemon creates a docker context. A BuildKit builder is addressed by its
 endpoint (`unix://…`), never by a context name.
 
-Data goes to `~/.kiri` (override with `KIRI_DATA_DIR`), logs to
-`~/.kiri/logs/` (the unit tests redirect them via `KIRI_STATE_DIR`), the
-socket path defaults to `~/.kiri/run/docker.sock` (override with
-`KIRI_SOCKET`). The repository does not install anything system-wide
+Data goes to `~/.local/share/ctrs` (override with `CTRS_DATA_DIR`), logs to
+`~/.local/share/ctrs/logs/` (the unit tests redirect them via `CTRS_STATE_DIR`), the
+socket path defaults to `~/.local/share/ctrs/run/docker.sock` (override with
+`CTRS_SOCKET`). The repository does not install anything system-wide
 (`/usr/local/bin`, `launchd`, `/etc/resolver`); see docs/launchd.md for an
 optional user service example.
 
@@ -52,7 +52,7 @@ optional user service example.
 
 ```
 docker CLI ─┐
-compose ────┼─ ~/.kiri/run/docker.sock ─► kiri daemon ── vsock ──► guest agent (PID 1)
+compose ────┼─ ~/.local/share/ctrs/run/docker.sock ─► ctrs daemon ── vsock ──► guest agent (PID 1)
 buildx ─────┘    Docker Engine API          owns the VM              clone3 → container
 ```
 
@@ -75,11 +75,11 @@ buildx ─────┘    Docker Engine API          owns the VM             
 
 | Path | What |
 |------|------|
-| `crates/kiri` | the `kiri` binary: daemon, Docker API, CLI |
-| `crates/kiri-vmm` | Virtualization.framework VM |
-| `crates/kiri-init` | guest PID 1, agent and container runtime |
-| `crates/kiri-proto` | host ↔ guest wire protocol |
-| `crates/kiri-image` | image references, registry client, blob store, archives |
+| `crates/ctrs` | the `ctrs` binary: daemon, Docker API, CLI |
+| `crates/ctrs-vmm` | Virtualization.framework VM |
+| `crates/ctrs-init` | guest PID 1, agent and container runtime |
+| `crates/ctrs-proto` | host ↔ guest wire protocol |
+| `crates/ctrs-image` | image references, registry client, blob store, archives |
 | `guest/kernel` | kernel config and patches |
 | `conformance/` | `smoke.sh` (engine round-trip), `run.sh` (API fixtures) |
 | `tests/e2e.sh` | the Docker compatibility suite, against a running engine |

@@ -54,8 +54,8 @@ trial, every workload — is systematic, not noise.
 
 ## Size and supply chain
 
-- default `target/release/kiri`: 4,073,824 B before the slice (4,076,560 B after; +2.7 KB from the #134 fixes).
-- h12tiny `target/release/kiri`: 4,321,424 B (**+247,864 B, +6.1 %**), and `cargo check -p kiri --features h12tiny` adds ~minutes to a cold build (kache-warm checks are fast).
+- default `target/release/ctrs`: 4,073,824 B before the slice (4,076,560 B after; +2.7 KB from the #134 fixes).
+- h12tiny `target/release/ctrs`: 4,321,424 B (**+247,864 B, +6.1 %**), and `cargo check -p ctrs --features h12tiny` adds ~minutes to a cold build (kache-warm checks are fast).
 - New lock entries (feature-only, never fetched by the default build): `h12tiny-server`/`h12tiny-core` 0.9.0 (MIT), `laputa-hyper-futures-lite` 1.12.0-beta.1 (MIT, pins `=1.12.0-beta.1`), `async-net` 2.0.0 + `async-io` stack, `futures-lite` 2.6.1, `http` 1.5.0, `bytes`. **No vanilla `hyper` in the graph anymore; no Tokio, no rustls, no OpenSSL.** `cargo audit` clean (129 deps). Default build pulls none of these.
 - Compile-time impact on `cargo check --workspace`: unmeasurable with warm cache (0.25–1.3 s both); cold impact unmeasured (recorded honestly as unknown).
 

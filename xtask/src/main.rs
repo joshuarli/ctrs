@@ -1,11 +1,11 @@
-//! Build tasks for Kiri. Run with `cargo xtask <task>`.
+//! Build tasks for ctrs. Run with `cargo xtask <task>`.
 //!
-//!   guest    build kiri-init for the guest and pack guest/out/initramfs.cpio
+//!   guest    build ctrs-init for the guest and pack guest/out/initramfs.cpio
 //!   kernel   build the guest kernel into guest/out/Image (needs a Docker engine)
 //!   disk     make the empty data disk template guest/out/data.img (needs a Docker engine)
-//!   host     build the `kiri` binary and sign it with the virtualization entitlement
-//!   linux    `kiri` and `kiri-init` for a Linux host, in target/linux/release
-//!            (built in a Linux container: needs a Docker engine, Kiri works)
+//!   host     build the `ctrs` binary and sign it with the virtualization entitlement
+//!   linux    `ctrs` and `ctrs-init` for a Linux host, in target/linux/release
+//!            (built in a Linux container: needs a Docker engine, ctrs works)
 //!   all      guest + host
 //!
 //! `--arch x86_64` (or `intel`) makes guest, kernel, host and linux do the
@@ -61,7 +61,7 @@ impl Arch {
     /// architecture (so `cargo run` and the Apple Silicon build stay as they
     /// were), target/<triple>/release when cross-built.
     fn host_bin(self, root: &Path) -> PathBuf {
-        if self.native() { root.join("target/release/kiri") } else { root.join("target").join(self.host_target()).join("release/kiri") }
+        if self.native() { root.join("target/release/ctrs") } else { root.join("target").join(self.host_target()).join("release/ctrs") }
     }
 
     fn native(self) -> bool {
@@ -104,14 +104,14 @@ fn run(cmd: &mut Command) -> io::Result<()> {
 
 fn guest(root: &Path, arch: Arch) -> io::Result<()> {
     let target = arch.guest_target();
-    // kiri-init is pure Rust: rust-lld links it against Rust's own musl, as
+    // ctrs-init is pure Rust: rust-lld links it against Rust's own musl, as
     // .cargo/config.toml does for arm64. Set here, not there, so the Linux
     // engine build (which links C) keeps its own linker.
     run(Command::new(env!("CARGO"))
         .current_dir(root)
         .env("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "rust-lld")
-        .args(["build", "--release", "-p", "kiri-init", "--target", target]))?;
-    let init = fs::read(root.join("target").join(target).join("release/kiri-init"))?;
+        .args(["build", "--release", "-p", "ctrs-init", "--target", target]))?;
+    let init = fs::read(root.join("target").join(target).join("release/ctrs-init"))?;
 
     // Uncompressed on purpose: it is small, and the kernel skips decompression.
     let mut cpio = Cpio::default();
@@ -127,15 +127,15 @@ fn guest(root: &Path, arch: Arch) -> io::Result<()> {
     Ok(())
 }
 
-/// The arm64 kernel builds in the cached tree in the `kiri-kbuild` volume;
-/// the x86-64 one in its own, `kiri-kbuild-x86_64`, since both build in the
+/// The arm64 kernel builds in the cached tree in the `ctrs-kbuild` volume;
+/// the x86-64 one in its own, `ctrs-kbuild-x86_64`, since both build in the
 /// source tree. On Apple Silicon the x86-64 kernel is cross-compiled.
 fn kernel(root: &Path, arch: Arch) -> io::Result<()> {
     let src = root.join("guest/kernel");
     let out = arch.guest_out(root)?;
     let (karch, cache) = match arch {
-        Arch::Arm64 => ("KARCH=arm64", "kiri-kbuild:/build"),
-        Arch::X86_64 => ("KARCH=x86_64", "kiri-kbuild-x86_64:/build"),
+        Arch::Arm64 => ("KARCH=arm64", "ctrs-kbuild:/build"),
+        Arch::X86_64 => ("KARCH=x86_64", "ctrs-kbuild-x86_64:/build"),
     };
     run(Command::new("docker").args([
         "run",
@@ -172,7 +172,7 @@ fn disk(root: &Path) -> io::Result<()> {
         "-c",
         "set -e; apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs >/dev/null; \
          rm -f /out/data.img; truncate -s 64G /out/data.img; \
-         mkfs.ext4 -q -F -m 0 -L kiri-data -E lazy_itable_init=1,lazy_journal_init=1 /out/data.img",
+         mkfs.ext4 -q -F -m 0 -L ctrs-data -E lazy_itable_init=1,lazy_journal_init=1 /out/data.img",
     ]))?;
     let meta = fs::metadata(out.join("data.img"))?;
     println!("{} ({} GiB sparse)", out.join("data.img").display(), meta.len() >> 30);
@@ -181,7 +181,7 @@ fn disk(root: &Path) -> io::Result<()> {
 
 fn host(root: &Path, arch: Arch) -> io::Result<()> {
     let mut build = Command::new(env!("CARGO"));
-    build.current_dir(root).args(["build", "--release", "-p", "kiri"]);
+    build.current_dir(root).args(["build", "--release", "-p", "ctrs"]);
     if !arch.native() {
         build.args(["--target", arch.host_target()]);
     }
@@ -190,7 +190,7 @@ fn host(root: &Path, arch: Arch) -> io::Result<()> {
     if cfg!(target_os = "macos") {
         // Virtualization.framework refuses to start a VM without this entitlement.
         run(Command::new("codesign").args(["--force", "--sign", "-", "--entitlements"])
-            .arg(root.join("crates/kiri/kiri.entitlements"))
+            .arg(root.join("crates/ctrs/ctrs.entitlements"))
             .arg(&bin))?;
     }
     println!("{} ({} KiB)", bin.display(), fs::metadata(&bin)?.len() / 1024);
@@ -207,7 +207,7 @@ fn linux(root: &Path) -> io::Result<()> {
 }
 
 fn linux_build(root: &Path, amd64: bool) -> io::Result<()> {
-    let (platform, out, cache) = if amd64 { ("linux/amd64", "linux-x86_64", "kiri-cargo-amd64") } else { ("linux/arm64", "linux", "kiri-cargo") };
+    let (platform, out, cache) = if amd64 { ("linux/amd64", "linux-x86_64", "ctrs-cargo-amd64") } else { ("linux/arm64", "linux", "ctrs-cargo") };
     run(Command::new("docker").args(["run", "--rm", "--platform", platform, "-v"]).arg(format!("{}:/src", root.display())).args([
         "-v",
         &format!("{cache}:/usr/local/cargo/registry"),
@@ -221,9 +221,9 @@ fn linux_build(root: &Path, amd64: bool) -> io::Result<()> {
         "rust:1-alpine",
         "sh",
         "-c",
-        "apk add -q musl-dev && cargo build --release -p kiri -p kiri-init",
+        "apk add -q musl-dev && cargo build --release -p ctrs -p ctrs-init",
     ]))?;
-    for b in ["kiri", "kiri-init"] {
+    for b in ["ctrs", "ctrs-init"] {
         let p = root.join("target").join(out).join("release").join(b);
         println!("{} ({} KiB)", p.display(), fs::metadata(&p)?.len() / 1024);
     }

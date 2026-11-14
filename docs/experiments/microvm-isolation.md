@@ -6,14 +6,14 @@ answer to untrusted code on this host class. An opt-in per-task microVM design
 is sketched below for a future slice gated on Gate H; it is not built, not
 authorized, and no security claim is made for it.**
 
-Question: for *untrusted agent workloads* on a Kiri host, is a per-task
+Question: for *untrusted agent workloads* on a ctrs host, is a per-task
 microVM (VZ or smolvm/libkrun) a meaningful upgrade over containers in the
 shared guest VM, and at what cost?
 
 ## Evidence anchors (this machine, 2026-11-14)
 
-- Kiri VZ guest boot: **149–155 ms** wake; 152–161 ms fresh (CTRS-17).
-- Kiri VM: 2 CPUs, 8192 MiB, virtio balloon (host reclaims idle memory —
+- ctrs VZ guest boot: **149–155 ms** wake; 152–161 ms fresh (CTRS-17).
+- ctrs VM: 2 CPUs, 8192 MiB, virtio balloon (host reclaims idle memory —
   `apple.rs:392`), virtio-block data.img (Cached, Fsync), optional virtiofs
   share, Rosetta dir share. Guest helper (`com.apple.Virtualization
   .VirtualMachine.xpc`) RSS **~1.1 GB** at idle — the balloon is what keeps an
@@ -37,23 +37,23 @@ shared guest VM, and at what cost?
 | boot per task | ~150–160 ms VM + guest init + agent handshake (≈1–2 s realistic) — never measured end-to-end | "<200 ms to agent ready" claimed (unverified here); Linux claims least | image open + exec in live VM; ≈tens of ms + image |
 | RAM at N tasks | N × per-VM helper (~hundreds of MB floor; observed ~1.1 GB for the shared 8 GiB VM with balloon) — **N=8 ⇒ several GB, always** | claimed elastic (host commits what guest uses); no local measurement | incremental ≈50–150 MiB per container in one 8 GiB ballooned VM |
 | disk per task | cloned sparse data.img (APFS clone, copy-on-write) — cheap-ish; still one template per task | overlay + `.smolmachine` artifact story | shared image layers, per-container overlay |
-| mounts | virtiofs (as Kiri already has); read-only default | virtiofs (+ DAX on x86_64; off on arm64) | virtiofs (Kiri today) |
-| snapshots | VZ save/restore APIs exist (macOS 13+); Kiri implements **none**; restore would need secret re-authorization anyway | implemented; secrets re-authorized on restore; restore edge cases documented | none (image layers only) |
+| mounts | virtiofs (as ctrs already has); read-only default | virtiofs (+ DAX on x86_64; off on arm64) | virtiofs (ctrs today) |
+| snapshots | VZ save/restore APIs exist (macOS 13+); ctrs implements **none**; restore would need secret re-authorization anyway | implemented; secrets re-authorized on restore; restore edge cases documented | none (image layers only) |
 | secrets | no broker exists; would need new mechanism (mount at runtime; never baked into image) | credential substitution bindings; restore re-auth requirement | none native; same gap |
 | networking | one VZNAT per VM (bridge/IP/MAC each; conntrack per VM, macvtap-class) or `none` — losing the shared-bridge model; published ports story undefined | virtio-net (smoltcp gateway) or TSI; DNS cache + egress allowlist optional | shared bridge + one DNAT table; published ports; working DNS relay |
 | blast radius | host daemon + VMM XPC helper; VM escape = host root-adjacent | same | host daemon + shared guest kernel (container escape = guest kernel compromise → every container) |
-| implementation in Kiri | new engine concept (N VMs per task), task lifecycle, image unpack per task, control plane, telemetry, kill/cleanup | new VMM type + Hypervisor.framework path (or shipping smolvm binaries) | zero new code |
+| implementation in ctrs | new engine concept (N VMs per task), task lifecycle, image unpack per task, control plane, telemetry, kill/cleanup | new VMM type + Hypervisor.framework path (or shipping smolvm binaries) | zero new code |
 
 ## What the evidence does and does not show
 
-Shows: the VM boundary is real, boots fast enough, and Kiri's VZ path is
+Shows: the VM boundary is real, boots fast enough, and ctrs's VZ path is
 proven on this hardware (CTRS-04/08/17 recovery, sleep/wake). It also shows
 the shared-VM model is *not* free of escape risk: one guest-kernel exploit
 crosses every container; a per-task microVM reduces that to one task.
 
 Does not show: that untrusted *agent* code is common enough to justify the
 cost; that a per-task microVM is faster or safer for short-lived tasks (the
-VM boot + agent handshake is real latency on every task start); or that Kiri
+VM boot + agent handshake is real latency on every task start); or that ctrs
 can ship secrets into a task VM any more safely than into a container.
 
 Explicit non-claims (Gate H): this repo does **not** claim multi-tenant
@@ -82,7 +82,7 @@ If a concrete untrusted-workload demand appears, the only acceptable shape:
   read-only virtiofs workspace; no host socket, no network unless requested
   (`--network none` default when the flag is present); VM destroyed on exit;
   no persistence, no restart-always for sandbox tasks;
-- image pulls for sandbox tasks never unpack into the shared Kiri image
+- image pulls for sandbox tasks never unpack into the shared ctrs image
   store (separate root) — supply chain isolation;
 - secrets: none injected by default; injection is a runtime-only,
   never-persisted path (restore APIs re-authorize, never reuse);
@@ -100,7 +100,7 @@ its documented limits is the honest answer at this stage.
 
 ## Citation index
 
-- this repo: `crates/kiri-vmm/src/apple.rs:370-450` (VM config: 2 CPUs,
+- this repo: `crates/ctrs-vmm/src/apple.rs:370-450` (VM config: 2 CPUs,
   memory, balloon, virtio-block Cached/Fsync, virtiofs share, Rosetta share,
   VZNAT attachment); `docs/evidence/net.md` (boot/sleep-wake/RSS anchors);
   `docs/decisions.md` (CTRS-17).
