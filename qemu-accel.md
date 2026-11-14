@@ -3,9 +3,9 @@
 ## Status
 
 - Goal: reliable ARM64 builds, with native cross-compilation for substantial compilation work and QEMU for target execution.
-- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`.
-- Accepted slices: none. Known red: implementation and qualification gates below are unrun, not passing.
-- Parked branches: none. Next: P0, then S1, using one writer.
+- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`. Last accepted: P0 (2026-11-14, on `86afb7c`).
+- Accepted slices: P0 (baseline, isolated Linux harness, environment runner, pin candidate). Known red: implementation and qualification gates below are unrun, not passing.
+- Parked branches: none. Next: S1, using one writer.
 - Start only on a separate execution request. First command: `git status --short`.
 - Local completion and release qualification are distinct. Keep unavailable proofs under **Needs environment**; never report them as passed.
 
@@ -28,6 +28,8 @@ Repair an encountered defect immediately only if it blocks a listed proof or vio
 ## Decisions
 
 ### Owner-decided
+
+- **2026-11-14 (P0):** Freeze the BuildKit pin candidate to `moby/buildkit:v0.35.0` — index `sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb`, linux/amd64 manifest `sha256:a521fc1fd903a46c611c733dd692548512232fba2e0386d6055846a903d05a71`, linux/arm64 manifest `sha256:7dc61a9fab7c7f5a50b1cdbbefa4180829e68c6c0172206eb54ad934de097ddf`; bundled emulator QEMU 10.2.3 (`buildkit-qemu-aarch64` sha256 `239ff153cde81b6a6ab2c48eef9cff234751caa8e9d841363eace8db51e000e8`, x86-64); buildkitd v0.35.0 from tag v0.35.0 commit `f55949dea4f03bb9d85b73e9afc9a609291289db` (GitHub Actions run 43069750854, Dockerfile target `release`, base alpine 3.24 / golang 1.27-alpine3.24). Fallback on a demonstrated v0.35.0 release defect: `moby/buildkit:v0.34.2` (newest stable patch of the preceding supported line). Not yet qualified: S1 proves the candidate end to end.
 
 - **2026-11-14:** Enforce the managed pin. A manually retagged image is not a supported managed-image override. Custom images use a separate user-selected buildx builder. Preserve that selection; do not add a managed override setting.
 - The source brief requires compatibility builds and an explicit cross-compilation path on AMD64 Linux, particularly Alpine/musl, Rust, and C/C++. It excludes FEX, a full-system ARM VM, mandatory remote builders, and silent Dockerfile rewriting.
@@ -185,14 +187,14 @@ Documentation must supply runnable compatibility and cross-compilation commands,
 
 At execution, replace each conditional row with exact status and recorded evidence; do not erase an unmet requirement.
 
-| Proof | Prerequisite and command |
-| --- | --- |
-| AMD64 Linux ctrs runtime | Root-capable isolated Linux namespaces/cgroup environment and explicitly AMD64 artifacts; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` after P0 isolation support |
-| No foreign host handlers | Fresh dedicated AMD64 Linux host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt`; runner must fail closed if any foreign handler can service the test |
-| macOS regression | Apple Silicon macOS with signing/Virtualization.framework; `cargo test --workspace`, then `CARGO_ENCODED_RUSTFLAGS="" cargo xtask all` and `conformance/smoke.sh` using isolated state |
-| Performance | Idle AMD64 machine passing both perf-gate checks; `bash bench/arm64-build.sh --samples 5 --all-states` |
-| Hosted CI result | Separately authorized push/run; local workflow changes and tests do not prove GitHub CI passed |
-| Actual publication | Separately authorized default-branch release dispatch after all release gates; follow existing release workflow; verify downloaded checksums and artifacts. Do not dispatch from this campaign |
+| Proof | Prerequisite and command | Status (evidence: `docs/evidence/arm64-build.md`) |
+| --- | --- | --- |
+| AMD64 Linux ctrs runtime | Root-capable isolated Linux namespaces/cgroup environment and explicitly AMD64 artifacts; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` after P0 isolation support | **Passed twice 2026-11-14 (28/28)** on isolated runs: fresh prefix, isolated DOCKER_CONFIG, per-run ports, preserved failure logs; refusal and SIGTERM paths verified |
+| No foreign host handlers | Fresh dedicated AMD64 Linux host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt`; runner must fail closed if any foreign handler can service the test | Unavailable on the baseline host: `qemu-aarch64` enabled with flags `POCF`. `--require-no-binfmt` verified working (fails closed, exit 1). Namespace independence must be probe-proven inside a fresh privileged environment during S1, else this row stays unproven |
+| macOS regression | Apple Silicon macOS with signing/Virtualization.framework; `cargo test --workspace`, then `CARGO_ENCODED_RUSTFLAGS="" cargo xtask all` and `conformance/smoke.sh` using isolated state | Not available on this host; unverified |
+| Performance | Idle AMD64 machine passing both perf-gate checks; `bash bench/arm64-build.sh --samples 5 --all-states` | Unavailable (S6; this host is a loaded workstation, load ~3–19 / 32 cores); unverified |
+| Hosted CI result | Separately authorized push/run; local workflow changes and tests do not prove GitHub CI passed | Not authorized by this campaign |
+| Actual publication | Separately authorized default-branch release dispatch after all release gates; follow existing release workflow; verify downloaded checksums and artifacts. Do not dispatch from this campaign | Not authorized by this campaign |
 
 ## Execution boundary and non-goals
 
