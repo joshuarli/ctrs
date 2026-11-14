@@ -1179,6 +1179,37 @@ impl Engine {
                     if let Ok(mut link) = self.link.try_lock() {
                         *link = None;
                     }
+                    // The VM dying is a daemon restart for its containers:
+                    // the ones that were running come back under their
+                    // restart policy once a fresh VM boots.
+                    let restart: Vec<String> = {
+                        let st = self.lock();
+                        st.containers
+                            .values()
+                            .filter(|c| {
+                                let p = &c.spec.restart;
+                                (p.name == "always" || (p.name == "unless-stopped" && !c.stopped_by_user))
+                                    && !c.spec.auto_remove
+                                    && c.status == Status::Exited
+                                    && c.vm_stopped
+                                    && !SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst)
+                            })
+                            .map(|c| c.id.clone())
+                            .collect()
+                    };
+                    if !restart.is_empty() {
+                        if let Some(me) = self.me.get().and_then(Weak::upgrade) {
+                            std::thread::spawn(move || {
+                                if me.vm().is_ok() {
+                                    for id in restart {
+                                        if let Err(e) = me.start_inner(&id, false) {
+                                            crate::diag::warn!("container did not restart", id = &id[..12], error = format!("{e:?}"));
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
             }
         }

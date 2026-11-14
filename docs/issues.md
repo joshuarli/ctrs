@@ -108,21 +108,20 @@ fixed, by design:**
   exactly as Docker does when its daemon restarts. Verified live: this
   session's engine restart auto-started `buildx_buildkit_default`
   (`unless-stopped`) with no manual action.
-- VM *death while the daemon lives* does not: the `Event::Lost` handler
-  (`engine.rs`, the `Event::Lost` arm) marks every running container
-  `Exited(255)` with `vm_stopped = true` and persists them — and never
-  consults the restart policy or schedules `start_inner`. The VM reboots
-  on the next request; the containers stay `Exited`. This is precisely the
-  reporter's "stays Exited (255) until someone starts it by hand", and it
-  is not documented anywhere else.
-- The reporter's ask "restart `--restart always`/`unless-stopped`
-  containers when the next VM boots" is implementable in a few lines of
-  `Event::Lost` (reuse the policy scan `load` uses), but it can only be
-  verified by forcing a VM death while the daemon lives — a crash-path
-  experiment that CTRS-21's failure-injection harness
-  (`conformance/failure.sh`) is built to run safely. An untested patch to
-  the crash handler is the one thing this campaign may not ship; the fix is
-  therefore tracked for CTRS-21 with the exact defect location named here.
+- VM *death while the daemon lives* did not, before CTRS-21: the
+  `Event::Lost` handler marked every running container `Exited(255)` and
+  never consulted the restart policy. **Fixed and verified on 2026-11-14
+  (CTRS-21):** the handler now boots a fresh VM and restarts every
+  `always` / `unless-stopped` container that was running when the VM died
+  (the same policy scan `load` uses). Verified by injecting a real VM
+  death on a scratch engine: kill -9 of the Virtualization.framework XPC
+  helper → daemon logs `the VM stopped unexpectedly` → fresh VM boots
+  (148 ms) → `ctrs21-restart` (`unless-stopped`) comes back Up, while
+  `ctrs21-norestart` stays `Exited (255)`. The reporter's ask ("restart
+  `--restart always`/`unless-stopped` containers when the next VM boots")
+  is now implemented for the VM-death case. Remaining console gap:
+  capture the guest console (`hvc0`) into a file on unexpected VM stop so
+  an oops can be diagnosed — tracked for CTRS-21.
 
 Mitigation until then: any restart-critical container is restarted on
 *daemon* restart already (restart the Kiri app/engine and it comes back —

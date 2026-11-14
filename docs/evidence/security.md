@@ -28,7 +28,8 @@ single-user engine (see `docs/security.md`).
 | 3 | Daemon SIGKILL at rest (mid-steady-state), fresh engine on the same root | stale socket rebound; policy container back up | **PASS**: new engine boots VM (144 ms) and restarts `ctrs21-restart` (`unless-stopped`); second test: stale `.sock` file unlinked and rebound without `rm` | live repro |
 | 4 | Seccomp differential fixture: static probe replayed under default, `no-new-privileges`, `seccomp=unconfined`, `--privileged`, `SYS_ADMIN`, `SYS_BOOT`, `SYS_TIME`, `SYS_NICE`, `SYS_MODULE`, `SYS_PACCT`, `BPF`, `PERFMON` (x12 modes, 37 syscalls each) | vsock + io_uring denied in **all** modes; others denied except the per-cap relaxations; clone3 ENOSYS without SYS_ADMIN | **PASS — fixture green**: "all modes match the documented filter (vsock+io_uring denied for everyone; capabilities relax only their own rules)" | `conformance/seccomp/run.sh` |
 | 5 | `seccomp=unconfined` lets mount(2) through (userns owner holds CAP_SYS_ADMIN in-ns) | — (observed, matches design) | Verified behavior: errno:14 (EFAULT), not EPERM — boundary only, as documented in code | seccomp run |
-| 6 | Full e2e with all CTRS-21 changes in the guest and daemon | 480 + 1 | **481/481, 0 skipped** | `tests/e2e.sh` on fresh scratch engine |
+| 6 | VM death with daemon live (`kill -9` of the Virtualization.framework XPC helper; scratch engine) | `Event::Lost` boots a fresh VM and restarts `unless-stopped` containers; a no-policy container stays down | **PASS**: log shows `the VM stopped unexpectedly` → VM booted 148 ms → `ctrs21-restart` Up; `ctrs21-norestart` Exited (255) | live injection |
+| 7 | Full e2e with all CTRS-21 changes in the guest and daemon | 480 + 1 | **481/481, 0 skipped** | `tests/e2e.sh` on fresh scratch engine |
 
 ## Seccomp differential, the important lines (raw, 2026-11-14)
 
