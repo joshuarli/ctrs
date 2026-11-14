@@ -86,7 +86,7 @@ pub(super) fn error(w: &mut UnixStream, e: Error) -> io::Result<()> {
     }
 }
 
-fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     if let Some(done) = super::ops::route(req, engine, w) {
         return done;
     }
@@ -469,7 +469,7 @@ fn image_tag(req: &Request, engine: &Engine, source: &str) -> Result<(), Error> 
 }
 
 /// `docker load`: an image archive, streamed into the store.
-fn image_load(req: &Request, engine: &Engine, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+fn image_load(req: &Request, engine: &Engine, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     let loaded = kiri_image::archive::load(&engine.store, http::Body::new(req, r));
     match loaded {
         Ok(images) => {
@@ -2010,7 +2010,7 @@ fn wait(req: &Request, engine: &Engine, id: &str, w: &mut UnixStream) -> io::Res
     Ok(Next::KeepAlive)
 }
 
-fn attach(req: &Request, engine: &Arc<Engine>, key: &str, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+fn attach(req: &Request, engine: &Arc<Engine>, key: &str, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     let (want_out, want_err, want_in) = (req.flag("stdout"), req.flag("stderr"), req.flag("stdin"));
     let (id, tty, rx) = match engine.attach(key) {
         Ok(v) => v,
@@ -2030,10 +2030,11 @@ fn attach(req: &Request, engine: &Arc<Engine>, key: &str, w: &mut UnixStream, r:
 
 /// Copies the client's side of a hijacked connection into the process's
 /// stdin, on its own thread, ending with CloseStdin at EOF.
-fn forward_stdin(engine: Arc<Engine>, id: String, r: &mut BufReader<UnixStream>) -> io::Result<()> {
+fn forward_stdin(engine: Arc<Engine>, id: String, r: &mut dyn http::DynBufRead) -> io::Result<()> {
     // Anything the client sent right behind the request is already buffered.
-    let early = r.buffer().to_vec();
-    let mut stream = r.get_ref().try_clone()?;
+    let concrete = r.as_any_mut().downcast_mut::<BufReader<UnixStream>>().ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "attach stdin needs the socket"))?;
+    let early = concrete.buffer().to_vec();
+    let mut stream = concrete.get_ref().try_clone()?;
     std::thread::Builder::new().name("kiri-stdin".into()).spawn(move || {
         if !early.is_empty() && engine.input(&id, &early).is_err() {
             return;
@@ -2120,7 +2121,7 @@ fn exec_create(req: &Request, engine: &Engine, key: &str) -> Result<Value, Error
     Ok(json!({"Id": id}))
 }
 
-fn exec_start(req: &Request, engine: &Arc<Engine>, id: &str, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+fn exec_start(req: &Request, engine: &Arc<Engine>, id: &str, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
     let detach = body["Detach"].as_bool().unwrap_or(false);
     if let Some(size) = console_size(&body["ConsoleSize"]) {
@@ -2409,7 +2410,7 @@ fn upload_reader<'a>(head: Vec<u8>, rest: impl io::Read + 'a) -> Result<Box<dyn 
     }
 }
 
-fn archive_put(req: &Request, engine: &Engine, id: &str, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+fn archive_put(req: &Request, engine: &Engine, id: &str, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     use kiri_proto::copy_flags;
     let path = req.query("path").unwrap_or("/");
     let mut flags = copy_flags::CHUNKED;

@@ -12,7 +12,7 @@
 //! Either way BuildKit keeps the build in its history, which the window's
 //! Builds view reads (through buildx, so only where buildx is installed).
 
-use std::io::{self, BufReader, Read};
+use std::io::{self, Read};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -715,7 +715,7 @@ fn sniff(head: &[u8]) -> Context {
 }
 
 /// `POST /build`: the classic builder API, run in the managed BuildKit.
-pub fn build(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut BufReader<UnixStream>) -> io::Result<Next> {
+pub fn build(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
     let mut o = match Options::parse(req) {
         Ok(o) => o,
         Err(e) => {
@@ -768,7 +768,7 @@ pub fn build(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: &mut Bu
     Ok(Next::Close)
 }
 
-fn run(req: &Request, engine: &Engine, o: &mut Options, r: &mut BufReader<UnixStream>, out: &mut Out<'_>, probe: &UnixStream) -> Result<Vec<kiri_image::Image>, String> {
+fn run(req: &Request, engine: &Engine, o: &mut Options, r: &mut dyn http::DynBufRead, out: &mut Out<'_>, probe: &UnixStream) -> Result<Vec<kiri_image::Image>, String> {
     let quiet = o.quiet;
     let id = ensure_running(engine, &mut |m| {
         if !quiet {
@@ -799,7 +799,7 @@ fn run(req: &Request, engine: &Engine, o: &mut Options, r: &mut BufReader<UnixSt
 }
 
 /// The request body, unpacked into `dir/context` in the builder.
-fn send_context(engine: &Engine, id: &str, dir: &str, req: &Request, r: &mut BufReader<UnixStream>, o: &mut Options) -> Result<(), String> {
+fn send_context(engine: &Engine, id: &str, dir: &str, req: &Request, r: &mut dyn http::DynBufRead, o: &mut Options) -> Result<(), String> {
     let mut body = http::Body::new(req, r);
     let mut head = Vec::with_capacity(512);
     (&mut body).take(512).read_to_end(&mut head).map_err(|e| format!("reading the build context: {e}"))?;

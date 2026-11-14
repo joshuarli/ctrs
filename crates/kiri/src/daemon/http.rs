@@ -60,7 +60,7 @@ impl Request {
 
 /// Reads a line of at most `max` bytes. A line that hits the cap without a
 /// newline is too large and is an error.
-fn read_capped_line(r: &mut BufReader<UnixStream>, max: u64) -> io::Result<String> {
+fn read_capped_line(r: &mut dyn DynBufRead, max: u64) -> io::Result<String> {
     let mut line = String::new();
     let n = (&mut *r).take(max + 1).read_line(&mut line)?;
     if n == 0 {
@@ -73,14 +73,14 @@ fn read_capped_line(r: &mut BufReader<UnixStream>, max: u64) -> io::Result<Strin
 }
 
 /// One chunk-size line: hex with an optional `;extension`. Bounded.
-fn read_chunk_size(r: &mut BufReader<UnixStream>) -> io::Result<u64> {
+fn read_chunk_size(r: &mut dyn DynBufRead) -> io::Result<u64> {
     let line = read_capped_line(r, MAX_CHUNK_LINE)?;
     let size = line.trim().split(';').next().unwrap_or("");
     u64::from_str_radix(size, 16).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))
 }
 
 /// The CRLF terminating one chunk's data.
-fn read_chunk_crlf(r: &mut BufReader<UnixStream>) -> io::Result<()> {
+fn read_chunk_crlf(r: &mut dyn DynBufRead) -> io::Result<()> {
     let mut crlf = [0u8; 2];
     r.read_exact(&mut crlf)?;
     if &crlf != b"\r\n" {
@@ -91,7 +91,7 @@ fn read_chunk_crlf(r: &mut BufReader<UnixStream>) -> io::Result<()> {
 
 /// The trailer section after the zero-size chunk: field lines, then the
 /// final empty line. Bounded in line length and field count.
-fn consume_trailers(r: &mut BufReader<UnixStream>) -> io::Result<()> {
+fn consume_trailers(r: &mut dyn DynBufRead) -> io::Result<()> {
     let mut line = String::new();
     for _ in 0..MAX_TRAILER_FIELDS {
         line.clear();
@@ -142,6 +142,18 @@ fn validate_framing(headers: &[(String, String)]) -> io::Result<()> {
         l.parse::<usize>().map_err(|_| bad())?;
     }
     Ok(())
+}
+
+/// The request body reader: usually `BufReader<UnixStream>`, but the
+/// h12tiny pilot (CTRS-15) substitutes an in-memory reader. Any so the
+/// attach/stdin path can recover the socket when there is one.
+pub trait DynBufRead: BufRead + std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+impl<T: BufRead + std::any::Any> DynBufRead for T {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 /// Reads the next request on a connection. `Ok(None)` is a clean close.
@@ -225,7 +237,7 @@ pub fn read_request(r: &mut BufReader<UnixStream>, w: &mut UnixStream, stream: i
 
 /// A streamed request body: Content-Length or chunked, read as it arrives.
 pub struct Body<'a> {
-    r: &'a mut BufReader<UnixStream>,
+    r: &'a mut dyn DynBufRead,
     chunked: bool,
     /// Bytes left in the body (or in the current chunk).
     left: u64,
@@ -233,7 +245,7 @@ pub struct Body<'a> {
 }
 
 impl<'a> Body<'a> {
-    pub fn new(req: &Request, r: &'a mut BufReader<UnixStream>) -> Body<'a> {
+    pub fn new(req: &Request, r: &'a mut dyn DynBufRead) -> Body<'a> {
         let chunked = req.header("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
         let left = if chunked { 0 } else { req.header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0) };
         Body { r, chunked, left, done: !chunked && left == 0 }
