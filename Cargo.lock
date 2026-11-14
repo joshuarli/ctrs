@@ -76,6 +76,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crabtables"
+version = "0.1.0"
+source = "git+https://github.com/laputa-systems/crabtables?rev=38646b8f2f6ee7256c448849edda4459842a2e10#38646b8f2f6ee7256c448849edda4459842a2e10"
+dependencies = [
+ "libc",
+ "netlink-sys",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -226,6 +235,7 @@ dependencies = [
 name = "kiri-init"
 version = "0.0.0"
 dependencies = [
+ "crabtables",
  "flate2",
  "kiri-proto",
  "libc",
@@ -281,6 +291,17 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
+]
+
+[[package]]
+name = "netlink-sys"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c99d38e00b420df49e940fe0826e667c3dad82ac68eb4c2bbf754c1c14a83a10"
+dependencies = [
+ "bytes",
+ "libc",
+ "log",
 ]
 
 [[package]]

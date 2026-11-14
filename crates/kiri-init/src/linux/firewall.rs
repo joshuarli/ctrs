@@ -129,12 +129,18 @@ pub enum Match {
     CtStateMasked(u32),
     /// `ct status & mask != 0` (IPS_DST_NAT = 1 << 5).
     CtStatusMasked(u32),
-    /// Destination address payload match (network header +16, 4 bytes for
-    /// IPv4, +8/16 for IPv6), with an optional 4-bit mask over the first byte
-    /// (`!= 127.0.0.0/8` in the reference).
-    PayloadDaddrV4 { masked_neq: bool },
-    /// Source address prefix match (IPv6 NAT66).
-    PayloadSaddrV6 { prefix: u8 },
+    /// `ip daddr == addr` (payload network header +16).
+    DaddrV4([u8; 4]),
+    /// `ip saddr == addr` (payload network header +12).
+    SaddrV4([u8; 4]),
+    /// `ip daddr & 255.0.0.0 != 127.0.0.0`.
+    DaddrV4NotLoopback,
+    /// `tcp dport == port`.
+    TcpDport(u16),
+    /// `udp dport == port`.
+    UdpDport(u16),
+    /// `ip6 saddr <subnet>/<prefix>` (NAT66 source match).
+    PayloadSaddrV6 { subnet: [u8; 16], prefix: u8 },
     /// `fib daddr type local` (NFTA_FIB_DREG, ADDRTYPE, DADDR): v4 only.
     FibDaddrTypeLocal,
 }
@@ -385,5 +391,179 @@ mod tests {
     fn empty_policy_has_no_tables_but_validates() {
         assert_eq!(FirewallPolicy::empty().validate(), Ok(()));
         assert_eq!(FirewallPolicy::empty().transaction(Netns::Current).unwrap().steps, Vec::new());
+    }
+}
+
+/// The crabtables-backed implementation of [`FirewallBackend`] (CTRS-12),
+/// selected by the `crabtables` cargo feature. Same semantics as `netlink.rs`:
+/// one atomic batch per table, destroy-and-recreate, `NLM_F_APPEND` rules.
+#[cfg(feature = "crabtables")]
+pub mod crabtables_backend {
+    use std::net::IpAddr;
+    use std::os::fd::AsRawFd;
+
+    use crabtables::expr::{Bitwise, Cmp, Expr, Fib};
+    use crabtables::sys::NFTA_FIB_F_DADDR;
+    use crabtables::{Batch, BitwiseOp, Chain, ChainType, CmpOp, Family, FibResult, Policy, Reg, Socket, Table};
+
+    use super::*;
+
+    const TABLE: &str = "kiri";
+    /// RTN_LOCAL: a local address type from fib daddr.
+    const RTN_LOCAL: u32 = 2;
+    /// NF_NAT_RANGE_PROTO_RANDOM_FULLY.
+    const MASQ_RANDOM_FULLY: u32 = 16;
+
+    pub struct CrabtablesBackend;
+
+    fn fam(f: NftFamily) -> Family {
+        match f {
+            NftFamily::Ipv4 => Family::Ipv4,
+            NftFamily::Ipv6 => Family::Ipv6,
+        }
+    }
+
+    fn nft_hook(h: Hook) -> crabtables::Hook {
+        match h {
+            Hook::Prerouting => crabtables::Hook::PREROUTING,
+            Hook::Input => crabtables::Hook::INPUT,
+            Hook::Forward => crabtables::Hook::FORWARD,
+            Hook::LocalOut => crabtables::Hook::OUTPUT,
+            Hook::Postrouting => crabtables::Hook::POSTROUTING,
+        }
+    }
+
+    fn chain_type(t: ChainKind) -> ChainType {
+        match t {
+            ChainKind::Nat => ChainType::Nat,
+            ChainKind::Filter => ChainType::Filter,
+        }
+    }
+
+    fn apply_match(b: crabtables::RuleBuilder, m: &Match) -> crabtables::RuleBuilder {
+        use crabtables::Field;
+        match m {
+            Match::IifnamePrefix => b.match_prefix(Field::IifName, "kiri", 32),
+            Match::OifnamePrefix => b.match_prefix(Field::OifName, "kiri", 32),
+            Match::IifnameIs(n) => b.match_eq(Field::IifName, n.as_str()),
+            Match::OifnameIs(n) => b.match_eq(Field::OifName, n.as_str()),
+            Match::Iif(i) => b.match_eq(Field::Iif, *i),
+            Match::Oif(i) => b.match_eq(Field::Oif, *i),
+            Match::L4Proto(n) => b.match_eq(Field::L4Proto, *n),
+            Match::CtStateMasked(mask) => b.ct_state(*mask),
+            Match::CtStatusMasked(mask) => b.ct_status(*mask),
+            Match::DaddrV4(a) => b.match_eq(Field::IpDaddr, *a),
+            Match::SaddrV4(a) => b.match_eq(Field::IpSaddr, *a),
+            Match::DaddrV4NotLoopback => b
+                .expr(Field::IpDaddr.load(Reg::R1))
+                .expr(Expr::Bitwise(Bitwise {
+                    sreg: Reg::R1,
+                    dreg: Reg::R1,
+                    len: 4,
+                    op: Some(BitwiseOp::MaskXor),
+                    mask: Some(vec![255, 0, 0, 0]),
+                    xor: Some(vec![0; 4]),
+                    data: None,
+                }))
+                .expr(Expr::Cmp(Cmp {
+                    sreg: Reg::R1,
+                    op: CmpOp::Neq,
+                    data: vec![127, 0, 0, 0],
+                })),
+            Match::TcpDport(p) => b.match_eq(Field::TcpDport, *p),
+            Match::UdpDport(p) => b.match_eq(Field::UdpDport, *p),
+            Match::PayloadSaddrV6 { subnet, prefix } => b.match_prefix(Field::Ip6Saddr, *subnet, *prefix as u32),
+            Match::FibDaddrTypeLocal => b
+                .expr(Expr::Fib(Fib {
+                    dreg: Reg::R1,
+                    result: FibResult::AddrType,
+                    flags: NFTA_FIB_F_DADDR,
+                }))
+                .expr(Expr::Cmp(Cmp {
+                    sreg: Reg::R1,
+                    op: CmpOp::Eq,
+                    data: RTN_LOCAL.to_ne_bytes().to_vec(),
+                })),
+        }
+    }
+
+    fn apply_target(b: crabtables::RuleBuilder, target: &Target) -> crabtables::RuleBuilder {
+        match target {
+            Target::Masquerade { random_fully } => b.masquerade(if *random_fully { MASQ_RANDOM_FULLY } else { 0 }),
+            Target::Dnat { to_ip, to_port } => b.dnat(IpAddr::V4((*to_ip).into()), Some(*to_port)),
+            Target::Redirect { to } => b.redirect(Some(*to)),
+            Target::Verdict(Verdict::Accept) => b.accept(),
+            Target::Verdict(Verdict::Drop) => b.drop(),
+        }
+    }
+
+    fn build(transaction: &FirewallTransaction) -> Batch {
+        let mut batch = Batch::new();
+        for step in &transaction.steps {
+            match step {
+                Step::BeginBatch | Step::EndBatch => {}
+                Step::DestroyTable { family } => {
+                    batch.destroy_table(fam(*family), TABLE);
+                }
+                Step::CreateTable { family } => {
+                    batch.create_table(&Table::new(fam(*family), TABLE));
+                }
+                Step::CreateChain { family, chain } => {
+                    let f = fam(*family);
+                    let c = Chain::new(f, TABLE, chain.name.name())
+                        .with_hook(chain_type(chain.name.kind()), nft_hook(chain.name.hook()), chain.name.priority())
+                        .with_policy(match chain.policy {
+                            Verdict::Accept => Policy::Accept,
+                            Verdict::Drop => Policy::Drop,
+                        });
+                    batch.create_chain(&c);
+                }
+                Step::CreateRule { family, rule } => {
+                    let f = fam(*family);
+                    let mut b = crabtables::RuleBuilder::new(f, TABLE, rule.chain.name());
+                    for m in &rule.matches {
+                        b = apply_match(b, m);
+                    }
+                    b = apply_target(b, &rule.target);
+                    batch.add_rule(&b.build());
+                }
+            }
+        }
+        batch
+    }
+
+    fn open_socket(netns: Netns) -> crabtables::Result<Socket> {
+        match netns {
+            Netns::Current => Socket::new(),
+            Netns::File(fd) => {
+                // Enter the namespace just long enough to create the socket,
+                // which stays bound to it (as in Netlink::open_in).
+                let own = std::fs::File::open("/proc/self/ns/net").map_err(crabtables::Error::from)?;
+                // SAFETY: the caller hands us a valid netns fd; nothing about
+                // thread state is disturbed and we restore it at once.
+                if unsafe { libc::setns(fd, libc::CLONE_NEWNET) } != 0 {
+                    return Err(crabtables::Error::from(std::io::Error::last_os_error()));
+                }
+                let r = Socket::new();
+                // SAFETY: as above; a failure here is not reported (the
+                // socket already carries the namespace) but the error is
+                // surfaced through the io path otherwise.
+                let _ = unsafe { libc::setns(own.as_raw_fd(), libc::CLONE_NEWNET) };
+                r
+            }
+        }
+    }
+
+    impl super::FirewallBackend for CrabtablesBackend {
+        fn apply(&self, transaction: &FirewallTransaction) -> ApplyOutcome {
+            let batch = build(transaction);
+            match open_socket(transaction.netns).and_then(|mut s| s.commit(&batch)) {
+                Ok(_) => ApplyOutcome::Applied,
+                Err(crabtables::Error::OutcomeUnknown(u)) => ApplyOutcome::OutcomeUnknown { cause: u.cause().to_string() },
+                // A refusal (batch rolled back) or a send that never reached
+                // the kernel: the table is the previous one either way.
+                Err(e) => ApplyOutcome::RolledBack { cause: e.to_string() },
+            }
+        }
     }
 }
