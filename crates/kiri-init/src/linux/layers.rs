@@ -188,7 +188,12 @@ fn untar(reader: impl Read, dest: &Path) -> io::Result<u64> {
             continue;
         }
         total += entry.size();
-        entry.unpack_in(dest)?;
+        // Entries whose paths escape the root (`..` components) come back
+        // false and were skipped; a layer recorded as loaded with bytes
+        // missing is a silent corruption, so refuse it.
+        if !entry.unpack_in(dest)? {
+            return Err(escapes());
+        }
     }
     Ok(total)
 }
