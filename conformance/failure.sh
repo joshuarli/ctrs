@@ -41,15 +41,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# fresh_engine NAME: wipes the root, starts the daemon on it, waits for the
-# socket. Sets EH_DATA, EH_SOCK, EH_PID.
+# fresh_engine NAME: wipes the root (it stays absent), starts the daemon on
+# it, waits for the socket. Sets EH_DATA, EH_SOCK, EH_PID.
 fresh_engine() {
   local name=$1
   EH_DATA=$PREFIX-$name-data
   EH_SOCK=$PREFIX-$name.sock
   EH_PIDFILE=$PREFIX-$name.pid
+  # The root is absent on purpose: a fresh install must create and validate it.
   rm -rf "$EH_DATA" "$EH_SOCK" "$EH_PIDFILE"
-  mkdir -p "$EH_DATA"
   KIRI_DATA_DIR="$EH_DATA" KIRI_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
   EH_PID=$!
   engines+=("$EH_PID")

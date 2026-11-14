@@ -39,11 +39,55 @@ use std::time::Instant;
 use crate::diag;
 
 
+/// The data root, created and validated before the lock is taken. A
+/// daemon meeting a data root it must not trust stops rather than writes
+/// into it: the root itself is 0700 and owner-only, a planted symlink or a
+/// root owned by someone else fails closed. Intermediate directories above
+/// the root are created with the user's umask; the root itself never is.
+fn prepare_root(root: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    // SAFETY: geteuid cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    let created = match std::fs::symlink_metadata(root) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                return Err(io::Error::other(format!("the data root {} is a symlink; refusing to use it", root.display())));
+            }
+            if !meta.is_dir() {
+                return Err(io::Error::other(format!("the data root {} is not a directory", root.display())));
+            }
+            if meta.uid() != euid {
+                return Err(io::Error::other(format!("the data root {} is owned by uid {}; refusing to use it", root.display(), meta.uid())));
+            }
+            false
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // The root itself is ours from the start: private.
+            std::fs::DirBuilder::new().mode(0o700).recursive(true).create(root)?;
+            true
+        }
+        Err(e) => return Err(e),
+    };
+    let meta = std::fs::metadata(root)?;
+    if created || meta.permissions().mode() & 0o077 != 0 {
+        // Ours and too open, or freshly created under a loose umask.
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 /// One engine per data root: an `flock(2)` on `<root>/.lock`, held for the
 /// daemon's life. Without it two engines on the same root interleave blob
 /// and image writes and both silently corrupt the store.
 fn root_lock(root: &Path) -> io::Result<OwnedFd> {
-    let file = std::fs::File::create(root.join(".lock"))?;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o600)
+        .open(root.join(".lock"))?;
     // SAFETY: flock on a descriptor this function owns; the lock dies with it.
     let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if ret != 0 {
@@ -142,6 +186,7 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     };
 
     let root = kiri_image::Store::default_root()?;
+    prepare_root(&root)?;
     let _root_lock = root_lock(&root)?;
     let store = kiri_image::Store::open(root)?;
     let engine = engine::Engine::boot(store).inspect_err(|e| diag::error!("engine did not start", error = e))?;
@@ -222,4 +267,81 @@ fn socket_group(socket: &std::path::Path, group: &std::ffi::OsStr) -> io::Result
     };
     std::os::unix::fs::chown(socket, None, Some(gid))?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o660))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prepare_root, root_lock};
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ctrs-root-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn creates_a_missing_root_private_and_lockable() {
+        let parent = scratch("fresh");
+        let root = parent.join("data");
+        assert!(!root.exists());
+        prepare_root(&root).unwrap();
+        let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let lock = root_lock(&root).unwrap();
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn the_second_lock_is_refused() {
+        let parent = scratch("held");
+        let root = parent.join("data");
+        prepare_root(&root).unwrap();
+        let first = root_lock(&root).unwrap();
+        let err = root_lock(&root).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        drop(first);
+        root_lock(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn refuses_a_planted_symlink() {
+        let parent = scratch("link");
+        let elsewhere = scratch("link-elsewhere");
+        let root = parent.join("data");
+        std::os::unix::fs::symlink(&elsewhere, &root).unwrap();
+        let err = prepare_root(&root).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+        let _ = std::fs::remove_dir_all(&parent);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn refuses_a_root_that_is_a_file() {
+        let parent = scratch("file");
+        let root = parent.join("data");
+        std::fs::write(&root, b"not a directory").unwrap();
+        let err = prepare_root(&root).unwrap_err();
+        assert!(err.to_string().contains("not a directory"));
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn tightens_an_open_root_and_keeps_the_lock_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = scratch("loose");
+        let root = parent.join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        prepare_root(&root).unwrap();
+        let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = root_lock(&root).unwrap();
+        let mode = std::fs::metadata(root.join(".lock")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
 }

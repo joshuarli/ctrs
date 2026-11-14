@@ -28,8 +28,9 @@ STATE_BEFORE=""
 CTX_BEFORE=$(docker context ls --format '{{.Name}}|{{.Current}}' 2>/dev/null | sort)
 
 step 'clean scratch'
+# The data root stays absent: the daemon must create and validate it.
 rm -rf "$DATA" "$HOME_DIR"
-mkdir -p "$DATA" "$HOME_DIR"
+mkdir -p "$HOME_DIR"
 rm -f "$SOCK"
 
 step 'build + ad-hoc sign host binary'
