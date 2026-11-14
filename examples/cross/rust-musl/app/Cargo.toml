@@ -1,0 +1,11 @@
+[package]
+name = "fixture-app"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+logmacro = { path = "../logmacro" }
+
+[build-dependencies]
+cc = "1"

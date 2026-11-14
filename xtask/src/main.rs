@@ -17,22 +17,59 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-/// Which platform a build is for; `--arch x86_64` (`amd64`, `intel`) selects
-/// Intel, arm64 otherwise.
+/// Which platform a build is for; `--arch` selects it. One flag, one value;
+/// aliases map to one canonical value; unknown or conflicting flags are
+/// refused before anything runs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Arch {
     Arm64,
     X86_64,
 }
 
-impl Arch {
-    /// `--arch x86_64` (`amd64`, `intel`) anywhere after the task; arm64 otherwise.
-    fn from_args() -> Arch {
-        let args = std::env::args().skip(2).collect::<Vec<_>>();
-        let intel = args.windows(2).any(|w| w[0] == "--arch" && matches!(w[1].as_str(), "x86_64" | "amd64" | "intel"));
-        if intel { Arch::X86_64 } else { Arch::Arm64 }
+/// `x86_64` (`amd64`, `x86-64`, `intel`) selects Intel; `arm64` (`aarch64`)
+/// selects ARM. macOS keeps its intentional ARM default; Linux follows the
+/// host.
+fn default_arch() -> Arch {
+    if cfg!(target_os = "macos") {
+        Arch::Arm64
+    } else if cfg!(target_arch = "x86_64") {
+        Arch::X86_64
+    } else {
+        Arch::Arm64
     }
+}
 
+fn parse_arch(value: &str) -> Option<Arch> {
+    match value {
+        "arm64" | "aarch64" => Some(Arch::Arm64),
+        "amd64" | "x86_64" | "x86-64" | "intel" => Some(Arch::X86_64),
+        _ => None,
+    }
+}
+
+/// Parses `--arch` from the argument slice (everything after the task).
+/// One flag, one value; unknown flags and conflicting `--arch`s are errors.
+fn parse(args: &[String], default: Arch) -> Result<Arch, String> {
+    let mut arch: Option<Arch> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--arch" => {
+                let value = args.get(i + 1).ok_or("--arch needs a value (arm64, aarch64, amd64, x86_64, x86-64, intel)")?;
+                let parsed = parse_arch(value).ok_or_else(|| format!("--arch {value} is not supported (want arm64, aarch64, amd64, x86_64, x86-64 or intel)"))?;
+                if arch.is_some() {
+                    return Err("--arch given more than once".into());
+                }
+                arch = Some(parsed);
+                i += 2;
+            }
+            other => return Err(format!("unknown argument {other:?} (known flag: --arch)")),
+        }
+    }
+    Ok(arch.unwrap_or(default))
+}
+
+impl Arch {
     fn guest_target(self) -> &'static str {
         match self {
             Arch::Arm64 => "aarch64-unknown-linux-musl",
@@ -44,6 +81,23 @@ impl Arch {
         match self {
             Arch::Arm64 => "aarch64-apple-darwin",
             Arch::X86_64 => "x86_64-apple-darwin",
+        }
+    }
+
+    /// Where the Linux binaries land: target/linux/release for arm64,
+    /// target/linux-x86_64/release for amd64.
+    fn linux_out(self) -> &'static str {
+        match self {
+            Arch::Arm64 => "linux",
+            Arch::X86_64 => "linux-x86_64",
+        }
+    }
+
+    /// The cargo cache for the Linux build (separate per architecture).
+    fn linux_cache(self) -> &'static str {
+        match self {
+            Arch::Arm64 => "ctrs-cargo-aarch64-musl",
+            Arch::X86_64 => "ctrs-cargo-amd64",
         }
     }
 
@@ -72,17 +126,24 @@ impl Arch {
 fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-    let arch = Arch::from_args();
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let arch = match parse(&args, default_arch()) {
+        Ok(arch) => arch,
+        Err(e) => {
+            eprintln!("xtask {task}: {e}");
+            return ExitCode::from(2);
+        }
+    };
     let result = match task.as_str() {
         "guest" => guest(&root, arch),
         "kernel" => kernel(&root, arch),
         "disk" => disk(&root),
         "host" => host(&root, arch),
-        "linux" => linux(&root),
+        "linux" => linux(&root, arch),
         "all" => guest(&root, arch).and_then(|()| host(&root, arch)),
         _ => {
-            eprintln!("usage: cargo xtask <guest|kernel|disk|host|linux|all> [--arch arm64]");
-            return ExitCode::FAILURE;
+            eprintln!("usage: cargo xtask <guest|kernel|disk|host|linux|all> [--arch arm64|aarch64|amd64|x86_64|x86-64|intel]");
+            return ExitCode::from(2);
         }
     };
     match result {
@@ -197,32 +258,88 @@ fn host(root: &Path, arch: Arch) -> io::Result<()> {
     Ok(())
 }
 
-/// The Linux host build: native, in a Rust container, so C dependencies
-/// (ring) find a compiler. The cargo registry is cached in a volume.
-/// `--arch amd64` builds x86-64 binaries (on Apple silicon the container
-/// runs under Rosetta).
-fn linux(root: &Path) -> io::Result<()> {
-    let amd64 = std::env::args().skip(2).collect::<Vec<_>>().windows(2).any(|w| w[0] == "--arch" && (w[1] == "amd64" || w[1] == "x86_64"));
-    linux_build(root, amd64)
+/// The Linux host build, native, in a container: amd64 runs the rust image
+/// natively (x86_64 under it compiles straight for x86_64); arm64 runs a
+/// pinned cross toolchain on the *build* platform — the compiler and build
+/// scripts run natively there, targeting aarch64 musl, never a target
+/// emulator for compilation. The cargo registry is cached per architecture.
+fn linux(root: &Path, arch: Arch) -> io::Result<()> {
+    linux_build(root, arch)
 }
 
-fn linux_build(root: &Path, amd64: bool) -> io::Result<()> {
-    let (platform, out, cache) = if amd64 { ("linux/amd64", "linux-x86_64", "ctrs-cargo-amd64") } else { ("linux/arm64", "linux", "ctrs-cargo") };
-    run(Command::new("docker").args(["run", "--rm", "--platform", platform, "-v"]).arg(format!("{}:/src", root.display())).args([
-        "-v",
-        &format!("{cache}:/usr/local/cargo/registry"),
-        "-w",
-        "/src",
-        "-e",
-        &format!("CARGO_TARGET_DIR=/src/target/{out}"),
-        // The repo's cross-linking setting is for the guest build from macOS.
-        "-e",
-        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc",
-        "rust:1-alpine",
-        "sh",
-        "-c",
-        "apk add -q musl-dev && cargo build --release -p ctrs -p ctrs-init",
-    ]))?;
+fn linux_build(root: &Path, arch: Arch) -> io::Result<()> {
+    let out = arch.linux_out();
+    let cache = arch.linux_cache();
+    /// The platform the Linux builds run on: the host's own architecture.
+    /// The arm64 cross path runs the matching variant of the pinned
+    /// toolchain, natively, wherever it runs.
+    #[cfg(target_arch = "aarch64")]
+    const BUILDPLATFORM: &str = "linux/arm64";
+    #[cfg(not(target_arch = "aarch64"))]
+    const BUILDPLATFORM: &str = "linux/amd64";
+
+    match arch {
+        Arch::Arm64 => {
+            // Pinned: messense/rust-musl-cross (rustc 1.96.1, gcc 12.4.0,
+            // aarch64 musl 1.2.x), built from the Debian toolchain by that
+            // project. Build-only; never redistributed.
+            run(Command::new("docker")
+                .args(["run", "--rm", "--platform", BUILDPLATFORM, "-v"])
+                .arg(format!("{}:/src", root.display()))
+                .args([
+                    "-v",
+                    &format!("{cache}:/root/.cargo/registry"),
+                    "-w",
+                    "/src",
+                    "-e",
+                    &format!("CARGO_TARGET_DIR=/src/target/{out}"),
+                    // messense ships aarch64-unknown-linux-musl-gcc; the repo's
+                    // guest config wants rust-lld, which cannot drive crt paths
+                    // for the full release build.
+                    "-e",
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-unknown-linux-musl-gcc",
+                    // The user's global config injects a mold -B path; override it.
+                    "-e",
+                    "CARGO_ENCODED_RUSTFLAGS=",
+                    // The repo's rust-toolchain.toml requests nightly-2026-11-09,
+                    // which this image does not ship and whose musl std rustup has
+                    // not been installed for; the image's stable carries the target.
+                    "-e",
+                    "RUSTUP_TOOLCHAIN=stable",
+                    "messense/rust-musl-cross:aarch64-musl@sha256:02e790506c5f15a533bc05b3af8719b16a8a2314480f6f0fdc0166432035d9b4",
+                    "sh",
+                    "-c",
+                    // The container runs as root and owns target/linux; the copy
+                    // keeps the published layout at target/linux/release.
+                    "set -e; cargo build --release --target aarch64-unknown-linux-musl -p ctrs -p ctrs-init \
+                        && mkdir -p /src/target/linux/release \
+                        && cp /src/target/linux/aarch64-unknown-linux-musl/release/ctrs /src/target/linux/aarch64-unknown-linux-musl/release/ctrs-init /src/target/linux/release/",
+                ]))?;
+        }
+        Arch::X86_64 => {
+            run(Command::new("docker")
+                .args(["run", "--rm", "--platform", "linux/amd64", "-v"])
+                .arg(format!("{}:/src", root.display()))
+                .args([
+                    "-v",
+                    &format!("{cache}:/usr/local/cargo/registry"),
+                    "-w",
+                    "/src",
+                    "-e",
+                    &format!("CARGO_TARGET_DIR=/src/target/{out}"),
+                    // The repo's cross-linking setting is for the guest build from macOS.
+                    "-e",
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc",
+                    // The user's global config injects a mold -B path; override it.
+                    "-e",
+                    "CARGO_ENCODED_RUSTFLAGS=",
+                    "rust:1.100.0-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb",
+                    "sh",
+                    "-c",
+                    "apk add -q musl-dev && cargo build --release -p ctrs -p ctrs-init",
+                ]))?;
+        }
+    }
     for b in ["ctrs", "ctrs-init"] {
         let p = root.join("target").join(out).join("release").join(b);
         println!("{} ({} KiB)", p.display(), fs::metadata(&p)?.len() / 1024);
@@ -290,5 +407,63 @@ impl Cpio {
         self.ino = 0;
         self.entry("TRAILER!!!", 0, 1, (0, 0), &[]);
         self.buf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn arch_aliases() {
+        for (given, want) in [
+            ("arm64", Arch::Arm64),
+            ("aarch64", Arch::Arm64),
+            ("amd64", Arch::X86_64),
+            ("x86_64", Arch::X86_64),
+            ("x86-64", Arch::X86_64),
+            ("intel", Arch::X86_64),
+        ] {
+            assert_eq!(parse(&args(&["--arch", given]), Arch::Arm64), Ok(want), "{given}");
+        }
+    }
+
+    #[test]
+    fn arch_defaults_follow_the_host() {
+        assert_eq!(parse(&args(&[]), Arch::X86_64), Ok(Arch::X86_64));
+        assert_eq!(parse(&args(&[]), Arch::Arm64), Ok(Arch::Arm64));
+        assert_eq!(parse(&args(&["--arch", "arm64"]), Arch::X86_64), Ok(Arch::Arm64));
+    }
+
+    #[test]
+    fn arch_refusals() {
+        for given in ["--arch", "--arch banana", "--arch arm64 --arch amd64", "--arch arm64 --arch arm64", "--bogus", "-a arm64", "--arch arm64 --bogus"] {
+            let parts: Vec<&str> = given.split_whitespace().collect();
+            assert!(parse(&args(&parts), Arch::Arm64).is_err(), "{given}");
+        }
+    }
+
+    #[test]
+    fn arch_error_names_the_flag_and_values() {
+        let e = parse(&args(&["--arch", "banana"]), Arch::Arm64).unwrap_err();
+        assert!(e.contains("banana"));
+        assert!(e.contains("arm64"));
+        assert!(e.contains("x86_64"));
+        let e = parse(&args(&["--arch"]), Arch::Arm64).unwrap_err();
+        assert!(e.contains("--arch"));
+    }
+
+    #[test]
+    fn triples_and_paths_are_target_specific() {
+        assert_eq!(Arch::Arm64.guest_target(), "aarch64-unknown-linux-musl");
+        assert_eq!(Arch::X86_64.guest_target(), "x86_64-unknown-linux-musl");
+        assert_eq!(Arch::Arm64.linux_out(), "linux");
+        assert_eq!(Arch::X86_64.linux_out(), "linux-x86_64");
+        assert_eq!(Arch::Arm64.linux_cache(), "ctrs-cargo-aarch64-musl");
+        assert_eq!(Arch::X86_64.linux_cache(), "ctrs-cargo-amd64");
     }
 }

@@ -3,9 +3,9 @@
 ## Status
 
 - Goal: reliable ARM64 builds, with native cross-compilation for substantial compilation work and QEMU for target execution.
-- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`. Last accepted: S3 (2026-11-14).
-- Accepted slices: P0 (baseline, isolated Linux harness, environment runner, pin candidate), S1 (foreign builds through both entry points; managed builder provisions from the pin's digest reference), S2 (managed identity and safe reconciliation; identity suite green), S3 (accurate platform requests and image metadata; platform suite green). Known red: S4–S7 gates unrun, not passing.
-- Parked branches: none. Next: S4, using one writer.
+- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`. Last accepted: S4 (2026-11-14).
+- Accepted slices: P0 (baseline, isolated Linux harness, environment runner, pin candidate), S1 (foreign builds through both entry points; managed builder provisions from the pin's digest reference), S2 (managed identity and safe reconciliation; identity suite green), S3 (accurate platform requests and image metadata; platform suite green), S4 (host-native compilers and explicit target output; cross suite green; ARM64 musl release artifacts cross-built on the build platform). Known red: S5–S7 gates unrun, not passing.
+- Parked branches: none. Next: S5, using one writer.
 - Start only on a separate execution request. First command: `git status --short`.
 - Local completion and release qualification are distinct. Keep unavailable proofs under **Needs environment**; never report them as passed.
 
@@ -49,6 +49,17 @@ Repair an encountered defect immediately only if it blocks a listed proof or vio
 - **Archive load distinguishes fallback from registry validation**: absent `os`/`architecture` is the legacy fallback (os linux, host arch — the host default that is genuinely "made for this machine"); aliases normalize on load; non-string/empty values fail; foreign-OS archives load as foreign records. No second platform-bearing field exists in the docker-save layout; "conflicting" is unrepresentable — missing/wrong-typed metadata is what fails.
 - **Nothing new in persisted records**: `platform` stays `os/arch`; no variant field added.
 - **An architecture ctrs cannot run is refused at the boundary** (e.g. `linux/ppc64le`), not accepted-then-unrunnable; foreign-arch archives are a load tolerance, not support.
+
+### Executor decisions (2026-11-14, S4)
+
+- **The ARM64 Linux build compiles with a pinned cross toolchain on the build platform, never under a target emulator** (`xtask linux --arch arm64`): `messense/rust-musl-cross:aarch64-musl@sha256:02e790506c5f15a533bc05b3af8719b16a8a2314480f6f0fdc0166432035d9b4` — rustc 1.96.1, gcc 12.4.0, aarch64 musl 1.2.x, CRT sysroot, MIT; index digest verified against the live `aarch64-musl` tag (amd64 variant last pushed 2026-07, actively pulled). Compilation, build scripts and proc macros run natively on the BUILDPLATFORM (`linux/amd64` here; `linux/arm64` on aarch64 hosts). The linker targets aarch64; ring's C objects go through the cross gcc. `.cargo/config.toml` (guest `rust-lld`) is untouched; the cross linker is passed as `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER` at the container boundary.
+- **The container ignores the repo's `rust-toolchain.toml`** (`RUSTUP_TOOLCHAIN=stable`): the image ships only its stable (the requested nightly has no musl std there; first attempt died on `can't find crate for core`), and that stable carries `aarch64-unknown-linux-musl` preinstalled. The host build keeps the pinned nightly.
+- **The `tonistiigi/xx` alternative was piloted twice and lost the charter's "fewer external components" tie-break**: (A) manual rust-std tarball — `tar -xJ` broken in `rust:1-alpine` (fails on a sha256-verified download), `install.sh` needs bash; (B) `rustup target add` + `xx-apk musl-dev` + `xx-cargo` — passes end to end, but adds the xx helper, a target-std download at build time, and clang `--target` handoff for the C objects behind an implicit fallback, for no functional gain over the one pinned toolchain. messense stays; both pilots' logs are session scratch, and xx was qualified on the fixture only, not the full workspace.
+- **Artifact layout is unchanged**: ARM64 `target/linux/release/{ctrs,ctrs-init}` (static EXEC, AArch64, no INTERP), AMD64 `target/linux-x86_64/release/` (static-PIE, x86-64). Cargo caches are per architecture: `ctrs-cargo-aarch64-musl` (new) vs `ctrs-cargo-amd64` (kept). The cross build runs as root in the container; the published-layout copy happens inside it.
+- **One typed `Arch` and one `--arch` flag parse every task's arguments**; unknown/missing/conflicting values exit 2 before any Docker spawn (unit-tested and asserted by `--case cross`). macOS keeps its intentional ARM64 default; Linux follows the host. Unknown flags are errors.
+- **The root `Dockerfile` (release.yml's Linux builder) pins `rust:1.100.0-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb`** instead of the mutable tag; the per-arch variant digests are identical to the previously pinned `rust:1-alpine@sha256:2ccc…` (now unified on the self-describing pin, including the xtask AMD64 path). The Dockerfile comment now states the real constraint (rust-lld vs musl CRT objects).
+- **This slice is feature implementation, not a speed claim.** S4 proves the cross path and its outputs; equivalent-work performance vs emulation is S6 and needs a qualifying host.
+- **The examples are qualification fixtures, not shipped images**: build-only, digest-pinned, native BUILDPLATFORM toolchain, `TARGETOS/TARGETARCH/TARGETVARIANT` selection, static output, foreign-target final stage that executes and asserts a representative result (Rust fixture includes a proc macro and a real C object via build.rs; C/C++ fixture links C and C++). They prove the pattern without a desktop window, QEMU redistribution, or Dockerfile rewriting of user projects.
 
 ### Executor decisions (2026-11-14, S2)
 

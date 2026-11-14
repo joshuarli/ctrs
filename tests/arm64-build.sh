@@ -5,6 +5,7 @@
 #   bash tests/arm64-build.sh --case compatibility
 #   bash tests/arm64-build.sh --case identity
 #   bash tests/arm64-build.sh --case platform
+#   bash tests/arm64-build.sh --case cross
 #   bash tests/arm64-build.sh --case environment --require-no-binfmt
 #   bash tests/arm64-build.sh --all
 #   bash tests/arm64-build.sh --list
@@ -34,7 +35,7 @@ FAIL=0
 UNAVAILABLE=0
 
 usage() {
-  sed -n '2,16p' "$0" >&2
+  sed -n '2,17p' "$0" >&2
   exit 2
 }
 
@@ -760,6 +761,136 @@ case_platform() {
   return 1
 }
 
+# Pinned cross toolchain (rustc 1.96.1, gcc 12.4.0, aarch64 musl), build-only.
+CROSS_BUILDER_IMAGE=messense/rust-musl-cross:aarch64-musl@sha256:02e790506c5f15a533bc05b3af8719b16a8a2314480f6f0fdc0166432035d9b4
+
+case_cross() {
+  echo "== cross"
+  local t0=$SECONDS
+  local cross_rc=0
+
+  case "$(uname -m)" in
+    x86_64)  local host_plat=linux/amd64 host_triple=x86_64-unknown-linux-gnu ;;
+    aarch64) local host_plat=linux/arm64 host_triple=aarch64-unknown-linux-gnu ;;
+    *)       note_unavailable "cross: host architecture $(uname -m) cannot qualify the cross path"; return 1 ;;
+  esac
+
+  echo "-- xtask argument parsing (no Docker is spawned)"
+  if (cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo test -q -p xtask) > "$SCRATCH/cross-xtask.log" 2>&1; then
+    ok "cargo test -p xtask"
+  else
+    miss "cargo test -p xtask (log: $SCRATCH/cross-xtask.log)"; cross_rc=1
+  fi
+  local out rc
+  out=$(cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo run -q -p xtask -- linux --arch banana 2>&1); rc=$?
+  if [ $rc = 2 ] && case "$out" in *"not supported"*) true ;; *) false ;; esac; then
+    ok "--arch banana refused with exit 2"
+  else
+    miss "--arch banana: exit $rc, output: $out"; cross_rc=1
+  fi
+  out=$(cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo run -q -p xtask -- linux --arch arm64 --arch amd64 2>&1); rc=$?
+  [ $rc = 2 ] && ok "conflicting --arch refused with exit 2" || { miss "conflicting --arch: exit $rc, output: $out"; cross_rc=1; }
+  out=$(cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo run -q -p xtask -- linux --arch 2>&1); rc=$?
+  [ $rc = 2 ] && ok "--arch without a value refused with exit 2" || { miss "--arch without a value: exit $rc, output: $out"; cross_rc=1; }
+
+  echo "-- default Linux execution on an AMD64 host (bare xtask, no flag)"
+  if (cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo xtask linux) > "$SCRATCH/cross-amd64.log" 2>&1; then
+    ok "bare cargo xtask linux"
+  else
+    miss "bare cargo xtask linux (log: $SCRATCH/cross-amd64.log)"; cross_rc=1
+  fi
+  local machine
+  machine=$(elf_machine "$ROOT/target/linux-x86_64/release/ctrs" 2>/dev/null)
+  [ "$machine" = 3e00 ] && ok "default AMD64 ctrs e_machine 0x3e00" || { miss "default AMD64 ctrs e_machine 0x$machine (want 0x3e00)"; cross_rc=1; }
+  machine=$(elf_machine "$ROOT/target/linux-x86_64/release/ctrs-init" 2>/dev/null)
+  [ "$machine" = 3e00 ] && ok "default AMD64 ctrs-init e_machine 0x3e00" || { miss "default AMD64 ctrs-init e_machine 0x$machine (want 0x3e00)"; cross_rc=1; }
+
+  echo "-- explicit ARM64 output"
+  if (cd "$ROOT" && CARGO_ENCODED_RUSTFLAGS='' cargo xtask linux --arch arm64) > "$SCRATCH/cross-arm64.log" 2>&1; then
+    ok "cargo xtask linux --arch arm64"
+  else
+    miss "cargo xtask linux --arch arm64 (log: $SCRATCH/cross-arm64.log)"; cross_rc=1
+  fi
+  machine=$(elf_machine "$ROOT/target/linux/release/ctrs" 2>/dev/null)
+  [ "$machine" = b700 ] && ok "explicit ARM64 ctrs e_machine 0xb700" || { miss "explicit ARM64 ctrs e_machine 0x$machine (want 0xb700)"; cross_rc=1; }
+  machine=$(elf_machine "$ROOT/target/linux/release/ctrs-init" 2>/dev/null)
+  [ "$machine" = b700 ] && ok "explicit ARM64 ctrs-init e_machine 0xb700" || { miss "explicit ARM64 ctrs-init e_machine 0x$machine (want 0xb700)"; cross_rc=1; }
+
+  echo "-- examples cross-build on the build platform, never under a target emulator"
+  if ! "$D" buildx version >/dev/null 2>&1; then
+    note_unavailable "cross: docker buildx not available for the example builds"
+    return 1
+  fi
+  local rust_tag="ctrsaccel/cross-rust:$$" cpp_tag="ctrsaccel/cross-cpp:$$"
+  if DOCKER_BUILDKIT=1 "$D" buildx build --progress plain --no-cache --platform linux/arm64 --load -t "$rust_tag" -f "$ROOT/examples/cross/rust-musl/Dockerfile" "$ROOT/examples/cross/rust-musl" > "$SCRATCH/cross-rust.log" 2>&1; then
+    ok "rust-musl example built ($rust_tag)"
+  else
+    miss "rust-musl example build failed (log: $SCRATCH/cross-rust.log)"; tail -5 "$SCRATCH/cross-rust.log"; cross_rc=1
+  fi
+  if DOCKER_BUILDKIT=1 "$D" buildx build --progress plain --no-cache --platform linux/arm64 --load -t "$cpp_tag" -f "$ROOT/examples/cross/c-cpp-musl/Dockerfile" "$ROOT/examples/cross/c-cpp-musl" > "$SCRATCH/cross-cpp.log" 2>&1; then
+    ok "c-cpp-musl example built ($cpp_tag)"
+  else
+    miss "c-cpp-musl example build failed (log: $SCRATCH/cross-cpp.log)"; tail -5 "$SCRATCH/cross-cpp.log"; cross_rc=1
+  fi
+  grep -qF "build platform $host_plat; target linux/arm64; triple aarch64-unknown-linux-musl" "$SCRATCH/cross-rust.log" \
+    && ok "rust build ran on $host_plat, target linux/arm64" \
+    || { miss "rust build platform/target line missing from $SCRATCH/cross-rust.log"; cross_rc=1; }
+  grep -qF "host=$host_triple target=aarch64-unknown-linux-musl" "$SCRATCH/cross-rust.log" \
+    && ok "rust build scripts ran on $host_triple, not under emulation" \
+    || { miss "rust build host/target line missing from $SCRATCH/cross-rust.log"; cross_rc=1; }
+  grep -qF "build platform $host_plat; target linux/arm64; triple aarch64-unknown-linux-musl" "$SCRATCH/cross-cpp.log" \
+    && ok "C/C++ build ran on $host_plat, target linux/arm64" \
+    || { miss "C/C++ build platform/target line missing from $SCRATCH/cross-cpp.log"; cross_rc=1; }
+
+  echo "-- the target images run and report as linux/arm64"
+  local img out_img meta
+  for img in "$rust_tag cross-fixture: fixture target ok (42 via build.rs C linkage)" "$cpp_tag cross-fixture: C++ musl static ok (42)"; do
+    local tag="${img%% *}" want="${img#* }"
+    out_img=$("$D" run --rm --platform linux/arm64 "$tag" 2>&1) \
+      && [ "$out_img" = "$want" ] \
+      && ok "$tag runs: $out_img" \
+      || { miss "$tag output: '$out_img' (want '$want')"; cross_rc=1; }
+    meta=$("$D" image inspect -f '{{.Os}}/{{.Architecture}}' "$tag" 2>&1)
+    [ "$meta" = "linux/arm64" ] \
+      && ok "$tag metadata linux/arm64" \
+      || { miss "$tag metadata: '$meta' (want linux/arm64)"; cross_rc=1; }
+  done
+
+  echo "-- release artifacts are statically linked AArch64"
+  local probe b
+  for b in ctrs ctrs-init; do
+    probe=$("$D" run --rm -v "$ROOT:/src:ro" "$CROSS_BUILDER_IMAGE" sh -c 'readelf -h /src/target/linux/release/$1; echo INTERPS: $(readelf -lW /src/target/linux/release/$1 | grep -c INTERP || true)' _ "$b" 2>&1)
+    if grep -q 'Class:.*ELF64' <<< "$probe" && grep -q 'Type:.*EXEC' <<< "$probe" && grep -q 'Machine:.*AArch64' <<< "$probe" && [ "$(tail -n1 <<< "$probe")" = "INTERPS: 0" ]; then
+      ok "readelf $b: ELF64 EXEC AArch64, no INTERP header"
+    else
+      miss "readelf $b: $(grep -E 'Class|Type|Machine|INTERPS' <<< "$probe" | tr '\n' ' ')"
+      cross_rc=1
+    fi
+  done
+
+  echo "-- outputs and caches are per architecture"
+  "$D" volume inspect ctrs-cargo-aarch64-musl >/dev/null 2>&1 \
+    && ok "cargo cache volume ctrs-cargo-aarch64-musl exists" \
+    || { miss "cargo cache volume ctrs-cargo-aarch64-musl missing"; cross_rc=1; }
+  "$D" volume inspect ctrs-cargo-amd64 >/dev/null 2>&1 \
+    && ok "cargo cache volume ctrs-cargo-amd64 exists" \
+    || { miss "cargo cache volume ctrs-cargo-amd64 missing"; cross_rc=1; }
+  grep -q 'TARGETARCH' "$ROOT/examples/cross/rust-musl/Dockerfile" \
+    && grep -q 'TARGETARCH' "$ROOT/examples/cross/c-cpp-musl/Dockerfile" \
+    && ok "example Dockerfiles select the target via TARGETARCH" \
+    || { miss "example Dockerfiles do not reference TARGETARCH"; cross_rc=1; }
+
+  "$D" rmi "$rust_tag" "$cpp_tag" >/dev/null 2>&1 || true
+
+  info "cross checked in $((SECONDS - t0))s"
+  if [ $cross_rc = 0 ]; then
+    ok "cross case passed"
+    return 0
+  fi
+  miss "cross case failed"
+  return 1
+}
+
 EXPECTED_SHA256=dd59e62b7ce111e08c38cfdc945da204e9014e078ef1fcfae9b0dabbc3543e17
 
 # sha256("ctrs-arm64-qualification\n"): the fixture contract with
@@ -988,7 +1119,7 @@ run_case() {
     compatibility) case_compatibility ;;
     identity)      case_identity ;;
     platform)      case_platform ;;
-    cross)         note_unavailable "cross (planned: S4)" ;;
+    cross)         case_cross ;;
     lifecycle)     note_unavailable "lifecycle (planned: S5)" ;;
   esac
 }
