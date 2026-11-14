@@ -13,6 +13,7 @@ use crate::cancel::Cancel;
 use crate::tags::{next_link, version_order};
 use crate::reference::Reference;
 use crate::store::{Image, Layer, RunConfig, Store, sha256_digest};
+use crate::transport::{Body, Request, Transport, with_query};
 
 const ACCEPT: &str = "application/vnd.oci.image.index.v1+json, \
     application/vnd.docker.distribution.manifest.list.v2+json, \
@@ -63,12 +64,6 @@ impl std::error::Error for Error {}
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Error::Io(e)
-    }
-}
-
-impl From<ureq::Error> for Error {
-    fn from(e: ureq::Error) -> Self {
-        Error::Http(e.to_string())
     }
 }
 
@@ -132,12 +127,12 @@ fn oci_layer_type(media_type: &str) -> &str {
 }
 
 /// The response if it is a success, else its status and body as an error.
-fn ok(mut resp: ureq::http::Response<ureq::Body>, url: &str) -> Result<ureq::http::Response<ureq::Body>, Error> {
-    let status = resp.status().as_u16();
+fn ok(resp: crate::transport::Response, url: &str) -> Result<crate::transport::Response, Error> {
+    let status = resp.status;
     if (200..300).contains(&status) {
         return Ok(resp);
     }
-    let body = resp.body_mut().with_config().limit(64 << 10).read_to_string().unwrap_or_default();
+    let body = resp.text(64 << 10).unwrap_or_default();
     Err(Error::Status { url: url.to_owned(), status, body })
 }
 
@@ -197,7 +192,7 @@ impl Credentials {
 /// so the next pull skips the handshakes and token round trips this one made.
 #[derive(Debug)]
 pub struct Client {
-    agent: ureq::Agent,
+    transport: Transport,
     credentials: Option<Credentials>,
 }
 
@@ -220,6 +215,7 @@ pub fn set_proxy_source(f: ProxySource) {
 
 type ProxyChoice = Option<Option<(String, Vec<String>)>>;
 
+#[cfg(not(feature = "h12tiny"))]
 fn proxy(chosen: ProxyChoice) -> Option<Option<ureq::Proxy>> {
     let Some((url, skip)) = chosen? else { return Some(None) };
     let parsed = ureq::Proxy::new(&url).ok()?;
@@ -249,19 +245,34 @@ fn realm_is_secure(realm: &str, registry: &str) -> bool {
 /// Registries and their CDNs keep one open about a minute or more, and a
 /// reused connection saves the TCP and TLS handshakes: two round trips,
 /// 400 ms to Docker Hub from Europe, per host per pull.
+#[cfg(not(feature = "h12tiny"))]
 const IDLE: Duration = Duration::from_secs(90);
 
-/// The process's one agent, so its connection pool outlives a pull. It is
-/// built again only when the proxy settings change.
-fn shared_agent() -> ureq::Agent {
-    static AGENT: Mutex<Option<(ProxyChoice, ureq::Agent)>> = Mutex::new(None);
+/// The process's one transport, so its connection pool (ureq) outlives a
+/// pull. Built again only when the proxy settings change. With the
+/// `h12tiny` feature the h12tiny backend is selected instead; the proxy
+/// settings do not apply to it (it has none).
+fn shared_transport() -> Transport {
+    static T: Mutex<Option<(ProxyChoice, Transport)>> = Mutex::new(None);
     let chosen = PROXY_SOURCE.get().and_then(|f| f());
-    let mut slot = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((c, agent)) = slot.as_ref()
+    let mut slot = T.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((c, t)) = slot.as_ref()
         && *c == chosen
     {
-        return agent.clone();
+        return t.clone();
     }
+    #[cfg(feature = "h12tiny")]
+    {
+        if PROXY_SOURCE.get().is_some() {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| eprintln!("kiri: the h12tiny registry transport has no proxy support; ignoring the proxy settings"));
+        }
+        let t = Transport::shared_h12tiny();
+        *slot = Some((chosen, t.clone()));
+        return t;
+    }
+    #[cfg(not(feature = "h12tiny"))]
+    {
     let mut cfg = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_connect(Some(Duration::from_secs(15)))
@@ -277,8 +288,10 @@ fn shared_agent() -> ureq::Agent {
     // Happy Eyeballs rather than ureq's one address after another, so an
     // IPv6 address without a working route does not stall the pull.
     let agent = ureq::Agent::with_parts(cfg.build(), crate::connect::connector(), ureq::unversioned::resolver::DefaultResolver::default());
-    *slot = Some((chosen, agent.clone()));
-    agent
+    let t = Transport::Ureq(agent);
+    *slot = Some((chosen, t.clone()));
+    t
+    }
 }
 
 /// Bearer tokens (and Basic answers) by registry, repository, actions and
@@ -387,21 +400,28 @@ fn transient(e: &Error) -> bool {
     }
 }
 
-/// Reads the rest of a response, so its connection goes back to the pool
-/// instead of being closed (ureq only reuses a connection read to the end).
-fn drain(mut resp: ureq::http::Response<ureq::Body>) {
-    let _ = resp.body_mut().with_config().limit(64 << 10).read_to_vec();
-}
-
 /// A pooled connection the server closed just as it was reused: the request
 /// never got an answer and is safe to send again on a new connection.
-fn stale(e: &ureq::Error) -> bool {
-    matches!(e, ureq::Error::Io(e) if matches!(e.kind(), io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof))
+fn stale(e: &Error) -> bool {
+    const CLOSED: [io::ErrorKind; 4] = [io::ErrorKind::ConnectionReset, io::ErrorKind::ConnectionAborted, io::ErrorKind::BrokenPipe, io::ErrorKind::UnexpectedEof];
+    match e {
+        Error::Io(e) => {
+            if let Some(u) = e.get_ref().and_then(|i| i.downcast_ref::<ureq::Error>()) {
+                return matches!(u, ureq::Error::Io(e) if CLOSED.contains(&e.kind()));
+            }
+            CLOSED.contains(&e.kind())
+        }
+        // The h12tiny backend connects fresh each time, so only a failure
+        // before any bytes were sent is worth one automatic retry.
+        #[cfg(feature = "h12tiny")]
+        Error::Http(msg) => msg.starts_with("h12tiny Connect:") || msg.starts_with("h12tiny Timeout:"),
+        _ => false,
+    }
 }
 
 impl Client {
     pub fn new() -> Client {
-        Client { agent: shared_agent(), credentials: None }
+        Client { transport: shared_transport(), credentials: None }
     }
 
     /// Who the tokens are for: a fingerprint of the credentials, so one
@@ -455,23 +475,37 @@ impl Client {
         }
         let known = CHALLENGES.lock().unwrap_or_else(|e| e.into_inner()).get(&r.registry).cloned();
         let Some(challenge) = known.or_else(|| (r.registry == "docker.io").then(|| DOCKER_HUB_CHALLENGE.to_owned())) else { return Ok(()) };
+        // The token pre-fetch is worth doing for either transport; the two
+        // pool-warming probes only pay off when connections can be reused.
+        if !self.transport.warms_pool() {
+            if let Ok((header, ttl)) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry) {
+                Self::remember_token(key, header, ttl);
+            }
+            return Ok(());
+        }
         let url = format!("{}/v2/", r.api_base());
         std::thread::scope(|s| {
             // Two connections: after the manifests, the config and the first
             // layer are fetched at once.
-            let connections: Vec<_> = (0..2).map(|_| s.spawn(|| self.agent.get(&url).call().map(drain))).collect();
+            let probes: Vec<_> = (0..2)
+                .map(|_| {
+                    let transport = self.transport.clone();
+                    let url = url.clone();
+                    s.spawn(move || transport.send(Request::get(url)).map(|r| r.discard()))
+                })
+                .collect();
             if let Ok((header, ttl)) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry) {
                 Self::remember_token(key, header, ttl);
             }
             let mut failed = None;
-            for c in connections {
+            for c in probes {
                 match c.join() {
                     Ok(Ok(())) => return Ok(()),
                     Ok(Err(e)) => failed = Some(e),
                     Err(_) => {}
                 }
             }
-            failed.map_or(Ok(()), |e| Err(e.into()))
+            failed.map_or(Ok(()), Err)
         })
     }
 
@@ -656,14 +690,9 @@ impl Client {
             return Ok(hit);
         }
         let url = format!("{}/v2/{}/manifests/{reference}", r.api_base(), r.repository);
-        let mut resp = self.get(r, &url, Some(ACCEPT))?;
-        let media_type = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_owned();
-        let bytes = resp.body_mut().with_config().limit(4 << 20).read_to_vec()?;
+        let resp = self.get(r, &url, Some(ACCEPT))?;
+        let media_type = resp.header("content-type").unwrap_or_default().to_owned();
+        let bytes = resp.bytes(4 << 20)?;
         if by_digest {
             MANIFESTS.lock().unwrap_or_else(|e| e.into_inner()).put(&key, reference, &bytes, &media_type);
         }
@@ -695,13 +724,14 @@ impl Client {
                 if cancel.is_cancelled() {
                     return Err(Error::Cancelled);
                 }
-                let mut resp = self.get_from(r, &url, got)?;
-                if got > 0 && resp.status().as_u16() != 206 {
+                let resp = self.get_from(r, &url, got)?;
+                if got > 0 && resp.status != 206 {
                     // The whole blob again: start over.
                     out = store.blob_writer(digest)?;
                     (got, told) = (0, 0);
                 }
-                let mut body = resp.body_mut().with_config().limit(max.saturating_sub(got)).reader();
+                let remaining = max.saturating_sub(got);
+                let mut body = resp.into_reader().take(remaining.saturating_add(1));
                 loop {
                     let n = body.read(&mut buf)?;
                     // A shut-down connection reads as an early end.
@@ -713,6 +743,9 @@ impl Client {
                     }
                     out.write_all(&buf[..n])?;
                     got += n as u64;
+                    if got > max {
+                        return Err(Error::Io(io::Error::new(io::ErrorKind::InvalidData, "body exceeds limit")));
+                    }
                     if got - told >= 512 * 1024 {
                         on_bytes(got);
                         told = got;
@@ -735,32 +768,32 @@ impl Client {
     }
 
     /// GET a blob from byte `from` on (all of it from 0).
-    fn get_from(&self, r: &Reference, url: &str, from: u64) -> Result<ureq::http::Response<ureq::Body>, Error> {
+    fn get_from(&self, r: &Reference, url: &str, from: u64) -> Result<crate::transport::Response, Error> {
         if from == 0 {
             return self.get(r, url, None);
         }
         let resp = self.authed(r, "pull", |auth| {
-            let mut req = self.agent.get(url).header("Range", format!("bytes={from}-"));
+            let mut req = Request::get(url.to_owned()).header("Range", format!("bytes={from}-"));
             if let Some(a) = auth {
                 req = req.header("Authorization", a);
             }
-            req.call()
+            self.transport.send(req)
         })?;
         ok(resp, url)
     }
 
     /// GET with registry auth.
-    fn get(&self, r: &Reference, url: &str, accept: Option<&str>) -> Result<ureq::http::Response<ureq::Body>, Error> {
+    fn get(&self, r: &Reference, url: &str, accept: Option<&str>) -> Result<crate::transport::Response, Error> {
         let resp = self.authed(r, "pull", |auth| {
             let send = || {
-                let mut req = self.agent.get(url);
+                let mut req = Request::get(url.to_owned());
                 if let Some(a) = accept {
                     req = req.header("Accept", a);
                 }
                 if let Some(a) = auth {
                     req = req.header("Authorization", a);
                 }
-                req.call()
+                self.transport.send(req)
             };
             match send() {
                 Err(e) if stale(&e) => send(),
@@ -777,8 +810,8 @@ impl Client {
         &self,
         r: &Reference,
         actions: &str,
-        call: impl Fn(Option<&str>) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
-    ) -> Result<ureq::http::Response<ureq::Body>, Error> {
+        call: impl Fn(Option<&str>) -> Result<crate::transport::Response, Error>,
+    ) -> Result<crate::transport::Response, Error> {
         let key = self.token_key(r, actions);
         let mut resp = None;
         for attempt in 0..2 {
@@ -786,9 +819,9 @@ impl Client {
                 self.credentials.as_ref().filter(|c| !c.registry_token.is_empty()).map(|c| format!("Bearer {}", c.registry_token))
             });
             let rsp = call(header.as_deref())?;
-            if rsp.status().as_u16() == 401 && attempt == 0 {
-                let challenge = rsp.headers().get("www-authenticate").and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
-                drain(rsp);
+            if rsp.status == 401 && attempt == 0 {
+                let challenge = rsp.header("www-authenticate").unwrap_or_default().to_owned();
+                rsp.discard();
                 let (answer, ttl) = self.answer(&challenge, &format!("repository:{}:{actions}", r.repository), &r.registry).map_err(|e| match e {
                     Error::Status { url, status, body } if url.is_empty() => Error::Status { url: r.api_base(), status, body },
                     e => e,
@@ -836,37 +869,32 @@ impl Client {
             WARNED.call_once(|| eprintln!("kiri: not sending {registry}'s credentials to its token realm {realm}: not https"));
         }
         let creds = self.credentials.as_ref().filter(|_| secure);
-        let mut resp = if let Some(c) = creds.filter(|c| !c.identity_token.is_empty()) {
+        let resp = if let Some(c) = creds.filter(|c| !c.identity_token.is_empty()) {
             // An identity token is an OAuth refresh token.
-            let mut form = vec![("grant_type", "refresh_token"), ("refresh_token", c.identity_token.as_str()), ("service", service), ("client_id", "kiri")];
+            let mut form = vec![("grant_type".to_owned(), "refresh_token".to_owned()), ("refresh_token".to_owned(), c.identity_token.clone()), ("service".to_owned(), service.to_owned()), ("client_id".to_owned(), "kiri".to_owned())];
             if let Some(s) = scope {
-                form.push(("scope", s));
+                form.push(("scope".to_owned(), s.to_owned()));
             }
-            self.agent.post(realm.as_str()).send_form(form)?
+            self.transport.send(Request { method: "POST", url: realm.clone(), headers: Vec::new(), body: Body::Form(form) })?
         } else {
-            let mut req = self.agent.get(realm.as_str());
-            if let Some(s) = scope {
-                req = req.query("scope", s);
+            let query: Vec<(&str, &str)> = scope.into_iter().map(|s| ("scope", s)).chain((!service.is_empty()).then_some(("service", service))).chain(creds.map(|c| ("account", c.username.as_str()))).collect();
+            let url = with_query(realm, &query);
+            let mut req = Request::get(url);
+            if let Some(c) = creds
+                && let Some(b) = c.basic()
+            {
+                req = req.header("Authorization", b);
             }
-            if !service.is_empty() {
-                req = req.query("service", service);
-            }
-            if let Some(c) = creds {
-                req = req.query("account", &c.username);
-                if let Some(b) = c.basic() {
-                    req = req.header("Authorization", &b);
-                }
-            }
-            req.call()?
+            self.transport.send(req)?
         };
-        let status = resp.status().as_u16();
+        let status = resp.status;
         if status == 401 || status == 403 {
             return Err(Error::Status { url: realm.clone(), status, body: "unauthorized: incorrect username or password".into() });
         }
         if status != 200 {
             return Err(Error::Status { url: realm.clone(), status, body: String::new() });
         }
-        let t: Token = serde_json::from_slice(&resp.body_mut().read_to_vec()?).map_err(|e| Error::Http(e.to_string()))?;
+        let t: Token = serde_json::from_slice(&resp.bytes(16 << 20)?).map_err(|e| Error::Http(e.to_string()))?;
         // The distribution spec: 60 seconds when the server does not say.
         let ttl = Duration::from_secs(t.expires_in.filter(|&s| s > 0).unwrap_or(60));
         Ok((t.token.or(t.access_token).ok_or_else(|| Error::Http("token response had no token".into()))?, ttl))
@@ -874,12 +902,13 @@ impl Client {
 
     /// `docker search`, against Docker Hub's search API.
     pub fn search(&self, term: &str, limit: u32) -> Result<Vec<serde_json::Value>, Error> {
-        let url = "https://index.docker.io/v1/search";
-        let mut resp = self.agent.get(url).query("q", term).query("n", &limit.to_string()).call()?;
-        if resp.status().as_u16() != 200 {
-            return Err(Error::Status { url: url.to_owned(), status: resp.status().as_u16(), body: String::new() });
+        let url = with_query("https://index.docker.io/v1/search", &[("q", term), ("n", &limit.to_string())]);
+        let resp = self.transport.send(Request::get(url))?;
+        let status = resp.status;
+        if status != 200 {
+            return Err(Error::Status { url: "https://index.docker.io/v1/search".to_owned(), status, body: String::new() });
         }
-        let body: serde_json::Value = serde_json::from_slice(&resp.body_mut().with_config().limit(4 << 20).read_to_vec()?).map_err(|e| Error::Http(e.to_string()))?;
+        let body: serde_json::Value = serde_json::from_slice(&resp.bytes(4 << 20)?).map_err(|e| Error::Http(e.to_string()))?;
         Ok(body["results"].as_array().cloned().unwrap_or_default())
     }
 
@@ -888,12 +917,14 @@ impl Client {
     /// the registry's tag list is unordered and has no dates.
     pub fn hub_tags(&self, repo: &str, limit: u32) -> Result<Vec<String>, Error> {
         let repo = if repo.contains('/') { repo.to_owned() } else { format!("library/{repo}") };
-        let url = format!("https://hub.docker.com/v2/repositories/{repo}/tags");
-        let mut resp = self.agent.get(&url).query("page_size", &limit.to_string()).query("ordering", "last_updated").call()?;
-        if resp.status().as_u16() != 200 {
-            return Err(Error::Status { url, status: resp.status().as_u16(), body: String::new() });
+        let base_url = format!("https://hub.docker.com/v2/repositories/{repo}/tags");
+        let url = with_query(&base_url, &[("page_size", &limit.to_string()), ("ordering", "last_updated")]);
+        let resp = self.transport.send(Request::get(url))?;
+        let status = resp.status;
+        if status != 200 {
+            return Err(Error::Status { url: base_url, status, body: String::new() });
         }
-        let body: serde_json::Value = serde_json::from_slice(&resp.body_mut().with_config().limit(4 << 20).read_to_vec()?).map_err(|e| Error::Http(e.to_string()))?;
+        let body: serde_json::Value = serde_json::from_slice(&resp.bytes(4 << 20)?).map_err(|e| Error::Http(e.to_string()))?;
         Ok(body["results"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect())
     }
 
@@ -909,9 +940,9 @@ impl Client {
         let mut url = format!("{base}/v2/{}/tags/list?n=1000", r.repository);
         let mut tags: Vec<String> = Vec::new();
         for _ in 0..TAG_PAGES {
-            let mut resp = self.get(r, &url, None)?;
-            let next = resp.headers().get("link").and_then(|v| v.to_str().ok()).and_then(next_link).map(str::to_owned);
-            let body: serde_json::Value = serde_json::from_slice(&resp.body_mut().with_config().limit(4 << 20).read_to_vec()?).map_err(|e| Error::Http(e.to_string()))?;
+            let resp = self.get(r, &url, None)?;
+            let next = resp.header("link").and_then(next_link).map(str::to_owned);
+            let body: serde_json::Value = serde_json::from_slice(&resp.bytes(4 << 20)?).map_err(|e| Error::Http(e.to_string()))?;
             tags.extend(body["tags"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).filter(|t| !t.starts_with("sha256-")).map(str::to_owned));
             // Only a next page on the same registry is followed.
             match next {
@@ -931,15 +962,15 @@ impl Client {
         let host = if host.is_empty() || host == "index.docker.io" || host == "docker.io" { "registry-1.docker.io" } else { host };
         let base = format!("{}://{host}", if crate::reference::is_local(host) { "http" } else { "https" });
         let url = format!("{base}/v2/");
-        let resp = self.agent.get(&url).call()?;
-        match resp.status().as_u16() {
+        let resp = self.transport.send(Request::get(url.clone()))?;
+        match resp.status {
             200 => Ok(()),
             401 => {
-                let challenge = resp.headers().get("www-authenticate").and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+                let challenge = resp.header("www-authenticate").unwrap_or_default().to_owned();
                 if challenge.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("basic")) {
                     let (auth, _) = self.answer(&challenge, "", host)?;
-                    let again = self.agent.get(&url).header("Authorization", &auth).call()?;
-                    return match again.status().as_u16() {
+                    let again = self.transport.send(Request::get(url.clone()).header("Authorization", auth))?;
+                    return match again.status {
                         200 => Ok(()),
                         s => Err(Error::Status { url, status: s, body: "unauthorized: incorrect username or password".into() }),
                     };
@@ -962,13 +993,13 @@ impl Client {
         for (digest, size) in &blobs {
             let url = format!("{base}/v2/{repo}/blobs/{digest}");
             let head = self.authed(target, "pull,push", |auth| {
-                let mut req = self.agent.head(&url);
+                let mut req = Request { method: "HEAD", url: url.clone(), headers: Vec::new(), body: Body::Empty };
                 if let Some(a) = auth {
                     req = req.header("Authorization", a);
                 }
-                req.call()
+                self.transport.send(req)
             })?;
-            if head.status().as_u16() == 200 {
+            if head.status == 200 {
                 progress(PushProgress::Exists { digest: digest.clone() });
                 continue;
             }
@@ -976,24 +1007,23 @@ impl Client {
             // Start an upload session, then send the blob in one PUT.
             let start_url = format!("{base}/v2/{repo}/blobs/uploads/");
             let started = self.authed(target, "pull,push", |auth| {
-                let mut req = self.agent.post(&start_url).header("Content-Length", "0");
+                let mut req = Request { method: "POST", url: start_url.clone(), headers: Vec::new(), body: Body::Empty };
                 if let Some(a) = auth {
                     req = req.header("Authorization", a);
                 }
-                req.send_empty()
+                self.transport.send(req)
             })?;
             let started = ok(started, &start_url)?;
-            let location = started.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+            let location = started.header("location").unwrap_or_default().to_owned();
             let location = if location.starts_with('/') { format!("{base}{location}") } else { location };
             let put_url = format!("{location}{}digest={digest}", if location.contains('?') { '&' } else { '?' });
             let path = store.blob_path(digest)?;
             let put = self.authed(target, "pull,push", |auth| {
-                let mut f = std::fs::File::open(&path).map_err(ureq::Error::Io)?;
-                let mut req = self.agent.put(&put_url).header("Content-Type", "application/octet-stream").header("Content-Length", &size.to_string());
+                let mut req = Request { method: "PUT", url: put_url.clone(), headers: vec![("Content-Length".to_owned(), size.to_string())], body: Body::File { path: path.clone(), content_type: Some("application/octet-stream") } };
                 if let Some(a) = auth {
                     req = req.header("Authorization", a);
                 }
-                req.send(ureq::SendBody::from_reader(&mut f))
+                self.transport.send(req)
             })?;
             ok(put, &put_url)?;
             progress(PushProgress::Pushed { digest: digest.clone() });
@@ -1007,11 +1037,11 @@ impl Client {
         let bytes = serde_json::to_vec(&manifest).map_err(|e| Error::Manifest(e.to_string()))?;
         let url = format!("{base}/v2/{repo}/manifests/{}", target.reference);
         let put = self.authed(target, "pull,push", |auth| {
-            let mut req = self.agent.put(&url).header("Content-Type", OCI_MANIFEST);
+            let mut req = Request { method: "PUT", url: url.clone(), headers: vec![("Content-Type".to_owned(), OCI_MANIFEST.to_owned())], body: Body::Bytes(bytes.clone()) };
             if let Some(a) = auth {
                 req = req.header("Authorization", a);
             }
-            req.send(&bytes[..])
+            self.transport.send(req)
         })?;
         ok(put, &url)?;
         Ok((sha256_digest(&bytes), bytes.len() as u64))
@@ -1117,6 +1147,12 @@ fn not_found(e: Error, r: &Reference) -> Error {
 mod tests {
     use super::*;
 
+    fn tmp_root(tag: &str) -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("kiri-{tag}-{}-{seq}", std::process::id()))
+    }
+
     #[test]
     fn a_missing_image_reads_as_docker_says_it() {
         let r = Reference::parse("gall").unwrap();
@@ -1164,9 +1200,9 @@ mod tests {
     #[test]
     fn tokens_are_kept_apart_by_who_asked() {
         let r = Reference::parse("alpine").unwrap();
-        let anon = Client { agent: shared_agent(), credentials: None };
-        let alice = Client { agent: shared_agent(), credentials: Some(Credentials { username: "alice".into(), password: "a".into(), ..Default::default() }) };
-        let other = Client { agent: shared_agent(), credentials: Some(Credentials { username: "alice".into(), password: "b".into(), ..Default::default() }) };
+        let anon = Client { transport: shared_transport(), credentials: None };
+        let alice = Client { transport: shared_transport(), credentials: Some(Credentials { username: "alice".into(), password: "a".into(), ..Default::default() }) };
+        let other = Client { transport: shared_transport(), credentials: Some(Credentials { username: "alice".into(), password: "b".into(), ..Default::default() }) };
         let keys = [anon.token_key(&r, "pull"), alice.token_key(&r, "pull"), other.token_key(&r, "pull"), alice.token_key(&r, "pull,push")];
         for (i, a) in keys.iter().enumerate() {
             for b in &keys[i + 1..] {
@@ -1270,9 +1306,16 @@ mod tests {
     }
 
     fn test_client() -> Client {
-        let cfg = ureq::Agent::config_builder().http_status_as_error(false).build();
-        let agent = ureq::Agent::with_parts(cfg, crate::connect::connector_with(Duration::from_millis(300)), ureq::unversioned::resolver::DefaultResolver::default());
-        Client { agent, credentials: None }
+        Client { transport: Transport::test_ureq(Duration::from_millis(300)), credentials: None }
+    }
+
+    #[cfg(feature = "h12tiny")]
+    fn test_client_h12tiny() -> Client {
+        Client { transport: Transport::test_h12tiny(Duration::from_millis(300)), credentials: None }
+    }
+
+    fn named(client: &Client, name: &str) {
+        assert_eq!(client.transport.name(), name);
     }
 
     fn blob() -> (Vec<u8>, String) {
@@ -1281,8 +1324,7 @@ mod tests {
         (data, digest)
     }
 
-    #[test]
-    fn a_stalled_blob_resumes_where_it_stopped() {
+    fn stalled_resume_case(client: Client) {
         let (data, digest) = blob();
         let half = data.len() / 2;
         let body = data.clone();
@@ -1298,11 +1340,11 @@ mod tests {
                 let _ = c.write_all(rest);
             }
         });
-        let root = std::env::temp_dir().join(format!("kiri-stall-test-{}", std::process::id()));
+        let root = tmp_root("stall");
         let store = Store::open(&root).unwrap();
         let r = Reference::parse(&format!("{host}/test/blob:1")).unwrap();
         let started = Instant::now();
-        let got = test_client().download(&store, &r, &digest, &|_| {}).unwrap();
+        let got = client.download(&store, &r, &digest, &|_| {}).unwrap();
         assert_eq!(got, data.len() as u64);
         assert!(store.has_blob(&digest, data.len() as u64));
         assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
@@ -1312,7 +1354,19 @@ mod tests {
     }
 
     #[test]
-    fn a_server_without_ranges_sends_the_blob_again() {
+    fn a_stalled_blob_resumes_where_it_stopped() {
+        named(&test_client(), "ureq");
+        stalled_resume_case(test_client());
+    }
+
+    #[cfg(feature = "h12tiny")]
+    #[test]
+    fn a_stalled_blob_resumes_where_it_stopped_h12tiny() {
+        named(&test_client_h12tiny(), "h12tiny");
+        stalled_resume_case(test_client_h12tiny());
+    }
+
+    fn no_range_case(client: Client) {
         let (data, digest) = blob();
         let body = data.clone();
         let tries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1326,10 +1380,10 @@ mod tests {
                 let _ = c.write_all(&body);
             }
         });
-        let root = std::env::temp_dir().join(format!("kiri-norange-test-{}", std::process::id()));
+        let root = tmp_root("norange");
         let store = Store::open(&root).unwrap();
         let r = Reference::parse(&format!("{host}/test/blob:1")).unwrap();
-        assert_eq!(test_client().download(&store, &r, &digest, &|_| {}).unwrap(), data.len() as u64);
+        assert_eq!(client.download(&store, &r, &digest, &|_| {}).unwrap(), data.len() as u64);
         assert!(store.has_blob(&digest, data.len() as u64));
         quit(&host);
         let seen = served.join().unwrap();
@@ -1339,23 +1393,47 @@ mod tests {
     }
 
     #[test]
-    fn a_blob_that_never_arrives_gives_up() {
+    fn a_server_without_ranges_sends_the_blob_again() {
+        named(&test_client(), "ureq");
+        no_range_case(test_client());
+    }
+
+    #[cfg(feature = "h12tiny")]
+    #[test]
+    fn a_server_without_ranges_sends_the_blob_again_h12tiny() {
+        named(&test_client_h12tiny(), "h12tiny");
+        no_range_case(test_client_h12tiny());
+    }
+
+    fn never_arrives_case(client: Client) {
         let (_, digest) = blob();
         let (host, served) = blob_server(|_, c| {
             let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n");
             std::thread::sleep(Duration::from_millis(400));
         });
-        let root = std::env::temp_dir().join(format!("kiri-dead-test-{}", std::process::id()));
+        let root = tmp_root("dead");
         let store = Store::open(&root).unwrap();
         let r = Reference::parse(&format!("{host}/test/blob:1")).unwrap();
-        assert!(test_client().download(&store, &r, &digest, &|_| {}).is_err());
+        assert!(client.download(&store, &r, &digest, &|_| {}).is_err());
         quit(&host);
         assert_eq!(served.join().unwrap().len(), BLOB_TRIES as usize);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn a_cancelled_download_stops_at_once_and_leaves_nothing() {
+    fn a_blob_that_never_arrives_gives_up() {
+        named(&test_client(), "ureq");
+        never_arrives_case(test_client());
+    }
+
+    #[cfg(feature = "h12tiny")]
+    #[test]
+    fn a_blob_that_never_arrives_gives_up_h12tiny() {
+        named(&test_client_h12tiny(), "h12tiny");
+        never_arrives_case(test_client_h12tiny());
+    }
+
+    fn cancelled_case(client: Client) {
         let (data, digest) = blob();
         let body = data.clone();
         let (host, served) = blob_server(move |_, c| {
@@ -1364,13 +1442,10 @@ mod tests {
             let _ = c.write_all(&body[..body.len() / 2]);
             std::thread::sleep(Duration::from_secs(5));
         });
-        let root = std::env::temp_dir().join(format!("kiri-cancel-test-{}", std::process::id()));
+        let root = tmp_root("cancel");
         let store = Store::open(&root).unwrap();
         let r = Reference::parse(&format!("{host}/test/blob:1")).unwrap();
-        // Stalls only give up after 10 s: the cancel must not wait for that.
-        let cfg = ureq::Agent::config_builder().http_status_as_error(false).build();
-        let agent = ureq::Agent::with_parts(cfg, crate::connect::connector_with(Duration::from_secs(10)), ureq::unversioned::resolver::DefaultResolver::default());
-        let client = Client { agent, credentials: None };
+        // Stalls only give up after a while: the cancel must not wait for that.
         let cancel = Cancel::new();
         let c = cancel.clone();
         std::thread::spawn(move || {
@@ -1389,6 +1464,23 @@ mod tests {
         quit(&host);
         assert_eq!(served.join().unwrap(), [0]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_cancelled_download_stops_at_once_and_leaves_nothing() {
+        // Stalls only give up after 10 s: the cancel must not wait for that.
+        let client = Client { transport: Transport::test_ureq(Duration::from_secs(10)), credentials: None };
+        named(&client, "ureq");
+        cancelled_case(client);
+    }
+
+    #[cfg(feature = "h12tiny")]
+    #[test]
+    fn a_cancelled_download_stops_at_once_and_leaves_nothing_h12tiny() {
+        // The h12tiny body read wakes at the stall; 1 s keeps the test quick.
+        let client = Client { transport: Transport::test_h12tiny(Duration::from_secs(1)), credentials: None };
+        named(&client, "h12tiny");
+        cancelled_case(client);
     }
 
     #[test]

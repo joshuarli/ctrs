@@ -7,6 +7,7 @@
 //! a half-downloaded one is deleted with its writer.
 
 use std::cell::RefCell;
+#[cfg(any(test, not(feature = "h12tiny")))]
 use std::io;
 use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,6 +71,7 @@ impl Cancel {
     /// Notes `stream` as one to shut down on cancel, or refuses it if the
     /// pull is already cancelled. Checked under the lock [`Cancel::cancel`]
     /// takes, so a connection is either refused or shut down, never missed.
+    #[cfg(any(test, not(feature = "h12tiny")))]
     fn watch(&self, stream: &Arc<TcpStream>) -> io::Result<()> {
         let mut streams = self.0.streams.lock().unwrap_or_else(|e| e.into_inner());
         if self.is_cancelled() {
@@ -95,6 +97,7 @@ impl Drop for Entered {
 
 /// Called by a connection before each read and write: ties it to the pull
 /// this thread works for, if one, and fails once that is cancelled.
+#[cfg(any(test, not(feature = "h12tiny")))]
 pub(crate) fn watch(stream: &Arc<TcpStream>) -> io::Result<()> {
     CURRENT.with(|c| match &*c.borrow() {
         Some(cancel) => cancel.watch(stream),

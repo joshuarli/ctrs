@@ -5,8 +5,10 @@
 pub mod archive;
 pub mod b64;
 pub mod cancel;
+#[cfg(any(test, not(feature = "h12tiny")))]
 mod connect;
 pub mod reference;
+mod transport;
 pub mod registry;
 pub mod store;
 pub mod tags;

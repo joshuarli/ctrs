@@ -36,6 +36,8 @@ tar = "0.4"
 default = []
 ## CTRS-15 pilot: HTTP/1.1 API serving via h12tiny (per-connection reactor).
 h12tiny = ["dep:h12tiny-server", "dep:h12tiny-core", "dep:async-net", "dep:futures-lite", "dep:hyper"]
+## CTRS-16 pilot: the registry client over h12tiny-client-sync.
+registry-h12tiny = ["kiri-image/h12tiny"]
 
 [lints]
 workspace = true

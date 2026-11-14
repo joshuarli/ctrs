@@ -35,11 +35,13 @@ const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// connection that goes silent mid-body (a stalled CDN, a NAT that dropped
 /// it) then fails, and the pull resumes the blob on a new one, rather than
 /// waiting forever with the builder's lock held.
+#[cfg(not(feature = "h12tiny"))]
 pub(crate) const STALL: Duration = Duration::from_secs(60);
 
 /// ureq's default chain with the TCP step swapped for Happy Eyeballs: an
 /// HTTP CONNECT proxy if one is set (its own connection to the proxy goes
 /// through this chain too), then TCP, then TLS for https.
+#[cfg(not(feature = "h12tiny"))]
 pub(crate) fn connector() -> impl Connector<(), Out = impl Transport> {
     connector_with(STALL)
 }
