@@ -108,6 +108,14 @@ the guest.
 
 ### Mounts and volumes
 
+- The host's root filesystem is shared into the guest over virtiofs,
+  **read-write**, at `/mnt/mac` (that is how bind mounts work). Containers
+  never see it — only the guest agent and, in the guest, root-equivalent
+  processes do. A privileged container, or anything that escapes the guest
+  boundary, can therefore read and write the host filesystem, including
+  `~/.ssh`, `~/.docker`, and the engine's data root. That is the single
+  trust domain this engine is built for; do not run workloads you do not
+  trust with your host's filesystem.
 - Host directories share through virtiofs, read-only or read-write as
   asked. Every host page the guest reads through virtiofs is also
   readable by anything in the guest.
@@ -143,19 +151,22 @@ primary LAN segment.
   back under their restart policy on the next boot (verified:
   `unless-stopped` auto-restarted after SIGKILL, both engines).
 - VM death *while the daemon lives*: containers are marked `Exited (255)`
-  and persisted, but the restart policy is **not** consulted — they stay
-  down until a manual `docker start` or a daemon restart. Root cause
-  localized to `engine.rs` (`Event::Lost`); fix scheduled for CTRS-21's
-  failure harness. Details: `docs/issues.md` (#50).
+  and persisted, and since CTRS-21 the `Event::Lost` handler boots a fresh
+  VM and restarts every `always` / `unless-stopped` container that was
+  running when the VM died (the same policy scan a daemon boot uses).
+  Verified by `kill -9` of the Virtualization.framework XPC helper on a
+  scratch engine: VM re-boots in ~150 ms, the policy container comes back.
+  Details: `docs/issues.md` (#50) and `docs/evidence/security.md`.
 - Nine silent daemon deaths in this campaign (zero log output, no host
   memory pressure, guest VM helper gone) — root cause unproven
   (Virtualization.framework XPC helper; correlates with bursts of
   privileged-container activity and VM wakes). The engine survives each
   one if the launchd job is set to restart it; a restart loses in-flight
   pulls but not the store (digest-verified, atomic `containers.json`).
-- The guest's console (`hvc0`) is discarded in production builds, so a
-  guest oops leaves no trace — known gap; console capture on unexpected
-  VM stop is a CTRS-21 item.
+- The guest's console (`hvc0`) is captured to `<data root>/vm-console.log`
+  (previous generation `.prev`) since CTRS-21, and the last 32 KiB are
+  emitted into the daemon log when the VM stops unexpectedly, so a guest
+  oops is no longer silent.
 
 ## What is not protected, stated plainly
 

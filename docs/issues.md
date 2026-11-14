@@ -119,17 +119,17 @@ fixed, by design:**
   (148 ms) → `ctrs21-restart` (`unless-stopped`) comes back Up, while
   `ctrs21-norestart` stays `Exited (255)`. The reporter's ask ("restart
   `--restart always`/`unless-stopped` containers when the next VM boots")
-  is now implemented for the VM-death case. Remaining console gap:
-  capture the guest console (`hvc0`) into a file on unexpected VM stop so
-  an oops can be diagnosed — tracked for CTRS-21.
+  is now implemented for the VM-death case. The console gap is closed too
+  (CTRS-21): the daemon captures `hvc0` to `<data root>/vm-console.log`
+  on every boot (previous generation `.prev`), and the last 32 KiB are
+  emitted into the daemon log when the VM stops unexpectedly.
 
-Mitigation until then: any restart-critical container is restarted on
-*daemon* restart already (restart the Kiri app/engine and it comes back —
-same path as Docker's own daemon restart); a VM-death with a live daemon
-still requires a manual `docker start`. The console is also discarded in
-production (`apple.rs: console: None` → the virtio console attachment is
-dropped), so an oops leaves no trace; console capture on unexpected VM stop
-is part of the CTRS-21 route as well. If the Oops recurs, report
+Mitigation: any restart-critical container is restarted on *daemon*
+restart (restart the Kiri engine and it comes back — same path as
+Docker's own daemon restart), and since CTRS-21 a VM death with a live
+daemon restarts `always`/`unless-stopped` containers by itself. An oops
+that panics the guest leaves its trace in `<data root>/vm-console.log`
+and in the daemon log (last 32 KiB). If the Oops recurs, report
 "guest kernel BUG at net/core/skbuff.c:4854 in skb_segment on ip_forward"
 against kernel 6.18.58 — a kernel-side (or virtio-net feature-side) fix,
 not a Kiri one. CTRS-04 crash parity is unaffected: the VM recovers on the
