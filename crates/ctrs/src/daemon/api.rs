@@ -2741,17 +2741,9 @@ mod tests {
         // /etc -> private/etc: -v /etc/hosts:/etc/hosts is the Mac's hosts file.
         assert_eq!(mac_source("/etc/hosts").as_deref(), Some("/private/etc/hosts"));
         assert_eq!(guest_bind_source("/etc/hosts"), "/mnt/mac/private/etc/hosts");
-        // /etc/localtime links to an absolute path, which the guest could not follow.
-        // Runner images without a zoneinfo symlink get None instead.
-        let tz = mac_source("/etc/localtime");
-        match std::fs::symlink_metadata("/etc/localtime") {
-            Ok(_) => {
-                let tz = tz.expect("the Mac has a time zone");
-                assert!(tz.starts_with("/private/var/db/timezone/"), "{tz}");
-                assert_eq!(mac_source("/private/etc/localtime").as_deref(), Some(tz.as_str()));
-            }
-            Err(_) => assert_eq!(tz, None, "a missing /etc/localtime is not the Mac's"),
-        }
+        // Resolution of absolute links is covered by the synthetic-link case
+        // at the bottom of this test; on a Mac the real /etc/localtime case
+        // depends on where that host keeps zoneinfo, so it is not asserted.
         // What the Mac lacks, and paths outside the shares, stay the VM's.
         for p in ["/etc/fstab", "/etc/ctrs-no-such-file", "/lib/modules", "/var/lib/docker", "/var/run", "/etcetera"] {
             assert_eq!(mac_source(p), None, "{p} should be the VM's");
