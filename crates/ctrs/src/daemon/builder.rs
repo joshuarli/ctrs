@@ -961,6 +961,13 @@ impl Options {
             m @ ("host" | "none") => m.to_owned(),
             m => return Err(Error::BadRequest(format!("network mode \"{m}\" not supported by buildkit"))),
         };
+        let platform = match req.query("platform").filter(|p| !p.is_empty()) {
+            None => String::new(),
+            Some(p) => match ctrs_image::Platform::parse(p) {
+                Some(p) => p.to_string(),
+                None => return Err(Error::BadRequest(format!("invalid platform {p:?}: want os/arch (e.g. linux/arm64, linux/amd64)"))),
+            },
+        };
         let mut extra_hosts = Vec::new();
         for h in req.queries("extrahosts").flat_map(|h| h.split(',')).map(str::trim).filter(|h| !h.is_empty()) {
             let (name, ip) = h.split_once(':').or_else(|| h.split_once('=')).ok_or_else(|| Error::BadRequest(format!("invalid extra host {h}: name:ip")))?;
@@ -984,7 +991,7 @@ impl Options {
             labels: pairs(json_query(req, "labels")?),
             no_cache: req.flag("nocache"),
             pull: req.flag("pull"),
-            platform: req.query("platform").unwrap_or_default().to_lowercase(),
+            platform,
             network,
             extra_hosts,
             shm_size: req.query("shmsize").and_then(|s| s.parse().ok()).unwrap_or(0),
@@ -1612,6 +1619,15 @@ mod tests {
 
     #[test]
     fn plain_build_and_refusals() {
+        // Platform normalization for the classic build, matching buildx.
+        let v8 = Options::parse(&req(&[("platform", "linux/arm64/v8")])).unwrap();
+        assert_eq!(v8.platform, "linux/arm64");
+        assert!(Options::parse(&req(&[("platform", "banana")])).is_err());
+        assert!(Options::parse(&req(&[("platform", "linux/arm/v7")])).is_err());
+        assert!(Options::parse(&req(&[("platform", "windows/amd64")])).is_err());
+        assert!(Options::parse(&req(&[("platform", "linux/arm64/v9")])).is_err());
+        assert!(Options::parse(&req(&[("platform", "linux/amd64/")])).is_err());
+        assert!(Options::parse(&req(&[("platform", "linux//arm64")])).is_err());
         let o = Options::parse(&req(&[])).unwrap();
         assert_eq!(o.dockerfile, "Dockerfile");
         let a = o.argv("/d");

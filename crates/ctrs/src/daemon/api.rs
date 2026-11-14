@@ -741,6 +741,12 @@ fn pull(req: &Request, engine: &Engine, w: &mut UnixStream) -> io::Result<Next> 
             return Ok(Next::KeepAlive);
         }
     };
+    if let Some(p) = req.query("platform").filter(|p| !p.is_empty())
+        && Platform::parse(p).is_none()
+    {
+        http::error(w, 400, &format!("invalid platform {p:?}: want os/arch (e.g. linux/arm64, linux/amd64)"))?;
+        return Ok(Next::KeepAlive);
+    }
     http::begin_stream(w, 200, "application/json")?;
     let key = super::pulls::key(&reference.short(), req.query("platform").unwrap_or_default(), req.header("x-registry-auth").unwrap_or_default());
     let (follower, lead) = super::pulls::join(&key);
@@ -1435,7 +1441,8 @@ pub(super) fn create(req: &Request, engine: &Engine) -> Result<Value, Error> {
     }
     // A local image for another platform is not the one asked for: the CLI
     // pulls the right one when told there is none.
-    if let Some(p) = req.query("platform").filter(|p| !p.is_empty()).and_then(Platform::parse) {
+    if let Some(raw) = req.query("platform").filter(|p| !p.is_empty()) {
+        let p = Platform::parse(raw).ok_or_else(|| Error::BadRequest(format!("invalid platform {raw:?}: want os/arch (e.g. linux/arm64, linux/amd64)")))?;
         if image.platform != p.to_string() {
             return Err(Error::NotFound(format!("No such image: {image_name} for {p}")));
         }

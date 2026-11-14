@@ -4,6 +4,7 @@
 #   bash tests/arm64-build.sh --case environment
 #   bash tests/arm64-build.sh --case compatibility
 #   bash tests/arm64-build.sh --case identity
+#   bash tests/arm64-build.sh --case platform
 #   bash tests/arm64-build.sh --case environment --require-no-binfmt
 #   bash tests/arm64-build.sh --all
 #   bash tests/arm64-build.sh --list
@@ -610,6 +611,155 @@ case_identity() {
   return 1
 }
 
+# S3: platform normalization and image metadata. Focused regression tests
+# plus a real export/load/inspect round trip in a disposable harness.
+BASE_ALPINE=alpine@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
+
+case_platform() {
+  echo "== platform"
+  local t0=$SECONDS
+  local plat_rc=0
+
+  echo "-- focused regression tests (host cargo)"
+  local tlog="$SCRATCH/platform-cargo.log"
+  : > "$tlog"
+  local group
+  for group in "ctrs-image registry::tests" "ctrs-image archive::tests" "ctrs daemon::builder::tests"; do
+    if ! cargo test -p ${group%% *} ${group#* } >> "$tlog" 2>&1; then
+      miss "cargo test -p $group (log: $tlog)"; plat_rc=1
+    else
+      ok "cargo test -p $group"
+    fi
+  done
+
+  BIN=${BIN:-$ROOT/target/linux-x86_64/release}
+  [ -x "$BIN/ctrs" ] || { miss "AMD64 artifacts at $BIN (build: cargo xtask linux --arch amd64)"; return 1; }
+  [ "$(uname -m)" = x86_64 ] || { note_unavailable "platform: AMD64 host required for the OCI export check"; return 1; }
+
+  ISO_PKGS="docker-cli curl docker-cli-buildx"
+  local rt_prefix=${PREFIX:-ctrs-platform-$$-$RANDOM}
+  local tag="ctrsaccel/platform-rt:$$"
+  source "$ROOT/tests/lib/isolated-env.sh"
+  iso_endpoint_check
+  iso_bin_check
+  iso_prepare "$rt_prefix"
+  iso_trap_install
+  iso_start || { miss "harness engine did not answer in 60 s"; ISO_PRESERVE=1; return 1; }
+  local SOCK=unix:///root/.local/share/ctrs/run/docker.sock
+  isoc() { iso_engine_cmd "$*"; }
+
+  echo "-- arm64 single-platform image (digest-pinned base, no RUN)"
+  printf 'FROM %s\n' "$BASE_ALPINE" > "$WORK/ctx-Dockerfile"
+  isoc "mkdir -p /ctx"
+  "$D" cp "$WORK/ctx-Dockerfile" "$CONTAINER:/ctx/Dockerfile" >/dev/null \
+    || { miss "copying the context into the harness"; ISO_PRESERVE=1; return 1; }
+  if ! isoc "DOCKER_BUILDKIT=0 docker build --platform linux/arm64 -t $tag /ctx" > "$WORK/build-rt.log" 2>&1; then
+    miss "arm64 classic build (log: $WORK/build-rt.log)"; tail -5 "$WORK/build-rt.log"; ISO_PRESERVE=1; return 1
+  fi
+  ok "arm64 image built ($tag)"
+
+  echo "-- save / rmi / load round trip"
+  if ! isoc "docker save $tag > /root/rt.tar" >/dev/null 2>&1; then
+    miss "docker save $tag"; ISO_PRESERVE=1; return 1
+  fi
+  if ! isoc "docker rmi $tag" >/dev/null 2>&1; then
+    miss "docker rmi $tag"; plat_rc=1
+  fi
+  if isoc "docker load < /root/rt.tar" > "$WORK/load.log" 2>&1; then
+    ok "single-platform image loads (docker format)"
+  else
+    miss "single-platform load failed (log: $WORK/load.log)"; tail -4 "$WORK/load.log"; ISO_PRESERVE=1; return 1
+  fi
+  local arch
+  arch=$(isoc "docker image inspect $tag --format '{{.Architecture}}'") || arch=""
+  [ "$arch" = "arm64" ] && ok "loaded image reports architecture arm64" || { miss "loaded image architecture: '$arch'"; plat_rc=1; }
+
+  echo "-- create mismatch"
+  local tag_json
+  tag_json=$(isoc "curl -s --unix-socket ${SOCK#unix://} -w '\n%{http_code}' -X POST 'http://localhost/containers/create?platform=linux/amd64&name=rt-mismatch-$$' -H 'Content-Type: application/json' -d '{\"Image\": \"$tag\"}'")
+  case "$tag_json" in
+    *"for linux/amd64"*) ok "create with platform=linux/amd64 against an arm64 image is refused: $(head -1 <<< "$tag_json")" ;;
+    *) miss "create mismatch: want the daemon's platform refusal, got: $tag_json"; plat_rc=1 ;;
+  esac
+  tag_json=$(isoc "curl -s --unix-socket ${SOCK#unix://} -w '\n%{http_code}' -X POST 'http://localhost/containers/create?platform=linux/arm64&name=rt-match-$$' -H 'Content-Type: application/json' -d '{\"Image\": \"$tag\"}'")
+  case "$tag_json" in
+    *'"Id"'*) ok "create with platform=linux/arm64 matches" ;;
+    *) miss "create with matching platform was refused: $tag_json"; plat_rc=1 ;;
+  esac
+  isoc "docker rm rt-match-$$" >/dev/null 2>&1 || true
+
+  echo "-- two-platform OCI export and inspection"
+  if ! isoc "DOCKER_BUILDKIT=1 docker buildx create --name ctrs-build --driver docker-container --driver-opt default-load=true $SOCK" >/dev/null 2>&1; then
+    miss "buildx create ctrs-build"; plat_rc=1
+  fi
+  if isoc "DOCKER_BUILDKIT=1 docker buildx build --builder ctrs-build --provenance=false --platform linux/amd64,linux/arm64 --output type=oci,dest=/root/export.oci.tar -f /ctx/Dockerfile /ctx" > "$WORK/oci-export.log" 2>&1; then
+    ok "two-platform OCI export built"
+  else
+    miss "two-platform OCI export failed (log: $WORK/oci-export.log)"; tail -5 "$WORK/oci-export.log"; plat_rc=1
+  fi
+  if "$D" cp "$CONTAINER:/root/export.oci.tar" "$WORK/export.oci.tar" >/dev/null 2>&1; then
+    local oci_dir="$WORK/oci-extract"
+    mkdir -p "$oci_dir"
+    tar -xf "$WORK/export.oci.tar" -C "$oci_dir"
+    # buildx's OCI export may wrap the platform-bearing manifests in a
+    # nested image index; descend past index entries to the leaf that
+    # names platforms.
+    local platform_index="$oci_dir/index.json"
+    local hop
+    for hop in 1 2 3; do
+      local with_platform
+      with_platform=$(jaq -r '[.manifests[] | select(.platform != null)] | length' "$platform_index" 2>/dev/null || echo 0)
+      [ "$with_platform" != 0 ] && break
+      local nested
+      nested=$(jaq -r '[.manifests[] | select(.mediaType == "application/vnd.oci.image.index.v1+json")] | .[0].digest' "$platform_index" 2>/dev/null | sed 's/sha256://')
+      [ -n "$nested" ] && [ "$nested" != null ] || break
+      platform_index="$oci_dir/blobs/sha256/$nested"
+    done
+    if jaq -e '[.manifests[].platform.architecture] | sort == ["amd64", "arm64"]' "$platform_index" >/dev/null 2>&1; then
+      ok "OCI index carries linux/amd64 and linux/arm64 entries"
+    else
+      miss "OCI index does not carry both entries: $(cat "$platform_index")"; plat_rc=1
+    fi
+    local darch
+    for darch in amd64 arm64; do
+      local manifest_blob cfg_digest cfg_os cfg_arch
+      manifest_blob=$(jaq -r ".manifests[] | select(.platform.architecture == \"$darch\") | .digest" "$platform_index" | sed 's/sha256://')
+      cfg_digest=$(jaq -r '.config.digest' "$oci_dir/blobs/sha256/$manifest_blob" | sed 's/sha256://')
+      cfg_os=$(jaq -r '.os' "$oci_dir/blobs/sha256/$cfg_digest")
+      cfg_arch=$(jaq -r '.architecture' "$oci_dir/blobs/sha256/$cfg_digest")
+      if [ "$cfg_os" = "linux" ] && [ "$cfg_arch" = "$darch" ]; then
+        ok "OCI $darch manifest config is $cfg_os/$cfg_arch"
+      else
+        miss "OCI $darch manifest config is $cfg_os/$cfg_arch"; plat_rc=1
+      fi
+    done
+  else
+    miss "could not copy the OCI export out of the harness"; plat_rc=1
+  fi
+
+  echo "-- multi-platform local load is refused"
+  local load_err
+  if load_err=$(isoc "docker load < /root/export.oci.tar" 2>&1); then
+    miss "multi-platform OCI load unexpectedly succeeded"; plat_rc=1
+  else
+    case "$load_err" in
+      *"no manifest.json"*|*"not an image archive"*) ok "multi-platform OCI load fails clearly: $(head -1 <<< "$load_err")" ;;
+      *) miss "multi-platform OCI load message unexpected: $load_err"; plat_rc=1 ;;
+    esac
+  fi
+
+  isoc "docker rmi -f $tag" >/dev/null 2>&1 || true
+
+  info "platform checked in $((SECONDS - t0))s"
+  if [ $plat_rc = 0 ]; then
+    ok "platform case passed"
+    return 0
+  fi
+  miss "platform case failed"
+  ISO_PRESERVE=1
+  return 1
+}
+
 EXPECTED_SHA256=dd59e62b7ce111e08c38cfdc945da204e9014e078ef1fcfae9b0dabbc3543e17
 
 # sha256("ctrs-arm64-qualification\n"): the fixture contract with
@@ -837,7 +987,7 @@ run_case() {
     environment) case_environment ;;
     compatibility) case_compatibility ;;
     identity)      case_identity ;;
-    platform)      note_unavailable "platform (planned: S3)" ;;
+    platform)      case_platform ;;
     cross)         note_unavailable "cross (planned: S4)" ;;
     lifecycle)     note_unavailable "lifecycle (planned: S5)" ;;
   esac

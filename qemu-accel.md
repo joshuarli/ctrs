@@ -3,9 +3,9 @@
 ## Status
 
 - Goal: reliable ARM64 builds, with native cross-compilation for substantial compilation work and QEMU for target execution.
-- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`. Last accepted: S2 (2026-11-14).
-- Accepted slices: P0 (baseline, isolated Linux harness, environment runner, pin candidate), S1 (foreign builds through both entry points; managed builder provisions from the pin's digest reference), S2 (managed identity and safe reconciliation; identity suite green). Known red: S3–S7 gates unrun, not passing.
-- Parked branches: none. Next: S3, using one writer.
+- Last inspected revision: `753a18db7de0ee49bfd8552297ab547977158b17`. Last accepted: S3 (2026-11-14).
+- Accepted slices: P0 (baseline, isolated Linux harness, environment runner, pin candidate), S1 (foreign builds through both entry points; managed builder provisions from the pin's digest reference), S2 (managed identity and safe reconciliation; identity suite green), S3 (accurate platform requests and image metadata; platform suite green). Known red: S4–S7 gates unrun, not passing.
+- Parked branches: none. Next: S4, using one writer.
 - Start only on a separate execution request. First command: `git status --short`.
 - Local completion and release qualification are distinct. Keep unavailable proofs under **Needs environment**; never report them as passed.
 
@@ -40,6 +40,15 @@ Repair an encountered defect immediately only if it blocks a listed proof or vio
 - **On hosts with a working foreign binfmt handler, BuildKit's `SupportedPlatforms` probe treats the target as "supported" and argv-wrapping never happens; RUN steps are serviced by the host's handler, not the bundled emulator.** The runner records which backend served each build (`emulator-mount` marker), asserts `no` for AMD64, and fails closed under `--require-no-binfmt`. Handler-free proof is unavailable on this host (single global binfmt_misc instance) and stays Needs environment.
 - **Plain `docker build` silently selects a default docker-container builder on the moving `buildx-stable-1` tag.** Everything ctrs-mediated must either pin `--builder ctrs-build` (buildx) or force `DOCKER_BUILDKIT=0` (classic `/build`). Digest-pinned qualification must never rely on a default-named builder.
 - **First `/containers/create` per builder returns 400, retry succeeds** (both intercept and plain paths, reproducible). Not tag-displacement; root cause open. S2 added the query (re-encoded) to all 4xx/5xx failure lines and the builder name + error to a rejected builder create, so the next occurrence carries the query; client bodies are never logged.
+
+### Executor decisions (2026-11-14, S3)
+
+- **One canonical platform parser at every request boundary** (`registry::Platform::parse`): aliases (`x86_64`/`x86-64`/`intel` → `amd64`, `aarch64` → `arm64`, `i386`/`i686` → `386`); `linux/arm64/v8` is the baseline `linux/arm64`; closed set `linux/{amd64, arm64, 386}`; `os` must be `linux`; anything else (unknown variant, extra component, non-Linux OS, unsupported architecture) is refused, never dropped. Bare `arm64`/`amd64` mean `linux/<arch>`.
+- **Registry pull verifies the downloaded config against the selection before any record is published** (os required, architecture required, must equal the selected entry). The check runs inside the config download, ahead of layer completion; a failed pull publishes nothing and leaves the previous tag record intact. (The docker CLI auto-pulls on a 404 mismatch refusal; the runner probes the daemon's API directly to read the actual message.)
+- **Index entries select on normalized os/architecture; attestation entries (no platform) are skipped.** `linux/arm64` requests match `linux/arm64/v8` entries; v8 ≡ baseline.
+- **Archive load distinguishes fallback from registry validation**: absent `os`/`architecture` is the legacy fallback (os linux, host arch — the host default that is genuinely "made for this machine"); aliases normalize on load; non-string/empty values fail; foreign-OS archives load as foreign records. No second platform-bearing field exists in the docker-save layout; "conflicting" is unrepresentable — missing/wrong-typed metadata is what fails.
+- **Nothing new in persisted records**: `platform` stays `os/arch`; no variant field added.
+- **An architecture ctrs cannot run is refused at the boundary** (e.g. `linux/ppc64le`), not accepted-then-unrunnable; foreign-arch archives are a load tolerance, not support.
 
 ### Executor decisions (2026-11-14, S2)
 

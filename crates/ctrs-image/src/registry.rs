@@ -67,7 +67,10 @@ impl From<io::Error> for Error {
     }
 }
 
-/// The platform to pull, e.g. `linux/arm64`.
+/// The platform to pull, e.g. `linux/arm64`. Normalized at the boundary:
+/// aliases map to one canonical architecture name, `linux/arm64/v8` is the
+/// baseline `linux/arm64`, and anything else unsupported or malformed is
+/// refused, never silently rewritten.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Platform {
     pub os: String,
@@ -75,20 +78,38 @@ pub struct Platform {
 }
 
 impl Platform {
-    /// `linux/amd64`, `linux/arm64/v8`, `amd64`: the CLI's `--platform`.
+    /// `linux/amd64`, `linux/arm64/v8`, `amd64`, `aarch64`, `x86_64`,
+    /// `intel`: the CLI's `--platform`. `arm64/v8` is baseline `arm64`;
+    /// an unknown variant, an extra component, a non-Linux OS, or an
+    /// unsupported architecture is refused, never dropped.
     pub fn parse(s: &str) -> Option<Platform> {
+        let s = s.trim().to_lowercase();
         let mut parts = s.split('/');
         let first = parts.next()?;
-        let (os, arch) = match parts.next() {
-            Some(arch) => (first, arch),
-            None => ("linux", first),
+        let (os, arch) = match (parts.next(), parts.next()) {
+            (None, _) => {
+                let normalized = match first {
+                    "arm64" | "aarch64" => "arm64",
+                    "amd64" | "x86_64" | "x86-64" | "intel" => "amd64",
+                    "386" | "i386" | "i686" => "386",
+                    _ => return None,
+                };
+                ("linux", normalized)
+            }
+            (Some(arch), variant) => {
+                // A third component or a trailing '/' is refused here.
+                let normalized = match (arch, variant) {
+                    // v8 is the arm64 baseline instruction set; nothing else
+                    // exists for arm64 in the registries ctrs reads.
+                    ("arm64" | "aarch64", Some("v8")) | ("arm64" | "aarch64", None) => "arm64",
+                    ("amd64" | "x86_64" | "x86-64" | "intel", None) => "amd64",
+                    ("386" | "i386" | "i686", None) => "386",
+                    _ => return None,
+                };
+                (first, normalized)
+            }
         };
-        let arch = match arch {
-            "x86_64" | "x86-64" => "amd64",
-            "aarch64" => "arm64",
-            a => a,
-        };
-        (!os.is_empty() && !arch.is_empty()).then(|| Platform { os: os.to_owned(), architecture: arch.to_owned() })
+        (os == "linux" && !arch.is_empty()).then(|| Platform { os: os.to_owned(), architecture: arch.to_owned() })
     }
 
     /// Linux on this machine's CPU architecture, which is what the guest runs.
@@ -100,6 +121,22 @@ impl Platform {
         };
         Platform { os: "linux".into(), architecture: architecture.into() }
     }
+}
+
+/// One canonical name per architecture, where ctrs knows the aliases;
+/// other nonempty names pass through verbatim (foreign records from
+/// registries and archives load unchanged).
+pub(crate) fn normalize_arch(s: &str) -> Option<String> {
+    let s = s.trim().to_lowercase();
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return None;
+    }
+    Some(match s.as_str() {
+        "x86_64" | "x86-64" | "intel" => "amd64".into(),
+        "aarch64" => "arm64".into(),
+        "i386" | "i686" => "386".into(),
+        other => other.into(),
+    })
 }
 
 impl fmt::Display for Platform {
@@ -525,20 +562,25 @@ impl Client {
         std::thread::scope(|s| {
             // The config, alongside the layers rather than before them: it is
             // small, and fetching it first cost a round trip to the registry
-            // and one to its CDN before any layer started.
+            // and one to its CDN before any layer started. The config is
+            // verified the moment it lands: os and architecture are required
+            // and must name the selected platform — a mismatch fails the
+            // pull before any layer completes the update.
             s.spawn(|| {
                 let _on = cancel.enter();
-                if store.has_blob(&config.digest, config.size) {
-                    return;
-                }
-                // Bounded: the manifest declares the size, and a config is small.
-                let result = self.download_with(store, reference, &config.digest, crate::store::MAX_CONFIG, &|_| {}, cancel).and_then(|got| {
-                    if got != config.size {
-                        return Err(Error::Manifest(format!("config {} is {got} bytes, the manifest says {}", config.digest, config.size)));
+                let done = (|| -> Result<(), Error> {
+                    if !store.has_blob(&config.digest, config.size) {
+                        // Bounded: the manifest declares the size, and a config is small.
+                        let result = self.download_with(store, reference, &config.digest, crate::store::MAX_CONFIG, &|_| {}, cancel)?;
+                        if result != config.size {
+                            return Err(Error::Manifest(format!("config {} is {result} bytes, the manifest says {}", config.digest, config.size)));
+                        }
                     }
-                    Ok(())
-                });
-                if let Err(e) = result {
+                    let bytes = store.read_config(&config.digest)?;
+                    let cfg: ImageConfig = serde_json::from_slice(&bytes).map_err(|e| Error::Manifest(format!("image config is not JSON: {e}")))?;
+                    verify_config_against(&cfg, platform)
+                })();
+                if let Err(e) = done {
                     first_error.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(e);
                 }
             });
@@ -575,6 +617,8 @@ impl Client {
         if let Some(e) = first_error.into_inner().unwrap_or_else(|e| e.into_inner()) {
             return Err(e);
         }
+        // The record was verified when the config landed; re-read it for
+        // the image metadata (created, run command).
         let cfg_bytes = store.read_config(&config.digest)?;
         let cfg: ImageConfig = serde_json::from_slice(&cfg_bytes).map_err(|e| Error::Manifest(e.to_string()))?;
 
@@ -1030,10 +1074,23 @@ struct Descriptor {
     size: u64,
 }
 
+/// The config must name the platform the manifest selected (or the host,
+/// for the fallback entry): os and architecture are required; a mismatch
+/// or an absence fails the pull before any record is published.
+fn verify_config_against(cfg: &ImageConfig, platform: &Platform) -> Result<(), Error> {
+    match (cfg.os.as_deref(), cfg.architecture.as_deref()) {
+        (Some(os), Some(architecture)) if os == platform.os && architecture == platform.architecture => Ok(()),
+        (Some(os), Some(architecture)) => Err(Error::Manifest(format!("image config is {os}/{architecture}, the manifest selection is {platform}"))),
+        _ => Err(Error::Manifest("image config is missing os or architecture".into())),
+    }
+}
+
 #[derive(Deserialize)]
 struct ImageConfig {
     created: Option<String>,
     config: Option<ContainerConfig>,
+    os: Option<String>,
+    architecture: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -1067,7 +1124,72 @@ fn not_found(e: Error, r: &Reference) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn platform_aliases_normalize() {
+        for (given, want) in [
+            ("linux/amd64", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("linux/x86_64", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("linux/x86-64", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("linux/intel", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("linux/aarch64", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            ("linux/arm64", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            ("linux/arm64/v8", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            ("linux/aarch64/v8", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            ("linux/386", Platform { os: "linux".into(), architecture: "386".into() }),
+            ("linux/i386", Platform { os: "linux".into(), architecture: "386".into() }),
+            ("linux/i686", Platform { os: "linux".into(), architecture: "386".into() }),
+            ("amd64", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("arm64", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            ("X86_64", Platform { os: "linux".into(), architecture: "amd64".into() }),
+            ("LINUX/Arm64/V8", Platform { os: "linux".into(), architecture: "arm64".into() }),
+            (" linux/arm64 ", Platform { os: "linux".into(), architecture: "arm64".into() }),
+        ] {
+            assert_eq!(Platform::parse(given), Some(want), "{given}");
+        }
+    }
+
+    #[test]
+    fn platform_refusals() {
+        for given in [
+            "",
+            " ",
+            "linux/",
+            "linux//arm64",
+            "/arm64",
+            "linux/arm/v7",
+            "linux/arm64/v9",
+            "linux/arm64/",
+            "linux/amd64/v4",
+            "linux/amd64/x86-64",
+            "linux/arm64/extra/v8",
+            "windows/amd64",
+            "darwin/arm64",
+            "bsd/amd64",
+            "banana",
+            "linux/banana",
+            "arch64",
+        ] {
+            assert_eq!(Platform::parse(given), None, "{given}");
+        }
+    }
+
+    #[test]
+    fn architecture_aliases_normalize_or_pass_foreign() {
+        assert_eq!(normalize_arch("x86_64").as_deref(), Some("amd64"));
+        assert_eq!(normalize_arch("x86-64").as_deref(), Some("amd64"));
+        assert_eq!(normalize_arch("aarch64").as_deref(), Some("arm64"));
+        assert_eq!(normalize_arch("ARM64").as_deref(), Some("arm64"));
+        assert_eq!(normalize_arch("ppc64le").as_deref(), Some("ppc64le"));
+        assert_eq!(normalize_arch("s390x").as_deref(), Some("s390x"));
+        assert_eq!(normalize_arch("riscv64").as_deref(), Some("riscv64"));
+        assert_eq!(normalize_arch(""), None);
+        assert_eq!(normalize_arch("   "), None);
+        assert_eq!(normalize_arch("arm_64!!!"), None);
+    }
 
     fn tmp_root(tag: &str) -> std::path::PathBuf {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -1382,5 +1504,204 @@ mod tests {
         assert!(transient(&Error::Status { url: String::new(), status: 503, body: String::new() }));
         assert!(!transient(&Error::Status { url: String::new(), status: 404, body: String::new() }));
         assert!(!transient(&Error::Io(io::Error::new(io::ErrorKind::InvalidData, "digest mismatch"))));
+    }
+
+    // --- Pull, against a loopback registry --------------------------------
+
+    /// A registry on loopback serving fixed routes by path; entries are
+    /// (path, content-type, body). Unknown paths answer 404 like a registry.
+    fn registry_stub(routes: Vec<(String, &'static str, Vec<u8>)>) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        let routes: std::sync::Arc<Vec<(String, &'static str, Vec<u8>)>> = std::sync::Arc::new(routes);
+        let server = std::thread::spawn(move || {
+            listener.set_nonblocking(true).unwrap();
+            let end = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < end {
+                let Ok((mut c, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                c.set_nonblocking(false).unwrap();
+                let mut head = Vec::new();
+                let mut b = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && c.read(&mut b).unwrap_or(0) == 1 {
+                    head.push(b[0]);
+                }
+                let head = String::from_utf8_lossy(&head).to_lowercase();
+                if head.starts_with("quit") || head.is_empty() {
+                    break;
+                }
+                let path = head.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("").to_owned();
+                let found = routes.iter().find(|(p, _, _)| *p == path);
+                match found {
+                    Some((_, content_type, body)) => {
+                        let head = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n", body.len());
+                        let _ = c.write_all(head.as_bytes());
+                        let _ = c.write_all(body);
+                    }
+                    None => {
+                        let body = b"{\"errors\":[{\"code\":\"MANIFEST_UNKNOWN\"}]}";
+                        let head = format!("HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len());
+                        let _ = c.write_all(head.as_bytes());
+                        let _ = c.write_all(body);
+                    }
+                }
+            }
+        });
+        (host, server)
+    }
+
+    fn digest_of(body: &[u8]) -> String {
+        sha256_digest(body)
+    }
+
+    fn pull_case(platform: &str, routes: Vec<(String, &'static str, Vec<u8>)>, expect_err: Option<&str>) {
+        let root = tmp_root("pull-case");
+        let store = Store::open(&root).unwrap();
+        let (host, server) = registry_stub(routes);
+        let client = test_client();
+        let reference = Reference::parse(&format!("{host}/test/repo:latest")).unwrap();
+        let result = client.pull(&store, &reference, &Platform::parse(platform).unwrap(), &|_| {});
+        match (result, expect_err) {
+            (Ok(_), None) => assert!(store.find(&format!("{host}/test/repo:latest")).unwrap().is_some(), "record published"),
+            (Err(e), Some(want)) => {
+                let text = e.to_string();
+                assert!(text.contains(want), "want {want:?} in {text:?}");
+                assert!(store.find(&format!("{host}/test/repo:latest")).unwrap().is_none(), "no record on failure");
+            }
+            (Ok(_), Some(want)) => panic!("expected failure containing {want:?}, got Ok"),
+            (Err(e), None) => panic!("expected success, got {e}"),
+        }
+        quit(&host);
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn image_routes(config_os: &str, config_arch: Option<&str>, arch_entry: Option<&str>) -> Vec<(String, &'static str, Vec<u8>)> {
+        let layer = b"layer-bytes".to_vec();
+        let layer_digest = digest_of(&layer);
+        let cfg = match config_arch {
+            Some(arch) => serde_json::to_vec(&json!({"os": config_os, "architecture": arch, "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}})).unwrap(),
+            None => serde_json::to_vec(&json!({"os": config_os, "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}})).unwrap(),
+        };
+        let cfg_digest = digest_of(&cfg);
+        let manifest = json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cfg_digest, "size": cfg.len()},
+            "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": layer_digest, "size": layer.len()}],
+        });
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        let manifest_digest = digest_of(&manifest_bytes);
+        let mut routes = vec![
+            ("/v2/test/repo/manifests/latest".to_owned(), "application/vnd.docker.distribution.manifest.list.v2+json", vec![]),
+            (format!("/v2/test/repo/manifests/{manifest_digest}"), "application/vnd.oci.image.manifest.v1+json", manifest_bytes),
+            (format!("/v2/test/repo/blobs/{cfg_digest}"), "application/vnd.oci.image.config.v1+json", cfg),
+            (format!("/v2/test/repo/blobs/{layer_digest}"), "application/vnd.oci.image.layer.v1.tar+gzip", layer),
+        ];
+        // The index names the requested entry for both platforms, pointing
+        // at the same manifest — the config decides.
+        let entries = match arch_entry {
+            Some(arch) => serde_json::json!([
+                {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest_digest, "size": 0, "platform": {"os": config_os, "architecture": arch}}
+            ]),
+            None => serde_json::json!([
+                {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest_digest, "size": 0, "platform": {"os": config_os, "architecture": "amd64"}},
+                {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest_digest, "size": 0, "platform": {"os": config_os, "architecture": "arm64"}}
+            ]),
+        };
+        let index = json!({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": entries});
+        routes[0].2 = serde_json::to_vec(&index).unwrap();
+        routes
+    }
+
+    #[test]
+    fn pull_fails_when_config_disagrees_with_the_selection() {
+        // The index's amd64 entry points at a manifest whose config says arm64.
+        pull_case("linux/amd64", image_routes("linux", Some("arm64"), Some("amd64")), Some("image config is linux/arm64"));
+        // No record: the previous tag record is untouched.
+    }
+
+    #[test]
+    fn pull_fails_when_config_arch_is_missing() {
+        pull_case("linux/arm64", image_routes("linux", None, Some("arm64")), Some("missing os or architecture"));
+    }
+
+    #[test]
+    fn pull_fails_when_config_os_is_missing() {
+        let layer = b"layer-bytes".to_vec();
+        let layer_digest = digest_of(&layer);
+        let cfg = serde_json::to_vec(&json!({"architecture": "arm64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}})).unwrap();
+        let cfg_digest = digest_of(&cfg);
+        let manifest = serde_json::to_vec(&json!({
+            "schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cfg_digest, "size": cfg.len()},
+            "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": layer_digest, "size": layer.len()}],
+        })).unwrap();
+        let manifest_digest = digest_of(&manifest);
+        let routes = vec![
+            ("/v2/test/repo/manifests/latest".to_owned(), "application/vnd.docker.distribution.manifest.list.v2+json", serde_json::to_vec(&json!({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": [{"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest_digest, "size": 0, "platform": {"os": "linux", "architecture": "arm64"}}]})).unwrap()),
+            (format!("/v2/test/repo/manifests/{manifest_digest}"), "application/vnd.oci.image.manifest.v1+json", manifest),
+            (format!("/v2/test/repo/blobs/{cfg_digest}"), "application/vnd.oci.image.config.v1+json", cfg),
+            (format!("/v2/test/repo/blobs/{layer_digest}"), "application/vnd.oci.image.layer.v1.tar+gzip", layer),
+        ];
+        pull_case("linux/arm64", routes, Some("missing os or architecture"));
+    }
+
+    #[test]
+    fn a_single_manifest_pull_fails_when_its_config_is_not_the_requested_platform() {
+        let layer = b"layer-bytes".to_vec();
+        let layer_digest = digest_of(&layer);
+        let cfg = serde_json::to_vec(&json!({"os": "linux", "architecture": "amd64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}})).unwrap();
+        let cfg_digest = digest_of(&cfg);
+        let manifest = serde_json::to_vec(&json!({
+            "schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cfg_digest, "size": cfg.len()},
+            "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": layer_digest, "size": layer.len()}],
+        })).unwrap();
+        let manifest_digest = digest_of(&manifest);
+        let routes = vec![
+            ("/v2/test/repo/manifests/latest".to_owned(), "application/vnd.oci.image.manifest.v1+json", manifest),
+            (format!("/v2/test/repo/blobs/{cfg_digest}"), "application/vnd.oci.image.config.v1+json", cfg),
+            (format!("/v2/test/repo/blobs/{layer_digest}"), "application/vnd.oci.image.layer.v1.tar+gzip", layer),
+        ];
+        pull_case("linux/arm64", routes, Some("image config is linux/amd64"));
+    }
+
+    #[test]
+    fn a_pull_by_digest_fails_when_its_config_is_not_the_requested_platform() {
+        let layer = b"layer-bytes".to_vec();
+        let layer_digest = digest_of(&layer);
+        let cfg = serde_json::to_vec(&json!({"os": "linux", "architecture": "amd64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}})).unwrap();
+        let cfg_digest = digest_of(&cfg);
+        let manifest = serde_json::to_vec(&json!({
+            "schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cfg_digest, "size": cfg.len()},
+            "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": layer_digest, "size": layer.len()}],
+        })).unwrap();
+        let manifest_digest = digest_of(&manifest);
+        let routes = vec![
+            (format!("/v2/test/repo/manifests/{manifest_digest}"), "application/vnd.oci.image.manifest.v1+json", manifest.clone()),
+            (format!("/v2/test/repo/blobs/{cfg_digest}"), "application/vnd.oci.image.config.v1+json", cfg),
+            (format!("/v2/test/repo/blobs/{layer_digest}"), "application/vnd.oci.image.layer.v1.tar+gzip", layer),
+        ];
+        let root = tmp_root("pull-digest");
+        let store = Store::open(&root).unwrap();
+        let (host, server) = registry_stub(routes);
+        let client = test_client();
+        let reference = Reference::parse(&format!("{host}/test/repo@{manifest_digest}")).unwrap();
+        let result = client.pull(&store, &reference, &Platform::parse("linux/arm64").unwrap(), &|_| {});
+        let err = result.expect_err("digest pull must fail on disagreement");
+        assert!(err.to_string().contains("image config is linux/amd64"), "{err}");
+        assert!(store.find(&reference.short()).unwrap().is_none(), "no record on failure");
+        quit(&host);
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pull_accepts_a_matching_config_and_records_the_platform() {
+        pull_case("linux/arm64", image_routes("linux", Some("arm64"), None), None);
     }
 }

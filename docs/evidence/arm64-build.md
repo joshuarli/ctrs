@@ -1,14 +1,16 @@
 # ARM64 builds on AMD64 Linux — evidence
 
-Date: 2026-11-14. Verdict: **P0 done; S1 done; S2 done. The managed
-builder now reconciles a stopped stale builder to the frozen v0.35.0
-pin (fresh provisioning, cache preserved), refuses actionably on stale
-running/paused and foreign same-name containers, reports
-desired/actual/tag/upgrade diagnostics, and the identity suite is green.
-Handler-free (binfmt-independent) proof is unavailable on this host: one
-global binfmt_misc instance serves every namespace, so BuildKit treats
-arm64 as "supported" and no isolated namespace can be emptied. That
-proof remains Needs environment.**
+Date: 2026-11-14. Verdict: **P0 done; S1 done; S2 done; S3 done. The
+managed builder now reconciles a stopped stale builder to the frozen
+v0.35.0 pin (fresh provisioning, cache preserved), refuses actionably on
+stale running/paused and foreign same-name containers, reports
+desired/actual/tag/upgrade diagnostics, and platform requests are
+normalized to one canonical path with config verification before any
+record is published. The identity suite (40 checks) and the platform
+suite (14 checks) are green. Handler-free (binfmt-independent) proof is
+unavailable on this host: one global binfmt_misc instance serves every
+namespace, so BuildKit treats arm64 as "supported" and no isolated
+namespace can be emptied. That proof remains Needs environment.**
 
 This file is the parity register for the slices in `qemu-accel.md`. Rows
 name the case, the proof command and the evidence. Nothing here is a claim
@@ -308,6 +310,64 @@ Findings (S2 scope):
   post-restore check; stale-digest-rmi ordering after the forge — fixed),
   no product defects.
 
+## S3 — accurate platform requests and image metadata (2026-11-14, landed)
+
+`bash tests/arm64-build.sh --case platform` is **green** (14 checks,
+~20–40 s warm): focused regression suites (`ctrs-image registry::tests`,
+`ctrs-image archive::tests`, `daemon::builder::tests`), an arm64
+single-platform image built via classic `/build`, docker-format
+save/rmi/load round trip with `Architecture: arm64` after reload,
+create-with-platform mismatch refused by the daemon at the API
+(`No such image: … for linux/amd64`), a matching create accepted, a
+two-platform OCI export whose index carries linux/amd64 and linux/arm64
+manifest entries whose configs both report the right os/architecture
+(nested-index layout from buildx handled), and the multi-platform OCI
+tarball refused on load with `not an image archive: no manifest.json`
+(no partial record published). Digest-pinned base, host binfmt handler
+visible (unchanged fingerprint behavior as for S2). Compatibility
+re-verified on the S3 artifacts; identity re-verified as well.
+
+What changed:
+
+- **One canonical platform parser at the request boundary**
+  (`registry::Platform::parse`): trimmed, lowercased; aliases
+  (`x86_64`, `x86-64`, `intel` → `amd64`; `aarch64` → `arm64`;
+  `i386`, `i686` → `386`); `linux/arm64/v8` and `linux/aarch64/v8` are
+  the baseline `linux/arm64`; bare `arm64`/`amd64` mean `linux/<arch>`;
+  the closed set is `linux/{amd64, arm64, 386}`; an unknown variant, an
+  extra component, a non-Linux OS, or an unsupported architecture is
+  refused, never dropped. `os` must be `linux`.
+- **Index entry selection** matches on normalized os/architecture;
+  attestation entries (no `platform`) are skipped; `linux/arm64`
+  requests match `linux/arm64/v8` entries (v8 equivalence).
+- **Downloaded config is verified against the selection before any
+  record is published.** os and architecture are required; a mismatch
+  or an absence fails the pull (fast: the check runs inside the config
+  download, ahead of layer completion) and the previous tag record is
+  left intact — `put_image` is never reached.
+- **Archive load**: absent `os`/`architecture` is the documented legacy
+  fallback (os `linux`, the host's architecture; a load fallback, never
+  confused with registry validation); aliases normalize on load;
+  present-but-invalid values (non-string or empty `os`/`architecture`)
+  fail the load; a foreign-OS archive loads as a foreign record, not
+  relabeled as linux.
+- **Create/pull request validation**: `platform=` malformed on pull →
+  HTTP 400; malformed on `POST /containers/create` → 400 (mismatch on a
+  well-formed request → `No such image: … for <platform>` as before);
+  malformed on classic `POST /build` → 400 with the same message text as
+  buildx accepts; normalization matches buildx (`arm64/v8` → `arm64`).
+- `docker image inspect` reports the right `Architecture` by
+  construction (records are normalized).
+
+Honest limits: an explicit request for an architecture ctrs cannot run
+(`linux/ppc64le`) is refused at the boundary, not accepted and then
+silently unrunnable; archive loads of foreign architectures are a
+tolerance (records to inspect, never to run), not support. The
+"conflicting archive metadata" case has no second platform-bearing field
+in the docker-save layout (manifest.json carries none); the load-path
+checks reject missing/empty/wrong-typed metadata, and the fallback is
+coded separately from registry validation.
+
 ## Needs environment (statuses at P0+S2)
 
 | Proof | Prerequisite and command | status |
@@ -326,6 +386,7 @@ Findings (S2 scope):
 | --- | --- | --- |
 | native AMD64; ARM64 musl/glibc via both entry points | `--case compatibility` (S1) | **passing 2026-11-14 (24 checks; 6 builds + process evidence; host handler visible, unproven independent)** |
 | managed identity, reconciliation, ownership | `--case identity` (S2) | **passing 2026-11-14 (40 checks; fresh install, matching reuse, stale tag, stale stopped replace, failed pull, interrupt recovery, simultaneous callers, foreign conflict, cache sentinel, buildx path; host/harness contexts unchanged)** |
+| pull/build/export/load/inspect metadata | `--case platform` (S3) | **passing 2026-11-14 (14 checks; aliases/v8, disagreement and single-manifest pulls fail closed, save/load round trip, OCI export descriptors, multi-platform load refusal)** |
 | pull/build/export/load/inspect metadata | `--case platform` (S3) | not implemented |
 | native compilers, static AArch64 output | `--case cross` (S4) | not implemented |
 | cancel/failure/cleanup, emulator diagnostics | `--case lifecycle` (S5) | not implemented |

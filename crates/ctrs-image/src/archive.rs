@@ -71,7 +71,7 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
         // An untagged image is known by its id.
         let names = if names.is_empty() { vec![config_digest.clone()] } else { names };
         for name in names {
-            let image = from_config(name, &config_digest, &config, layers.clone());
+            let image = from_config(name, &config_digest, &config, layers.clone())?;
             store.put_image(image.clone())?;
             loaded.push(image);
         }
@@ -148,16 +148,25 @@ fn media_type_of(path: &std::path::Path) -> io::Result<&'static str> {
     })
 }
 
-/// An image record from its config JSON.
-pub fn from_config(name: String, config_digest: &str, config: &Value, layers: Vec<Layer>) -> Image {
+/// An image record from its config JSON. Platform metadata is validated:
+/// absent `os`/`architecture` are the documented legacy fallback (os
+/// `linux`, the host's architecture); present values must be nonempty
+/// strings and aliases normalize. Bad metadata fails, it does not pass.
+pub fn from_config(name: String, config_digest: &str, config: &Value, layers: Vec<Layer>) -> io::Result<Image> {
     let c = &config["config"];
     let strings = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
     let text = |v: &Value| v.as_str().unwrap_or_default().to_owned();
-    let os = config["os"].as_str().unwrap_or("linux");
-    // A config that names no architecture was made for this machine.
-    let host = crate::registry::Platform::host_linux();
-    let arch = config["architecture"].as_str().unwrap_or(&host.architecture);
-    Image {
+    let os = match &config["os"] {
+        Value::Null => "linux".to_owned(),
+        Value::String(s) if !s.trim().is_empty() => s.trim().to_lowercase(),
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "image config has a non-string or empty os")),
+    };
+    let arch = match &config["architecture"] {
+        Value::Null => crate::registry::Platform::host_linux().architecture,
+        Value::String(s) => crate::registry::normalize_arch(s).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("image config architecture {s:?} is not a platform architecture")))?,
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "image config architecture must be a string")),
+    };
+    Ok(Image {
         name,
         // Loaded images have no registry manifest; the config names them.
         digest: config_digest.to_owned(),
@@ -175,7 +184,7 @@ pub fn from_config(name: String, config_digest: &str, config: &Value, layers: Ve
             working_dir: text(&c["WorkingDir"]),
             user: text(&c["User"]),
         },
-    }
+    })
 }
 
 #[cfg(test)]
@@ -203,7 +212,7 @@ mod tests {
         let config = json!({"os": "linux", "architecture": "arm64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["echo", "hi"], "Env": ["A=1"]}});
         let (cfg, _) = put(&serde_json::to_vec(&config).unwrap());
         let (layer, size) = put(b"\x1f\x8bnot really gzip");
-        let image = from_config("demo:1".into(), &cfg, &config, vec![Layer { digest: layer.clone(), size, media_type: media_type_of(&store.blob_path(&layer).unwrap()).unwrap().into() }]);
+        let image = from_config("demo:1".into(), &cfg, &config, vec![Layer { digest: layer.clone(), size, media_type: media_type_of(&store.blob_path(&layer).unwrap()).unwrap().into() }]).unwrap();
         store.put_image(image.clone()).unwrap();
 
         let mut tarball = Vec::new();
@@ -218,6 +227,95 @@ mod tests {
         assert!(loaded[0].layers[0].media_type.ends_with("gzip"));
         assert_eq!(other.find("demo:1").unwrap().unwrap().config_digest, cfg);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An archive whose config declares nothing loads with the documented
+    /// fallback (os linux, the host's architecture) — that is a load
+    /// fallback, not registry validation.
+    #[test]
+    fn absent_platform_metadata_falls_back_and_aliases_normalize() {
+        let dir = scratch();
+        let store = Store::open(&dir).unwrap();
+        let config = json!({"created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}});
+        let bytes = archive_of(&store, &config, None);
+        let loaded = load(&store, bytes.as_slice()).unwrap();
+        let host = crate::registry::Platform::host_linux();
+        assert_eq!(loaded[0].platform, format!("linux/{}", host.architecture));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn architecture_aliases_normalize_on_load() {
+        let dir = scratch();
+        let store = Store::open(&dir).unwrap();
+        let config = json!({"os": "linux", "architecture": "x86_64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["/bin/true"]}});
+        let bytes = archive_of(&store, &config, None);
+        let loaded = load(&store, bytes.as_slice()).unwrap();
+        assert_eq!(loaded[0].platform, "linux/amd64");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A foreign-OS image loads as a foreign record; it cannot run, and it
+    /// is not silently relabeled as linux.
+    #[test]
+    fn a_foreign_os_config_loads_as_foreign() {
+        let dir = scratch();
+        let store = Store::open(&dir).unwrap();
+        let config = json!({"os": "windows", "architecture": "amd64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["cmd", "/c"]}});
+        let bytes = archive_of(&store, &config, None);
+        let loaded = load(&store, bytes.as_slice()).unwrap();
+        assert_eq!(loaded[0].platform, "windows/amd64");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_or_nonstring_platform_metadata_fails() {
+        for cfg in [
+            json!({"os": "", "architecture": "amd64", "config": {}}),
+            json!({"os": "linux", "architecture": "", "config": {}}),
+            json!({"os": 7, "architecture": "amd64", "config": {}}),
+            json!({"os": "linux", "architecture": 7, "config": {}}),
+        ] {
+            let dir = scratch();
+            let store = Store::open(&dir).unwrap();
+            let bytes = archive_of(&store, &cfg, None);
+            assert!(load(&store, bytes.as_slice()).is_err(), "{cfg}");
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    /// Builds a docker-save-layout archive carrying `config` and one
+    /// trivial layer; `tag` names the image (or none for an untagged id).
+    fn archive_of(store: &Store, config: &Value, tag: Option<&str>) -> Vec<u8> {
+        let config_bytes = serde_json::to_vec(config).unwrap();
+        let (config_digest, _) = {
+            let mut w = store.ingest().unwrap();
+            std::io::Write::write_all(&mut w, &config_bytes).unwrap();
+            w.finish().unwrap()
+        };
+        let layer = b"layer-bytes".to_vec();
+        let (layer_digest, _) = {
+            let mut w = store.ingest().unwrap();
+            std::io::Write::write_all(&mut w, &layer).unwrap();
+            w.finish().unwrap()
+        };
+        let mut b = tar::Builder::new(Vec::new());
+        let mut add = |name: &str, data: &[u8]| {
+            let mut h = tar::Header::new_ustar();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_entry_type(tar::EntryType::Regular);
+            b.append_data(&mut h, name, data).unwrap();
+        };
+        let manifest = json!([{
+            "Config": format!("{config_digest}.json").replace("sha256:", ""),
+            "RepoTags": tag.map_or_else(Vec::new, |t| vec![t.to_owned()]),
+            "Layers": [layer_digest],
+        }]);
+        add(&format!("{config_digest}.json").replace("sha256:", ""), &config_bytes);
+        add(&layer_digest, &layer);
+        add("manifest.json", &serde_json::to_vec(&manifest).unwrap());
+        b.into_inner().unwrap()
     }
 
     #[test]
