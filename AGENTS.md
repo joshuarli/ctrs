@@ -40,7 +40,16 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Guest firewall (nftables) semantics and fixtures | `docs/firewall.md` |
 | Threat model, seccomp differential, failure harness | `docs/security.md` |
 | Optional launchd user service | `docs/launchd.md` |
+| Install, uninstall | `docs/install.md` |
+| Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
-| Measurement evidence | `docs/evidence/` |
-| Experiments (smolvm, microVM) | `docs/experiments/` |
 | Remaining campaign slices (CTRS-22/23) | `docs/campaign-headless-ctrs.md` |
+| Evidence: firewall qualification | `docs/evidence/crabtables.md` |
+| Evidence: gate B | `docs/evidence/gate-b.md` |
+| Evidence: h12tiny HTTP pilot | `docs/evidence/http.md` |
+| Evidence: networking/vzNAT | `docs/evidence/net.md` |
+| Evidence: registry client pilot | `docs/evidence/registry.md` |
+| Evidence: security qualification | `docs/evidence/security.md` |
+| Evidence: release prep (artifact manifest) | `docs/evidence/release.md` |
+| Experiment: smolvm-network analysis | `docs/experiments/smolvm-network.md` |
+| Experiment: microVM isolation research | `docs/experiments/microvm-isolation.md` |

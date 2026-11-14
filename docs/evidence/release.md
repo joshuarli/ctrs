@@ -22,29 +22,38 @@ stack is deleted.
 
 ## Comparison vs the initial import
 
-| Metric | Pin (import, `06a617b`) | This commit | Δ |
+| Metric | Pin (import `06a617b`) | This commit | Δ |
 | --- | --- | --- | --- |
 | `ctrs` release binary (aarch64-apple-darwin) | 13,187,664 B | 6,327,152 B | −52.0 % |
-| Tracked files | 396 | 161 | −59 % |
-| Tracked lines (`git ls-files \| xargs wc -l`) | 163,327 | 45,359 | −72 % |
-| — Rust only (`git ls-files '*.rs' \| xargs wc -l`) | — | 35,462 | — |
-| `Cargo.lock` packages | 150 | 157 | +7 (GTK/UI graph removed; feature-gated h12tiny/crabtables stacks added) |
-| `cargo tree --locked` output lines | 183 | 132 | −28 % |
+| Tracked files | 397 | 164 | −59 % |
+| Tracked lines (tree, at ref) | 166,316 | 45,703 | −72 % |
+| — Rust only | 67,910 | 35,431 | −48 % |
+| `Cargo.lock` entries | 212 | 157 | −55 (GTK/UI graph deleted; feature-gated h12tiny/crabtables stacks added) |
+| `cargo tree --locked` lines | 183 | 131 | −28 % |
 | Workspace tests passing | 359 (12 suites) | 203 (sum over suites, 2026-11-14) | −44 % (deleted subsystems' tests) |
 
-Pin numbers from the import baseline record (deleted 2026-11-14; recovered
-from git object `3141847`:`docs/baseline.md`). `cargo check --workspace`
-was 13.98 s at the pin; 2.9 s warm this run.
+Pin numbers: binary size, 359 tests, 183 tree lines, 150 packages per
+`cargo metadata` (not a lockfile count), and 13.98 s `cargo check` come
+from the import baseline record (deleted 2026-11-14; recovered from git
+object `3141847`:`docs/baseline.md`). File/line counts are the tree at
+the import commit itself (`git ls-tree -r 06a617b`); the pin contained two
+pre-existing files (`README.md`, `docs/campaign-headless-kiri.md`), so the
+import's diffstat (396 files, 163,327 insertions) is not a tree size.
+`cargo check --workspace` was 13.98 s at the pin (rustc 1.99.1); 2.9 s
+warm this run (nightly 2026-11-09 + warm cache — not a comparable
+methodology).
 
 ## Fresh measurements (2026-11-14)
 
 Host: this Mac (Apple Silicon, macOS 27.2), scratch roots under
-`.work/tmp/release-measure2/` (never `~/.local/share/ctrs`, never OrbStack).
-Commands and raw output in `.work/tmp/measure2.out` (not committed).
+`.work/tmp/release-measure4/` (never `~/.local/share/ctrs`, never
+OrbStack). Raw output: `.work/tmp/release-measure4/` and
+`.work/tmp/measure2.out` (not committed).
 
-- Daemon socket-up latency, VM boots on first container: 0.010–0.016 s over
-  5 fresh boots. A fresh first `docker run --rm alpine true` with the image
-  cached (VM cold) took 0.33 s.
+- Daemon socket-up latency (VM boots on first container): first boot
+  0.25 s; 0.014–0.016 s on the next four fresh boots. A fresh first
+  `docker run --rm alpine true` with the image cached (VM cold) took
+  0.33 s.
 - `docker run --rm alpine true`, 25 warm samples: p50 41 ms, p95 63 ms,
   p99 65 ms, max 71 ms, min 21 ms.
 - Create-once + 25× (`docker start` + `docker stop -t 0`): p50 33 ms,
@@ -55,15 +64,17 @@ Commands and raw output in `.work/tmp/measure2.out` (not committed).
 - Cold pull (`docker rmi` + `docker pull alpine`): 0.867–0.910 s over 5
   trials; hot pull: 0.392–0.427 s over 5 trials. Network-dependent; same
   host for both.
-- RSS: daemon idle 22,064 KB; Apple Virtualization helper (XPC) idle
-  301,232 KB. Peak sampled during a sequential 25× run loop: daemon
-  23,088 KB; VM helper 314,624 KB. Daemon idle RSS is inside the 30 MB
-  smoke gate.
+- RSS: daemon fresh-boot idle 8,256 KB (smoke harness, before the VM
+  boots); daemon 22,064 KB after the VM had booted once; 23,088 KB peak
+  sampled during a sequential 25× run loop. The Apple Virtualization
+  helper (XPC): 301,232 KB idle after first VM boot, 314,624 KB peak
+  sampled. Fresh-boot idle is inside the 30 MB smoke gate.
 - Bind-mount metadata: 1000 `stat`s on a host dir inside the guest over
-  virtiofs took 0.20 s (busybox `time`). Host-side reference with one
-  fork+exec per stat (`/usr/bin/stat`): 6.11 s — different method
+  virtiofs took 0.22 s (busybox `time`, logged). Host-side reference with
+  one fork+exec per stat (`/usr/bin/stat`): 4.57 s — different method
   (fork-heavy), reported raw, not as a like-for-like ratio.
-- Smoke: `conformance/smoke.sh` green on this build (see below).
+- Smoke: `conformance/smoke.sh` green on this build: 21/21 pass, daemon
+  idle RSS 8256 KB (gate ≤ 30 MB).
 
 ## Notices / third-party
 

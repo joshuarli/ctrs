@@ -56,7 +56,9 @@ cargo xtask linux --arch amd64
 
 and need a host with:
 
-- a modern kernel (6.1+): clone3, namespaces, overlayfs, cgroup v2;
+- a kernel with clone3, cgroup v2, overlayfs, and nf_tables/rtnetlink
+  (roughly 5.3+; the agent hand-encodes its netlink/nftables messages —
+  no external `nft`/`ip` helpers needed);
 - root, or a delegated cgroup v2 subtree plus `CAP_SYS_ADMIN`-class
   capabilities — the agent runs as root on the host kernel and owns the
   container namespaces; nothing sandboxed is supported;
@@ -69,8 +71,12 @@ Run it foreground as root:
 
 ```sh
 sudo ./ctrs daemon
-DOCKER_HOST=unix://$HOME/.local/share/ctrs/run/docker.sock docker run --rm alpine echo hello
+DOCKER_HOST=unix:///root/.local/share/ctrs/run/docker.sock docker run --rm alpine echo hello
 ```
+
+When the engine runs as root its data root resolves against root's home
+(`/root/.local/share/ctrs`); set `CTRS_DATA_DIR`/`CTRS_SOCKET` explicitly
+to keep the state where you want it.
 
 The native Linux path is not yet runtime-qualified (N-1); treat it as a
 compile-tested preview. macOS is the qualified platform.
@@ -83,9 +89,15 @@ docker contexts, and no shell configuration. To remove it:
 1. Stop the engine: `ctrs engine stop` (or `kill` the daemon; the VM exits
    with it).
 2. Remove the binary: `rm ~/.local/bin/ctrs` (or wherever you put it).
-3. **Destroy the data root** — this deletes every pulled image, container
-   record and the VM disk; back up anything you want first:
-   `rm -rf ~/.local/share/ctrs` (or your `CTRS_DATA_DIR`).
+3. **Destroy the private state** — this deletes every pulled image,
+   container record and the VM disk; back up anything you want first:
+   - default install: `rm -rf ~/.local/share/ctrs`
+   - with `CTRS_DATA_DIR` set: also `rm -rf "$CTRS_DATA_DIR"` (image store,
+      VM data, data-root `.lock`)
+   - with `CTRS_STATE_DIR` set: also remove that directory (vm.json, logs)
+   - the daemon's own state directory is always `$HOME/.local/share/ctrs`
+     (e.g. `builder.json`) even when the other two are redirected — remove
+     it too; uninstalling with only a custom `CTRS_DATA_DIR` leaves it behind
 4. If you installed the optional launchd example, remove it:
    `launchctl bootout gui/$UID ~/Library/LaunchAgents/<file>.plist` and
    `rm ~/Library/LaunchAgents/<file>.plist`.
@@ -96,7 +108,8 @@ Nothing else exists to clean up: no `/etc/resolver` entries, no
 `/var/run/docker.sock`, no group memberships (unlike the
 `docker`-group model).
 
-The uninstall steps were verified on scratch roots (fresh `CTRS_DATA_DIR`,
-engine ran a container, then both artifacts above were removed and the
-scratch tree was left empty); `~/.local/share/ctrs` was not touched in that
-check.
+The uninstall steps were verified on a scratch install: a throwaway
+`CTRS_DATA_DIR` with a container run, the binary, the data root and the
+state directory under the scratch `HOME` removed — the scratch tree was
+left with no private state, and the real `~/.local/share/ctrs` was
+untouched (and did not exist before the check).

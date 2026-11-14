@@ -10,7 +10,7 @@ The daemon never creates a docker context and never edits
 docker CLI at it, set `DOCKER_HOST`:
 
 ```sh
-export DOCKER_HOST=unix://$HOME/.ctrs/run/docker.sock
+export DOCKER_HOST=unix://$HOME/.local/share/ctrs/run/docker.sock
 docker run --rm alpine echo hello
 ```
 
@@ -63,8 +63,8 @@ optional; delete the plist to undo.
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key>
   <dict><key>SuccessfulExit</key><false/></dict>
-  <key>StandardOutPath</key><string>/Users/YOU/.ctrs/daemon.launchd.log</string>
-  <key>StandardErrorPath</key><string>/Users/YOU/.ctrs/daemon.launchd.log</string>
+  <key>StandardOutPath</key><string>/Users/YOU/.local/share/ctrs/logs/daemon.launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.local/share/ctrs/logs/daemon.launchd.log</string>
 </dict>
 </plist>
 ```
