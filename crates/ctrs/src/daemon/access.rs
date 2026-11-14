@@ -7,17 +7,14 @@
 //! also gets their own entry in the socket's access list (a POSIX ACL), which
 //! applies at once, to every session they have.
 //!
-//! The daemon writes the list when it makes the socket, and `ctrs host-access`
-//! (run as root, from the window's onboarding through pkexec) writes it again
-//! after adding someone.
-//!
-//! An entry in the list outlives the membership it was written for, so the
-//! daemon doesn't rely on it alone: a `Gate` checks every new connection
-//! against the group, and every few seconds checks the people still connected,
-//! closing the connections of anyone removed (streams and `exec` sessions
-//! too) and writing the list again without them. Removal applies as soon as
-//! the system's user database says so; where that is cached (nscd, sssd), it
-//! is when the cache catches up.
+//! The daemon writes the list when it makes the socket and again whenever a
+//! sweep removes someone. An entry in the list outlives the membership it
+//! was written for, so the daemon doesn't rely on it alone: a `Gate` checks
+//! every new connection against the group, and every few seconds checks the
+//! people still connected, closing the connections of anyone removed (streams
+//! and `exec` sessions too) and writing the list again without them. Removal
+//! applies as soon as the system's user database says so; where that is
+//! cached (nscd, sssd), it is when the cache catches up.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString, OsStr};
@@ -81,10 +78,6 @@ fn group_by_name(name: &CStr) -> io::Result<Rec<libc::group>> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no group {}", name.to_string_lossy())))
 }
 
-fn c_name(s: &str) -> io::Result<CString> {
-    CString::new(s).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
-}
-
 /// The account names listed in a group record.
 fn names(group: &libc::group) -> Vec<&CStr> {
     let mut out = Vec::new();
@@ -97,22 +90,6 @@ fn names(group: &libc::group) -> Vec<&CStr> {
         }
     }
     out
-}
-
-fn group_members(group: &CStr) -> io::Result<Vec<String>> {
-    let g = group_by_name(group)?;
-    Ok(names(&g.rec).iter().map(|n| n.to_string_lossy().into_owned()).collect())
-}
-
-/// The users in `group` by name (its member list, not primary-group users).
-pub fn members(group: &str) -> io::Result<Vec<String>> {
-    group_members(&c_name(group)?)
-}
-
-/// A user's numeric id, if the account exists.
-pub fn uid(user: &str) -> Option<u32> {
-    let a = account_by_name(&c_name(user).ok()?).ok()??;
-    Some(a.rec.pw_uid)
 }
 
 /// The uids of the names in a group record, sorted. A name with no account
@@ -132,14 +109,6 @@ fn uids_of(group: &libc::group) -> io::Result<Vec<u32>> {
 
 fn member_uids(group: &CStr) -> io::Result<Vec<u32>> {
     uids_of(&group_by_name(group)?.rec)
-}
-
-/// Gives every member of `group` read-write access to `socket` by name, so a
-/// member just added can use it without signing in again. Returns how many.
-pub fn grant(socket: &Path, group: &str) -> io::Result<usize> {
-    let uids = member_uids(&c_name(group)?)?;
-    set(socket, &uids)?;
-    Ok(uids.len())
 }
 
 /// The uid at the other end of an accepted connection.

@@ -114,7 +114,7 @@ fn local(t: &str) -> String {
         return t.to_owned();
     }
     let ms = t.get(20..23).filter(|m| m.bytes().all(|b| b.is_ascii_digit())).unwrap_or("000");
-    let at = secs as libc::time_t;
+    let at = secs;
     // SAFETY: localtime_r fills the tm it is given and keeps no pointer.
     let tm = unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
