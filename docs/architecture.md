@@ -53,8 +53,8 @@ Every process the engine or its CLI spawns, and what to make of it. Test-only sp
 | --- | --- | --- | --- |
 | `docker.rs` (`kiri ps`/`run`/…) | external `docker` CLI on PATH | Docker's own commands, delegated: `DOCKER_HOST=unix://<socket>`, `DOCKER_CONTEXT` removed, argv untouched | intended delegation; tested with a stub CLI (argv + env) |
 | `builds.rs` (`kiri build-with kiri` / first `docker build`) | `docker buildx` | BuildKit builder provisioning for `docker build`: `buildx version → inspect → rm --keep-state → create`. The builder is addressed by **endpoint** (`unix://<socket>`), never a docker context; ctrs never creates one | intended delegation, user- or first-build-triggered; no context created (CTRS-10) |
-| `service.rs` | `ps` | `kiri stop`'s "is this our daemon" check and `kiri status` RSS/uptime readout | OS helper; the only liveness signal Linux supports without /proc parsing |
-| `service.rs` | the `kiri` binary itself | `kiri start` spawns `kiri daemon` in its own process group | self; not a delegation |
+| `service.rs` | `ps` | `kiri engine status` RSS/uptime readout | OS helper |
+| `service.rs` | the `kiri` binary itself | `kiri engine start` spawns `kiri daemon` in its own process group | self; not a delegation |
 | `guest.rs` | `/usr/bin/tar` | unpacks the packed 64 GiB `data.img.tgz` template (holes preserved as sparse) | OS helper; fails loudly if missing |
 | `ports.rs` | `/usr/sbin/lsof` | names the non-ctrs process holding a published port, in the "already allocated" error message | macOS integration; absence just drops the detail |
 | `ports.rs` | `/bin/launchctl` | `getenv SSH_AUTH_SOCK` when the daemon wasn't started from a shell that has it | macOS integration; `SSH_AUTH_SOCK` env takes precedence |

@@ -17,15 +17,18 @@ docker run --rm alpine echo hello
 ## The lifecycle commands
 
 ```sh
-kiri start      # spawn the daemon detached; returns once the socket is up (idempotent)
-kiri status     # pid, rss, uptime, socket (--json for scripts); exit 1 when not running
-kiri stop       # SIGTERM; exits within 10 s; removes a stale pidfile without touching a foreign pid
-kiri restart    # stop then start
+kiri engine start     # spawn the daemon detached; returns once the API answers (idempotent)
+kiri engine status    # pid, rss, uptime, socket (--json for scripts); exit 1 when not running
+kiri engine stop      # the engine itself exits (same teardown as SIGTERM); falls back to a verified pidfile signal
+kiri engine restart   # stop then start
+kiri status           # shorthand for kiri engine status
 ```
 
-`kiri start` is what `kiri daemon` plus a supervisor is, without one: the
-child runs in its own process group with stdio detached and logs to
-`~/.kiri/logs/daemon.log`. Stop it with `kiri stop` (same as SIGTERM).
+`kiri engine start` is what `kiri daemon` plus a supervisor is, without
+one: the child runs in its own process group with stdio detached and logs
+to `~/.kiri/logs/daemon.log`. Stop it with `kiri engine stop`. The
+containers keep `kiri start|stop|restart CONTAINER` (as docker has them);
+the bare forms name a container to act on, or print an error pointing here.
 
 ## Foreground (the default)
 

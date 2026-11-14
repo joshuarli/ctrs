@@ -30,7 +30,9 @@ const USAGE: &str = "\
 usage: kiri COMMAND          docker's commands, on Kiri: kiri run, ps, exec,
                              logs, stop, rm, images, pull, build, compose…
        kiri daemon
-       kiri start | stop | status [--json] | restart
+       kiri engine start | stop | status [--json] | restart   the engine itself
+       kiri start | stop | restart CONTAINER                  as docker does
+       kiri status                                          engine status
        kiri build-with [docker|kiri]   which builder docker build uses
        kiri diag logs [-f] [--ui|--engine|--cli] [--errors] [-n N]
        kiri diag report [--out PATH]     a support file: logs and crashes, tokens taken out";
@@ -47,7 +49,23 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         Some("daemon") => daemon::run(&args[1..]),
         #[cfg(unix)]
-        Some("start" | "stop" | "status" | "restart") => service::run(&args),
+        // The engine's own lifecycle. Bare `kiri status` is its status too
+        // (docker has no `status` subcommand).
+        Some("engine") => service::run(&args[1..]),
+        #[cfg(unix)]
+        Some("status") => service::run(&args),
+        #[cfg(unix)]
+        // Container operations, as docker has them; without a container
+        // argument these stay in `kiri engine`.
+        Some("start" | "stop" | "restart") if args.len() >= 2 => {
+            engine_version_check();
+            docker::run(&args)
+        }
+        #[cfg(unix)]
+        Some("start" | "stop" | "restart") => {
+            eprintln!("usage: kiri engine {}   (containers: kiri {} CONTAINER)", args[0], args[0]);
+            return ExitCode::FAILURE;
+        }
         #[cfg(unix)]
         Some("build-with") => buildwith::cli(&args[1..]),
         #[cfg(unix)]

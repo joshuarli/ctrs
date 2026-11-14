@@ -764,6 +764,28 @@ section "errors"
 t bad-image-name "invalid" $D run --rm 'UPPER/case' true
 code no-such-image-pull 125 $D run --rm kiri-test/no-such-image:none true
 
+section "kiri CLI dispatch (engine vs container)"
+# `kiri stop CONTAINER` must stop the container, not the engine; the engine's
+# own lifecycle lives under `kiri engine`.
+KIRI=$(cd "$(dirname "$0")/.." && pwd)/target/release/kiri
+if [ -x "$KIRI" ]; then
+  ki() { KIRI_SOCKET="$SOCK" perl -e 'alarm 120; exec @ARGV' "$KIRI" "$@"; }
+  $D run -d --name ci-dispatch-a alpine sleep 120 >/dev/null 2>&1
+  $D run -d --name ci-dispatch-b alpine sleep 120 >/dev/null 2>&1
+  ki stop ci-dispatch-a >/dev/null 2>&1
+  t dispatch-stop-container "exited" $D inspect -f '{{.State.Status}}' ci-dispatch-a
+  t dispatch-engine-alive "ci-dispatch-b" $D ps --format '{{.Names}}' --filter name=ci-dispatch-b
+  t dispatch-engine-responds "OK" bash -c "printf 'GET /_ping HTTP/1.0\r\n\r\n' | curl -s --unix-socket '$SOCK' http://d/_ping"
+  ki start ci-dispatch-a >/dev/null 2>&1
+  t dispatch-restart-container "running" $D inspect -f '{{.State.Status}}' ci-dispatch-a
+  code dispatch-bare-stop-refused 1 env KIRI_SOCKET="$SOCK" "$KIRI" stop
+  code dispatch-engine-bogus 1 env KIRI_SOCKET="$SOCK" "$KIRI" engine bogus
+  t dispatch-engine-status "running" env KIRI_SOCKET="$SOCK" "$KIRI" engine status
+  $D rm -f ci-dispatch-a ci-dispatch-b >/dev/null 2>&1
+else
+  skip 'kiri CLI dispatch' 'target/release/kiri not built'
+fi
+
 cleanup
 
 if [ "${SOAK:-0}" -gt 0 ]; then

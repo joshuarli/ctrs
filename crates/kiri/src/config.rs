@@ -64,6 +64,15 @@ pub fn socket() -> io::Result<PathBuf> {
     Ok(home.join(".kiri").join("run/docker.sock"))
 }
 
+/// The lifecycle pidfile for one socket: `<socket>.pid`, not a fixed name
+/// beside it. Distinct endpoints in one directory own distinct pidfiles,
+/// so one engine can never claim another's lifecycle metadata.
+pub fn pidfile(socket: &std::path::Path) -> PathBuf {
+    let mut name = socket.as_os_str().to_owned();
+    name.push(".pid");
+    PathBuf::from(name)
+}
+
 /// Where the kernel, initramfs and data-disk template live: `KIRI_GUEST_DIR`
 /// overrides; else `guest/out` (or `guest/out/x86_64`) relative to the
 /// binary, following links from PATH to the real file.

@@ -109,6 +109,20 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
             engine.unstop();
             return reply(w, engine.vm().map(|_| Value::Null).map_err(Error::Io), 204);
         }
+        // The local socket's answer to `kiri engine stop`: same clean
+        // teardown as SIGTERM, by asking the process instead of signalling
+        // whatever pid a pidfile says. Answers first; the signal handler
+        // owns the rest.
+        ("POST", "/kiri/shutdown") => {
+            let r = reply(w, Ok(Value::Null), 204);
+            std::thread::spawn(|| {
+                // SAFETY: signals this process only; the masked sigwait
+                // thread owns teardown (raise() would hit only the caller,
+                // which has the signal blocked).
+                unsafe { libc::kill(libc::getpid(), libc::SIGTERM) };
+            });
+            return r;
+        }
         // The window's Stop: off until Start, whatever asks for the VM meanwhile.
         ("POST", "/kiri/stop") => return reply(w, engine.stop_all().map(|()| Value::Null), 204),
         ("POST", "/kiri/sleep") => return reply(w, engine.sleep_now().map(|()| Value::Null), 204),
@@ -317,6 +331,7 @@ fn version() -> Value {
         "KernelVersion": kernel_version(),
         "GitCommit": "",
         "GoVersion": "n/a (Rust)",
+        "EnginePid": std::process::id(),
     })
 }
 

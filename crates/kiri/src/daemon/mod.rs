@@ -118,12 +118,6 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     let _ = std::fs::remove_file(&socket); // stale, from a daemon that died
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
-    let pidfile = socket.with_file_name("kiri.pid");
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        std::fs::write(&pidfile, format!("{} {now}\n", std::process::id())).and_then(|()| std::fs::set_permissions(&pidfile, std::fs::Permissions::from_mode(0o600)))?;
-    }
     // On a Linux host the daemon runs as root; `KIRI_SOCKET_GROUP=kiri`
     // lets that group's users in, as the docker group does for dockerd.
     let access_group = std::env::var_os("KIRI_SOCKET_GROUP");
@@ -152,6 +146,16 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     let store = kiri_image::Store::open(root)?;
     let engine = engine::Engine::boot(store).inspect_err(|e| diag::error!("engine did not start", error = e))?;
     diag::info!("engine ready", version = env!("CARGO_PKG_VERSION"), ms = t0.elapsed().as_millis(), socket = format!("unix://{}", socket.display()));
+    // The pidfile is the fallback handle for `kiri engine stop` when the
+    // socket is wedged; it exists only once the engine is actually up.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let pidfile = crate::config::pidfile(&socket);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Err(e) = std::fs::write(&pidfile, format!("{} {now}\n", std::process::id())).and_then(|()| std::fs::set_permissions(&pidfile, std::fs::Permissions::from_mode(0o600))) {
+            diag::warn!("pidfile not written", error = e);
+        }
+    }
     kiri_image::set_proxy_source(proxy::for_registry);
     // The managed BuildKit stops itself when builds have been idle a while.
     builder::watch(engine.clone());
@@ -163,7 +167,7 @@ pub fn run(_args: &[String]) -> io::Result<()> {
         unsafe { libc::sigwait(&set, &mut sig) };
         diag::info!("engine shutting down", signal = sig);
         let _ = std::fs::remove_file(&sock);
-        let _ = std::fs::remove_file(sock.with_file_name("kiri.pid"));
+        let _ = std::fs::remove_file(crate::config::pidfile(&sock));
         on_signal.shutdown();
         // Give the guest a moment to power off before the VM is released.
         std::thread::sleep(std::time::Duration::from_millis(50));
