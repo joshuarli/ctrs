@@ -22,7 +22,15 @@ use super::time;
 pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
     let mut w = stream.try_clone()?;
     let mut r = BufReader::new(stream);
-    while let Some(req) = http::read_request(&mut r, streams_body)? {
+    while let Some(req) = match http::read_request(&mut r, &mut w, streams_body) {
+        Ok(x) => x,
+        Err(e) => {
+            // Framing the client broke is not dispatched: say so, then close.
+            crate::diag::warn!("malformed HTTP request", error = e);
+            let _ = http::error(&mut w, 400, "bad request framing");
+            return Ok(());
+        }
+    } {
         // The window's action this request is part of: the engine's lines
         // for it carry the same op.
         let _op = req.header("X-Kiri-Op").filter(|o| crate::diag::valid_op(o)).map(|o| crate::diag::enter_op(o.to_owned()));

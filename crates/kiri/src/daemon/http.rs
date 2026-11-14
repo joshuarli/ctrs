@@ -15,6 +15,11 @@ const MAX_BODY: usize = 8 << 20;
 /// The request line and headers together may not exceed this: an endless
 /// header line must not grow memory without bound.
 const MAX_HEAD: u64 = 64 << 10;
+/// One chunk-size line (hex, plus an optional `;extension`).
+const MAX_CHUNK_LINE: u64 = 64;
+/// One trailer field line and the number of trailer fields per body.
+const MAX_TRAILER_LINE: u64 = 8 << 10;
+const MAX_TRAILER_FIELDS: usize = 32;
 
 #[derive(Debug)]
 pub struct Request {
@@ -53,10 +58,96 @@ impl Request {
     }
 }
 
+/// Reads a line of at most `max` bytes. A line that hits the cap without a
+/// newline is too large and is an error.
+fn read_capped_line(r: &mut BufReader<UnixStream>, max: u64) -> io::Result<String> {
+    let mut line = String::new();
+    let n = (&mut *r).take(max + 1).read_line(&mut line)?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of body"));
+    }
+    if n as u64 > max {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "line too large"));
+    }
+    Ok(line)
+}
+
+/// One chunk-size line: hex with an optional `;extension`. Bounded.
+fn read_chunk_size(r: &mut BufReader<UnixStream>) -> io::Result<u64> {
+    let line = read_capped_line(r, MAX_CHUNK_LINE)?;
+    let size = line.trim().split(';').next().unwrap_or("");
+    u64::from_str_radix(size, 16).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))
+}
+
+/// The CRLF terminating one chunk's data.
+fn read_chunk_crlf(r: &mut BufReader<UnixStream>) -> io::Result<()> {
+    let mut crlf = [0u8; 2];
+    r.read_exact(&mut crlf)?;
+    if &crlf != b"\r\n" {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "missing CRLF after chunk"));
+    }
+    Ok(())
+}
+
+/// The trailer section after the zero-size chunk: field lines, then the
+/// final empty line. Bounded in line length and field count.
+fn consume_trailers(r: &mut BufReader<UnixStream>) -> io::Result<()> {
+    let mut line = String::new();
+    for _ in 0..MAX_TRAILER_FIELDS {
+        line.clear();
+        let n = (&mut *r).take(MAX_TRAILER_LINE).read_line(&mut line)?;
+        if n == 0 || line.trim().is_empty() {
+            return Ok(());
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, "too many trailer fields"))
+}
+
+/// HTTP/1.1: a request with `Expect: 100-continue` waits for the interim
+/// status line before the client sends the body; answer it before the
+/// body is read, in both the buffered and the streamed path.
+fn expects_continue(headers: &[(String, String)]) -> bool {
+    headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("expect") && v.trim().eq_ignore_ascii_case("100-continue"))
+}
+
+/// Contradictory or invalid framing is rejected before dispatch: both
+/// framings at once, mismatched repeated Content-Length, a non-numeric
+/// value, or a Transfer-Encoding Kiri cannot read. Identical repeated
+/// Content-Length values are accepted.
+fn validate_framing(headers: &[(String, String)]) -> io::Result<()> {
+    let bad = || io::Error::new(io::ErrorKind::InvalidData, "invalid or contradictory framing");
+    let mut te = false;
+    let mut lengths: Vec<&str> = Vec::new();
+    for (k, v) in headers {
+        if k.eq_ignore_ascii_case("transfer-encoding") {
+            te = true;
+            for code in v.split(',') {
+                if !code.trim().eq_ignore_ascii_case("chunked") {
+                    return Err(bad());
+                }
+            }
+        } else if k.eq_ignore_ascii_case("content-length") {
+            lengths.push(v.trim());
+        }
+    }
+    if te && !lengths.is_empty() {
+        return Err(bad());
+    }
+    if let Some(first) = lengths.first()
+        && lengths.iter().any(|l| l != first)
+    {
+        return Err(bad());
+    }
+    for l in &lengths {
+        l.parse::<usize>().map_err(|_| bad())?;
+    }
+    Ok(())
+}
+
 /// Reads the next request on a connection. `Ok(None)` is a clean close.
 /// When `stream(method, path)` is true the body stays unread: the handler
 /// reads it through [`Body`].
-pub fn read_request(r: &mut BufReader<UnixStream>, stream: impl Fn(&str, &str) -> bool) -> io::Result<Option<Request>> {
+pub fn read_request(r: &mut BufReader<UnixStream>, w: &mut UnixStream, stream: impl Fn(&str, &str) -> bool) -> io::Result<Option<Request>> {
     // The request line and headers are read through a cap, so a client
     // cannot exhaust memory with an endless line. The body is read after.
     let (method, path, query, headers) = {
@@ -96,31 +187,31 @@ pub fn read_request(r: &mut BufReader<UnixStream>, stream: impl Fn(&str, &str) -
         }
         (method, path, query, headers)
     };
+    validate_framing(&headers)?;
+    if expects_continue(&headers) {
+        w.write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
+        w.flush()?;
+    }
     let streamed = stream(&method, &path);
     let mut req = Request { method, path, query, headers, body: Vec::new() };
     if streamed {
         return Ok(Some(req));
     }
     if req.header("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked")) {
-        let mut line = String::new();
         loop {
-            line.clear();
             // A chunk-size line is short hex (plus an optional ;extension).
-            (&mut *r).take(64).read_line(&mut line)?;
-            let size = line.trim().split(';').next().unwrap_or("");
-            let n = usize::from_str_radix(size, 16)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))?;
-            if n > MAX_BODY || req.body.len().checked_add(n).is_none_or(|t| t > MAX_BODY) {
+            let n = read_chunk_size(r)? as usize;
+            if n == 0 {
+                consume_trailers(r)?;
+                break;
+            }
+            if req.body.len().checked_add(n).is_none_or(|t| t > MAX_BODY) {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "request body too large"));
             }
             let start = req.body.len();
             req.body.resize(start + n, 0);
             r.read_exact(&mut req.body[start..])?;
-            let mut crlf = [0u8; 2];
-            r.read_exact(&mut crlf)?;
-            if n == 0 {
-                break;
-            }
+            read_chunk_crlf(r)?;
         }
     } else if let Some(len) = req.header("content-length").and_then(|v| v.parse::<usize>().ok()) {
         if len > MAX_BODY {
@@ -155,19 +246,9 @@ impl Read for Body<'_> {
             return Ok(0);
         }
         if self.chunked && self.left == 0 {
-            let mut line = String::new();
-            self.r.read_line(&mut line)?;
-            // A chunk size may carry extensions after a semicolon.
-            let size = line.trim().split(';').next().unwrap_or("");
-            self.left = u64::from_str_radix(size, 16).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))?;
+            self.left = read_chunk_size(self.r)?;
             if self.left == 0 {
-                // Trailers, then the blank line.
-                loop {
-                    line.clear();
-                    if self.r.read_line(&mut line)? == 0 || line.trim().is_empty() {
-                        break;
-                    }
-                }
+                consume_trailers(self.r)?;
                 self.done = true;
                 return Ok(0);
             }
@@ -180,8 +261,7 @@ impl Read for Body<'_> {
         self.left -= n as u64;
         if self.left == 0 {
             if self.chunked {
-                let mut crlf = [0u8; 2];
-                self.r.read_exact(&mut crlf)?;
+                read_chunk_crlf(self.r)?;
             } else {
                 self.done = true;
             }
