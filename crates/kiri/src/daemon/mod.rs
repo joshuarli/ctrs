@@ -32,10 +32,25 @@ mod volumes;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::os::unix::io::{AsRawFd, OwnedFd};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::diag;
+
+
+/// One engine per data root: an `flock(2)` on `<root>/.lock`, held for the
+/// daemon's life. Without it two engines on the same root interleave blob
+/// and image writes and both silently corrupt the store.
+fn root_lock(root: &Path) -> io::Result<OwnedFd> {
+    let file = std::fs::File::create(root.join(".lock"))?;
+    // SAFETY: flock on a descriptor this function owns; the lock dies with it.
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if ret != 0 {
+        return Err(io::Error::new(io::ErrorKind::AddrInUse, format!("the data root {} is in use by another engine", root.display())));
+    }
+    Ok(OwnedFd::from(file))
+}
 
 /// `~/.kiri`: the daemon's state. Always under HOME: `KIRI_SOCKET` may point the
 /// socket anywhere, but it must not move private state into a directory another user can prepare.
@@ -132,7 +147,9 @@ pub fn run(_args: &[String]) -> io::Result<()> {
         None => None,
     };
 
-    let store = kiri_image::Store::open(kiri_image::Store::default_root()?)?;
+    let root = kiri_image::Store::default_root()?;
+    let _root_lock = root_lock(&root)?;
+    let store = kiri_image::Store::open(root)?;
     let engine = engine::Engine::boot(store).inspect_err(|e| diag::error!("engine did not start", error = e))?;
     diag::info!("engine ready", version = env!("CARGO_PKG_VERSION"), ms = t0.elapsed().as_millis(), socket = format!("unix://{}", socket.display()));
     kiri_image::set_proxy_source(proxy::for_registry);
