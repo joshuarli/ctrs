@@ -14,6 +14,19 @@ export DOCKER_HOST=unix://$HOME/.kiri/run/docker.sock
 docker run --rm alpine echo hello
 ```
 
+## The lifecycle commands
+
+```sh
+kiri start      # spawn the daemon detached; returns once the socket is up (idempotent)
+kiri status     # pid, rss, uptime, socket (--json for scripts); exit 1 when not running
+kiri stop       # SIGTERM; exits within 10 s; removes a stale pidfile without touching a foreign pid
+kiri restart    # stop then start
+```
+
+`kiri start` is what `kiri daemon` plus a supervisor is, without one: the
+child runs in its own process group with stdio detached and logs to
+`~/.kiri/logs/daemon.log`. Stop it with `kiri stop` (same as SIGTERM).
+
 ## Foreground (the default)
 
 ```sh

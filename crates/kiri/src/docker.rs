@@ -1,6 +1,6 @@
 //! `kiri ps`, `kiri run`, `kiri compose up`…: Docker's own commands, run
 //! by the docker CLI against Kiri's daemon, over `DOCKER_HOST` (the URL of
-//! Kiri's Unix socket, set here — never a docker context).
+//! the engine's Unix socket, set here — never a docker context).
 
 use std::io;
 #[cfg(unix)]

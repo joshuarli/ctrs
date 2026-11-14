@@ -73,7 +73,7 @@ impl Guest {
     /// The VM: kernel, initramfs, data disk, NAT, the Mac's files, Rosetta.
     #[cfg(target_os = "macos")]
     fn vm_config(opts: &BootOptions) -> io::Result<Config> {
-        let dir = guest_dir();
+        let dir = crate::config::guest_dir();
         // swiotlb=noforce: the VM's virtio devices address all of memory, so
         // the kernel's 64 MB bounce buffer would sit there unused.
         let mut cmdline = String::from("console=hvc0 rdinit=/init panic=-1 rcupdate.rcu_expedited=1 swiotlb=noforce");
@@ -254,25 +254,3 @@ fn missing_kernel(kernel: &std::path::Path, exe: Option<&std::path::Path>) -> io
     io::Error::new(io::ErrorKind::NotFound, msg)
 }
 
-#[cfg(target_os = "macos")]
-/// Where the kernel and initramfs live: `KIRI_GUEST_DIR`, else
-/// the in-repo build output (`guest/out`, or `guest/out/x86_64` on Intel),
-/// found relative to the binary.
-pub fn guest_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KIRI_GUEST_DIR") {
-        return PathBuf::from(d);
-    }
-    // Through its links: `kiri` on the PATH is one (~/.kiri/bin/kiri), and
-    // the guest is beside the binary it leads to, not beside the link.
-    let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
-    let bundled = exe.as_ref().and_then(|e| e.parent().map(|d| d.join("../Resources/guest"))).filter(|d| d.join(KERNEL).is_file());
-    // From a checkout: what `cargo xtask guest`/`kernel` built, the Intel
-    // guest under guest/out/x86_64. Found from the binary's place in
-    // target/<profile>/, not a path compiled in, so no build machine's
-    // folders end up in the binary.
-    let built = if cfg!(target_arch = "x86_64") { "guest/out/x86_64" } else { "guest/out" };
-    bundled.unwrap_or_else(|| {
-        let repo = exe.as_ref().and_then(|e| e.ancestors().find(|d| d.join("Cargo.lock").is_file() && d.join("guest").is_dir()));
-        repo.map(|r| r.join(built)).unwrap_or_else(|| PathBuf::from(built))
-    })
-}

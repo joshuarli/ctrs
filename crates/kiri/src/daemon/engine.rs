@@ -35,36 +35,27 @@ fn stopped_marker() -> Option<std::path::PathBuf> {
     super::state_dir().ok().map(|d| d.join("stopped"))
 }
 
-/// The VM's memory ceiling: `KIRI_MEMORY_MIB`, else Settings → Resources,
+/// The VM's memory ceiling: `KIRI_MEMORY_MIB`, else `vm.json`, else
 /// else half the Mac's RAM up to 8 GiB.
 pub fn memory_ceiling() -> u64 {
     if let Some(mib) = std::env::var("KIRI_MEMORY_MIB").ok().and_then(|v| v.parse::<u64>().ok()) {
         return mib << 20;
     }
-    if let Some(mib) = resources()["memory_mib"].as_u64() {
+    if let Some(mib) = crate::config::Resources::load().memory_mib {
         return (mib << 20).clamp(1 << 30, physical_memory());
     }
     (physical_memory() / 2).clamp(2 << 30, 8 << 30)
 }
 
-/// The VM's CPUs: `KIRI_CPUS`, else Settings → Resources, else 2.
+/// The VM's CPUs: `KIRI_CPUS`, else `vm.json`, else 2.
 pub fn vm_cpus() -> usize {
     let max = max_cpus();
-    std::env::var("KIRI_CPUS").ok().and_then(|v| v.parse().ok()).or_else(|| resources()["cpus"].as_u64().map(|c| c as usize)).unwrap_or(2).clamp(1, max)
+    std::env::var("KIRI_CPUS").ok().and_then(|v| v.parse().ok()).or_else(|| crate::config::Resources::load().cpus.map(|c| c as usize)).unwrap_or(2).clamp(1, max)
 }
 
 /// The Mac's CPUs, the most the VM can have.
 pub fn max_cpus() -> usize {
     std::thread::available_parallelism().map_or(2, std::num::NonZero::get)
-}
-
-/// What Settings → Resources saved, read at each boot: `{"cpus", "memory_mib"}`.
-pub fn resources_path() -> Option<std::path::PathBuf> {
-    super::state_dir().ok().map(|d| d.join("vm.json"))
-}
-
-pub fn resources() -> serde_json::Value {
-    resources_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::Value::Null)
 }
 
 pub fn physical_memory_bytes() -> u64 {

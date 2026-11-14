@@ -14,11 +14,15 @@ mod buildwith;
 #[cfg(unix)]
 mod client;
 #[cfg(unix)]
+mod config;
+#[cfg(unix)]
 mod daemon;
 #[cfg(unix)]
 mod diag;
 #[cfg(unix)]
 mod guest;
+#[cfg(unix)]
+mod service;
 #[cfg(any(unix, windows))]
 mod docker;
 
@@ -26,6 +30,7 @@ const USAGE: &str = "\
 usage: kiri COMMAND          docker's commands, on Kiri: kiri run, ps, exec,
                              logs, stop, rm, images, pull, build, compose…
        kiri daemon
+       kiri start | stop | status [--json] | restart
        kiri build-with [docker|kiri]   which builder docker build uses
        kiri diag logs [-f] [--ui|--engine|--cli] [--errors] [-n N]
        kiri diag report [--out PATH] [--send]   (a file to send us, tokens taken out)";
@@ -41,6 +46,8 @@ fn main() -> ExitCode {
     let result: std::io::Result<()> = match args.first().map(String::as_str) {
         #[cfg(unix)]
         Some("daemon") => daemon::run(&args[1..]),
+        #[cfg(unix)]
+        Some("start" | "stop" | "status" | "restart") => service::run(&args),
         #[cfg(unix)]
         Some("build-with") => buildwith::cli(&args[1..]),
         #[cfg(unix)]

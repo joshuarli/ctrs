@@ -101,6 +101,12 @@ pub fn run(_args: &[String]) -> io::Result<()> {
     let _ = std::fs::remove_file(&socket); // stale, from a daemon that died
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+    let pidfile = socket.with_file_name("kiri.pid");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        std::fs::write(&pidfile, format!("{} {now}\n", std::process::id())).and_then(|()| std::fs::set_permissions(&pidfile, std::fs::Permissions::from_mode(0o600)))?;
+    }
     // On a Linux host the daemon runs as root; `KIRI_SOCKET_GROUP=kiri`
     // lets that group's users in, as the docker group does for dockerd.
     let access_group = std::env::var_os("KIRI_SOCKET_GROUP");
@@ -138,6 +144,7 @@ pub fn run(_args: &[String]) -> io::Result<()> {
         unsafe { libc::sigwait(&set, &mut sig) };
         diag::info!("engine shutting down", signal = sig);
         let _ = std::fs::remove_file(&sock);
+        let _ = std::fs::remove_file(sock.with_file_name("kiri.pid"));
         on_signal.shutdown();
         // Give the guest a moment to power off before the VM is released.
         std::thread::sleep(std::time::Duration::from_millis(50));

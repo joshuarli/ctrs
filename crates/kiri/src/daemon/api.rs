@@ -509,7 +509,7 @@ fn image_save(engine: &Engine, names: &[String], w: &mut UnixStream) -> io::Resu
 /// `docker pull`, streamed as JSON progress lines like dockerd sends.
 /// `{"ports": [{"container_port": 80, "host_port": 8080, "proto": "tcp", "host_ip": ""}]}`;
 /// host_port 0 picks a free one.
-/// Settings → Resources: what the VM has now, what it boots with next, and
+/// The VM's resources: what it has now, what it boots with next, and
 /// the limits of this Mac.
 fn resources(engine: &Engine) -> Value {
     use super::engine as e;
@@ -556,9 +556,7 @@ fn set_resources(req: &Request) -> Result<(), Error> {
     let max_mem = e::physical_memory_bytes() >> 20;
     let cpus = body["cpus"].as_u64().filter(|c| (1..=e::max_cpus() as u64).contains(c)).ok_or_else(|| Error::BadRequest(format!("cpus must be 1 to {}", e::max_cpus())))?;
     let mem = body["memory_mib"].as_u64().filter(|m| (1024..=max_mem).contains(m)).ok_or_else(|| Error::BadRequest(format!("memory_mib must be 1024 to {max_mem}")))?;
-    let path = e::resources_path().ok_or_else(|| Error::Io(io::Error::other("HOME is not set")))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json!({"cpus": cpus, "memory_mib": mem}).to_string()).and_then(|()| std::fs::rename(&tmp, &path)).map_err(Error::Io)
+    crate::config::Resources { cpus: Some(cpus), memory_mib: Some(mem) }.save().map_err(Error::Io)
 }
 
 fn set_ports(req: &Request, engine: &Engine, id: &str) -> Result<Value, Error> {

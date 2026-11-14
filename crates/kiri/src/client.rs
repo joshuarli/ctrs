@@ -1,9 +1,6 @@
-//! The window and `kiri` subcommands talk to `kiri daemon` the way the docker CLI does: HTTP over
-//! the daemon's unix socket. One short connection per request, and one
+//! `kiri` subcommands talk to `kiri daemon` the way the docker CLI does: HTTP
+//! over the daemon's unix socket. One short connection per request, and one
 //! long-lived one for `/events`.
-
-// Parts of this serve only the Mac (the window, boot timings).
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -16,7 +13,7 @@ pub fn socket() -> io::Result<PathBuf> {
     if let Some(s) = std::env::var_os("KIRI_SOCKET") {
         return Ok(PathBuf::from(s));
     }
-    // Linux: the engine is the `kiri` system service (contrib/linux/kiri.service).
+    // Linux: a `kiri.service`-style system unit's socket, when present.
     #[cfg(target_os = "linux")]
     if std::path::Path::new(SERVICE_SOCKET).exists() {
         return Ok(PathBuf::from(SERVICE_SOCKET));
