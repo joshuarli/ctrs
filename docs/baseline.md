@@ -32,7 +32,9 @@ Follow-up commits: `b96e7e3` bumps rustix 1.1.5 → 1.1.6 (RUSTSEC-2026-0486); `
 
 Build method: `CARGO_ENCODED_RUSTFLAGS="" cargo xtask guest` (see decisions.md re: global mold rustflags). Kernel/disk built inside OrbStack's docker per Decision O2 — only `debian:trixie` containers with `--rm`; the user's `junior-*` containers were untouched; `docker ps -a`/`docker volume ls` before/after differ solely by the `kiri-kbuild` volume (kept for rebuilds; deleted at CTRS-23). `guest/out/` is gitignored.
 
-VM cold/warm boot times are not yet measurable without a running engine; recorded at CTRS-04.
+VM boot + smoke (CTRS-04, 2026-11-13, Apple Silicon): socket up 2 s after launch; `docker run --rm alpine true` 1 s; cold/hot `docker pull alpine` both <1 s; container exit codes propagate (`alpine false` → 1); exec/logs/rm green; published port maps `127.0.0.1:18080→80`; SIGTERM → daemon exit ≤2 s; no stale agent; OrbStack contexts byte-identical before/after; `~/.kiri` untouched during smoke and during `cargo test --workspace` (after test-isolation fix, `9a2b706`). Daemon idle RSS 10,896 KB. Smoke: `conformance/smoke.sh`, 15/15 checks.
+
+Full VM cold/warm boot time and container create/start/remove percentiles: recorded at CTRS-17 (network bench) where the harness measures them properly.
 
 ## Security audit at the pin (`cargo audit`, DB fetched 2026-11-13)
 
