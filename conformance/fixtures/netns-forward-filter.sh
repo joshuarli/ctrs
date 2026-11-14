@@ -32,14 +32,14 @@ mkdir_bridge() { # name addr
   ip link set "$1" up
 }
 veth_into() { # bridge name netns addr
-  ip link add "$3-h" type veth peer name "$3-p"
-  ip link set "$3-h" master "$1"
-  ip link set "$3-h" up
-  ip link set "$3-p" netns "$4"
-  ip netns exec "$4" ip link set lo up
-  ip netns exec "$4" ip link set "$3-p" name eth0
-  ip netns exec "$4" ip addr add "$5" dev eth0
-  ip netns exec "$4" ip link set eth0 up
+  ip link add "$2-h" type veth peer name "$2-p"
+  ip link set "$2-h" master "$1"
+  ip link set "$2-h" up
+  ip link set "$2-p" netns "$3"
+  ip netns exec "$3" ip link set lo up
+  ip netns exec "$3" ip link set "$2-p" name eth0
+  ip netns exec "$3" ip addr add "$4" dev eth0
+  ip netns exec "$3" ip link set eth0 up
 }
 
 mkdir_bridge "$BR1" 198.18.1.1/24

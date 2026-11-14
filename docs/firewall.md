@@ -61,10 +61,12 @@ Attribute numbering follows the nftables UAPI: `NFTA_TABLE_NAME` = 1,
 table ip kiri {                                  # created iff the engine manages any network
   chain postrouting { type nat hook postrouting priority 100; policy accept;
     oif <uplink> masquerade
+    # VM mode with >=1 published TCP port:
+    iif <uplink> ip saddr <gateway> oifname "kiri*" masquerade fully-random
   }
   chain prerouting { type nat hook prerouting priority -100; policy accept;
     # VM mode (redirect=true):
-    iifname "kiri*" ip daddr 198.19.248.254 tcp dport <PORT> redirect to :<PORT>   # HOST_RELAY_PORT (1026)
+    iifname "kiri*" meta l4proto tcp ip daddr 198.19.248.254 redirect to :1026   # HOST_RELAY_PORT
     iifname "kiri*" udp dport 53 ip daddr 198.19.248.254 redirect to :53           # dns_redirect_rule
     iif <uplink> ip saddr <gateway> fib daddr type local                           # published TCP ports,
       ip daddr != 127.0.0.0/8 tcp dport <hp> dnat to <ip>:<p>                      #   from the Mac only
@@ -110,10 +112,19 @@ rules, not by chain policy.
 ## Every rule, precisely
 
 ### postrouting (IPv4)
-`meta oif (NFT_META_OIF = 5) => reg 1; cmp eq <uplink ifindex>; masquerade`.
-Matches only packets leaving the uplink; the VM or Linux host is NATed to
-its own address, as Docker's default. On a Linux host this was written
-once at `host_uplink()`; in the VM at `uplink()` boot.
+1. `meta oif (NFT_META_OIF = 5) => reg 1; cmp eq <uplink ifindex>; masquerade`.
+   Matches only packets leaving the uplink; the VM or Linux host is NATed to
+   its own address, as Docker's default. On a Linux host this was written
+   once at `host_uplink()`; in the VM at `uplink()` boot.
+2. VM mode, only with ≥1 published TCP port: `published_masq_rule()` —
+   `meta iif <uplink> (NFT_META_IIF = 4)` `and` `payload saddr <gateway>`
+   `and` `oifname "kiri*"` `masq fully-random`
+   (`NFTA_MASQ_FLAGS = NF_NAT_RANGE_PROTO_RANDOM_FULLY (16)`).
+   The Mac's connections to a published port arrive at the container from
+   the bridge gateway on a fresh port, like Docker's userland proxy; a Mac
+   source port reused within the container's 60 s TIME_WAIT never meets the
+   old socket. Verified live in the VM (CTRS-13): the rule appears in
+   postrouting, not prerouting as first drafted here.
 
 ### prerouting (IPv4, VM mode)
 1. `redirect_rule(…, from_bridges = true)`: `iifname "kiri*"` (4-byte prefix
@@ -141,12 +152,6 @@ once at `host_uplink()`; in the VM at `uplink()` boot.
    The `!= 127.0.0.0/8` clause exists so that a packet for 127.0.0.1 is
    never rewritten before routing: one arriving from the LAN would
    otherwise reach a container instead of being dropped.
-4. `published_masq_rule(uplink, gateway)` (present only with ≥1 TCP dnat):
-   `iif <uplink> ip saddr <gateway> oifname "kiri*" masquerade random-fully`.
-   The Mac's connections to a published port arrive at the container from
-   the bridge gateway on a fresh port, like Docker's userland proxy; a Mac
-   source port reused within the container's 60 s TIME_WAIT never meets the
-   old socket. `random-fully` is `NFTA_MASQ_FLAGS = NF_NAT_RANGE_PROTO_RANDOM_FULLY (16)`.
 
 ### prerouting (IPv4, Linux-host mode)
 Per published port, TCP **and** UDP, `dnat_rules("prerouting", d, local)`:

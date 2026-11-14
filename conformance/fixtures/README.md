@@ -15,8 +15,15 @@ firewall acceptance gate; they do not exercise any Rust code.
 | `netns-localnet.sh` | `input`: container packets to 127.0.0.0/8 are dropped even with `route_localnet` (CVE-2020-8558) |
 | `netns-redirect.sh` | `prerouting` redirect: only packets from a `kiri*` bridge to the reserved address reach the host listener |
 
-Every fixture needs **Linux root** (namespaces, veth, nftables). None of
-them was executed on the macOS development host; they are written from the
-documented reference semantics and will run in the Linux guest at CTRS-13
-(Gate D). Each fixture is self-contained, cleans up with a trap, and exits
-non-zero on failure. Nothing here is run in ordinary CI.
+Every fixture needs **Linux root** (namespaces, veth, nftables). They are
+not executed on the macOS development host. They were run in the Linux
+guest at CTRS-13 and pass there (see `docs/evidence/crabtables.md`); they
+are the Gate D oracle and must stay green there. Each fixture is
+self-contained, cleans up with a trap, and exits non-zero on failure.
+Nothing here is run in ordinary CI.
+
+`netns-localnet.sh` asserts the guard's match semantics with nft counters
+around an L2-injected attack packet: on kernel 6.18.58 packets with
+destination 127.0.0.0/8 are dropped on non-loopback interfaces regardless
+of `route_localnet`, so the fixture does not claim an end-to-end delivery
+the kernel refuses to perform.

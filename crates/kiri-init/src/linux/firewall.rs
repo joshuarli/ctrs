@@ -117,6 +117,8 @@ pub enum Match {
     /// `iifname|oifname <op> "kiri*"`: a 4-byte prefix match.
     IifnamePrefix,
     OifnamePrefix,
+    /// `oifname != "kiri*"`: the forward filter's not-into-kiri-bridges rule.
+    OifnamePrefixNeq,
     /// Whole IFNAMSIZ comparison (NUL-padded), used per bridge.
     IifnameIs(String),
     OifnameIs(String),
@@ -129,8 +131,14 @@ pub enum Match {
     CtStateMasked(u32),
     /// `ct status & mask != 0` (IPS_DST_NAT = 1 << 5).
     CtStatusMasked(u32),
+    /// `ct state & mask == 0` (the localnet guard's fresh-connection test).
+    CtStateMaskedEqZero(u32),
+    /// `ct status & mask == 0` (the relay and localnet guards' DNAT test).
+    CtStatusMaskedEqZero(u32),
     /// `ip daddr == addr` (payload network header +16).
     DaddrV4([u8; 4]),
+    /// `ip daddr <subnet>/<prefix>` (a masked payload match, not a set).
+    DaddrV4Prefix { subnet: [u8; 4], prefix: u8 },
     /// `ip saddr == addr` (payload network header +12).
     SaddrV4([u8; 4]),
     /// `ip daddr & 255.0.0.0 != 127.0.0.0`.
@@ -404,7 +412,7 @@ pub mod crabtables_backend {
 
     use crabtables::expr::{Bitwise, Cmp, Expr, Fib};
     use crabtables::sys::NFTA_FIB_F_DADDR;
-    use crabtables::{Batch, BitwiseOp, Chain, ChainType, CmpOp, Family, FibResult, Policy, Reg, Socket, Table};
+    use crabtables::{Batch, BitwiseOp, Chain, ChainType, CmpOp, CtKey, Family, FibResult, Policy, Reg, Table};
 
     use super::*;
 
@@ -445,6 +453,19 @@ pub mod crabtables_backend {
         match m {
             Match::IifnamePrefix => b.match_prefix(Field::IifName, "kiri", 32),
             Match::OifnamePrefix => b.match_prefix(Field::OifName, "kiri", 32),
+            Match::OifnamePrefixNeq => {
+                // `oifname != "kiri*"`: the byte-aligned prefix match
+                // truncated to 4 bytes, then compare not-equal.
+                let load = Field::OifName.load(Reg::R1);
+                let load = match load {
+                    Expr::Payload(mut p) => {
+                        p.len = 4;
+                        Expr::Payload(p)
+                    }
+                    other => other,
+                };
+                b.expr(load).expr(Expr::Cmp(Cmp { sreg: Reg::R1, op: CmpOp::Neq, data: b"kiri".to_vec() }))
+            }
             Match::IifnameIs(n) => b.match_eq(Field::IifName, n.as_str()),
             Match::OifnameIs(n) => b.match_eq(Field::OifName, n.as_str()),
             Match::Iif(i) => b.match_eq(Field::Iif, *i),
@@ -452,7 +473,10 @@ pub mod crabtables_backend {
             Match::L4Proto(n) => b.match_eq(Field::L4Proto, *n),
             Match::CtStateMasked(mask) => b.ct_state(*mask),
             Match::CtStatusMasked(mask) => b.ct_status(*mask),
+            Match::CtStateMaskedEqZero(mask) => b.match_masked(Field::CtState, *mask, 0u32),
+            Match::CtStatusMaskedEqZero(mask) => b.match_masked(Field::Ct(CtKey::Status, None), *mask, 0u32),
             Match::DaddrV4(a) => b.match_eq(Field::IpDaddr, *a),
+            Match::DaddrV4Prefix { subnet, prefix } => b.match_prefix(Field::IpDaddr, *subnet, *prefix as u32),
             Match::SaddrV4(a) => b.match_eq(Field::IpSaddr, *a),
             Match::DaddrV4NotLoopback => b
                 .expr(Field::IpDaddr.load(Reg::R1))
@@ -532,9 +556,9 @@ pub mod crabtables_backend {
         batch
     }
 
-    fn open_socket(netns: Netns) -> crabtables::Result<Socket> {
+    fn open_socket(netns: Netns) -> crabtables::Result<crabtables::Socket> {
         match netns {
-            Netns::Current => Socket::new(),
+            Netns::Current => crabtables::Socket::new(),
             Netns::File(fd) => {
                 // Enter the namespace just long enough to create the socket,
                 // which stays bound to it (as in Netlink::open_in).
@@ -544,7 +568,7 @@ pub mod crabtables_backend {
                 if unsafe { libc::setns(fd, libc::CLONE_NEWNET) } != 0 {
                     return Err(crabtables::Error::from(std::io::Error::last_os_error()));
                 }
-                let r = Socket::new();
+                let r = crabtables::Socket::new();
                 // SAFETY: as above; a failure here is not reported (the
                 // socket already carries the namespace) but the error is
                 // surfaced through the io path otherwise.
@@ -560,10 +584,123 @@ pub mod crabtables_backend {
             match open_socket(transaction.netns).and_then(|mut s| s.commit(&batch)) {
                 Ok(_) => ApplyOutcome::Applied,
                 Err(crabtables::Error::OutcomeUnknown(u)) => ApplyOutcome::OutcomeUnknown { cause: u.cause().to_string() },
-                // A refusal (batch rolled back) or a send that never reached
-                // the kernel: the table is the previous one either way.
+                Err(crabtables::Error::Batch(b)) => {
+                    // Debug carries the full per-op error list; Display truncates.
+                    let details = format!("{b:?}");
+                    ApplyOutcome::RolledBack { cause: details }
+                }
+                // A send that never reached the kernel: the table is the previous one.
                 Err(e) => ApplyOutcome::RolledBack { cause: e.to_string() },
             }
         }
+    }
+}
+
+/// CTRS-13: apply the reference policy to the calling network namespace
+/// through the crabtables adapter. Run only inside a scratch netns as root,
+/// with nft(8) available to dump the result:
+///
+/// ```text
+/// apk add --no-cache nftables iproute2 util-linux
+/// unshare -n sh -c 'env CARGO_TEST_NOCAPTURE=1 /path/kiri_init_test --ignored --nocapture crabtables_matches_reference'
+/// nft -j list table ip kiri > /w/cmp/adapter-v4.json   # same netns
+/// ```
+///
+/// Never run this in the engine's VM root netns: it destroys and recreates
+/// the `kiri` table. The scratch netns dies with the unshare, taking the
+/// tables with it.
+#[cfg(all(test, feature = "crabtables"))]
+mod compare {
+    use super::*;
+
+    /// The reference configuration as a policy, VM mode: a published TCP
+    /// port (61000), host.docker.internal redirect, DNS redirect, per-bridge
+    /// forward filter, both input guards; the IPv6 table holds NAT66 and a
+    /// v6 forward filter.
+    pub fn reference_policy() -> FirewallPolicy {
+        let v4 = TableSpec {
+            family: NftFamily::Ipv4,
+            table: TableName::KIRI,
+            chains: vec![
+                ChainSpec::of(ChainName::Postrouting, Verdict::Accept),
+                ChainSpec::of(ChainName::Prerouting, Verdict::Accept),
+                ChainSpec::of(ChainName::Output, Verdict::Accept),
+                ChainSpec::of(ChainName::Forward, Verdict::Accept),
+                ChainSpec::of(ChainName::Input, Verdict::Accept),
+            ],
+            rules: vec![
+                Rule { chain: ChainName::Postrouting, matches: vec![Match::Oif(2)], target: Target::Masquerade { random_fully: false } },
+                Rule { chain: ChainName::Postrouting, matches: vec![Match::Iif(2), Match::SaddrV4([192, 168, 64, 1]), Match::OifnamePrefix], target: Target::Masquerade { random_fully: true } },
+                Rule {
+                    chain: ChainName::Prerouting,
+                    matches: vec![Match::IifnamePrefix, Match::DaddrV4([198, 19, 248, 254]), Match::L4Proto(libc::IPPROTO_TCP as u8)],
+                    target: Target::Redirect { to: 1026 },
+                },
+                Rule {
+                    chain: ChainName::Prerouting,
+                    matches: vec![Match::IifnamePrefix, Match::UdpDport(53), Match::DaddrV4([198, 19, 248, 254])],
+                    target: Target::Redirect { to: 53 },
+                },
+                Rule {
+                    chain: ChainName::Prerouting,
+                    matches: vec![Match::Iif(2), Match::SaddrV4([192, 168, 64, 1]), Match::FibDaddrTypeLocal, Match::DaddrV4NotLoopback, Match::TcpDport(61000)],
+                    target: Target::Dnat { to_ip: [172, 17, 0, 2], to_port: 80 },
+                },
+                Rule {
+                    chain: ChainName::Output,
+                    matches: vec![Match::DaddrV4([198, 19, 248, 254]), Match::L4Proto(libc::IPPROTO_TCP as u8)],
+                    target: Target::Redirect { to: 1026 },
+                },
+                Rule { chain: ChainName::Forward, matches: vec![Match::OifnamePrefixNeq], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::CtStateMasked(1 << 1 | 1 << 2)], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::CtStatusMasked(1 << 5)], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::IifnameIs("kiri0".into()), Match::OifnameIs("kiri0".into())], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![], target: Target::Verdict(Verdict::Drop) },
+                Rule {
+                    chain: ChainName::Input,
+                    matches: vec![Match::IifnamePrefix, Match::DaddrV4Prefix { subnet: [127, 0, 0, 0], prefix: 8 }, Match::CtStateMaskedEqZero(1 << 1 | 1 << 2), Match::CtStatusMaskedEqZero(1 << 5)],
+                    target: Target::Verdict(Verdict::Drop),
+                },
+                Rule { chain: ChainName::Input, matches: vec![Match::TcpDport(1026), Match::CtStatusMaskedEqZero(1 << 5)], target: Target::Verdict(Verdict::Drop) },
+            ],
+        };
+        let mut fd00 = [0u8; 16];
+        fd00[0] = 0xfd;
+        fd00[1] = 0xde;
+        fd00[2] = 0xed;
+        let v6 = TableSpec {
+            family: NftFamily::Ipv6,
+            table: TableName::KIRI,
+            chains: vec![ChainSpec::of(ChainName::Postrouting, Verdict::Accept), ChainSpec::of(ChainName::Forward, Verdict::Accept)],
+            rules: vec![
+                Rule { chain: ChainName::Postrouting, matches: vec![Match::PayloadSaddrV6 { subnet: fd00, prefix: 64 }, Match::OifnamePrefixNeq], target: Target::Masquerade { random_fully: false } },
+                Rule { chain: ChainName::Forward, matches: vec![Match::OifnamePrefixNeq], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::CtStateMasked(1 << 1 | 1 << 2)], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::CtStatusMasked(1 << 5)], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![Match::IifnameIs("kiri1".into()), Match::OifnameIs("kiri1".into())], target: Target::Verdict(Verdict::Accept) },
+                Rule { chain: ChainName::Forward, matches: vec![], target: Target::Verdict(Verdict::Drop) },
+            ],
+        };
+        FirewallPolicy { version: FIREWALL_CONFIG_VERSION, tables: vec![v4, v6] }
+    }
+
+    #[test]
+    #[ignore = "needs Linux root inside a scratch netns (see module docs); never the engine's netns"]
+    fn crabtables_matches_reference() {
+        // SAFETY: no preconditions; geteuid is always safe.
+        if unsafe { libc::geteuid() } != 0 {
+            panic!("needs root");
+        }
+        let policy = reference_policy();
+        let tx = policy.transaction(Netns::Current).expect("reference policy validates");
+        use super::FirewallBackend;
+        let backend = crate::linux::firewall::crabtables_backend::CrabtablesBackend;
+        let first = backend.apply(&tx);
+        eprintln!("first apply: {first:?}");
+        assert_eq!(first, ApplyOutcome::Applied);
+        let second = backend.apply(&tx);
+        eprintln!("second apply: {second:?}");
+        assert_eq!(second, ApplyOutcome::Applied, "re-apply must destroy-and-recreate cleanly");
+        eprintln!("crabtables applied the reference policy twice; tables left for nft dump");
     }
 }

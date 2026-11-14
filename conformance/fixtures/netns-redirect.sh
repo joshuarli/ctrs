@@ -48,7 +48,6 @@ mk_ns() { # netns bridge host-if-name addr gateway
 }
 mk_ns "$C" "$BR" kfw-redir-c0 198.18.5.2/24 198.18.5.1
 mk_ns "$X" "$XBR" kfw-redir-x0 198.18.6.2/24 198.18.6.1
-ip netns exec "$C" ip addr add 198.19.248.254/32 dev eth0
 
 # The relay listener on the host's 0.0.0.0:1026.
 python3 -c 'import socket

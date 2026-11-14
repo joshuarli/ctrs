@@ -39,6 +39,7 @@ ip netns exec "$SRV" ip link set lo up
 ip netns exec "$SRV" ip link set kfw-dnat-s1 name eth0
 ip netns exec "$SRV" ip addr add 198.18.0.2/24 dev eth0
 ip netns exec "$SRV" ip link set eth0 up
+ip netns exec "$SRV" ip route add default via 198.18.0.1
 
 ip link add "$LANIF" type veth peer name kfw-dnat-l1
 ip addr add 203.0.113.1/24 dev "$LANIF"
