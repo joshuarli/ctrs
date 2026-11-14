@@ -10,6 +10,8 @@ mod builder;
 pub mod dns;
 pub mod proxy;
 mod engine;
+#[cfg(feature = "h12tiny")]
+mod h12tiny;
 mod filters;
 mod health;
 mod hostetc;
@@ -167,6 +169,16 @@ pub fn run(_args: &[String]) -> io::Result<()> {
                 },
                 None => None,
             };
+            #[cfg(feature = "h12tiny")]
+            {
+                if h12tiny::wants_incumbent(&conn) {
+                    let _ = api::serve(conn, engine);
+                } else {
+                    let _ = h12tiny::serve_conn(conn, engine);
+                }
+                return;
+            }
+            #[cfg(not(feature = "h12tiny"))]
             let _ = api::serve(conn, engine);
         });
         if let Err(e) = spawned {

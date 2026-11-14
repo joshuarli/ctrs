@@ -29,7 +29,7 @@ def run(sock):
     c = Conn(sock)
     try:
         try:
-            c.send_all(b"GET /_ping HTTP/1.1\r\nhost: x\r\nx-fill: " + b"a" * 100000 + b"\r\n\r\n")
+            c.send_all(b"GET /_ping HTTP/1.1\r\nhost: x\r\nx-fill: " + b"a" * 500000 + b"\r\n\r\n")
         except OSError:
             pass
         else:

@@ -60,9 +60,18 @@ def run(sock):
             status, _, body = c.read_response()
         else:
             status = int(first.split(" ")[1])
-            while c.readline() not in (b"\r\n", b"\n"):
-                pass
-            body = b""
+            headers = {}
+            while True:
+                line = c.readline()
+                if line in (b"\r\n", b"\n"):
+                    break
+                k, _, v = line.partition(b":")
+                if k:
+                    headers[k.decode().strip().lower()] = v.decode().strip()
+            if "content-length" in headers:
+                body = c._read_exactly(int(headers["content-length"]))
+            else:
+                body = b""
         if (status, body) != (200, b"OK"):
             failures.append(f"GET /_ping with Expect -> {status} {body!r}")
     except socket.timeout:

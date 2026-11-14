@@ -11,7 +11,7 @@ pub const API_VERSION: &str = "1.47";
 
 /// Largest request body read into memory (container create, etc.). Archives
 /// and image loads are streamed with [`Body`] instead, at any size.
-const MAX_BODY: usize = 8 << 20;
+pub(crate) const MAX_BODY: usize = 8 << 20;
 /// The request line and headers together may not exceed this: an endless
 /// header line must not grow memory without bound.
 const MAX_HEAD: u64 = 64 << 10;
@@ -48,6 +48,13 @@ impl Request {
 
     pub fn header(&self, key: &str) -> Option<&str> {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_str())
+    }
+
+    /// Replaces the headers after construction (the pilot fills them).
+    #[cfg(feature = "h12tiny")]
+    pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> Request {
+        self.headers = headers;
+        self
     }
 
     /// A request the daemon makes of itself (the managed builder's
@@ -283,7 +290,7 @@ impl Read for Body<'_> {
 }
 
 /// `/v1.47/containers/json` → `/containers/json`.
-fn strip_version(path: &str) -> &str {
+pub(crate) fn strip_version(path: &str) -> &str {
     if let Some(rest) = path.strip_prefix("/v")
         && let Some(i) = rest.find('/')
             && rest[..i].bytes().all(|b| b.is_ascii_digit() || b == b'.') {
@@ -292,7 +299,7 @@ fn strip_version(path: &str) -> &str {
     path
 }
 
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
     let mut out = Vec::with_capacity(b.len());
