@@ -14,6 +14,7 @@ Requires Python >= 3.11 (tomllib). See README.md.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -60,6 +61,18 @@ COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
 W7_DIR = FIXTURES / "w7"
+W9_IMAGE = "python:3.13-slim"
+# ~0.6 s of CPU work inside the container, deterministic across engines
+# (same image, same interpreter); argv[1] is the job marker.
+W9_WORK = (
+    "import sys,time,hashlib\n"
+    "end=time.monotonic()+0.6\n"
+    "h=hashlib.sha256()\n"
+    "i=0\n"
+    "while time.monotonic()<end:\n"
+    "    h.update(str(i).encode());i+=1\n"
+    "print('npw9-'+sys.argv[1]+'-ok-'+h.hexdigest()[:12])\n"
+)
 
 # W8: a per-engine local OCI registry (registry:2 on a published loopback
 # port, content in a named volume so it survives ctrs VM restarts) serves a
@@ -823,6 +836,45 @@ def trial_w7(ctx, engine: Engine, state: str) -> dict:
         return rec
 
 
+def trial_w9(ctx, engine: Engine, state: str,
+             jobs: tuple = (1, 4, 8, 16)) -> dict:
+    """W9: parallel container churn — J concurrent `docker run` jobs, each
+    doing ~0.6 s of CPU work in python:3.13-slim and printing a marker.
+    Wall time per job count is the metric; every marker must appear."""
+    case_id = "W9"
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    try:
+        engine.ensure_up()
+        all_ok = True
+        for j in jobs:
+            t0 = time.monotonic()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=j) as ex:
+                futs = [
+                    ex.submit(engine.sh,
+                             ["run", "--rm", W9_IMAGE, "python3", "-c",
+                              W9_WORK, str(i)],
+                             timeout=180, check=False)
+                    for i in range(j)
+                ]
+                outs = [f.result() for f in futs]
+            wall = round(time.monotonic() - t0, 3)
+            rec["metrics"][f"jobs_{j}_s"] = wall
+            ok = all(
+                cp.returncode == 0
+                and f"npw9-{i}-ok-" in cp.stdout
+                for i, cp in enumerate(outs))
+            checks[f"jobs_{j}"] = ok
+            all_ok = all_ok and ok
+        rec["correctness"]["ok"] = all_ok
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -926,6 +978,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w8(ctx, engine, state, **kw)
         elif case_id == "W7":
             rec = trial_w7(ctx, engine, state)
+        elif case_id == "W9":
+            rec = trial_w9(ctx, engine, state)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1221,7 +1275,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8", "W9"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1234,7 +1288,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8", "W9"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1250,7 +1304,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W7", "W8"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W7", "W8", "W9"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)

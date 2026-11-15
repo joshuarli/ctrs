@@ -95,8 +95,14 @@ note = "Images are scratch+COPY relocated rootfs of postgres:17-alpine, redis:7-
 [[case]]
 id = "W9"
 family = "parallel-ci-churn"
-status = "pending"
-note = "1/4/8/16 parallel jobs with temp networks, writable layers, logs, artifacts"
+title = "J concurrent docker run jobs (1/4/8/16) doing ~0.6 s CPU work each in python:3.13-slim; wall time + marker verification"
+fixture = "inline (python:3.13-slim service image)"
+status = "implemented"
+metrics = ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"]
+states = ["warm"]
+params = {}
+correctness = ["jobs_<J> all markers present, rc=0"]
+note = "v1 churn: concurrent create/start/run/rm with CPU work and log capture; temp networks, writable-layer writes and artifact collection are deferred to a v2 cell."
 
 [[case]]
 id = "W10"

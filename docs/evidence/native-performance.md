@@ -153,6 +153,24 @@ offline; `--load` lands results in each engine's store.
 - Incremental is a wash; empty-build loss (~0.9 s) is consistent with
   the same fixed overhead plus possibly slower layer export.
 
+### W9 parallel container churn (warm, 5 pairs, ~0.6 s CPU per job)
+
+J concurrent `docker run --rm python:3.13-slim` jobs (1/4/8/16), each
+printing a verified marker. Median wall seconds:
+
+| jobs | ctrs | orbstack | orbstack/ctrs |
+| --- | --- | --- | --- |
+| 1 | 0.64 | 0.84 | 1.31 |
+| 4 | 0.66 | 1.06 | 1.62 |
+| 8 | 0.73 | 1.45 | 2.00 |
+| 16 | 0.78 | 2.10 | **2.69** |
+
+- ctrs container create/start/rm scales far better under concurrency —
+  OrbStack's per-container overhead grows roughly linearly with J
+  while ctrs stays near-flat. All markers verified on all 10 trials.
+- v1 scope: create/start/run/rm + CPU + log capture; temp networks,
+  writable-layer writes and artifact collection deferred.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -173,7 +191,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W1, W2 | implemented, pilot trials collected |
 | W8 | implemented (incl. under-load cell), pilot trials collected |
 | W7 | implemented, 5-pair pilot collected — **loss cell** (below) |
-| W3–W6, W9–W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W9 | implemented, 5-pair pilot collected — large win (below) |
+| W3–W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
