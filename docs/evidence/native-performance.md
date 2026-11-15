@@ -169,6 +169,13 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
   incl. `--tests`, `cargo xtask guest`, `conformance/smoke.sh` 21/0,
   fresh `alpine:3.20` pull + run, `redis:7` pull concurrent with `exec`
   on a running container.
-- **Pending:** paired before/after W1/W2 trials plus a pull-during-load
-  responsiveness cell; host-side bulk-stream separation (second vsock
-  connection) remains a separate slice of priority 1.
+- **Post-change pilot (2026-11-14, warm, 5 pairs, seed-varied):** W2 ctrs
+  rps median ~2533 vs OrbStack ~2143 (~18% ahead, consistent with the
+  pre-change pilot); W1 warm ctrs ~3.6 s vs OrbStack ~4.1–6.1 s bimodal;
+  ctrs cold W1 20.1 s (single sample, WAN pull variance dominates — the
+  pre-change cold was 18.8 s, not a regression signal at n=1). All
+  correctness checks green.
+- **Pending:** a dedicated pull-during-load responsiveness cell (the
+  actual hypothesis test) and the ≥10-pair frozen baseline; host-side
+  bulk-stream separation (second vsock connection) remains a separate
+  slice of priority 1.
