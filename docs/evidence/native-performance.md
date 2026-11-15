@@ -932,3 +932,19 @@ path engine-wide — two retries over ~1.6 s precede the vsock
 fallback (guest install is idempotent across retries).
 `docker cp` now applies the same namespace-filtered pax xattrs as
 layer unpack (`591a690`) — previously it dropped all xattrs.
+
+**W8 attribution for LayerFetch (2026-11-15):** a debug-logged cold
+trial (`run-20261115T055651`) shows all four portfolio layers
+fetching over the share (`mib=1/16/41/109`, zero retries/failures)
+in ~1.65 s total fetch+install. True cold `run_*` vs the last
+pre-change cold trial: pg 1.16 -> 0.76 s, py 0.68 -> 0.41 s,
+redis ~flat, busybox ~flat — roughly a third off the deploy step,
+consistent with removing only the vsock transfer while unpack+vda
+install remains. OrbStack still wins `run_pg`/`run_py` (~0.3-0.5 s)
+because its in-VM store makes deploy a pull-time cost; ctrs's
+host-side store makes it a run-time cost — the same structural
+gap as W6/W7, reduced but not closed. `pull_*` remains a ctrs win
+(0.07-0.17 s vs 0.09-0.62 s). Caveat recorded: an earlier same-day
+baseline showed misleading 0.02-0.04 s `run_*` because the runner
+adopted a still-running manual daemon and its `stop()` no-ops on
+adopted engines — cold-store trials require a runner-owned daemon.
