@@ -16,10 +16,10 @@
 //! the solve's trailers arrive. Every other exporter form (push, tar,
 //! local, multi-entry, attestations) passes through untouched.
 //!
-//! `/session` needs no h2 parsing of its own: the session's h2 runs
-//! end-to-end between buildx and buildkitd's session manager, so the
-//! conn's bytes are spliced raw through `BytesMessage`s on a
-//! `Control.Session` stream of a minimal gRPC client.
+//! `/session` is a byte-level proxy: buildkitd's session manager is an
+//! HTTP hijack endpoint keyed on the `X-Docker-Expose-Session-*`
+//! headers, so the client's request head is forwarded verbatim and the
+//! h2 bytes are spliced raw in both directions.
 //!
 //! Flow control: both hops advertise a 1 GiB stream window and a
 //! 1 GiB connection window up front, so no WINDOW_UPDATE traffic is
@@ -91,7 +91,8 @@ fn frame_header(len: usize, ftype: u8, flags: u8, sid: u32) -> [u8; 9] {
 /// endpoints. The 101 goes out only once buildkitd is reachable, so a
 /// dead builder fails the dial as an HTTP error rather than a hung h2
 /// connection.
-pub fn serve(engine: &Arc<Engine>, path: &str, w: &mut UnixStream, r: &mut dyn DynBufRead) -> io::Result<()> {
+pub fn serve(engine: &Arc<Engine>, req: &http::Request, path: &str, w: &mut UnixStream, r: &mut dyn DynBufRead) -> io::Result<()> {
+    crate::diag::info!("build endpoint", path = path);
     // Anything the peer sent behind the request head is already in the
     // BufReader; hand it to the h2 side first.
     let concrete = r
@@ -103,6 +104,7 @@ pub fn serve(engine: &Arc<Engine>, path: &str, w: &mut UnixStream, r: &mut dyn D
     let backend = match dial_builder(engine) {
         Ok(b) => b,
         Err(e) => {
+            crate::diag::warn!("build endpoint dial failed", path = path, error = format!("{e}"));
             let _ = http::respond_with(w, 500, "text/plain; charset=utf-8", "", format!("ctrs: {e}\n").as_bytes());
             return Ok(());
         }
@@ -111,20 +113,20 @@ pub fn serve(engine: &Arc<Engine>, path: &str, w: &mut UnixStream, r: &mut dyn D
     w.flush()?;
     match path {
         "/grpc" => grpc(engine, early, sock, backend),
-        _ => session(early, sock, backend),
+        _ => session(req, early, sock, backend),
     }
 }
 
 /// The builder's buildkitd TCP port, reached through the guest relay
 /// at the builder container's bridge address.
 fn dial_builder(engine: &Arc<Engine>) -> io::Result<UnixStream> {
-    let id = super::builder::ensure_for_driver(engine).map_err(|e| io_err(format!("{e:?}")))?;
+    let id = super::builder::ensure_for_driver(engine).map_err(|e| io_err(format!("ensure: {e:?}")))?;
     let ip = engine
         .with(&id, |c| c.ip)
-        .map_err(|e| io_err(format!("{e:?}")))?
+        .map_err(|e| io_err(format!("lookup: {e:?}")))?
         .ok_or_else(|| io_err("the builder has no address"))?;
     let vm = engine.vm()?;
-    let conn = super::ports::open_relay(&vm, ip, BUILDKIT_TCP_PORT)?;
+    let conn = super::ports::open_relay(&vm, ip, BUILDKIT_TCP_PORT).map_err(|e| io_err(format!("relay {ip:?}:{BUILDKIT_TCP_PORT}: {e}")))?;
     Ok(UnixStream::from(conn.fd.try_clone()?))
 }
 
@@ -583,29 +585,47 @@ fn parse_exporter(msg: &[u8]) -> Option<(String, Vec<(String, String)>)> {
 /// and the tags to restore; `None` passes the request through.
 fn rewrite_solve(msg: &[u8], engine: &Arc<Engine>) -> Option<(Vec<u8>, String, Vec<String>)> {
     let fields = parse_fields(msg)?;
-    // Deprecated exporter fields would be appended by buildkitd;
-    // don't try to reason about a mixed request.
-    if fields.iter().any(|f| f.field == 3 || f.field == 4) {
-        return None;
-    }
+    crate::diag::debug!(
+        "solve request fields",
+        fields = format!("{:?}", fields.iter().map(|f| (f.field, f.wire)).collect::<Vec<_>>())
+    );
+    // Deprecated exporter fields (3, 4) are ignored by buildkitd when
+    // `Exporters` (13) is set — which buildx always does — so they are
+    // not a reason to skip the rewrite.
     let exporters: Vec<&Field> = fields.iter().filter(|f| f.field == 13 && f.wire == 2).collect();
     if exporters.len() != 1 {
+        crate::diag::debug!("solve rewrite skipped", reason = format!("exporters={}", exporters.len()));
         return None;
     }
     let e = exporters[0];
-    let (etype, attrs) = parse_exporter(&msg[e.content.0..e.content.1])?;
-    if etype != "docker" && etype != "image" {
+    let Some((etype, attrs)) = parse_exporter(&msg[e.content.0..e.content.1]) else {
+        crate::diag::debug!("solve rewrite skipped", reason = "exporter parse failed");
         return None;
+    };
+    crate::diag::debug!("solve exporter", etype = etype.clone(), attrs = format!("{attrs:?}"));
+    // The docker driver rewrites `image` exports to `moby` (buildx
+    // build/opt.go); dockerd's builtin exporter name means the same
+    // "load into the image store" intent our mirror+retag provides.
+    if etype != "docker" && etype != "image" && etype != "moby" {
+        return None;
+    }
+    if etype == "moby" {
+        crate::diag::debug!("moby exporter attrs", attrs = format!("{attrs:?}"));
     }
     let get = |k: &str| attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str());
     if get("push") == Some("true") {
+        crate::diag::debug!("solve rewrite skipped", reason = "push=true");
         return None;
     }
-    let name = get("name").filter(|n| !n.is_empty())?;
+    let Some(name) = get("name").filter(|n| !n.is_empty()) else {
+        crate::diag::debug!("solve rewrite skipped", reason = "no name attr");
+        return None;
+    };
     // Fail closed on anything we don't recognize: attestations,
     // platform pins, store selection, unknown knobs.
     for (k, _) in &attrs {
         if k.starts_with("annotation") || !(k == "name" || k == "push" || CARRY_ATTRS.contains(&k.as_str())) {
+            crate::diag::debug!("solve rewrite skipped", reason = format!("attr {k}"));
             return None;
         }
     }
@@ -746,6 +766,9 @@ fn relay_c2b_run<R: Read>(
     rd.preface()?;
     // Per-stream bytes awaiting their first complete grpc message.
     let mut cbuf: HashMap<u32, (Vec<u8>, bool)> = HashMap::new();
+    // Client stream ids whose first gRPC message was already relayed;
+    // only that message is eligible for the Solve rewrite.
+    let mut seen_first: std::collections::HashSet<u32> = std::collections::HashSet::new();
     loop {
         if dead.load(Ordering::Relaxed) {
             return Ok(());
@@ -797,43 +820,45 @@ fn relay_c2b_run<R: Read>(
                     let mut s = sids.lock().unwrap_or_else(|e| e.into_inner());
                     s.open_b(f.sid)
                 };
-                if let Some((buf, ended)) = cbuf.remove(&f.sid) {
-                    let mut buf = buf;
-                    let mut ended = ended;
-                    buf.extend_from_slice(&data);
-                    ended |= end;
-                    // First complete grpc message?
-                    if buf.len() >= 5 {
-                        let mlen = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-                        if buf.len() >= 5 + mlen || ended {
-                            let take = (5 + mlen).min(buf.len());
-                            let msg = &buf[..take];
-                            let rest = &buf[take..];
-                            let mut emit: Vec<u8> = Vec::new();
-                            let mut rewrote = None;
-                            if msg.len() >= 5 && msg[0] == 0 {
-                                if let Some((new_msg, repo, tags)) = rewrite_solve(&msg[5..msg.len().min(5 + mlen)], &engine) {
-                                    emit.push(0);
-                                    emit.extend_from_slice(&(new_msg.len() as u32).to_be_bytes());
-                                    emit.extend_from_slice(&new_msg);
-                                    rewrote = Some((repo, tags));
-                                }
-                            }
-                            if rewrote.is_none() {
-                                emit.extend_from_slice(msg);
-                            }
-                            emit.extend_from_slice(rest);
-                            if let Some((repo, tags)) = rewrote {
-                                pending.lock().unwrap_or_else(|e| e.into_inner()).insert(b, (repo, tags, engine.clone()));
-                            }
-                            send_data(&be_ep, &be_send, b, &emit, ended)?;
-                            continue;
-                        }
-                    }
-                    cbuf.insert(f.sid, (buf, ended));
-                } else {
+                if seen_first.contains(&f.sid) {
                     send_data(&be_ep, &be_send, b, &data, end)?;
+                    continue;
                 }
+                // Every stream's first bytes are one gRPC message; buffer
+                // until it completes so a SolveRequest can be inspected.
+                // Later messages on the same stream pass through below.
+                let (mut buf, mut ended) = cbuf.remove(&f.sid).unwrap_or_default();
+                buf.extend_from_slice(&data);
+                ended |= end;
+                if buf.len() >= 5 {
+                    let mlen = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+                    if buf.len() >= 5 + mlen || ended {
+                        let take = (5 + mlen).min(buf.len());
+                        let msg = &buf[..take];
+                        let rest = &buf[take..];
+                        let mut emit: Vec<u8> = Vec::new();
+                        let mut rewrote = None;
+                        if msg.len() >= 5 && msg[0] == 0 {
+                            if let Some((new_msg, repo, tags)) = rewrite_solve(&msg[5..msg.len().min(5 + mlen)], &engine) {
+                                emit.push(0);
+                                emit.extend_from_slice(&(new_msg.len() as u32).to_be_bytes());
+                                emit.extend_from_slice(&new_msg);
+                                rewrote = Some((repo, tags));
+                            }
+                        }
+                        if rewrote.is_none() {
+                            emit.extend_from_slice(msg);
+                        }
+                        emit.extend_from_slice(rest);
+                        if let Some((repo, tags)) = rewrote {
+                            pending.lock().unwrap_or_else(|e| e.into_inner()).insert(b, (repo, tags, engine.clone()));
+                        }
+                        seen_first.insert(f.sid);
+                        send_data(&be_ep, &be_send, b, &emit, ended)?;
+                        continue;
+                    }
+                }
+                cbuf.insert(f.sid, (buf, ended));
             }
             F_RST if f.sid != 0 => {
                 let (b, c) = {
@@ -1014,15 +1039,23 @@ fn hpack_str(out: &mut Vec<u8>, s: &str) {
     }
 }
 
-/// The `Control.Session` request headers, HPACK-encoded.
-fn session_headers() -> Vec<u8> {
+/// The `Control.Session` request headers, HPACK-encoded. The session
+/// id/shared-key/methods ride the client's `X-Docker-Expose-Session-*`
+/// headers, forwarded as gRPC metadata (lowercase, as h2 requires).
+fn session_headers(req: &http::Request) -> Vec<u8> {
     let mut h = Vec::new();
     h.push(0x83); // :method POST (static index 3)
     h.push(0x86); // :scheme http (static index 6)
     hpack_lit(&mut h, ":path", "/moby.buildkit.v1.Control/Session");
+    hpack_lit(&mut h, ":authority", "buildkit");
     hpack_lit(&mut h, "content-type", "application/grpc");
     hpack_lit(&mut h, "te", "trailers");
     hpack_lit(&mut h, "user-agent", "ctrs");
+    for (k, v) in req.headers() {
+        if k.to_ascii_lowercase().starts_with("x-docker-expose-session-") {
+            hpack_lit(&mut h, &k.to_ascii_lowercase(), v);
+        }
+    }
     h
 }
 
@@ -1046,7 +1079,7 @@ fn grpc_frame(msg: &[u8]) -> Vec<u8> {
 
 /// `/session`: splice the client's session bytes through a
 /// `Control.Session` bidi stream on a fresh buildkitd connection.
-fn session(early: Vec<u8>, sock: UnixStream, mut be: UnixStream) -> io::Result<()> {
+fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixStream) -> io::Result<()> {
     let cli_rd_sock = sock.try_clone()?;
     let mut cli_wr_sock = sock.try_clone()?;
     let be_ep = Arc::new(Endpoint::new(be.try_clone()?));
@@ -1097,7 +1130,7 @@ fn session(early: Vec<u8>, sock: UnixStream, mut be: UnixStream) -> io::Result<(
     }
 
     // Open the Control.Session stream (client-initiated stream 1).
-    be_ep.frame(F_HEADERS, FL_END_HEADERS, 1, &session_headers())?;
+    be_ep.frame(F_HEADERS, FL_END_HEADERS, 1, &session_headers(req))?;
 
     // Sender: client bytes → BytesMessage → grpc DATA on stream 1.
     let send_ep = be_ep.clone();

@@ -79,6 +79,11 @@ impl Request {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_str())
     }
 
+    /// All request headers, in wire order.
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
     /// Replaces the headers after construction (the pilot fills them).
     #[cfg(feature = "h12tiny")]
     pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> io::Result<Request> {

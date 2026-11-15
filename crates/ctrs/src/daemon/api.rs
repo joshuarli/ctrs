@@ -123,7 +123,7 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
     // The docker driver's BuildKit endpoints: h2c upgrades to the
     // managed builder's buildkitd (buildgrpc.rs).
     if m == "POST" && matches!(p, "/grpc" | "/session") && req.header("Upgrade").is_some_and(|u| u.eq_ignore_ascii_case("h2c")) {
-        return super::buildgrpc::serve(engine, p, w, r).map(|()| Next::Close);
+        return super::buildgrpc::serve(engine, req, p, w, r).map(|()| Next::Close);
     }
     match (m, p) {
         ("GET" | "HEAD", "/_ping") => {

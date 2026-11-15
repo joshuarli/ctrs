@@ -153,7 +153,12 @@ fn snapshot(c: &super::engine::Container) -> BuilderSnapshot {
         image: c.spec.image.clone(),
         image_id: c.spec.image_id.clone(),
         owned: c.spec.labels.as_object().is_some_and(|l| l.get(LABEL).is_some_and(|v| v == "1")),
-        tcp: c.spec.cmd.iter().any(|a| a.contains("0.0.0.0:1234")),
+        tcp: c
+            .spec
+            .cmd
+            .iter()
+            .any(|a| a.contains("0.0.0.0:1234"))
+            && c.spec.cmd.iter().any(|a| a.contains("buildkitd.sock")),
         created: c.created,
     }
 }
@@ -556,7 +561,9 @@ fn desired_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_imag
 fn create_body() -> Value {
     json!({
         "Image": PINNED,
-        "Cmd": ["--allow-insecure-entitlement=network.host", "--addr", "tcp://0.0.0.0:1234"],
+        // The unix socket keeps buildctl (classic builds, readiness
+        // probe) working; the TCP listener serves the h2c endpoints.
+        "Cmd": ["--allow-insecure-entitlement=network.host", "--addr", "unix:///run/buildkit/buildkitd.sock", "--addr", "tcp://0.0.0.0:1234"],
         "Labels": {LABEL: "1"},
         "HostConfig": {
             "Privileged": true,
