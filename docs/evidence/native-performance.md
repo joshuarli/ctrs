@@ -917,3 +917,18 @@ best-effort; verified live (bsdtar archive imports, unpacks,
 `docker cp` round-trips) plus a crafted-pax unit test. Real-world
 `docker import`/build-context archives from macOS tooling are
 commonly pax, so this was a genuine compat hole.
+
+**EXP-6 layer fetch — large-blob verification + retry hardening
+(`fa42966`, 2026-11-15):** `LayerFetch` verified at scale: a fresh
+`docker import` of a 256 MiB urandom rootfs produced a ~456 MiB
+store blob; `docker run` deployed+unpacked it via the share
+(`layer via share ... mib=456`) on the FIRST attempt ~1 s after
+import — total run 0.56 s including unpack and container setup,
+vs ~0.5-0.9 s for the vsock transfer alone at the measured
+~500 MB/s-1 GB/s floor. Real pull->run also engages
+(`alpine:3.19` rootfs, `mib=3`). Hardened the failure latch: one
+transient freshness-boundary failure no longer disables the share
+path engine-wide — two retries over ~1.6 s precede the vsock
+fallback (guest install is idempotent across retries).
+`docker cp` now applies the same namespace-filtered pax xattrs as
+layer unpack (`591a690`) — previously it dropped all xattrs.
