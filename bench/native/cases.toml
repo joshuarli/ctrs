@@ -119,8 +119,16 @@ note = "v1 churn: concurrent create/start/run/rm with CPU work and log capture; 
 [[case]]
 id = "W10"
 family = "failure-recovery"
-status = "pending"
-note = "kill/restart engine/agent/container mid-workload; lost-data and stuck-resource checks"
+title = "kill API container mid-load, restart after 3 s, verify recovery + no lost committed writes"
+fixture = "fixtures/w1 + fixtures/w2/load.py"
+status = "implemented"
+metrics = ["recovery_s", "load_errors", "load_rps", "load_p95_ms", "load_p99_ms", "items_got"]
+states = ["warm"]
+params = { duration_s = 20, concurrency = 8, write_ratio = 0.3,
+           kill_at_s = 6, down_for_s = 3 }
+correctness = ["api_found", "kill_rc", "start_rc", "recovered",
+               "no_lost_writes (items >= 500 + acked writes)"]
+note = "v1 kills the API container only; engine/VM-level kill is deferred (OrbStack shared-daemon restart is not comparable). Errors inside the kill window are expected and not a failure; lost committed writes or failure to recover are."
 
 [[case]]
 id = "W11"

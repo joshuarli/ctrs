@@ -1076,6 +1076,123 @@ def trial_w5(ctx, engine: Engine, state: str,
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
 
 
+def trial_w10(ctx, engine: Engine, state: str,
+              duration: float = 20.0, concurrency: int = 8,
+              write_ratio: float = 0.3, seed: int = 1,
+              kill_at: float = 6.0, down_for: float = 3.0) -> dict:
+    """W10 (pilot): kill the API container mid-load, restart it, and
+    verify the stack recovers with no lost committed writes. Metrics:
+    recovery time, errors in the kill window, and post-restart health.
+    Engine-level kill is out of scope for this cell (OrbStack's shared
+    daemon makes an engine restart non-comparable)."""
+    case_id = "W10"
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    load_out = trial_dir / "load.json"
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    sampler = trace = None
+    load_proc = None
+    t0 = time.monotonic()
+    try:
+        engine.ensure_up()
+        compose_down(engine, proj)
+        sampler, trace = start_sampler(engine, trial_dir)
+        up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
+        if up.returncode != 0:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
+            return rec
+        t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+        if t_ready is None:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append("stack never became healthy")
+            return rec
+        rec["metrics"]["setup_seconds"] = round(time.monotonic() - t0, 3)
+
+        load_t0 = time.monotonic()
+        load_proc = subprocess.Popen(
+            [sys.executable, str(LOAD_PY), "--url", base,
+             "--concurrency", str(concurrency), "--duration", str(duration),
+             "--write-ratio", str(write_ratio), "--seed", str(seed),
+             "--out", str(load_out)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Let load reach steady state, then kill the API container.
+        time.sleep(kill_at - (time.monotonic() - load_t0))
+        api_id = engine.compose(proj, ["ps", "-q", "api"],
+                                timeout=30).stdout.strip()
+        checks = rec["correctness"]["checks"]
+        checks["api_found"] = bool(api_id)
+        tk = time.monotonic()
+        kill = engine.sh(["kill", api_id], timeout=30, check=False) \
+            if api_id else None
+        checks["kill_rc"] = kill is not None and kill.returncode == 0
+        rec["metrics"]["kill_at_load_s"] = round(
+            time.monotonic() - load_t0, 3)
+
+        time.sleep(down_for)
+        ts = time.monotonic()
+        start = engine.sh(["start", api_id], timeout=120, check=False) \
+            if api_id else None
+        checks["start_rc"] = start is not None and start.returncode == 0
+        # Recovery = docker start returned -> /health ok again.
+        t_rec, _ = wait_health(base, HEALTH_DEADLINE_S)
+        rec["metrics"]["recovery_s"] = (
+            round(t_rec - ts, 3) if t_rec is not None else None)
+        checks["recovered"] = t_rec is not None
+
+        try:
+            load_proc.wait(timeout=duration + 120)
+        except subprocess.TimeoutExpired:
+            load_proc.kill()
+            load_proc.wait(timeout=10)
+        if load_out.exists():
+            summary = json.loads(load_out.read_text())
+            rec["metrics"].update({
+                "load_duration_s": summary["duration_s"],
+                "load_rps": summary["rps"],
+                "load_requests": summary["requests"],
+                "load_errors": summary["errors"],
+                "load_writes_ok": summary["writes_ok"],
+                "load_p95_ms": summary["latency_ms"]["p95"],
+                "load_p99_ms": summary["latency_ms"]["p99"],
+            })
+            # Errors clustered in the kill window are expected; what
+            # matters is that the stack came back and no committed write
+            # was lost (got >= 500 + acked writes).
+            status, stats = http_json(f"{base}/stats", timeout=10)
+            expected = 500 + summary["writes_ok"]
+            got = stats.get("items") if isinstance(stats, dict) else None
+            rec["metrics"]["items_expected_min"] = expected
+            rec["metrics"]["items_got"] = got
+            checks["no_lost_writes"] = (
+                isinstance(got, int) and got >= expected)
+        rec["correctness"]["ok"] = all(
+            checks.get(k) for k in
+            ("api_found", "kill_rc", "start_rc", "recovered",
+             "no_lost_writes"))
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        if load_proc is not None and load_proc.poll() is None:
+            load_proc.kill()
+            load_proc.wait(timeout=10)
+        compose_down(engine, proj)
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -1185,6 +1302,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w3(ctx, engine, state)
         elif case_id == "W5":
             rec = trial_w5(ctx, engine, state)
+        elif case_id == "W10":
+            rec = trial_w10(ctx, engine, state, **kw)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1330,7 +1449,7 @@ def cmd_run(args) -> int:
     ctx = RunContext(f"run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
     kw = {}
-    if args.case in ("W2", "W8"):
+    if args.case in ("W2", "W8", "W10"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
     if args.case == "W8" and getattr(args, "under_load", False):
@@ -1357,7 +1476,7 @@ def cmd_baseline(args) -> int:
                 rng.shuffle(order)
             for idx, eng in enumerate(order):
                 kw = {}
-                if args.case in ("W2", "W8"):
+                if args.case in ("W2", "W8", "W10"):
                     kw = {"concurrency": args.concurrency,
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
@@ -1480,7 +1599,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1493,7 +1612,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1509,7 +1628,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)

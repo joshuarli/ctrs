@@ -215,6 +215,30 @@ between bind iterations with marker verification.
   (60 tiny files, warm cache) so a heavier IO cell may widen it.
 - All edit-coherence markers verified on all 10 trials.
 
+### W10 failure recovery pilot (warm, kill API container mid-load)
+
+W1 stack under 8-way mixed load; `docker kill` the API container at
+~6 s, `docker start` after 3 s, load continues to 20 s. 4 trials per
+engine, all correctness checks green (recovery, no lost committed
+writes — `items >= 500 + acked writes` held everywhere; OrbStack even
+showed the expected +1 committed-but-unacked surplus once).
+
+| metric | ctrs | orbstack |
+| --- | --- | --- |
+| recovery_s (start → /health) | 0.54–0.80 | 0.36–0.37 |
+| load_errors in window | ~65k–73k | ~160–270 |
+
+- Both engines recover correctly with zero lost writes — the hard
+  gate passes on both.
+- ctrs restart→healthy is ~0.2 s slower (consistent with the W3
+  restart_s gap — container start path).
+- Error surfacing differs: ctrs's listener keeps accepting and fails
+  fast (~70k rapid errors), OrbStack appears to hold/refuse
+  connections (~200 errors). Fast-fail is arguably better client
+  behaviour; recorded as a difference, not a defect.
+- v1 scope: container kill only. Engine/VM-level kill deferred —
+  OrbStack's shared daemon makes an engine restart non-comparable.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -238,7 +262,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W9 | implemented, 5-pair pilot collected — large win (below) |
 | W3 | implemented, pilot collected — mixed (below) |
 | W5 | implemented, 5-pair pilot collected (below) |
-| W4, W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W10 | implemented, pilot collected (below) |
+| W4, W6, W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
