@@ -145,5 +145,16 @@ note = "v1 kills the API container only; engine/VM-level kill is deferred (OrbSt
 [[case]]
 id = "W11"
 family = "soak"
-status = "pending"
-note = "12-24h mixed load; daemon-death and growth gates"
+title = "sustained mixed load: repeated W2 load windows + container-churn bursts; engine-death, error-rate and resource-growth gates"
+fixture = "fixtures/w1 + fixtures/w2/load.py + inline churn"
+status = "implemented"
+metrics = ["soak_seconds", "windows", "requests", "errors", "error_pct",
+           "rps_mean", "churn_jobs_completed", "churn_failures",
+           "engine_version_check_failures", "peak_total_rss_kb",
+           "cpu_seconds_est"]
+states = ["warm"]
+params = { duration_s = 300, window_s = 30, concurrency = 8,
+           write_ratio = 0.3, churn_jobs = 8, churn_every = 4 }
+correctness = ["engine_alive", "error_rate <= 1%", "churn_all_ok",
+               "item_count >= expected"]
+note = "v1 pilot default 300 s; campaign target 12-24 h via --duration (run/baseline CLI default is 20 s — pass explicitly). Load windows are sequential 30 s runs of the W2 driver; churn bursts reuse the W9 job. 'engine_alive' counts failed `docker version` probes during the soak — any unplanned death fails the cell. Resource growth is recorded via the process sampler, not gated in v1."

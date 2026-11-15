@@ -1398,6 +1398,132 @@ def http_json_write(url: str, obj: dict, timeout: float = 10.0):
         return 0, {"transport_error": str(e)}
 
 
+def trial_w11(ctx, engine: Engine, state: str,
+              duration: float = 300.0, window: float = 30.0,
+              concurrency: int = 8, write_ratio: float = 0.3,
+              seed: int = 1, churn_jobs: int = 8,
+              churn_every: int = 4) -> dict:
+    """W11: sustained-operation soak — the W1 stack under repeated
+    load windows interleaved with container-churn bursts until the
+    duration deadline. Gates: engine answers `docker version` at the
+    end (no unplanned death), aggregate error rate stays under 1%,
+    every churn job exits 0. The resource sampler runs for the whole
+    trial so RSS/CPU growth is captured. v1 pilot default is 300 s;
+    the campaign target is 12-24 h via --duration."""
+    case_id = "W11"
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    sampler = trace = None
+    t0 = time.monotonic()
+    deadline = t0 + duration
+    try:
+        engine.ensure_up()
+        compose_down(engine, proj)
+        sampler, trace = start_sampler(engine, trial_dir)
+        up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
+        if up.returncode != 0:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                f"compose up rc={up.returncode}: "
+                f"{(up.stderr or up.stdout)[-300:]}")
+            return rec
+        t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+        if t_ready is None:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append("stack never became healthy")
+            return rec
+        rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
+
+        total_req = total_err = total_writes = windows = churn_done = 0
+        churn_fail = version_fail = 0
+        wseed = seed
+        while time.monotonic() < deadline:
+            windows += 1
+            wseed += 1
+            out = trial_dir / f"load-{windows:03d}.json"
+            load = subprocess.run(
+                [sys.executable, str(LOAD_PY), "--url", base,
+                 "--concurrency", str(concurrency),
+                 "--duration", str(window),
+                 "--write-ratio", str(write_ratio),
+                 "--seed", str(wseed), "--out", str(out)],
+                capture_output=True, text=True,
+                timeout=window + 120)
+            if out.exists():
+                s = json.loads(out.read_text())
+                total_req += s.get("requests", 0)
+                total_err += s.get("errors", 0)
+                total_writes += s.get("writes_ok", 0)
+            else:
+                total_err += 1
+                rec["validation_errors"].append(
+                    f"window {windows}: load driver no summary: "
+                    f"{load.stderr[-200:]}")
+            cp = engine.sh(["version", "--format", "{{.Server.Version}}"],
+                           timeout=15, check=False)
+            if cp.returncode != 0:
+                version_fail += 1
+            if windows % churn_every == 0 and time.monotonic() < deadline:
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=churn_jobs) as ex:
+                    futs = [
+                        ex.submit(engine.sh,
+                                  ["run", "--rm", W9_IMAGE, "python3",
+                                   "-c", W9_WORK, str(i)],
+                                  timeout=180, check=False)
+                        for i in range(churn_jobs)
+                    ]
+                    outs = [f.result() for f in futs]
+                churn_done += sum(
+                    1 for c in outs
+                    if c.returncode == 0 and "ok" in c.stdout)
+                churn_fail += sum(1 for c in outs if c.returncode != 0)
+
+        rec["metrics"].update({
+            "soak_seconds": round(time.monotonic() - t0, 3),
+            "windows": windows,
+            "requests": total_req,
+            "errors": total_err,
+            "error_pct": round(100.0 * total_err / max(total_req, 1), 4),
+            "writes_ok": total_writes,
+            "rps_mean": round(total_req / max(
+                time.monotonic() - t0 - rec["metrics"]["setup_seconds"], 1), 1),
+            "churn_jobs_completed": churn_done,
+            "churn_failures": churn_fail,
+            "engine_version_check_failures": version_fail,
+        })
+        status, stats = http_json(f"{base}/stats", timeout=10)
+        expected_items = 500 + total_writes
+        got_items = stats.get("items") if isinstance(stats, dict) else None
+        checks["item_count"] = {
+            "expected_min": expected_items, "got": got_items,
+            "ok": got_items is not None and got_items >= expected_items}
+        checks["engine_alive"] = version_fail == 0
+        checks["error_rate"] = total_err <= max(1, total_req // 100)
+        checks["churn_all_ok"] = churn_fail == 0
+        rec["correctness"]["ok"] = all(
+            v is True or (isinstance(v, dict) and v.get("ok"))
+            for v in checks.values())
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        compose_down(engine, proj)
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+
+
 class RunContext:
     def __init__(self, run_id: str):
         self.run_id = run_id
@@ -1514,6 +1640,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w5(ctx, engine, state)
         elif case_id == "W10":
             rec = trial_w10(ctx, engine, state, **kw)
+        elif case_id == "W11":
+            rec = trial_w11(ctx, engine, state, **kw)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1662,7 +1790,7 @@ def cmd_run(args) -> int:
     ctx = RunContext(f"run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
     kw = {}
-    if args.case in ("W2", "W8", "W10"):
+    if args.case in ("W2", "W8", "W10", "W11"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
     if args.case == "W8" and getattr(args, "under_load", False):
@@ -1689,7 +1817,7 @@ def cmd_baseline(args) -> int:
                 rng.shuffle(order)
             for idx, eng in enumerate(order):
                 kw = {}
-                if args.case in ("W2", "W8", "W10"):
+                if args.case in ("W2", "W8", "W10", "W11"):
                     kw = {"concurrency": args.concurrency,
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
@@ -1812,7 +1940,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1825,7 +1953,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1841,7 +1969,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
