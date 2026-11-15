@@ -1092,7 +1092,7 @@ W7_APPS = {
 def trial_w7(ctx, engine: Engine, state: str,
              driver: str = "default") -> dict:
     """W7: default buildx -> loaded runnable images for two real apps
-    (hyperfine 2.0.0 Rust, gum v2.0.2 Go). Per app: uncached (--no-cache)
+    (hyperfine 2.0.0 Rust, httpie 3.2.4 Python). Per app: uncached (--no-cache)
     / warm (identical context) / incremental (one-file stamp bump)
     builds, then run probes for version output and the note marker.
     Base images pull untimed in setup; stores remain warm."""
