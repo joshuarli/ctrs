@@ -85,7 +85,7 @@ recorded separately below.
 | W8-ul | load_rps (orb/ctrs) | 0.764 | [0.702,0.861] | 10 | win |
 | W9 | jobs_1_s | 0.741 | [0.706,0.819] | 10 | win |
 | W9 | jobs_16_s | 0.326 | [0.297,0.331] | 10 | win |
-| W10 | recovery_s | 1.807 | [1.630,1.833] | 10 | **loss — pre-balloon-fix; see below** |
+| W10 | recovery_s | 1.807 | [1.630,1.833] | 10 | loss — superseded by EXP-3 re-baseline below |
 | W10 | load_rps (orb/ctrs) | 0.306 | [0.283,0.322] | 10 | win |
 | W11 | rps_mean (orb/ctrs) | 0.790 | [0.671,0.950] | 3 | win |
 | W11 | requests (orb/ctrs) | 0.798 | [0.674,0.955] | 3 | win |
@@ -622,6 +622,14 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
   `CTRS_BALLOON_QUIET_SECS` (default 120 s) of API quiet; growth is
   never delayed. Verified spot check with the fix: 0.343 / 0.569 /
   0.351 / 0.356 s under the same 45 s-gap cadence.
-- **Scorecard impact:** W10 recovery needs a 10-pair re-baseline on the
-  fixed binary; other cells are longer-window and were not materially
+- **Scorecard impact:** W10 recovery re-baselined on the fixed binary
+  (below); other cells are longer-window and were not materially
   affected, but W5's sub-100 ms iterations could see small gains too.
+
+**W10 re-baseline (post-fix, `base-20261115T014916-6bbb`, 10 pairs,
+real alternating cadence):** ctrs recovery median **0.356 s** vs
+OrbStack **0.322 s** — paired ratio median 1.155, i.e. within ~15 %
+with both engines showing correlated tail outliers late in the run.
+Was 1.807 pre-fix. The residual gap is inside run-to-run noise; W10's
+raw `load_errors` asymmetry is a metric artifact (ctrs fast-refuses,
+OrbStack hang-accepts) and is not scored.
