@@ -677,3 +677,14 @@ the agent's `Msg::Output` path vs OrbStack's stream.
   (~3.4 s/stream x2 vs OrbStack ~2.2 s) — the single agent conn
   multiplexes all output; separating bulk transfer onto dedicated
   conns remains the EXP-1 slice-B direction if this gap matters.
+
+**EXP-4 follow-up (`88f3d48`):** the multiplexed case needed the
+drain. With each poll wakeup draining a pipe until EAGAIN (up to
+8 x 512 KiB chunks; pipe reads are nonblocking, matching the TTY
+master path), 4x parallel 256 MiB exec-cat aggregate rose
+~743 -> ~790 MB/s and 2-stream ~672 -> ~765 MB/s; single-stream
+unchanged. Copy-out vsock conns also take 4 MiB buffers (neutral
+alone). Residual vs OrbStack (~1.0-1.05 GB/s aggregate on the same
+probes) is the vsock line rate itself; closing it is the custom-
+Virtio question, not agent scheduling. `conformance/smoke.sh`
+21/21 on the drain-loop agent.
