@@ -58,21 +58,47 @@ trials pass with retags succeeding on identical rebuilds
   session streams; buildkitd logged client-side context canceled).
   Not reproduced since; watch recurrence.
 
-**In flight:** W6 `--driver default` 20-pair baseline for a tighter
-rust-build CI — log
-`.work/native-perf/logs/np04-default-baseline4-w6x20-20261115T140212.log`
-(detached). Warm daemon runs the signed `10cfff4` binary, `CTRS_LOG`
-unset.
+**Intermittent build failure under investigation (2026-11-15):**
+~1/150 default-driver builds fails with buildx reporting
+`Canceled: context canceled` / `error reading from server`. Two
+distinct causes found so far:
+1. Mirror manifest PUT dropped the conn (EOF) when a manifest
+   referenced blobs still committing from a concurrent push —
+   buildkitd logged `Put .../manifests/sha256:...: EOF` and retried
+   ~15x before failing the solve. Fixed `f3adade`: record_manifest
+   now waits up to 20s for config+layer blob presence (atomic-rename
+   commits make presence proof) and the PUT arm answers a proper
+   `400 BLOB_UNKNOWN` registry response instead of EOF.
+2. `/session` stream RST_STREAM error code 3 (h2 FLOW_CONTROL_ERROR)
+   from buildkitd ~100ms into a solve — seen at 21:21, 22:12, 22:14,
+   22:37, 22:45 UTC across W6/W7 trials including non-concurrent
+   baseline patterns. NOT yet root-caused. Instrumentation added
+   (same commit): GOAWAY/RST error codes logged on both relay
+   directions, per-frame session rx debug, send-window overdraw
+   warnings. `cargo test -p ctrs` green; diagnostics verified live
+   (session rx frame/WINDOW_UPDATE/DATA logs confirmed flowing).
 
-**Next executable action:** when the 20-pair log finishes, run
-`python3.14 bench/native/runner.py report --match 'base-20261115T14*'`
-and check build_rust_s CI upper bound ≤1.03 (strict-win needs ≤0.95;
-non-inferior ≤1.03 satisfies the "meet" gate but "exceed" wants a
-strict W6 default-build win — zlib already provides it, rust only
-needs to not lose). Then update `docs/evidence/native-performance.md`
-with final ratios/CIs and checkpoint this file. After W6 qualifies,
-the remaining "exceed" gap is ≥2 strict wins among W1/W2/W5/W8 plus
-the W11 12 h reliability leg — see the campaign contract.
+**In flight:** instrumented W6 `--driver default` 20-pair baseline
+to hunt cause 2 — log
+`.work/native-perf/logs/np04-debug-w6x20-20261115T153838.log`
+(detached). Warm daemon runs signed `f3adade` binary with
+`CTRS_LOG=debug` (diagnostic only — final qualification runs must
+re-run with debug off). A clean W7 10-pair baseline just completed
+under the same daemon: `base-20261115T152832-d51c`, 10/10 valid —
+usable as evidence but debug-on timings should be re-confirmed
+clean before final scoring.
+
+**Next executable action:** when the instrumented W6 baseline
+finishes, check `.work/native-perf/engines/ctrs-warm/daemon-manual.log`
+for `builder reset the session (code 3)`, `flow window overdraw`,
+or `builder reset grpc stream` warns and correlate with the failing
+trial's session rx frame sequence (last WINDOW_UPDATE/DATA before
+the RST). If no failure recurs, root-cause stays open — rerun
+baselines periodically until caught or accept the flake rate as a
+known defect to fix before the W11 reliability leg. Then: clean
+(debug-off) W6+W7 `--driver default` baselines for final qualified
+numbers, update `docs/evidence/native-performance.md`, checkpoint
+this file.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
