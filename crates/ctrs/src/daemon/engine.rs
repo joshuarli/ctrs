@@ -343,6 +343,9 @@ pub struct Container {
     /// Set by `stop`/`kill`: no automatic restart until started again.
     pub stopped_by_user: bool,
     pub restart_count: u32,
+    /// Consecutive failed exits, for restart backoff only; `restart_count`
+    /// is Docker's cumulative count and never resets on a clean exit.
+    fail_streak: u32,
     /// How many times it has exited; `wait?condition=next-exit` waits for this to grow.
     exits: u64,
     /// Terminal size asked for before the process existed.
@@ -439,6 +442,8 @@ struct Saved {
     vm_stopped: bool,
     stopped_by_user: bool,
     restart_count: u32,
+    #[serde(default)]
+    fail_streak: u32,
     #[serde(default)]
     health: Option<super::health::Health>,
 }
@@ -912,6 +917,7 @@ impl Engine {
                     vm_stopped: was_running || s.vm_stopped,
                     stopped_by_user: s.stopped_by_user,
                     restart_count: s.restart_count,
+                    fail_streak: s.fail_streak,
                     exits: 0,
                     size: None,
                 ip: None,
@@ -1001,6 +1007,7 @@ impl Engine {
                     vm_stopped: c.vm_stopped,
                     stopped_by_user: c.stopped_by_user,
                     restart_count: c.restart_count,
+                    fail_streak: c.fail_streak,
                     health: st.health.get(&c.id).map(|h| h.health.clone()),
                 })
                 .collect();
@@ -1087,15 +1094,17 @@ impl Engine {
                             _ => false,
                         };
                         if wants && !c.spec.auto_remove && !SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst) {
-                            let backoff = RESTART_BASE.saturating_mul(1 << c.restart_count.min(10)).min(RESTART_CAP);
+                            let backoff = RESTART_BASE.saturating_mul(1 << c.fail_streak.min(10)).min(RESTART_CAP);
                             c.restart_count += 1;
+                            c.fail_streak += 1;
                             restart_in = Some(backoff);
                         }
-                        // A run that ended cleanly zeroes the backoff for the
-                        // next one; only consecutive failures grow it. (After
-                        // the decision above so this exit's delay is unchanged.)
+                        // A run that ended cleanly zeroes the failure streak
+                        // for the next backoff; Docker's RestartCount is
+                        // cumulative and never resets here. (After the
+                        // decision above so this exit's delay is unchanged.)
                         if code == 0 {
-                            c.restart_count = 0;
+                            c.fail_streak = 0;
                         }
                         c.spec.auto_remove
                     }
@@ -1486,6 +1495,7 @@ impl Engine {
                 vm_stopped: false,
                 stopped_by_user: false,
                 restart_count: 0,
+                fail_streak: 0,
                 exits: 0,
                 size: None,
                 ip: None,
