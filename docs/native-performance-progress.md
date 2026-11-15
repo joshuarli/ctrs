@@ -29,11 +29,28 @@ benchmark's isolated buildx config had a stray docker-container
 `default` builder removed so `default` resolves to the docker
 driver exactly like OrbStack's. `cargo test -p ctrs` 174/174.
 
+**Mirror retag bug found and fixed `10cfff4` (2026-11-15):**
+first baseline rerun `base-20261115T125538-2dc3` finished W6 10/10
+pairs all-correct, but W7 ctrs pairs failed `*_note` correctness —
+warm/incr rebuilds produce content-identical manifests whose PUTs
+buildkit skipped because `manifests_ref` resolved `sha256:` digest
+refs against a process-global map (a digest pushed under an earlier
+build's repo answered GETs for every repo). Result: nothing recorded
+per-repo, `take_pushed` dropped everything, user tags stayed stale.
+Fix: `PUSH_REPO_MANIFESTS` tracks digests PUT per repo; `sha256:`
+GETs 404 for repos that never received the PUT, forcing buildkit to
+re-PUT and record. Verified: two consecutive W7 default-driver
+trials pass with retags succeeding on identical rebuilds
+(`run-20261115T131124-7962`, `run-20261115T131147-d5f1`).
+
 **In flight:** W6+W7 `--driver default` 10-pair baselines re-running
-against the new path — log
-`.work/native-perf/logs/np04-default-baseline-20261115T124001.log`
-(detached, survives session end). Warm daemon runs the signed
-`3b5f5ba` binary, `CTRS_LOG` unset (debug off for clean timings).
+against the fixed path — log
+`.work/native-perf/logs/np04-default-baseline2-20261115T131324.log`
+(detached, survives session end; W6 then W7 sequentially). Warm
+daemon runs the signed `10cfff4` binary, `CTRS_LOG` unset (debug off
+for clean timings). Prior attempt `base-20261115T125538-2dc3` is
+valid for W6 (all 20 trials correct) but INVALID for W7 — do not
+mix its W7 trials into reports.
 
 **Next executable action:** when the log shows both baselines
 done, run `python3.14 bench/native/runner.py report` on the new
