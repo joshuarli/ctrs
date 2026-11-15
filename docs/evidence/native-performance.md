@@ -1111,3 +1111,19 @@ exited instantly — `python3` on PATH is 3.9 without tomllib — and
 went unnoticed because output was piped through `tail`. Relaunched
 with `python3.14` explicitly, ctrs 12 h then orbstack 12 h chained
 (`run-20261115T073817` in progress at commit time).
+
+**G1 conformance refresh on the instrumented build (2026-11-15):**
+`conformance/failure.sh` 34/34 (first attempt showed a single S6
+flake — the post-pressure pull retry hit an ECR `429 TOOMANYREQUESTS`,
+confirmed environmental by an immediate clean rerun),
+`conformance/isolation.sh` 5/5, both against scratch engines on the
+signed binary carrying fatal-signal instrumentation. S12's injected
+VM death exercised `Event::Lost` recovery green (containers restarted
+on a new generation). One cosmetic wart observed: during deliberate
+VM kills the shutdown path logs `saving containers failed: ENOENT`
+after the state dir is already gone — recovery still correct, log
+severity only. `conformance/run.sh`'s five netns fixtures self-report
+`needs iproute2`: they require Linux root by design (README: run
+in-guest, qualified in `docs/evidence/crabtables.md`), so the macOS
+host lane shows them as harness-level skips, not engine failures.
+`tests/linux-host.sh` remains needs-native-host.
