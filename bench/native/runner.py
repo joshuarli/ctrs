@@ -1300,6 +1300,10 @@ def trial_w5(ctx, engine: Engine, state: str,
              "cp -r /src/. /dst/"],
             timeout=120, check=False)
         checks["volume_seed"] = cp.returncode == 0
+        if cp.returncode != 0:
+            rec["validation_errors"].append(
+                f"volume seed rc={cp.returncode}: "
+                f"{(cp.stderr or cp.stdout).strip()[-300:]}")
 
         bind_times, vol_times = [], []
         for i in range(iters):
@@ -1314,6 +1318,10 @@ def trial_w5(ctx, engine: Engine, state: str,
             ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout
                   and f"iter-{i}" in cp.stdout)
             checks[f"bind_iter_{i}"] = ok
+            if not ok:
+                rec["validation_errors"].append(
+                    f"bind iter {i} rc={cp.returncode}: "
+                    f"{(cp.stderr or cp.stdout).strip()[-200:]}")
 
             # Volume iteration: same test against the named volume.
             t0 = time.monotonic()
@@ -1324,6 +1332,10 @@ def trial_w5(ctx, engine: Engine, state: str,
             vol_times.append(round(time.monotonic() - t0, 3))
             ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout)
             checks[f"vol_iter_{i}"] = ok
+            if not ok:
+                rec["validation_errors"].append(
+                    f"vol iter {i} rc={cp.returncode}: "
+                    f"{(cp.stderr or cp.stdout).strip()[-200:]}")
 
         rec["metrics"]["bind_iters_s"] = bind_times
         rec["metrics"]["volume_iters_s"] = vol_times
