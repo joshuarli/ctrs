@@ -9,8 +9,16 @@ queue or turn-by-turn status diary.
 
 ## Resume here
 
-**Current task:** NP-02 — freeze digest/source/dataset/tool inputs and
-build the real W6/W7 fixtures, then measure that vertical slice.
+**Current task:** NP-04 — default-driver build→load→first-use path.
+First implementation slice landed (`4fdfc43`, unverified e2e):
+`crates/ctrs/src/daemon/buildgrpc.rs` terminates h2c on both hops of
+`POST /grpc` (HPACK relayed verbatim; lone default docker/image
+exporter rewritten to mirror push+retag on trailers; all other
+exporter forms pass through), splices `POST /session` bytes through a
+minimal `Control.Session` gRPC client, builder.rs gives buildkitd
+`--addr tcp://0.0.0.0:1234` and tracks it in `BuilderSnapshot.tcp`
+(pre-change builders classify stale), `/_ping` reports
+`Builder-Version: 2`. `cargo check`/`cargo test -p ctrs` clean (174).
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
@@ -52,14 +60,23 @@ per build; flips zlib to a loss and httpie warm/incr to
 inconclusive). Full comparison table in
 `docs/evidence/native-performance.md`.
 
-**Next executable action:** NP-04 — implement the scoped
-`docs/buildkit-driver.md` design: dedicated buildkitd target,
-`/grpc` h2c endpoint on the unix socket, transparent `/session`
-proxy, SolveRequest exporter rewrite (`type=docker`/`image` →
-mirror push+retag). Fail closed on multi-platform/attestation/
-`--push`/`--output` cases. Then re-run W6/W7 `--driver default`
-baselines and compare against the dc control. zlib default-driver
-loss is the acceptance cell to flip.
+**Next executable action:** e2e-verify `4fdfc43`, then re-run W6/W7
+`--driver default` baselines and compare against the dc control.
+Concretely: `cargo build --release -p ctrs`; restart the warm ctrs
+engine (`.work/native-perf/engines/ctrs-warm`, pid was 17232) with the
+new binary; `DOCKER_HOST=unix://…/docker.sock docker buildx build
+--load` a digest-pinned fixture (W7 hyperfine first — smallest) and
+check `docker images` shows the tag, probes pass, and
+`docker buildx du`/logs show no archive load. Watch for: buildx may
+send exporter attrs outside the allowlist (`unpack`, `name-canonical`)
+→ passthrough is correct-but-slow; if every solve passes through,
+widen `CARRY_ATTRS` in buildgrpc.rs. If `/grpc` or `/session` hangs,
+check `target` logs and the builder container's `--addr` flag took
+effect (old builder containers need `docker stop` + rebuild to gain
+the TCP listener — `tcp:false` snapshots classify StaleRunning and
+refuse until stopped). Then: `python3.14 bench/native/runner.py run
+--case w6 --driver default --pairs 10` (same for w7) and `report`.
+zlib default-driver loss is the acceptance cell to flip.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
