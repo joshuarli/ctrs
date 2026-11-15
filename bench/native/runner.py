@@ -284,6 +284,9 @@ class Engine:
         env = os.environ.copy()
         env["CTRS_DATA_DIR"] = str(self.dir / "data")
         env["CTRS_SOCKET"] = str(self.dir / "run" / "docker.sock")
+        # Diag state (logs, crashes, vm.json) defaults to
+        # ~/.local/share/ctrs; keep bench engines out of the user's state.
+        env["CTRS_STATE_DIR"] = str(self.dir / "state")
         # Resource parity: ctrs defaults to 2 vCPUs / 8 GiB while
         # OrbStack allocates ~all host cores. Give the bench VM the same
         # vCPU count and memory ceiling OrbStack reports so CPU-bound
