@@ -654,3 +654,26 @@ OrbStack hang-accepts) and is not scored.
   OrbStack because ctrs ships no embedded BuildKit; on matched
   `--driver dc` topology ctrs matches or beats OrbStack on every
   build cell. Tracked as a feature gap, not an engine-perf loss.
+
+### EXP-4 — bulk stdio stream widening (`docker exec`/`cp` out, 2026-11-15)
+
+Unmeasured-path probe after the frozen baseline: `docker exec cat`
+of a 1 GiB file and `docker cp` out of the same file, 1 GiB through
+the agent's `Msg::Output` path vs OrbStack's stream.
+
+- Baseline ctrs exec-cat: ~1.55–1.78 s (~600 MB/s); OrbStack
+  ~1.00–1.12 s (~950 MB/s). `docker cp` single-stream was already
+  ~parity (different copy protocol, 256 KiB tar buffer).
+- Hypotheses tried and rejected by measurement: drain-until-EAGAIN
+  in the agent loop + nonblocking pipe reads (no gain, added
+  complexity — reverted); the gap is not poll-cycle count.
+- Landed (`dc1f38b`): `MAX_OUTPUT_CHUNK` 64 KiB -> 512 KiB,
+  container stdio pipes grown toward 1 MiB, 4 MiB socket buffers
+  on both ends of the agent vsock conn and host `VmLink`.
+- Result: exec-cat ~1.24–1.37 s (~800 MB/s) vs OrbStack
+  ~1.00–1.23 s — residual ~15 % gap, down from ~50 %. `docker cp`
+  ~parity (1.64–1.75 vs 1.52–1.54 s, n=2 each).
+- Parallel cp-out still shows a shared-conn ceiling on ctrs
+  (~3.4 s/stream x2 vs OrbStack ~2.2 s) — the single agent conn
+  multiplexes all output; separating bulk transfer onto dedicated
+  conns remains the EXP-1 slice-B direction if this gap matters.
