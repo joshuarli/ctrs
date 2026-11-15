@@ -150,3 +150,16 @@ through the vsock relay on this machine, as before).
 - Benchmark tools are in `bench/net/` (`send.py`, `recv.py`, `udploss.py`,
   `udprecv.py`, `latency.py`) — Python stdlib only, usable inside guests via
   `docker cp`/`-v`.
+
+## Addendum 2026-11-15 — NAT path demoted to opt-in
+
+The W8 under-load investigation (see `native-performance.md` EXP-2)
+found the vmnet NAT path — reachable for the *signed* engine binary on
+this Mac even though unsigned builds are filtered — intermittently
+stalled individual published-port flows for ~5 s when image-pull bulk
+shared the NAT network, long enough for server keep-alives to close
+them (8 `RemoteDisconnected` per failing trial). A/B on the same
+binary: vsock framed relay 6/6 clean vs ~50 % failure on NAT, with
+bulk throughput at parity (~1.1 GB/s both) and interactive load ~15 %
+faster on vsock. `daemon/ports.rs` now defaults to the framed vsock
+relay; `CTRS_VMNET=1` re-enables NAT for future A/B work.

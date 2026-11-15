@@ -1,10 +1,12 @@
 //! Published ports, host side: a listener per `-p` binding on the Mac. Each
-//! client connection is passed on over the VM's NAT network to a port the
-//! guest kernel forwards (DNAT) to the container, so the guest copies
-//! nothing; vsock is several times slower in Virtualization.framework. Where
-//! that network is unreachable (a VPN that takes over its routes, an older
-//! agent), the connection gets its own vsock stream into the VM instead,
-//! whose agent connects to the container and relays. No root either way.
+//! client connection gets its own vsock stream into the VM, whose agent
+//! connects to the container and relays. No root, and no extra hop: the
+//! framed relay measured faster and steadier than the NAT network it
+//! replaced as default (see `vmnet_enabled`). `CTRS_VMNET=1` restores the
+//! old path: the Mac connects over the VM's NAT network to a port the
+//! guest kernel forwards (DNAT) to the container. Where that network is
+//! unreachable (a VPN that takes over its routes, an older agent), the
+//! connection gets its vsock stream instead.
 //!
 //! On a Linux host the daemon shares the kernel with the containers: the
 //! kernel forwards (DNAT) every published port reached on a non-loopback
@@ -106,7 +108,20 @@ fn nat_port() -> Option<NatPort> {
     Some(NatPort(port))
 }
 
+/// The NAT network is opt-in (`CTRS_VMNET=1`): measured against the framed
+/// vsock relay it wins neither throughput (~1.2 GB/s both ways on a bulk
+/// pull) nor latency (vsock served ~15% more requests/s under load), and
+/// under a concurrent bulk pull it stalled individual flows for seconds —
+/// long enough for a server's keep-alive to close them.
+fn vmnet_enabled() -> bool {
+    static VMNET: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *VMNET.get_or_init(|| std::env::var_os("CTRS_VMNET").is_some())
+}
+
 fn nat_usable() -> bool {
+    if !vmnet_enabled() {
+        return false;
+    }
     let mut down = NAT_DOWN_UNTIL.lock().unwrap_or_else(|e| e.into_inner());
     match *down {
         Some(t) if Instant::now() < t => false,
@@ -469,9 +484,11 @@ pub fn start(vm: Arc<VmLink>, id: &str, bindings: &[Binding], target_ip: [u8; 4]
         fw.bound.push((b, ip, port));
     }
     // In the VM: the guest kernel forwards each TCP binding from a port of
-    // its own on the NAT network. A target on loopback stays relayed.
+    // its own on the NAT network — only when CTRS_VMNET opts in; the framed
+    // vsock relay is the default path (see vmnet_enabled). A target on
+    // loopback stays relayed.
     let mut nat = vec![None; listeners.len()];
-    if cfg!(target_os = "macos") && target_ip != [127, 0, 0, 1] && !listeners.is_empty() {
+    if cfg!(target_os = "macos") && vmnet_enabled() && target_ip != [127, 0, 0, 1] && !listeners.is_empty() {
         match publish_nat(&vm, id, &listeners.iter().map(|(b, ..)| b.container_port).collect::<Vec<_>>(), target_ip) {
             Ok((addrs, ports)) => {
                 nat = addrs.into_iter().map(Some).collect();
@@ -739,15 +756,18 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
     let mut from_guest = std::fs::File::from(guest.fd.try_clone()?);
     let mut client_read = client.try_clone()?;
     let mut client_write = client;
+    let relay_start = Instant::now();
     let up = std::thread::Builder::new().name("ctrs-conn-up".into()).spawn(move || {
-        let _ = copy(&mut client_read, &mut to_guest);
+        let r = copy(&mut client_read, &mut to_guest);
         // Pass the client's half-close on.
         // SAFETY: half-closing a socket we own.
         unsafe { libc::shutdown(to_guest.as_raw_fd(), libc::SHUT_WR) };
+        r
     })?;
-    let _ = if framed { copy_frames(&mut from_guest, &mut client_write) } else { copy(&mut from_guest, &mut client_write) };
+    let down_res = if framed { copy_frames(&mut from_guest, &mut client_write) } else { copy(&mut from_guest, &mut client_write) };
     let _ = client_write.shutdown(Shutdown::Write);
-    let _ = up.join();
+    let up_res = up.join();
+    crate::diag::info!("port relay ended", ms = relay_start.elapsed().as_millis(), framed = framed, down = format!("{down_res:?}"), up = format!("{up_res:?}"));
     // `guest` drops here: the vsock connection is released on the VM's queue.
     drop(guest);
     Ok(())
@@ -759,15 +779,20 @@ fn relay_tcp(client: TcpStream, guest: TcpStream) -> io::Result<()> {
     guest.set_nodelay(true)?;
     guest.set_read_timeout(Some(TCP_IDLE))?;
     guest.set_write_timeout(Some(TCP_IDLE))?;
+    let start = Instant::now();
     let (mut client_read, mut guest_write) = (client.try_clone()?, guest.try_clone()?);
     let up = std::thread::Builder::new().name("ctrs-conn-up".into()).spawn(move || {
-        let _ = copy(&mut client_read, &mut guest_write);
+        let r = copy(&mut client_read, &mut guest_write);
         let _ = guest_write.shutdown(Shutdown::Write);
+        r
     })?;
     let (mut guest_read, mut client_write) = (guest, client);
-    let _ = copy(&mut guest_read, &mut client_write);
+    let down = copy(&mut guest_read, &mut client_write);
+    let down_ms = start.elapsed().as_millis();
     let _ = client_write.shutdown(Shutdown::Write);
-    let _ = up.join();
+    let up = up.join();
+    let up_ms = start.elapsed().as_millis();
+    crate::diag::info!("nat relay ended", down_ms = down_ms, up_ms = up_ms, down = format!("{down:?}"), up = format!("{up:?}"));
     Ok(())
 }
 

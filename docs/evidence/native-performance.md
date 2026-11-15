@@ -179,3 +179,36 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
   actual hypothesis test) and the ≥10-pair frozen baseline; host-side
   bulk-stream separation (second vsock connection) remains a separate
   slice of priority 1.
+
+### EXP-2 — published-port transport: framed vsock relay is now the default (2026-11-15)
+
+- **Symptom:** W8 under-load trials on ctrs intermittently failed with
+  2–8 `RemoteDisconnected` errors ~7 s into a 30 s mixed HTTP load while
+  OrbStack passed every trial. The API container never restarted
+  (`restarts=0`, no OOM); the drop was in the published-port path.
+- **Packet-level evidence:** a tcpdump on the guest bridge showed the
+  app (uvicorn) sending FIN *exactly* 5.000 s after the last response on
+  the affected flows — its keep-alive timeout — after the client went
+  silent for 5 s. Only flows on the VM's NAT (vmnet) path stalled; the
+  stall coincided with concurrent W8 image-pull bulk traffic sharing the
+  same NAT network.
+- **A/B:** forcing every published connection onto the framed vsock
+  relay produced **6/6 clean** W8 under-load trials (0 errors,
+  ~2800 rps) against a ~50 % failure rate on NAT.
+- **Bulk is a wash:** 200 MB through a published port measured
+  ~1.04–1.15 GB/s on vsock vs ~1.15–1.25 GB/s on NAT — the old
+  "vsock is several times slower" assumption was stale.
+- **Interactive is better on vsock:** W2 warm ~2850–2960 rps vs
+  ~2450–2530 rps on NAT (~15 % ahead).
+- **Change:** `daemon/ports.rs` — the vmnet/NAT path is now opt-in via
+  `CTRS_VMNET=1`; the default is the framed vsock relay, and
+  `publish_nat` is skipped entirely unless enabled. Per-trial path stays
+  observable in daemon logs (`port relay ended framed=true` vs
+  `nat relay ended`).
+- **Caveats:** the mechanism inside Apple's vmnet (per-flow queueing
+  under concurrent bulk) is inferred, not proven — the A/B correlation
+  is solid but n=7 clean trials; keep collecting samples in the frozen
+  baseline. `docs/evidence/net.md` already records that vmnet is
+  unreachable for *unsigned* dev builds on this Mac (Local Network
+  privacy), so most dev usage was already on vsock; this change makes
+  the entitled/signed path match.
