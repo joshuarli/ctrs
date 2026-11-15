@@ -2,8 +2,8 @@
 
 use std::process::ExitCode;
 
-// builds, cli_pins, scan and tools on Linux too: the daemon reads an
-// image's layers and scans it; the CLI needs them as well.
+// Headless (no window): plain `docker build` and `ctrs build-with` need the
+// builder provisioning on Linux too.
 #[cfg(unix)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod builds;

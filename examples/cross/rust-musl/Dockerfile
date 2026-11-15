@@ -15,7 +15,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 ARG BUILDPLATFORM
 # For --platform linux/amd64 use the stock image instead:
-#   rust:1-alpine@sha256:2cccd8b212b37dad15a555589c1b6787da4ab913fe24d8a9b2d99d3498869409 (rustc 1.100.0)
+#   rust:1.100.0-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb (rustc 1.100.0)
 WORKDIR /src
 COPY Cargo.toml ./
 COPY app ./app

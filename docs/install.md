@@ -50,11 +50,14 @@ Requirements and notes:
 No systemd requirement. The static binaries are built in a container:
 
 ```sh
-cargo xtask linux            # target/linux/release/{ctrs,ctrs-init} (arm64)
+cargo xtask linux            # host arch (arm64 on Apple Silicon): target/linux/release/{ctrs,ctrs-init}
 cargo xtask linux --arch amd64
+cargo xtask linux --arch arm64   # cross-compiled on the build platform (Linux hosts)
 ```
 
-and need a host with:
+or use the locally prepared x86_64/aarch64 Linux artifacts recorded in
+`docs/evidence/release.md` (local builds only — there is no public download
+yet; see its sha256s). The binaries need a host with:
 
 - a kernel with clone3, cgroup v2, overlayfs, and nf_tables/rtnetlink
   (roughly 5.3+; the agent hand-encodes its netlink/nftables messages —

@@ -1,7 +1,8 @@
 # ARM64 builds on AMD64 Linux — evidence
 
 Date: 2026-11-14–2026-11-15. Verdict: **P0 done; S1 done; S2 done; S3 done; S4 done; S5
-done; S6 done. Native cross-compilation builds both reference workloads
+done; S6 done; S7 done (Linux release prep; Ultrareview run; handler-free
+and hosted-CI proofs remain Needs environment). Native cross-compilation builds both reference workloads
 faster than emulation in every measured cell on this host (rust cold
 5.30 s vs 77.79 s; c-cpp cold 35.26 s vs 104.92 s; medians, 5 valid
 samples per path/state, rotated), the A↔B pin upgrade is
@@ -687,12 +688,101 @@ gate; it stays visible in the table).
   implicated. BuildKit v0.34.2 (A) built with the same bundled emulator
   as B (QEMU 10.2.3).
 
-## Needs environment (statuses at P0–S6)
+## S7 — final qualification, release prep, ultrareview (2026-11-15, landed)
+
+What landed at this milestone:
+
+- **The aarch64 release row now consumes the qualified cross path.**
+  `.github/workflows/release.yml`: the aarch64 row builds on
+  `ubuntu-26.04` (AMD64) with the pinned cross toolchain
+  (`messense/rust-musl-cross:aarch64-musl@sha256:02e790506c5f15a533bc05b3af8719b16a8a2314480f6f0fdc0166432035d9b4`,
+  rustc 1.96.1, gcc 12.4.0) — the same path as `cargo xtask linux
+  --arch arm64`; no qemu is registered on that row. Native ARM64 test
+  coverage stays with ci.yml's `linux-musl` job (`ubuntu-26.04-arm`,
+  every push). The x86_64 row and every dispatch-only/publication gate
+  are unchanged (default-branch recheck ×3, tag-existence check fails
+  closed on non-404, 2×x86_64 + 2×aarch64 static ELF gate, exact
+  per-zip artifact sets, SHA256SUMS self-check). The aarch64 row no
+  longer runs `cargo test`: its binaries cannot execute without an
+  emulator, and qemu execution would not be a native ARM64 result. The
+  workflow was never dispatched; both Linux rows' exact step commands
+  were reproduced on this host (see `docs/evidence/release.md`).
+- **Release artifacts prepared locally** (Linux only; macOS is Needs
+  environment): the four musl-static binaries, built from this tree
+  with the release-workflow `dist` profile (fat LTO), no INTERP/NEEDED
+  (verified in the builder and on the packaged copies), byte-identical
+  across the from-scratch rebuilds; zips + `SHA256SUMS` verified with
+  `sha256sum -c`. Actual AMD64 startup/build behavior of the packaged
+  dist artifacts: `BIN="$PWD/.work/release/20261115/check/bin" bash
+  tests/linux-host.sh` → **28 passed, 0 failed** (isolated
+  prefix/ports/config, per-run unique name). Full artifact table,
+  commands and dependency/emulator provenance: `docs/evidence/release.md`
+  (S7 section). No emulator bundle is included; the aarch64 binaries
+  are native ARM64 code.
+- **Qualification runner**: `bash tests/arm64-build.sh --all` →
+  **160 passed, 0 failed** on the final source (it now resets the
+  scratch-preserve flag per case, so a failing case no longer makes
+  later passing cases leak their harnesses).
+- **Workspace tests** (root, pinned builder image, final source):
+  `cargo test --workspace --lib --tests --no-fail-fast` →
+  **297 passed, 0 failed** (exit 0). Host run: 6 pre-existing
+  `ctrs-init` failures (chown to uid/gid 0) remain; unrelated, CI is
+  the authority. `cargo test -p ctrs-image`: 47/47 including the new
+  capped-reader test. `cargo test -p xtask`: 5/5.
+- **Ultrareview** (installed `~/.agents/skills/ultrareview`, run under
+  the campaign's granted review authority; four read-only lanes:
+  daemon, guest/runtime, tests, build/release). **No P1 findings.
+  Two P2 findings, both fixed and re-proven:**
+  - `docker load` ingested blobs with no size cap
+    (`ctrs-image::archive::load`): a crafted archive could fill the
+    host disk. A per-blob 64 GiB cap now fails the ingest with
+    `InvalidData` (mirrors the guest's expansion ceiling); the
+    partial blob is unlinked by `Ingest`'s drop guard; unit test
+    `capped_reader_fails_past_the_limit` added (47/47 green).
+    Residual: there is still no total-archive budget — filed as
+    CTRS-5 (P4).
+  - `xtask kernel`/`xtask disk` used the mutable `debian:trixie` tag:
+    now pinned to the verified index digest
+    `sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6`
+    and recorded in `docs/evidence/release.md`.
+  P3/P4 findings were filed as CTRS-1…CTRS-10 in `TODO.md` (not fixed
+  in this slice). The tests lane flagged identical `image_id`s across
+  incremental rounds as a possible invalid measurement; the
+  blast-radius probe shows the incremental state genuinely re-executes
+  the compile (`Compiling workload-app` present in the probe log;
+  comment-only markers change no compiled bytes, so byte-identical
+  output images are the expected result, and emulated incremental
+  runs at 2.2–6.4 s vs ~0.2–0.4 s for layer hits). S6's incremental
+  numbers stand; no fixture change was made.
+- **Harness/bench repairs from the review**: per-case `ISO_PRESERVE`
+  reset (`--all` leak fix); the bench's trailing perf-gate failure now
+  exits 75 (deferred, never passed) instead of silently exiting 0 —
+  the header's exit-code contract now holds. Affected proofs re-run.
+- **Legacy-consumer sweep**: `main.rs` module comment no longer names
+  deleted modules (`scan`, `tools`, `cli_pins`); the
+  `examples/cross/rust-musl` fallback comment now names the unified
+  `rust:1.100.0-alpine` pin; `docs/evidence/release.md` SBOM scope and
+  toolchain provenance match the files (the x86_64 Linux artifacts
+  build with the repo-pinned nightly auto-installed in the builder;
+  the aarch64 artifacts with the messense stable — now stated);
+  `docs/install.md` matches the host-follow default; `docs/development.md`
+  already matched. The Rosetta x86-64 exception is retained (its
+  supported environment). The `tonistiigi/xx` pilot remains recorded as
+  a rejected alternative; no consumer remains for the old
+  `rust:1-alpine` pin outside historical evidence notes.
+- **Release.yml verification of the aarch64 step commands**: the exact
+  commands run green on this host (fat-LTO dist profile; static ELFs;
+  machine AArch64; no INTERP/NEEDED; 52 s warm, ~1m41s from scratch).
+  CI YAML parses (`jaq`), matrix conditions traced per row. The
+  workflow has never been dispatched and must not be from this
+  campaign; hosted CI (including `arm64-compat`) remains unobserved.
+
+## Needs environment (statuses at P0–S7)
 
 | Proof | Prerequisite and command | status |
 | --- | --- | --- |
 | Live-drain of a stale running/paused builder end-to-end | A stale builder with live sessions kept running across a ctrs upgrade — unreachable on this host: a dead "running" record reconciles to exited at daemon boot (exit 255), and `paused` is not persisted. The refusal gates fire before any mutation; the classifier matrix is unit-tested (`assessment_matrix`) | **Unreachable end-to-end with today's product semantics (see S2 findings); unit matrix only** |
-| AMD64 Linux ctrs runtime | Root-capable isolated namespaces/cgroup environment; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` | **passed 2026-11-14, twice, 28/28** (isolated prefix/ports/config; SIGTERM log preservation verified) |
+| AMD64 Linux ctrs runtime | Root-capable isolated namespaces/cgroup environment; `BIN="$PWD/target/linux-x86_64/release" bash tests/linux-host.sh` | **passed 2026-11-14, twice, 28/28; and 2026-11-15 with the packaged dist artifacts (`BIN=.work/release/20261115/check/bin`), 28/28** |
 | No foreign host handlers | Fresh dedicated AMD64 host or proven independent binfmt namespace; `bash tests/arm64-build.sh --case compatibility --require-no-binfmt`; runner must fail closed if any foreign handler can service the test | **Unavailable on this host (2026-11-14): one global binfmt_misc instance serves every namespace; a fresh private-mount instance still shows `qemu-aarch64` POCF. The ordinary compatibility case passed with a host handler visible (and says so per backend). `--require-no-binfmt` fails closed, exit 1, creating nothing. The bundled-emulator path was never exercised here — it needs a dedicated host or VM without a foreign handler** |
 | macOS regression | Apple Silicon macOS; `cargo test --workspace`, `cargo xtask all`, `conformance/smoke.sh` | **not available on this host** |
 | Performance | Idle AMD64 machine passing both perf-gate checks; `bash bench/arm64-build.sh --samples 5 --all-states` | **Measured 2026-11-15** (bench/results/20261115T011929Z/): 90 samples, 90 valid, 0 rejected, gates quiet before and after (load 1.91 at start). Cross (C) vs emulation (B) gap outruns spread in every cell; A (old pin) neutral vs B; no memory penalty for crossing. Numbers are host-specific (this CPU, qemu-POCF, BuildKit v0.35.0) — a dedicated idle host would strengthen but not change the direction of these results |
@@ -709,5 +799,5 @@ gate; it stays visible in the table).
 | native compilers, static AArch64 output | `--case cross` (S4) | **passing 2026-11-14 (25 checks; xtask aliases/refusals, default AMD64 execution, explicit ARM64 output, host-native builds of both fixtures, target execution, static AArch64, per-arch outputs/caches)** |
 | cancel/failure/cleanup, emulator diagnostics | `--case lifecycle` (S5) | **passing 2026-11-14 (35 checks; concurrency, cancellation, worker failure, failed target execution, daemon restart + cache reuse, emulator fault injection; mutation-verified)** |
 | equivalent-work benchmark | `bench/arm64-build.sh --samples 5 --all-states` (S6) | **measured 2026-11-15 (90 samples, 0 rejected; host Ryzen 9 9950X; load 1.91 at start). C (cross) beats B (emulated) in every cell: rust cold 5.30 s vs 77.79 s; c-cpp cold 35.26 s vs 104.92 s. A (old pin) is neutral vs B. Objective met for these workloads on this host; not a general claim** |
-| static binaries, checksums, local manifest | S7 commands | not implemented |
+| static binaries, checksums, local manifest | S7 commands; `docs/evidence/release.md` (S7 section) | **done 2026-11-15 (Linux only): four static musl ELFs (2×x86_64 PIE, 2×AArch64 EXEC), zips + SHA256SUMS verified, hashes committed there; macOS row not rebuilt here** |
 | environment prerequisites | `--case environment` | **passing 2026-11-14 (22 ok, 0 missing, 0.2–1 s)** |
