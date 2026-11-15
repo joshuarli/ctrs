@@ -438,6 +438,21 @@ the missing `docker`-driver (embedded BuildKit) product feature, not
 engine runtime. This is now a *feature gap* to schedule, not a perf
 bug to chase.
 
+**Decomposition re-measured (2026-11-15, warm buildkit caches, real
+compile):** W6 zlib `buildx build --load` ctrs 2.53-2.61 s vs
+orbstack 1.27-1.31 s; W7 warm ctrs ~0.77 s vs orbstack ~0.42 s.
+Controls isolate the delta to the `--load` export hop, not execution:
+trivial `RUN` on the 1.4 GB gcc base builds in 1.95 s (ctrs) vs
+0.64 s (orbstack); in-container zlib compile is sub-second on both
+(identical libz.a sha256); a 3000-`exec` fork loop builds in 6.41 s
+on *both* engines; and `docker load` of a 468 MB store tar is *faster*
+on ctrs (0.73 s vs 1.23 s). So guest CPU, nested buildkit workers,
+and image ingest all meet or beat OrbStack — the residual is purely
+the docker-container driver's full-image tar round-trip
+(buildkit -> buildx CLI -> `/images/load` -> guest store) that the
+embedded `docker` driver skips. Closing it requires embedded
+buildkitd with direct store access (multi-session feature).
+
 ### W10 relay-churn fix: guest refusal marker + host negative cache
 
 W10's residual loss (~0.55 s vs ~0.30 s recovery) was traced to refused
@@ -717,6 +732,26 @@ FIFO frame buffer, POLLOUT-driven flush, production gated on a
 buffer cap for backpressure. ~10 `conn.write_all` sites share the
 `out`/`outbox` encoding already; must preserve frame order and the
 single-writer invariant. Not yet implemented.
+
+**EXP-4 dedicated exec-output connections (implemented, 2026-11-15):**
+the agent now dials a per-exec vsock connection (`EXEC_PORT`) as each
+exec starts; that exec's `Output` and `Exited` frames bypass the
+multiplexed control connection entirely (nonblocking writes + bounded
+pending buffer + POLLOUT drain + 8 MiB backpressure, dial failure
+falls back to the control conn, old agents/hosts interoperate). Host
+side a `serve_exec` thread deframes and feeds the same `on_event`
+fan-out, so attach/detach/internal execs (`buildctl dial-stdio`)
+need no API changes; `Exited` on the conn closes the stdin window as
+the control-link one does. Verified: stdout/stderr demux, stdin,
+exit codes, detached exec, TTY, sha256-identical 1 GiB stream,
+smoke 21/21, W7 build+run.
+
+Measured (`exec cat`, warm engine): single-stream 1 GiB ~1.25-1.40 s
+(unchanged ~800 MB/s — per-conn rate, not multiplexing, bound);
+**4x256 MiB parallel ~1.00 s each ≈ 1.0-1.07 GB/s aggregate, up from
+~790 MB/s (+~35%) and at OrbStack's ~1.05 GB/s parallel level.** The
+multiplexed-conn ceiling is gone; the residual single-stream ~15-20%
+vs OrbStack is per-connection line rate / per-chunk pipeline cost.
 
 **EXP-4 buffered-writer experiment — falsified, reverted
 (uncommitted, 2026-11-15):** implemented the candidate above as a
