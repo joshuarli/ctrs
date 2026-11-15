@@ -717,3 +717,23 @@ FIFO frame buffer, POLLOUT-driven flush, production gated on a
 buffer cap for backpressure. ~10 `conn.write_all` sites share the
 `out`/`outbox` encoding already; must preserve frame order and the
 single-writer invariant. Not yet implemented.
+
+**EXP-4 buffered-writer experiment — falsified, reverted
+(uncommitted, 2026-11-15):** implemented the candidate above as a
+`TxQueue`: `send(MSG_DONTWAIT)` per frame with a persistent FIFO,
+POLLOUT-driven flush, `TX_HIGH` (8 MiB) output-fd masking for
+backpressure; conn fd stayed blocking for reads so `read_frame`
+needed no partial-read state machine. Result was a regression on
+both axes: single-stream `exec cat` 1 GiB went ~1.30 s → ~1.55 s
+and 4x256 MiB parallel aggregate fell ~790 → ~520 MB/s. Likely
+cause: per-frame `send()` returns short on vsock and the extra
+queue copy per 512 KiB chunk costs more than the blocking
+`write_all` it replaced; POLLOUT re-arming may also spin the
+single event loop. Reverted to the committed drain-per-wakeup
+agent (`88f3d48`); re-measured back at baseline (1.30 s single,
+~1.32 s x4 ≈ 780 MB/s aggregate). Conclusion: the multiplexed-conn
+ceiling is not a writer-blocking artifact at this layer — the
+remaining ~20% vs OrbStack on parallel bulk is vsock line rate /
+scheduler interaction, and the next lever is the campaign's
+custom-Virtio question (priority 5) rather than userspace write
+buffering.
