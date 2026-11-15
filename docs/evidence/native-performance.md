@@ -371,6 +371,40 @@ product gap is real though: ctrs has no `docker`-driver build, so
 large bases. Candidate future work: embedded buildkit or a
 layer-dedup import path; recorded as a known structural difference.
 
+### W11 soak pilot (warm, 300 s, load windows + churn bursts)
+
+10 sequential 30 s W2 load windows (conc 8, 30% writes) interleaved
+with 8-job churn bursts every 4th window. Both engines green:
+
+| engine | requests | errors | churn fail | version-check fail | rps_mean |
+| --- | --- | --- | --- | --- | --- |
+| ctrs | 333,931 | 0 | 0 | 0 | 1100 |
+| orbstack | 378,464 | 0 | 0 | 0 | 1236 |
+
+No daemon deaths, no error leakage, item counts exact on both.
+`rps_mean` includes churn-burst downtime in the denominator; not a
+like-for-like W2 number. Pilot scale only — the campaign target is
+12–24 h (`--duration`); resource-trace growth analysis pending.
+
+### Builder-driver attribution control (`--driver dc`)
+
+W6/W7 `--driver dc` runs both engines on the same pinned
+`moby/buildkit` digest via a shared `np-dc` docker-container builder
+(n=3 pairs each, first ctrs trial excluded — cold builder image pull):
+
+| cell | ctrs dc | orbstack dc | default-driver winner |
+| --- | --- | --- | --- |
+| W6 zlib build_s | 2.28 | 2.31 | orbstack (0.52 vs 2.10) |
+| W7 build_empty_s | 5.85 | 6.26 | orbstack |
+| W7 build_warm_s | 1.17 | 1.52 | orbstack |
+| W7 build_incr_s | 2.55 | 3.13 | ~tie |
+
+**Conclusion:** on identical builder topology ctrs matches or beats
+OrbStack on every build cell. The entire default-path W6/W7 deficit is
+the missing `docker`-driver (embedded BuildKit) product feature, not
+engine runtime. This is now a *feature gap* to schedule, not a perf
+bug to chase.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -397,7 +431,7 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W10 | implemented, pilot collected (below) |
 | W4 | implemented, 5-pair baseline collected (below) |
 | W6 | implemented, 5-pair baseline collected (below) |
-| W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W11 | implemented, 300 s pilot collected (below) |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
