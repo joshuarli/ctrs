@@ -333,6 +333,10 @@ def workload_id(run_id: str, case_id: str, pair_id: int | None,
 
 
 _ORB_RESOURCES: tuple[int, int] | None = None
+# MiB added to the OrbStack-derived ceiling so the ctrs guest's
+# MemTotal (ceiling minus kernel/initramfs reservation) matches
+# OrbStack's reported MemTotal within the reporter's 1% pair gate.
+CTRS_GUEST_RESERVE_MIB = 950
 
 
 def orbstack_resources() -> tuple[int, int] | None:
@@ -456,10 +460,18 @@ class Engine:
         # vCPU count and memory ceiling OrbStack reports so CPU-bound
         # cells compare engines, not allocations. Explicit ambient
         # CTRS_CPUS/CTRS_MEMORY_MIB still win.
+        # The ceiling is not the guest-visible MemTotal: the pinned
+        # guest kernel+initramfs reserve ~891 MiB, so match OrbStack's
+        # reported MemTotal by adding CTRS_GUEST_RESERVE_MIB. Verified
+        # 2026-11-15: +950 MiB lands guest MemTotal within 0.1% of
+        # OrbStack (46,324,359,168 vs 46,278,524,928 bytes). If guest
+        # assets change the reservation, pairs fail closed on the
+        # reporter's 1% budget gate rather than silently mismatching.
         res = orbstack_resources()
         if res is not None:
             env.setdefault("CTRS_CPUS", str(res[0]))
-            env.setdefault("CTRS_MEMORY_MIB", str(res[1]))
+            env.setdefault("CTRS_MEMORY_MIB",
+                           str(res[1] + CTRS_GUEST_RESERVE_MIB))
         log = open(self.dir / "daemon.log", "ab")
         deadline = time.monotonic() + timeout
         # A previous daemon can still hold the data-root lock while its VM
