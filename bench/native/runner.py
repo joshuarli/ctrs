@@ -1157,12 +1157,27 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
 
     def wait_ready(deadline: float = 90.0) -> float | None:
         t0 = time.monotonic()
+        ready_at = None
         while time.monotonic() - t0 < deadline:
-            cp = engine.sh(["exec", name, "pg_isready", "-U", "postgres"],
-                           timeout=15, check=False)
-            if cp.returncode == 0:
-                return round(time.monotonic() - t0, 3)
-            time.sleep(0.5)
+            if ready_at is None:
+                cp = engine.sh(["exec", name, "pg_isready", "-U", "postgres"],
+                               timeout=15, check=False)
+                if cp.returncode == 0:
+                    ready_at = time.monotonic()
+            else:
+                # pg_isready can pass against the entrypoint's temporary
+                # init server, which then shuts down for the final
+                # postmaster — the orbstack W3 flake. Require a real
+                # query to keep succeeding for ~1.2 s before ready.
+                q = engine.sh(
+                    ["exec", name, "psql", "-U", "postgres", "-d",
+                     "postgres", "-tAc", "SELECT 1"],
+                    timeout=15, check=False)
+                if q.returncode != 0 or q.stdout.strip() != "1":
+                    ready_at = None
+                elif time.monotonic() - ready_at > 1.2:
+                    return round(ready_at - t0, 3)
+            time.sleep(0.4)
         return None
 
     try:
