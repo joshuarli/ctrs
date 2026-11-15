@@ -1211,3 +1211,33 @@ binary/guest provenance hashes, verified builder endpoint for the `dc`
 control, fail-closed reporting, dedicated measurement roots, and a
 three-pair noise control. Remaining queue work starts at NP-02
 (freeze inputs; real W6/W7 fixtures).
+
+## NP-02 vertical slice fixtures (2026-11-15, continued)
+
+W6/W7 now build real pinned upstream apps instead of proxies
+(commits `f755f6d`, `67759ce`, `d4394e1`):
+
+- **W6**: zlib 1.3.1 C build (`configure && make -j && make check`)
+  on digest-pinned `gcc:14.2.0-bookworm`, plus hyperfine 2.0.0 Rust
+  `cargo build --release --locked && cargo test --release --locked`
+  on digest-pinned `rust:1.100.0-bookworm` (132 tests pass). Sources
+  are sha256-pinned archives fetched on demand.
+- **W7**: two real apps through default buildx → `--load` → run
+  probes, each with uncached (`--no-cache`)/warm/incremental builds:
+  - hyperfine 2.0.0 (Rust → `debian:bookworm-slim` runtime)
+  - httpie 3.2.4 (PyPI sdist → `pip wheel` → offline `pip install`
+    → `python:3.13-slim` runtime); replaced an earlier gum/Go
+    candidate rejected by owner review.
+- All four base images are `FROM`-digest-pinned (index digests in
+  `assets.lock` `[images.w6]`/`[images.w7]`); both W7 Dockerfiles
+  re-validated end-to-end on OrbStack after pinning.
+
+Single-trial smoke runs (descriptive only, not pairs):
+
+| trial | hyperfine_uncached_s | hf_warm_s | hf_incr_s | httpie_uncached_s | httpie_warm_s | httpie_incr_s |
+| --- | --- | --- | --- | --- | --- | --- |
+| W7 orbstack warm default | 13.211 | 0.443 | 0.754 | 6.820 | 0.409 | 0.824 |
+| W7 ctrs warm default | 24.268 | 0.342 | 0.391 | 6.305 | 0.444 | 0.538 |
+
+All correctness checks green on both engines. n=1 — no performance
+conclusion; paired baseline is the next step.

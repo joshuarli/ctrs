@@ -23,11 +23,15 @@ and `http 3.2.4` probes pass, note marker readable). W7 keeps
 uncached/warm/incremental per app → 6 metrics
 (`{hyperfine,httpie}_{uncached,warm,incr}_s`).
 
-**Next executable action:** finish NP-02 input freeze — pin remaining
-image tags to digests in `assets.lock` (rust/gcc/python/debian base
-images currently tag-pinned; tool versions docker/buildx/buildkit
-already recorded by `preflight`/`prepare`), then run the W6/W7
-`baseline --driver default` vertical slice.
+**Next executable action:** monitor the running W6/W7 baseline
+(detached `nohup`, log
+`.work/native-perf/logs/w6w7-baseline-default-20261115T094322.log`,
+python PID recorded in session; results land under
+`.work/native-perf/results/`). When it finishes: `report` the new
+run, sanity-check pair validity, then run the matched-builder
+control (`--driver dc`) for W6/W7, then NP-03 qualification of the
+remaining cases. Smoke runs already green: W7 both engines, W6 ctrs
+— see `docs/evidence/native-performance.md` NP-02 section.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
