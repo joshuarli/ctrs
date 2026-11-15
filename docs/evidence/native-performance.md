@@ -171,6 +171,30 @@ printing a verified marker. Median wall seconds:
 - v1 scope: create/start/run/rm + CPU + log capture; temp networks,
   writable-layer writes and artifact collection deferred.
 
+### W3 persistent transactional Postgres (warm, pilot)
+
+postgres:17-alpine on a per-trial named volume: migrations → 300-tx
+deterministic mix (INSERT+UPDATE+COMMIT on a shared meta row) →
+CHECKPOINT → `docker restart` → exact count/sum/meta verification.
+
+| metric | ctrs median | orbstack median |
+| --- | --- | --- |
+| up_s (run -d → pg_isready) | 0.83 | 2.36 |
+| txmix_s (300 tx) | 0.07 | 0.35 |
+| tx_tps | ~4300 | ~860 |
+| restart_s | 0.60 | 0.21 |
+
+- **Durability caveat (campaign gate):** the ~5× tx_tps gap may partly
+  reflect disk-sync semantics — ctrs's data disk is `Cached`+`Fsync`
+  and the `.fsync`/`.full` audit is still open. Do not cite this as a
+  clean win until the durability policy is qualified.
+- `restart_s` is a small ctrs loss (0.60 vs 0.21 s) — container restart
+  path worth a look.
+- **Reliability:** 1 intermittent ctrs failure in ~9 trials — migrate/
+  txmix/checkpoint execs returned errors while the container stayed
+  healthy (stderr capture added for the next occurrence; not yet
+  reproduced). OrbStack 5/5 clean.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -192,7 +216,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W8 | implemented (incl. under-load cell), pilot trials collected |
 | W7 | implemented, 5-pair pilot collected — **loss cell** (below) |
 | W9 | implemented, 5-pair pilot collected — large win (below) |
-| W3–W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W3 | implemented, pilot collected — mixed (below) |
+| W4–W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 

@@ -62,6 +62,22 @@ LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
 W7_DIR = FIXTURES / "w7"
 W9_IMAGE = "python:3.13-slim"
+W3_IMAGE = "postgres:17-alpine"
+W3_PASSWORD = "npw3pw"
+W3_TXS = 300
+# Deterministic transaction mix: each tx inserts one row and updates a
+# counter row; the final SELECT gives the runner an exact checksum.
+W3_SQL = """\
+CREATE TABLE IF NOT EXISTS npw3_events (
+    id bigserial PRIMARY KEY, k int NOT NULL, v text NOT NULL);
+CREATE TABLE IF NOT EXISTS npw3_meta (k text PRIMARY KEY, n bigint NOT NULL);
+INSERT INTO npw3_meta VALUES ('txs', 0) ON CONFLICT DO NOTHING;
+"""
+
+
+def _w3_tx_sql(i: int) -> str:
+    return (f"BEGIN; INSERT INTO npw3_events(k,v) VALUES ({i}, 'v{i}');"
+            f" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'; COMMIT;\n")
 # ~0.6 s of CPU work inside the container, deterministic across engines
 # (same image, same interpreter); argv[1] is the job marker.
 W9_WORK = (
@@ -875,6 +891,118 @@ def trial_w9(ctx, engine: Engine, state: str,
         return rec
 
 
+def trial_w3(ctx, engine: Engine, state: str) -> dict:
+    """W3: persistent transactional Postgres — real migrations, a
+    deterministic 300-transaction mix, CHECKPOINT, `docker restart`,
+    then exact row-count verification on the persisted volume."""
+    case_id = "W3"
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    name = f"{proj}-db"
+    vol = f"{proj}-pgdata"
+
+    def psql(sql_file: str, timeout: float = 300) -> tuple[float, bool]:
+        tp = time.monotonic()
+        cp = engine.sh(
+            ["exec", name, "sh", "-c",
+             f"psql -U postgres -d postgres -f {sql_file} >/dev/null"],
+            timeout=timeout, check=False)
+        s = round(time.monotonic() - tp, 3)
+        if cp.returncode != 0:
+            rec["validation_errors"].append(
+                f"psql {sql_file} rc={cp.returncode}: "
+                f"{(cp.stderr or cp.stdout)[-300:]}")
+        return s, cp.returncode == 0
+
+    def wait_ready(deadline: float = 90.0) -> float | None:
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < deadline:
+            cp = engine.sh(["exec", name, "pg_isready", "-U", "postgres"],
+                           timeout=15, check=False)
+            if cp.returncode == 0:
+                return round(time.monotonic() - t0, 3)
+            time.sleep(0.5)
+        return None
+
+    try:
+        engine.ensure_up()
+        engine.sh(["rm", "-f", name], check=False, timeout=30)
+        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=30)
+
+        t0 = time.monotonic()
+        run = engine.sh(
+            ["run", "-d", "--name", name,
+             "-e", f"POSTGRES_PASSWORD={W3_PASSWORD}",
+             "-v", f"{vol}:/var/lib/postgresql/data", W3_IMAGE],
+            timeout=120, check=False)
+        checks["db_start"] = run.returncode == 0
+        ready = wait_ready() if checks["db_start"] else None
+        rec["metrics"]["up_s"] = round(time.monotonic() - t0, 3)
+        checks["db_ready"] = ready is not None
+        if ready is None:
+            raise RuntimeError("postgres never became ready")
+
+        mig = trial_dir / "migrate.sql"
+        mig.write_text(W3_SQL)
+        tx = trial_dir / "txmix.sql"
+        tx.write_text("".join(_w3_tx_sql(i) for i in range(W3_TXS))
+                      + "SELECT 'done';\n")
+        for f in (mig, tx):
+            cp = engine.sh(["cp", str(f), f"{name}:/tmp/{f.name}"],
+                           timeout=60, check=False)
+            if cp.returncode != 0:
+                rec["validation_errors"].append(
+                    f"docker cp {f.name} rc={cp.returncode}: "
+                    f"{(cp.stderr or cp.stdout)[-300:]}")
+
+        s, ok = psql("/tmp/migrate.sql")
+        rec["metrics"]["migrate_s"] = s
+        checks["migrate"] = ok
+
+        s, ok = psql("/tmp/txmix.sql", timeout=600)
+        rec["metrics"]["txmix_s"] = s
+        rec["metrics"]["tx_tps"] = round(W3_TXS / s, 1) if s else None
+        checks["txmix"] = ok
+
+        tp = time.monotonic()
+        cp = engine.sh(["exec", name, "psql", "-U", "postgres", "-d",
+                        "postgres", "-c", "CHECKPOINT"],
+                       timeout=60, check=False)
+        rec["metrics"]["checkpoint_s"] = round(time.monotonic() - tp, 3)
+        checks["checkpoint"] = cp.returncode == 0
+
+        tp = time.monotonic()
+        rst = engine.sh(["restart", name], timeout=120, check=False)
+        ready2 = wait_ready() if rst.returncode == 0 else None
+        rec["metrics"]["restart_s"] = round(time.monotonic() - tp, 3)
+        checks["restart_ready"] = ready2 is not None
+
+        out = engine.sh(
+            ["exec", name, "psql", "-U", "postgres", "-d", "postgres",
+             "-tA", "-c",
+             "SELECT count(*), COALESCE(sum(k),0), "
+             "(SELECT n FROM npw3_meta WHERE k='txs') FROM npw3_events"],
+            timeout=60, check=False)
+        expected_k = sum(range(W3_TXS))
+        want = f"{W3_TXS}|{expected_k}|{W3_TXS}"
+        checks["verify_rows"] = (out.returncode == 0
+                                 and want in out.stdout.replace(" ", "|"))
+        rec["correctness"]["ok"] = all(
+            checks.get(k) for k in
+            ("db_start", "db_ready", "migrate", "txmix", "checkpoint",
+             "restart_ready", "verify_rows"))
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        engine.sh(["rm", "-f", name], check=False, timeout=60)
+        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -980,6 +1108,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w7(ctx, engine, state)
         elif case_id == "W9":
             rec = trial_w9(ctx, engine, state)
+        elif case_id == "W3":
+            rec = trial_w3(ctx, engine, state)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1275,7 +1405,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W7", "W8", "W9"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1288,7 +1418,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W7", "W8", "W9"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1304,7 +1434,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W7", "W8", "W9"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W7", "W8", "W9"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
