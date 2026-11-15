@@ -83,6 +83,7 @@ buildx ─────┘    Docker Engine API          owns the VM             
 | `guest/kernel` | kernel config and patches |
 | `conformance/` | `smoke.sh` (engine round-trip), `run.sh` (API fixtures) |
 | `tests/e2e.sh` | the Docker compatibility suite, against a running engine |
+| `bench/arm64-build.sh` | the ARM64 build benchmark (equivalent-work A/B/C comparison; `--verify`, `--samples N --all-states`) |
 | `tests/arm64-build.sh` | the ARM64-on-AMD64 qualification runner (`environment`, `compatibility`, `identity`, `platform`, `cross`, `lifecycle` cases) |
 | `tests/linux-host.sh` | the Linux host build, driven in a privileged container |
 | `xtask` | build tasks |
@@ -99,5 +100,10 @@ qualification suite in a disposable, isolated environment; `--case
 lifecycle` covers concurrent builds, cancellation, worker failure, failed
 target execution, daemon restart with cache reuse, and the bundled
 emulator's diagnostics (see `docs/evidence/arm64-build.md`).
+`bench/arm64-build.sh --verify` runs the short benchmark pilot;
+`--samples 5 --all-states` is the full equivalent-work comparison
+(envelope: median gap must exceed observed spread on equivalent
+successful work before any speed claim; overlapping-load samples are
+discarded; the host must be quiet).
 `binfmt` handler-free proof is unavailable on hosts where the handlers
 are global; the runner fails closed under `--require-no-binfmt`.
