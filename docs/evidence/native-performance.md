@@ -473,6 +473,19 @@ as the campaign's one structural feature gap: `docker`-driver
 builds exist and work, they just cost ~0.3–1.3 s more per build,
 scaling with image size.
 
+**Exec stdin path (2026-11-15):** bulk `exec -i` measured ~400 MB/s
+vs OrbStack ~880 MB/s — a real loss, root-caused to two stacked
+costs. `forward_stdin` read 32 KiB per `Input` frame; the guest's
+per-frame cost capped throughput near half the link. Reading at
+`MAX_OUTPUT_CHUNK` (512 KiB) recovered ~25% (512 MiB: 1.35 s ->
+~1.0-1.15 s, `6b8cafb`). The residual ~2x gap matches the measured
+host->guest vsock ceiling (~450-500 MB/s, same as `docker cp` in at
+~475 MB/s) vs OrbStack's ~880 MB/s — asymmetric vsock directions,
+not fixable in userspace. Raw stdin on the dedicated conn was
+considered and rejected: it would save only the framing copies
+while adding a stdin-routing ordering problem between the control
+conn and the exec conn for ~10% gain.
+
 **Adjacent-path probes (same session, warm engines):** `docker save`
 of the 468 MB gcc store — ctrs 0.52 s vs OrbStack 2.51 s (~5x,
 host-side store reads directly); `docker export` ~1.5 s/GB on both
