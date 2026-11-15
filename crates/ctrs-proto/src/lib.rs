@@ -37,8 +37,9 @@ pub const INPUT_WINDOW: usize = 4 << 20;
 /// `InputConsumed`, which the host waits on, so an older agent would leave
 /// a client's stdin blocked after `INPUT_WINDOW` bytes. 4 added
 /// `UsageQuery`, which has no reply: an older agent's "unexpected" error
-/// would be taken as the reply to the next request.
-pub const PROTOCOL: u16 = 4;
+/// would be taken as the reply to the next request. 5 added `LayerFetch`,
+/// the virtiofs layer source an older agent would answer "unexpected" to.
+pub const PROTOCOL: u16 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg<'a> {
@@ -58,6 +59,11 @@ pub enum Msg<'a> {
     /// Host → guest: is this layer already unpacked? Answered by `LayerStatus`.
     LayerQuery(&'a str),
     LayerStatus(bool),
+    /// Host → guest: the layer blob is a file the guest reads itself over
+    /// the Mac's virtiofs share (faster than the conn's byte stream).
+    /// `path` is the guest-side absolute path under `/mnt/mac`. Answered
+    /// by `LayerStored` like `LayerBegin`, or `Error` when unreadable.
+    LayerFetch(LayerFetch<'a>),
     /// Host → guest: the next `size` raw bytes on the stream are this layer's
     /// blob. Answered by `LayerStored` or `Error`.
     LayerBegin(LayerBegin<'a>),
@@ -305,6 +311,15 @@ pub struct Hello {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LayerBegin<'a> {
+    pub digest: &'a str,
+    pub media_type: &'a str,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerFetch<'a> {
+    /// Guest-absolute path of the blob on the virtiofs share.
+    pub path: &'a str,
     pub digest: &'a str,
     pub media_type: &'a str,
     pub size: u64,
@@ -630,6 +645,7 @@ mod kind {
     pub const RETAIN_LAYERS: u16 = 73;
     pub const USAGE_QUERY: u16 = 74;
     pub const USAGE: u16 = 75;
+    pub const LAYER_FETCH: u16 = 76;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -814,6 +830,12 @@ impl Msg<'_> {
             Msg::LayerQuery(d) => frame(out, kind::LAYER_QUERY, |o| put_str(o, d)),
             Msg::LayerStatus(have) => frame(out, kind::LAYER_STATUS, |o| o.push(have as u8)),
             Msg::LayerBegin(l) => frame(out, kind::LAYER_BEGIN, |o| {
+                put_str(o, l.digest);
+                put_str(o, l.media_type);
+                put_u64(o, l.size);
+            }),
+            Msg::LayerFetch(l) => frame(out, kind::LAYER_FETCH, |o| {
+                put_str(o, l.path);
                 put_str(o, l.digest);
                 put_str(o, l.media_type);
                 put_u64(o, l.size);
@@ -1087,6 +1109,7 @@ pub fn decode(frame: &[u8]) -> Result<Msg<'_>, DecodeError> {
         kind::LAYER_QUERY => Msg::LayerQuery(r.str()?),
         kind::LAYER_STATUS => Msg::LayerStatus(r.u8()? != 0),
         kind::LAYER_BEGIN => Msg::LayerBegin(LayerBegin { digest: r.str()?, media_type: r.str()?, size: r.u64()? }),
+        kind::LAYER_FETCH => Msg::LayerFetch(LayerFetch { path: r.str()?, digest: r.str()?, media_type: r.str()?, size: r.u64()? }),
         kind::LAYER_STORED => Msg::LayerStored(LayerStored { unpacked_bytes: r.u64()?, elapsed_ns: r.u64()? }),
         kind::RUN => Msg::Run({
             let mut run = RunSpec {
@@ -1240,6 +1263,7 @@ mod tests {
         round(Msg::LayerQuery("sha256:ab"));
         round(Msg::LayerStatus(true));
         round(Msg::LayerBegin(LayerBegin { digest: "sha256:ab", media_type: "x+gzip", size: 9 }));
+        round(Msg::LayerFetch(LayerFetch { path: "/mnt/mac/x/blobs/sha256/ab", digest: "sha256:ab", media_type: "x+gzip", size: 9 }));
         round(Msg::LayerStored(LayerStored { unpacked_bytes: 1, elapsed_ns: 2 }));
         round(Msg::Started { id: "c1", pid: 42 });
         round(Msg::Output { id: "c1", stream: Stream::Stderr, data: b"hi\n" });

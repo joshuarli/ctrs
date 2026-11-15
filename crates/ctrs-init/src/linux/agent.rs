@@ -733,6 +733,33 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                         Err(e) => Msg::Error(&format!("unpack {}: {e}", begin.digest)).encode(&mut out),
                     }
                 }
+                // The same install, but the blob is a file on the Mac's
+                // virtiofs share: the host's store blob read directly,
+                // several times the conn's rate. An unreadable path is an
+                // Error reply, and the host sends the layer the old way.
+                Ok(Msg::LayerFetch(fetch)) => {
+                    let seq = install_seq;
+                    install_seq += 1;
+                    let begin = ctrs_proto::LayerBegin { digest: fetch.digest, media_type: fetch.media_type, size: fetch.size };
+                    let staged = std::fs::File::open(fetch.path).and_then(|mut f| layers::stage_blob(&mut f, &begin, &paths.layers, seq));
+                    match staged {
+                        Ok(blob) => {
+                            install_queue.push_back(layers::InstallJob {
+                                seq,
+                                digest: fetch.digest.to_owned(),
+                                media_type: fetch.media_type.to_owned(),
+                                size: fetch.size,
+                                blob,
+                                started: std::time::Instant::now(),
+                            });
+                            outbox.push_back(OutItem::AwaitJob { seq });
+                            pump_installs(&paths.layers, &mut install_queue, &mut install_wait, &mut done_jobs);
+                            drain_outbox(&mut conn, &mut out, &mut outbox, &mut done_jobs)?;
+                            continue;
+                        }
+                        Err(e) => Msg::Error(&format!("unpack {}: {e}", fetch.digest)).encode(&mut out),
+                    }
+                }
                 Ok(Msg::Run(spec)) => {
                     // A container that wants the network must not start before the
                     // VM has it: right after boot the DHCP lease can be a few

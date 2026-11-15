@@ -501,6 +501,11 @@ pub struct Engine {
     /// Serialises sending layers, so two creates of a new image don't send
     /// the same layers twice.
     layers: Mutex<()>,
+    /// Whether the guest's virtiofs share takes layer blobs (`/mnt/mac`).
+    /// Cleared for good on the first fetch that cannot be read, so a VM
+    /// without the share pays one failed round trip, not one per layer.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    layer_vfs: std::sync::atomic::AtomicBool,
     records: PathBuf,
     /// Serialises writes of `containers.json`.
     saving: Mutex<()>,
@@ -588,6 +593,7 @@ impl Engine {
             state: Mutex::default(),
             changed: Condvar::new(),
             layers: Mutex::new(()),
+            layer_vfs: std::sync::atomic::AtomicBool::new(cfg!(target_os = "macos")),
             records,
             saving: Mutex::new(()),
             me: OnceLock::new(),
@@ -1420,10 +1426,44 @@ impl Engine {
         let _one_at_a_time = self.layers.lock().unwrap_or_else(|e| e.into_inner());
         for (digest, media_type) in layers {
             if !self.vm()?.has_layer(digest)? {
-                self.vm()?.send_layer(digest, media_type, &self.store.blob_path(digest)?)?;
+                self.push_layer(digest, media_type)?;
             }
         }
         Ok(())
+    }
+
+    /// One layer into the guest: read from the store blob over the
+    /// virtiofs share when it takes it (several times the conn's rate,
+    /// and the file is already there), else streamed on the conn.
+    fn push_layer(&self, digest: &str, media_type: &str) -> io::Result<()> {
+        let vm = self.vm()?;
+        let blob = self.store.blob_path(digest)?;
+        #[cfg(target_os = "macos")]
+        if self.layer_vfs.load(std::sync::atomic::Ordering::Relaxed)
+            && let Ok(path) = self.guest_blob_path(&blob)
+            && let Ok(size) = std::fs::metadata(&blob).map(|m| m.len())
+        {
+            match vm.send_layer_fetch(digest, media_type, &path, size) {
+                Ok(()) => {
+                    crate::diag::debug!("layer via share", digest = &digest[..digest.len().min(19)], mib = size >> 20);
+                    return Ok(());
+                }
+                Err(e) => {
+                    crate::diag::info!("layer fetch over virtiofs failed; streaming instead", error = e);
+                    self.layer_vfs.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+        vm.send_layer(digest, media_type, &blob)
+    }
+
+    /// The blob as the guest sees it on the Mac share: `/mnt/mac` is the
+    /// host's `/`, so the store's absolute path lands under it.
+    #[cfg(target_os = "macos")]
+    fn guest_blob_path(&self, blob: &std::path::Path) -> io::Result<String> {
+        let root = self.store.root().canonicalize()?;
+        let rel = blob.strip_prefix(self.store.root()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "blob outside the store"))?;
+        Ok(format!("/mnt/mac/{}", root.join(rel).display()))
     }
 
     /// A container's layers back in the guest before it runs again: the

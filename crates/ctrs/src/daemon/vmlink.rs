@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 
-use ctrs_proto::{HEADER, LayerBegin, Msg, Stats, Stream};
+use ctrs_proto::{HEADER, LayerBegin, LayerFetch, Msg, Stats, Stream};
 use ctrs_vmm::Vm;
 
 /// A reply to one request.
@@ -297,6 +297,12 @@ impl VmLink {
         let size = std::fs::metadata(blob)?.len();
         self.call(|o| Msg::LayerBegin(LayerBegin { digest, media_type, size }).encode(o), Some((blob, size)))
             .map(drop)
+    }
+
+    /// The same layer, but the guest reads the blob itself from `path` on
+    /// the virtiofs share — the store file, no copy and no vsock bytes.
+    pub fn send_layer_fetch(&self, digest: &str, media_type: &str, path: &str, size: u64) -> io::Result<()> {
+        self.call(|o| Msg::LayerFetch(LayerFetch { path, digest, media_type, size }).encode(o), None).map(drop)
     }
 
     #[allow(clippy::too_many_arguments)]
