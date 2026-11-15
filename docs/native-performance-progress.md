@@ -10,15 +10,40 @@ queue or turn-by-turn status diary.
 ## Resume here
 
 **Current task:** NP-04 — default-driver build→load→first-use path.
-First implementation slice landed (`4fdfc43`, unverified e2e):
-`crates/ctrs/src/daemon/buildgrpc.rs` terminates h2c on both hops of
-`POST /grpc` (HPACK relayed verbatim; lone default docker/image
-exporter rewritten to mirror push+retag on trailers; all other
-exporter forms pass through), splices `POST /session` bytes through a
-minimal `Control.Session` gRPC client, builder.rs gives buildkitd
-`--addr tcp://0.0.0.0:1234` and tracks it in `BuilderSnapshot.tcp`
-(pre-change builders classify stale), `/_ping` reports
-`Builder-Version: 2`. `cargo check`/`cargo test -p ctrs` clean (174).
+**E2E-verified and committed `3b5f5ba` (2026-11-15):**
+`docker buildx build --builder default --load` on the warm ctrs
+socket now uses the **docker driver** end-to-end — h2c `/grpc`
+(HPACK relayed verbatim, flow-control windows honored), `/session`
+bytes spliced through `Control.Session` with the client's
+`X-Docker-Expose-Session-*` headers forwarded as gRPC metadata, and
+the lone `moby`/`docker`/`image` exporter rewritten to a mirror push
+with retag-on-trailers/discard-on-reset. Smoke `np-smoke:test`
+landed in `docker images` with no tarball/archive load; W7
+pairs-1 smoke `base-20261115T123903-a5ff` all-green on both engines
+(ctrs warm/incr roughly half of OrbStack's). Runtime fixes folded
+in: buildkitd listens on unix+TCP (buildctl probe kept), the first
+client DATA frame per h2 stream is now actually buffered for the
+SolveRequest rewrite (was unreachable), buildx's deprecated
+exporter fields 3/4 no longer fail the rewrite closed, and the
+benchmark's isolated buildx config had a stray docker-container
+`default` builder removed so `default` resolves to the docker
+driver exactly like OrbStack's. `cargo test -p ctrs` 174/174.
+
+**In flight:** W6+W7 `--driver default` 10-pair baselines re-running
+against the new path — log
+`.work/native-perf/logs/np04-default-baseline-20261115T124001.log`
+(detached, survives session end). Warm daemon runs the signed
+`3b5f5ba` binary, `CTRS_LOG` unset (debug off for clean timings).
+
+**Next executable action:** when the log shows both baselines
+done, run `python3.14 bench/native/runner.py report` on the new
+run ids, sanity-check pair validity (resource gate, correctness),
+and compare every cell against the dc control
+(`base-20261115T104041-95ab`, `base-20261115T105554-3c75`). The
+acceptance cell is the W6 zlib default-driver loss (was ratio
+1.22); httpie warm/incr inconclusive cells should now resolve.
+Record raw outputs/ratios/CIs in `docs/evidence/native-performance.md`
+and checkpoint this file with run ids + commit.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
@@ -60,23 +85,10 @@ per build; flips zlib to a loss and httpie warm/incr to
 inconclusive). Full comparison table in
 `docs/evidence/native-performance.md`.
 
-**Next executable action:** e2e-verify `4fdfc43`, then re-run W6/W7
-`--driver default` baselines and compare against the dc control.
-Concretely: `cargo build --release -p ctrs`; restart the warm ctrs
-engine (`.work/native-perf/engines/ctrs-warm`, pid was 17232) with the
-new binary; `DOCKER_HOST=unix://…/docker.sock docker buildx build
---load` a digest-pinned fixture (W7 hyperfine first — smallest) and
-check `docker images` shows the tag, probes pass, and
-`docker buildx du`/logs show no archive load. Watch for: buildx may
-send exporter attrs outside the allowlist (`unpack`, `name-canonical`)
-→ passthrough is correct-but-slow; if every solve passes through,
-widen `CARRY_ATTRS` in buildgrpc.rs. If `/grpc` or `/session` hangs,
-check `target` logs and the builder container's `--addr` flag took
-effect (old builder containers need `docker stop` + rebuild to gain
-the TCP listener — `tcp:false` snapshots classify StaleRunning and
-refuse until stopped). Then: `python3.14 bench/native/runner.py run
---case w6 --driver default --pairs 10` (same for w7) and `report`.
-zlib default-driver loss is the acceptance cell to flip.
+**Superseded 2026-11-15:** the e2e verification and baseline re-run
+above already happened — see "Resume here". The zlib default-driver
+loss remains the acceptance cell to flip; results pending in
+`np04-default-baseline-20261115T124001.log`.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
