@@ -71,9 +71,9 @@ signal).
 | W2 API load | rps | 2029 | 1899 | **1.07 win** |
 | W2 | p95 ms | 6.15 | 7.08 | 0.87 win |
 | W2 | p99 ms | 10.99 | 11.60 | 0.95 ~tie |
-| W3 postgres | tx_tps | 3488 | 771 | **4.53 win** |
-| W3 | up s | 1.11 | 2.38 | 0.47 win |
-| W3 | restart s | 0.61 | 0.24 | **2.57 loss** |
+| W3 postgres | tx_tps | 4000 | 813 | **4.9 win** (re-run, fine polling) |
+| W3 | up s | 2.00 | 3.34 | 0.60 win (includes +1.2 s stability gate) |
+| W3 | restart s | 0.245 | 0.208 | ~tie (was a polling artifact — see below) |
 | W4 queue 1/4/16 w | drain s | 0.40/0.16/0.16 | 0.56/0.66/1.86 | **win all** |
 | W5 edit-test | bind/vol s | 0.10/0.08 | 0.31/0.29 | **win both** |
 | W6 zlib build | build s (default driver) | 2.10 | 0.52 | **loss — builder topology, see below** |
@@ -84,14 +84,28 @@ signal).
 | W8 under-load | load p99 ms | 10.3 | 29.2 | **0.35 win** |
 | W8 under-load | load errors | 0 | 0 | tie |
 | W9 churn 1/4/8/16 | wall s | 0.64/0.65/0.70/0.72 | 0.86/1.08/1.40/2.11 | **win all** |
-| W10 recovery | recovery s | 0.54 | 0.37 | **1.47 loss** |
+| W10 recovery | recovery s | 0.546 | 0.301 | **1.8 loss under load** |
 | W10 | load rps during kill | 5244 | 1610 | 3.26 (errors expected in window) |
 | W10 | correctness | green | green | tie (no lost writes both) |
 
 **Losses to attack, in order:**
-1. **Container restart/start latency** — W3 `restart_s` 2.57x and W10
-   `recovery_s` 1.47x are the same path (`docker start`/`restart` →
-   health). ~0.2–0.35 s absolute; next hillclimb target.
+1. **W10 recovery under load** — the restart/start path itself is *not*
+   slow: idle A/B shows ctrs `docker start`+health ≈ 0.27 s vs
+   orbstack ≈ 0.29–0.38 s, and W3 `restart_s` is now a tie (0.245 vs
+   0.208) after fixing poll quantization — the earlier 2.57x 'loss' was
+   a fixture artifact (0.5 s isready ticks + fast API return landing
+   early in a cycle). The real W10 gap is **published-port churn during
+   downtime**: ctrs fast-fails ~68k connections through the per-
+   connection vsock relay (each a thread + vsock stream + guest-side
+   connect attempt on the agent's single event loop), while OrbStack's
+   kernel forwarding refuses cheaply (~174 errors). The post-restart
+   health check queues behind that churn → recovery_s 0.55 vs 0.30.
+   This is the campaign's predicted cross-workload interference,
+   now measured. Candidate fixes, one at a time: guest relay off the
+   agent loop (needs the clone3/thread audit), host-side refusal
+   suppression (needs a refusal signal — wire protocol is frozen), or
+   the priority-3 vmnet path (blocked on this host by Local Network
+   permission).
 2. **Builder export path** — W6/W7 default-driver losses traced to the
    docker-container driver's client-side image tarball export (~1.5–2 s
    on the gcc base). Matched-driver (`--driver dc`, same pinned
