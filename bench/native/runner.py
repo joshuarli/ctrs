@@ -72,6 +72,43 @@ W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
 W6_IMAGE = "gcc:14.2.0-bookworm"
 W6_DIR = FIXTURES / "w6"
+# Checksum-pinned upstream source for W6. The archive is gitignored
+# (too large for the repo); ensure_w6_source fetches it on demand and
+# refuses anything that does not match the pinned sha256. Hash verified
+# against the official madler/zlib v1.3.1 GitHub release asset.
+W6_SOURCE = {
+    "url": "https://github.com/madler/zlib/releases/download/v1.3.1/"
+           "zlib-1.3.1.tar.gz",
+    "file": "zlib-1.3.1.tar.gz",
+    "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+}
+
+
+def ensure_w6_source(dest_dir: Path | None = None) -> Path:
+    """Return the pinned W6 source archive, fetching it if absent.
+
+    A present file with the wrong checksum is replaced only after the
+    download verifies; a corrupt fetch never overwrites a good archive.
+    """
+    dest_dir = W6_DIR if dest_dir is None else dest_dir
+    target = dest_dir / W6_SOURCE["file"]
+    if target.is_file() and sha256_file(target) == W6_SOURCE["sha256"]:
+        return target
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tmp = dest_dir / (W6_SOURCE["file"] + ".part")
+    try:
+        with urllib.request.urlopen(W6_SOURCE["url"], timeout=300) as r, \
+                tmp.open("wb") as out:
+            shutil.copyfileobj(r, out, length=1024 * 1024)
+        if sha256_file(tmp) != W6_SOURCE["sha256"]:
+            raise RuntimeError(
+                "W6 source archive checksum mismatch; refusing to use it")
+        tmp.replace(target)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return target
+
+
 # Attribution control (campaign Phase B.2): a docker-container BuildKit
 # builder usable on *both* engines, so W6/W7 can separate engine runtime
 # from builder topology. The image is ctrs's pinned buildkit digest so
@@ -1088,9 +1125,7 @@ def trial_w6(ctx, engine: Engine, state: str,
     tag = f"npw6/zlib:{ctx.run_id[-6:]}"
     checks = rec["correctness"]["checks"]
     try:
-        if not (W6_DIR / "zlib-1.3.1.tar.gz").is_file():
-            raise RuntimeError("W6 source archive is absent from this checkout; "
-                               "implement checksum-pinned asset preparation before measuring W6")
+        source = ensure_w6_source(W6_DIR)
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
@@ -1104,8 +1139,7 @@ def trial_w6(ctx, engine: Engine, state: str,
         ctx_dir = trial_dir / "ctx"
         ctx_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(W6_DIR / "Dockerfile", ctx_dir / "Dockerfile")
-        shutil.copy(W6_DIR / "zlib-1.3.1.tar.gz",
-                    ctx_dir / "zlib-1.3.1.tar.gz")
+        shutil.copy(source, ctx_dir / W6_SOURCE["file"])
         (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
         tp = time.monotonic()
@@ -2158,6 +2192,7 @@ def cmd_prepare(args) -> int:
     on each selected engine."""
     engines = args.engines.split(",")
     ctx = RunContext(f"prep-{datetime.now().strftime('%Y%m%dT%H%M%S')}")
+    ensure_w6_source()
     summary = {}
     portfolio = {}
     for name in engines:

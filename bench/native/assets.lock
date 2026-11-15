@@ -42,3 +42,7 @@ fixture_api = "np-fixture-api:<content-hash tag; see runner.py api_tag()>"
 w1_app_requirements = "bench/native/fixtures/w1/api/requirements.txt"
 w1_seed = "bench/native/fixtures/w1/seed.sql (500 deterministic rows)"
 w2_load = "bench/native/fixtures/w2/load.py (stdlib, seeded RNG)"
+
+[sources]
+# Checksum-pinned upstream inputs fetched on demand by the runner.
+w6_zlib = { url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz", sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23", verified_against = "official madler/zlib v1.3.1 GitHub release asset, 2026-11-15" }

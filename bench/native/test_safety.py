@@ -5,6 +5,7 @@ No engine, VM, Docker installation, network service, or user data is used.
 
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -141,8 +142,12 @@ class WorkloadSafetyTests(unittest.TestCase):
             shutil.copy(runner.W6_DIR / "Dockerfile", fixture / "Dockerfile")
             # A fake source archive is sufficient for this mocked build:
             # the test checks orchestration, never executes compilation.
-            (fixture / "zlib-1.3.1.tar.gz").write_bytes(b"test-only asset")
-            with patch.object(runner, "W6_DIR", fixture):
+            payload = b"test-only asset"
+            (fixture / "zlib-1.3.1.tar.gz").write_bytes(payload)
+            source_pin = dict(runner.W6_SOURCE)
+            source_pin["sha256"] = hashlib.sha256(payload).hexdigest()
+            with patch.object(runner, "W6_DIR", fixture), \
+                    patch.object(runner, "W6_SOURCE", source_pin):
                 rec = runner.trial_w6(ctx, engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)
             builds = [call.args[0] for call in engine.sh.call_args_list
@@ -158,7 +163,8 @@ class WorkloadSafetyTests(unittest.TestCase):
     def test_missing_w6_asset_fails_before_starting_engine(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = fake_engine()
-            with patch.object(runner, "W6_DIR", Path(tmp) / "absent"):
+            with patch.object(runner, "ensure_w6_source",
+                              side_effect=RuntimeError("checksum-pinned fetch failed")):
                 rec = runner.trial_w6(FixtureContext(tmp), engine, "warm")
             self.assertFalse(rec["correctness"]["ok"])
             self.assertIn("checksum-pinned", rec["validation_errors"][0])
@@ -232,6 +238,62 @@ class WorkloadSafetyTests(unittest.TestCase):
                 rec = self.soak_result(summary, code)
                 self.assertFalse(rec["correctness"]["ok"])
                 self.assertEqual(rec["metrics"]["invalid_load_windows"], 1)
+
+
+class W6SourceTests(unittest.TestCase):
+    @staticmethod
+    def _pin(payload):
+        return {"url": "https://example.invalid/src.tar.gz",
+                "file": "src.tar.gz",
+                "sha256": hashlib.sha256(payload).hexdigest()}
+
+    @staticmethod
+    def _resp(data):
+        class Resp:
+            def __enter__(self):
+                return io.BytesIO(data)
+
+            def __exit__(self, *args):
+                return False
+        return Resp()
+
+    def test_verified_file_skips_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            payload = b"good archive"
+            (dest / "src.tar.gz").write_bytes(payload)
+            with patch.object(runner, "W6_SOURCE", self._pin(payload)), \
+                    patch.object(runner.urllib.request, "urlopen",
+                                 side_effect=AssertionError("network used")):
+                self.assertEqual(runner.ensure_w6_source(dest),
+                                 dest / "src.tar.gz")
+
+    def test_fetch_verifies_checksum_then_installs(self):
+        payload = b"fetched archive"
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            with patch.object(runner, "W6_SOURCE", self._pin(payload)), \
+                    patch.object(runner.urllib.request, "urlopen",
+                                 return_value=self._resp(payload)) as fetch:
+                target = runner.ensure_w6_source(dest)
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertFalse((dest / "src.tar.gz.part").exists())
+            fetch.assert_called_once()
+
+    def test_checksum_mismatch_never_installs_or_overwrites(self):
+        payload = b"corrupt download"
+        pin = self._pin(b"expected bytes")
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            original = b"pre-existing good archive"
+            (dest / "src.tar.gz").write_bytes(original)
+            with patch.object(runner, "W6_SOURCE", pin), \
+                    patch.object(runner.urllib.request, "urlopen",
+                                 return_value=self._resp(payload)):
+                with self.assertRaisesRegex(RuntimeError, "checksum"):
+                    runner.ensure_w6_source(dest)
+            self.assertEqual((dest / "src.tar.gz").read_bytes(), original)
+            self.assertFalse((dest / "src.tar.gz.part").exists())
 
 
 class ExitStatusTests(unittest.TestCase):

@@ -89,7 +89,7 @@ metrics = ["build_s", "artifact_sha256"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
 correctness = ["build rc=0", "artifact sha256 present"]
-note = "PILOT: source preparation is incomplete in a fresh checkout (zlib archive is untracked); require a checksum-pinned fetch. Explicit --no-cache and a per-pair stamp ensure distinct compilation attempts with identical A/B input; retained base images mean this is not engine-cold. Existing hash probe does not yet assert an expected artifact. Default and controlled dc builder results remain separate. Old run_id-only cache-stamp measurements require a new baseline."
+note = "PILOT: zlib 1.3.1 is the 'other language' half only — the pinned Rust app is still missing. Source archive is gitignored and fetched on demand via ensure_w6_source() with a pinned sha256 (official madler/zlib v1.3.1 GitHub release asset). Explicit --no-cache and a per-pair stamp ensure distinct compilation attempts with identical A/B input; retained base images mean this is not engine-cold. The artifact sha256 probe records the produced libz.a hash but does not yet assert an expected value. Default and controlled dc builder results remain separate. Old run_id-only cache-stamp measurements require a new baseline."
 
 [[case]]
 id = "W7"
