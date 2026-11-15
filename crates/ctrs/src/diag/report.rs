@@ -377,6 +377,17 @@ pub fn assemble(home: &Path, state: &Path, facts: &Facts, redactor: &Redactor) -
         s.push_str(&first_bytes(&text, CRASH_BUDGET));
     }
 
+    // Fatal-signal markers written by diag's signal handlers: the
+    // historical silent deaths left nothing else behind.
+    let signals = crashes.join("signals.log");
+    if let Ok(text) = std::fs::read_to_string(&signals) {
+        let lines: Vec<&str> = text.lines().collect();
+        if !lines.is_empty() {
+            let _ = writeln!(s, "\n==== Fatal signal markers ({}) ====", signals.display());
+            let _ = writeln!(s, "{}", lines[lines.len().saturating_sub(50)..].join("\n"));
+        }
+    }
+
     // What macOS wrote down itself: crashes our hook can't see (a signal, a
     // hang the system killed, an abort inside a framework).
     let reports = home.join("Library/Logs/DiagnosticReports");
