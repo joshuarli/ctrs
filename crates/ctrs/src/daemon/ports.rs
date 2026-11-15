@@ -17,7 +17,7 @@
 //! CPUs; through the bridge alone, one CPU carried it all and the port
 //! ran at about half of Docker's speed on 127.0.0.1.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -671,6 +671,9 @@ fn accept_loop(listener: &TcpListener, wake: &OwnedFd, vm: &Arc<VmLink>, ip: [u8
             return; // the container stopped
         }
         while let Ok((client, from)) = listener.accept() {
+            if refused_recent(ip, port) {
+                continue;
+            }
             let Some(permit) = tcp_permit(from.ip()) else {
                 continue;
             };
@@ -716,6 +719,9 @@ fn open_framed_relay(vm: &VmLink, ip: [u8; 4], port: u16) -> io::Result<(ctrs_vm
 }
 
 fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<SocketAddr>) -> io::Result<()> {
+    if refused_recent(ip, port) {
+        return Ok(());
+    }
     client.set_nonblocking(false)?;
     client.set_nodelay(true)?;
     client.set_read_timeout(Some(TCP_IDLE))?;
@@ -764,7 +770,10 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
         unsafe { libc::shutdown(to_guest.as_raw_fd(), libc::SHUT_WR) };
         r
     })?;
-    let down_res = if framed { copy_frames(&mut from_guest, &mut client_write) } else { copy(&mut from_guest, &mut client_write) };
+    let down_res = if framed { copy_frames(&mut from_guest, &mut client_write) } else { copy(&mut from_guest, &mut client_write).map(|_| false) };
+    if matches!(down_res, Ok(true)) {
+        note_refused(ip, port);
+    }
     let _ = client_write.shutdown(Shutdown::Write);
     let up_res = up.join();
     crate::diag::debug!("port relay ended", ms = relay_start.elapsed().as_millis(), framed = framed, down = format!("{down_res:?}"), up = format!("{up_res:?}"));
@@ -890,6 +899,8 @@ struct Deframer {
     head: [u8; 4],
     have: usize,
     left: usize,
+    /// Saw the guest's `u32::MAX` frame: the backend connect was refused.
+    refused: bool,
 }
 
 impl Deframer {
@@ -909,7 +920,12 @@ impl Deframer {
             data = &data[n..];
             if self.have == 4 {
                 self.have = 0;
-                self.left = u32::from_be_bytes(self.head) as usize;
+                let len = u32::from_be_bytes(self.head);
+                if len == u32::MAX {
+                    self.refused = true;
+                    continue;
+                }
+                self.left = len as usize;
                 if self.left == 0 {
                     return Ok(true);
                 }
@@ -919,14 +935,48 @@ impl Deframer {
     }
 }
 
-/// `copy` from a framed relay, up to its end frame (or the stream's end).
-fn copy_frames(from: &mut impl Read, to: &mut impl Write) -> io::Result<()> {
+/// Container ports whose guest connect was just refused. While an entry is
+/// fresh, accepted clients are dropped without a vsock relay, so retry
+/// churn against a dead backend costs the guest agent nothing. Entries are
+/// written only by real guest refusals, so a backend that starts listening
+/// is reached again within `REFUSED_TTL`.
+static REFUSED: Mutex<Option<HashMap<([u8; 4], u16), Instant>>> = Mutex::new(None);
+const REFUSED_TTL: Duration = Duration::from_millis(250);
+
+fn refused_recent(ip: [u8; 4], port: u16) -> bool {
+    let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(map) = g.as_mut() else { return false };
+    match map.get(&(ip, port)) {
+        Some(t) if t.elapsed() < REFUSED_TTL => true,
+        Some(_) => {
+            map.remove(&(ip, port));
+            false
+        }
+        None => false,
+    }
+}
+
+fn note_refused(ip: [u8; 4], port: u16) {
+    let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    let map = g.get_or_insert_with(HashMap::new);
+    if map.len() >= 8192 {
+        map.retain(|_, t| t.elapsed() < REFUSED_TTL);
+        if map.len() >= 8192 {
+            map.clear();
+        }
+    }
+    map.insert((ip, port), Instant::now());
+}
+
+/// `copy` from a framed relay, up to its end frame (or the stream's end);
+/// true when the guest reported the backend connect refused.
+fn copy_frames(from: &mut impl Read, to: &mut impl Write) -> io::Result<bool> {
     let mut buf = vec![0u8; COPY_BUF];
     let mut frames = Deframer::default();
     loop {
         let n = from.read(&mut buf)?;
         if n == 0 || frames.feed(&buf[..n], to)? {
-            return Ok(());
+            return Ok(frames.refused);
         }
         if n == buf.len() && buf.len() < COPY_BUF_MAX {
             buf.resize(buf.len() * 2, 0);
@@ -1256,6 +1306,21 @@ mod tests {
         let mut out = Vec::new();
         super::copy_frames(&mut &stream[..10], &mut out).unwrap();
         assert_eq!(out, b"HTTP/1");
+    }
+
+    #[test]
+    fn a_refusal_marker_frame_is_seen_and_carries_no_payload() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&u32::MAX.to_be_bytes());
+        stream.extend_from_slice(&5u32.to_be_bytes());
+        stream.extend_from_slice(b"hello");
+        stream.extend_from_slice(&0u32.to_be_bytes());
+        let mut out = Vec::new();
+        assert!(super::copy_frames(&mut &stream[..], &mut out).unwrap());
+        assert_eq!(out, b"hello");
+        // Without the marker a plain stream reports no refusal.
+        let mut out = Vec::new();
+        assert!(!super::copy_frames(&mut &b"\0\0\0\0"[..], &mut out).unwrap());
     }
 
     #[test]

@@ -405,6 +405,42 @@ the missing `docker`-driver (embedded BuildKit) product feature, not
 engine runtime. This is now a *feature gap* to schedule, not a perf
 bug to chase.
 
+### W10 relay-churn fix: guest refusal marker + host negative cache
+
+W10's residual loss (~0.55 s vs ~0.30 s recovery) was traced to refused
+connect churn: during the post-`docker start` window the load driver
+retries at ~5k conn/s, each spawning a host relay thread, a vsock
+stream, and a guest relay session whose connect() fails — all on the
+agent's single poll loop, starving the health-check relay queued
+behind it. A `--concurrency 1` control (same ~68k errors, fewer
+parallel sessions) recovered in ~0.35 s, confirming session churn rather
+than attempt rate as the mechanism.
+
+Fix, one hypothesis, both ends of the framed relay:
+
+- Guest (`relay.rs`): on connect() refusal (sync or SO_ERROR) over
+  `RELAY_FRAMED_PORT`, write a `u32::MAX` frame-length marker before
+  closing. `0xFFFFFFFF` cannot be a real payload length (frames are
+  length-prefixed; payload is opaque inside them).
+- Host (`ports.rs`): `Deframer` surfaces the marker; `relay()` records
+  `(container ip, port)` in a 250 ms negative cache; `accept_loop`
+  drops new accepts for that key without spawning a relay, and
+  `relay()` re-checks on entry. Entries are written only by real guest
+  refusals, so a backend that starts listening is reached within one
+  TTL — no protocol-visible behaviour change for healthy containers.
+
+Measured (warm, 5-pair-equivalent spot check, conc=8, 3 trials):
+
+| | before | after | orbstack |
+| --- | --- | --- | --- |
+| recovery_s | 0.49–0.56 | **0.346–0.368** | 0.294–0.423 |
+
+ctrs is now at parity within noise; `load_errors` (~65k) is unchanged
+and expected — clients still see fast refusals, the guest just no
+longer pays for each one. Wire-format note: host and guest ship in the
+same binary/initramfs, so the marker needs no negotiation; an old
+guest simply never sends it (host treats streams as before).
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |

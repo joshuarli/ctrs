@@ -59,6 +59,8 @@ pub struct Relay {
     udp: bool,
     /// The container's bytes go to the host in frames (`FRAMED_PORT`).
     framed: bool,
+    /// The backend connect failed; a refusal marker still owes the host.
+    refusing: bool,
 }
 
 pub fn listen_udp() -> io::Result<OwnedFd> {
@@ -87,7 +89,7 @@ pub fn accept(listener: &OwnedFd) -> Option<Relay> {
     }
     // SAFETY: `fd` is a fresh descriptor that nothing else owns.
     let host = unsafe { OwnedFd::from_raw_fd(fd) };
-    Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false })
+    Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
 }
 
 fn read_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
@@ -146,8 +148,9 @@ fn would_block(e: &io::Error) -> bool {
 impl Relay {
     /// (fd, events) pairs to poll for this relay.
     pub fn interest(&self, out: &mut Vec<libc::pollfd>) {
-        let host_ev = if self.target.is_none() || (!self.up.eof && self.up.buf.len() < BUF) { libc::POLLIN } else { 0 }
-            | if self.down.buf.is_empty() { 0 } else { libc::POLLOUT };
+        let host_ev = (if self.target.is_none() || (!self.up.eof && self.up.buf.len() < BUF) { libc::POLLIN } else { 0 }
+            | if self.down.buf.is_empty() { 0 } else { libc::POLLOUT })
+            | if self.refusing { libc::POLLOUT } else { 0 };
         out.push(libc::pollfd { fd: self.host.as_raw_fd(), events: host_ev, revents: 0 });
         if let (Some(t), true) = (&self.target, self.udp) {
             out.push(libc::pollfd { fd: t.as_raw_fd(), events: libc::POLLIN, revents: 0 });
@@ -181,6 +184,22 @@ impl Relay {
     }
 
     fn try_step(&mut self) -> io::Result<()> {
+        if self.refusing {
+            // A `u32::MAX` frame length is the refusal marker: it precedes
+            // the stream's end so the host can stop relaying retries to a
+            // backend that is not listening.
+            let marker = u32::MAX.to_be_bytes();
+            // SAFETY: writing to a socket we own.
+            let n = unsafe { libc::write(self.host.as_raw_fd(), marker.as_ptr().cast(), marker.len()) };
+            if n == marker.len() as isize {
+                self.dead = true;
+            } else if n >= 0 || would_block(&io::Error::last_os_error()) {
+                // Partial or busy: try again next poll.
+            } else {
+                self.dead = true;
+            }
+            return Ok(());
+        }
         if self.target.is_none() {
             // The header: where to connect.
             let need = 6 - self.header.len();
@@ -204,7 +223,16 @@ impl Relay {
                 self.target = Some(connect_udp(ip, port)?);
                 self.connected = true;
             } else {
-                self.target = Some(connect(ip, port)?);
+                match connect(ip, port) {
+                    Ok(t) => self.target = Some(t),
+                    Err(e) => {
+                        if self.framed {
+                            self.refusing = true;
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
             }
             return Ok(());
         }
@@ -222,7 +250,13 @@ impl Relay {
                 return Ok(());
             }
             if err != 0 {
-                self.dead = true; // refused: the client sees its connection close
+                // Refused: the client sees its connection close. On the
+                // framed port the marker lets the host drop retries early.
+                if self.framed {
+                    self.refusing = true;
+                } else {
+                    self.dead = true;
+                }
                 return Ok(());
             }
             // Writable without error means connected; one quick probe tells
@@ -413,6 +447,7 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4]) -> Option<Relay
         dead: false,
         udp: false,
         framed: false,
+        refusing: false,
     })
 }
 
@@ -423,7 +458,7 @@ fn dial_host(port: u32) -> io::Result<OwnedFd> {
 impl Relay {
     /// A relay that only exists to close `fd` on the next sweep.
     fn dead_one(fd: OwnedFd) -> Relay {
-        Relay { host: fd, target: None, connected: false, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: true, udp: false, framed: false }
+        Relay { host: fd, target: None, connected: false, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: true, udp: false, framed: false, refusing: false }
     }
 }
 
@@ -470,7 +505,7 @@ pub fn accept_ssh_agent(listener: &OwnedFd) -> Option<Relay> {
     if sys::set_nonblocking(host.as_raw_fd()).is_err() {
         return Some(Relay::dead_one(client));
     }
-    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false })
+    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
 }
 
 /// The engine's own API, for containers that mount the docker socket
@@ -514,7 +549,7 @@ pub fn accept_engine(listener: &OwnedFd) -> Option<Relay> {
     if sys::set_nonblocking(host.as_raw_fd()).is_err() {
         return Some(Relay::dead_one(client));
     }
-    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false })
+    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
 }
 
 #[cfg(test)]
