@@ -294,7 +294,7 @@ for w in "${WORKLOADS[@]}"; do
     done
   done
 done
-gate_after "timed groups" || { echo "timed groups ran but the trailing gate tripped; samples overlapping foreign load were already discarded per sample" >&2; }
+gate_after "timed groups" || { echo "timed groups ran but the trailing gate tripped; qualification deferred (never passed) on a busy host" >&2; exit 75; }
 
 printf 'compiler-cache state: unavailable (no compiler cache configured in this qualification; never counted as a hit)\n' >> "$OUT/provisioning.tsv"
 

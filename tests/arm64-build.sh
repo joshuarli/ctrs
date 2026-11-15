@@ -1420,6 +1420,7 @@ case_compatibility() {
 
 run_case() {
   local name=$1
+  ISO_PRESERVE=0
   case "$name" in
     environment) case_environment ;;
     compatibility) case_compatibility ;;
