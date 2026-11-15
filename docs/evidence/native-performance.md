@@ -1092,3 +1092,22 @@ write `signal=<n> fault=0x<addr> pid=<pid>` to
 `<state>/crashes/signals.log` and `_exit`. Any recurrence during the
 W11 soak or later is now attributable instead of silent. Fork-based
 unit test verifies the marker; `cargo test -p ctrs` 174/174.
+
+**Holdout gate implemented (2026-11-15, `7f97a18`):** campaign gate
+(f) requires an independent real-app check executed once per engine,
+never tuned against. `runner.py holdout` drives a frozen Gitea
+1.24.7 + Postgres 17 fixture (`fixtures/holdout`): admin via image
+CLI, 8 repos x 5 issues seeded over the REST API, a 240-op timed
+read workload through the published port, and real `git clone`
+smart-HTTP operations. Fixture validated end-to-end on OrbStack
+(`holdout-20261115T074006`: health 5.2 s, seed 2.2 s, 59.3 ops/s,
+4/4 clones, zero errors) — that run is fixture validation, not the
+gate measurement; the scored holdout run happens once per engine at
+the final gate. Excluded from the W-matrix; parameters frozen in
+`cases.toml`.
+
+**W11 long soak relaunched (2026-11-15):** an earlier launch attempt
+exited instantly — `python3` on PATH is 3.9 without tomllib — and
+went unnoticed because output was piped through `tail`. Relaunched
+with `python3.14` explicitly, ctrs 12 h then orbstack 12 h chained
+(`run-20261115T073817` in progress at commit time).
