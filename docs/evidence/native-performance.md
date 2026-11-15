@@ -1054,3 +1054,29 @@ correctness green (kill-window errors scale with ctrs's ~3x higher
 attempted rps; committed item counts exact). Every scored cell has
 now been re-measured against current code: all win or tie except
 the documented W6/W7 builder-topology gap.
+
+**W11 20-min-per-engine soak (2026-11-15,
+`base-20261115T063536-2533`, warm, 1 pair):** extends the pilot
+10x. All gates green on both engines — zero errors, zero engine
+deaths, 72/72 churn jobs each, exact item counts. ctrs: 3,169,115
+requests at rps_mean 2620 vs orbstack 2,327,673 at 1905 (**~1.37x**);
+peak_total_rss_kb 4.66 GB vs 13.77 GB (~3x lower). Sustained-load
+reliability gate now has 20 min/engine of clean evidence on top of
+the 5-min pilot.
+
+**Host-side vsock buffer widening — modest h2g win, committed
+`a617ba9`:** the guest already advertises 16 MiB vsock stream
+buffers (`sys::vsock_stream_buffer`, AF_VSOCK opts — the real
+flow-control window; plain SO_SNDBUF does not affect it), but the
+host end of every VZ connection kept socket defaults. Added
+`tune_vsock_fd` in `crates/ctrs-vmm/src/apple.rs` applying 16 MiB
+SO_RCVBUF/SO_SNDBUF to both host-dialed (`Connector::connect`) and
+guest-accepted (`PortDelegate::should_accept`) descriptors —
+covering published-port relays, exec output conns, and copy conns.
+Paired A/B on identical daemon state, 512 MiB transfers: cp-in
+(h2g) ~1.00 s -> ~0.82 s (~+22%), exec-stdin (h2g) ~0.96 s ->
+~0.85 s (~+12%); cp-out/exec-out/published-download (g2h)
+statistically flat — already bounded by the guest-advertised
+window and VZ internals. Smoke 21/21 on the signed build. The
+remaining h2g residual vs OrbStack is the VZ vsock line rate
+itself, not socket buffering.
