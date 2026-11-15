@@ -23,15 +23,24 @@ and `http 3.2.4` probes pass, note marker readable). W7 keeps
 uncached/warm/incremental per app → 6 metrics
 (`{hyperfine,httpie}_{uncached,warm,incr}_s`).
 
-**Next executable action:** monitor the running W6/W7 baseline
-(detached `nohup`, log
-`.work/native-perf/logs/w6w7-baseline-default-20261115T094322.log`,
-python PID recorded in session; results land under
-`.work/native-perf/results/`). When it finishes: `report` the new
-run, sanity-check pair validity, then run the matched-builder
-control (`--driver dc`) for W6/W7, then NP-03 qualification of the
-remaining cases. Smoke runs already green: W7 both engines, W6 ctrs
-— see `docs/evidence/native-performance.md` NP-02 section.
+**Baseline status 2026-11-15:** first W6+W7 `--driver default`
+baselines (`base-20261115T094322-097d`, `base-20261115T095725-0e1d`)
+completed 10/10 pairs each with all correctness green, but **every
+pair was rejected** by the reporter's 1% resource-budget gate:
+ctrs guest MemTotal was ~934 MB below OrbStack because the pinned
+guest kernel reserves ~891 MiB that the configured ceiling did not
+account for. Fixed in `4d0bb1a` (`CTRS_GUEST_RESERVE_MIB=950`,
+verified guest MemTotal within 0.1%); the rejected runs remain
+visible historical records. A 1-pair W7 validation
+(`base-20261115T100858-6ee7`) now pairs cleanly.
+
+**Next executable action:** monitor rerun
+`base-…` W6+W7 `--driver default` --pairs 10 (detached nohup, log
+`.work/native-perf/logs/w6w7-baseline-default-r2-20261115T100955.log`).
+When done: `report` both runs, sanity-check pair validity, record the
+scorecard in `docs/evidence/native-performance.md`, then run the
+matched-builder control (`--driver dc`) for W6/W7, then NP-03
+qualification of the remaining cases.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
