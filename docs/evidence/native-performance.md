@@ -966,3 +966,23 @@ unlocked host pushes. Not yet implemented — the single-stream and
 parallel exec floors argue the unpack itself may be CPU/IO bound,
 so first measure whether 2-4 concurrent installs actually scale on
 the 17-vCPU guest before committing to the reorder work.
+
+**Parallel layer installs — implemented (`9fad37c`, 2026-11-15):**
+the deploy path's remaining serialization is gone. Guest: up to
+`MAX_INSTALLS=4` forked install children unpack concurrently into
+their own layer dirs; `done_jobs` is now seq-keyed so `AwaitJob`
+replies stay FIFO even when installs finish out of order. Host:
+`VmLink::post()` splits send from await; `ensure_layers` runs all
+`has_layer` queries first (replies are FIFO — a query after a fetch
+would queue behind its install), dedups missing digests (two
+fetches for one layer would race `.tmp-<digest>`), sends every
+share-eligible `LayerFetch` deferred, then awaits verdicts and
+falls back per-layer to the serial path. Measured on a synthetic
+5x40 MiB image: all five fetches left in one timestamp and the
+whole deploy+unpack+create finished in 0.145 s (~1.4 GB/s
+effective) — vs an estimated ~0.75-1.5 s serialized; layer
+contents verified byte-identical, smoke 21/21, cargo test 173/173.
+W8's single-layer portfolio does not exercise the gain; real
+multi-layer images (build outputs, base+app stacks) are where it
+lands. vsock `LayerBegin` layers still stage on the agent loop and
+queue behind fetch jobs, preserving stream order.
