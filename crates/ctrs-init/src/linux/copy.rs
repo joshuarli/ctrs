@@ -166,6 +166,7 @@ fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
         for entry in archive.entries()? {
             let mut entry = entry?;
             let path = entry.path()?.into_owned();
+            let xattrs = super::layers::pax_xattrs(&mut entry)?;
             if spec.flags & copy_flags::NO_OVERWRITE_DIR_NON_DIR != 0 {
                 let target = checked_join(dest, &path)?;
                 if let Ok(m) = fs::symlink_metadata(&target)
@@ -181,6 +182,9 @@ fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
             // refuse them loudly too, rather than record a short copy.
             if !entry.unpack_in(dest)? {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, format!("archive member {} escapes the destination", path.display())));
+            }
+            for (key, value) in xattrs {
+                super::layers::set_pax_xattr(&dest.join(&path), &key, &value);
             }
         }
     }

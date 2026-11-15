@@ -274,7 +274,7 @@ fn untar(reader: impl Read, dest: &Path) -> io::Result<u64> {
 /// macOS tooling (`com.apple.provenance` et al. have no Linux
 /// namespace); filtering here keeps real xattrs (`user.*`, `security.*`,
 /// `trusted.*`, `system.*`) working while foreign ones are skipped.
-fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+pub(crate) fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let mut out = Vec::new();
     let Some(exts) = entry.pax_extensions()? else { return Ok(out) };
     for e in exts.flatten() {
@@ -289,7 +289,7 @@ fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<Vec<(Vec<u8>
 /// Best-effort setxattr for one pax keyword: a layer whose xattrs the
 /// filesystem refuses still unpacks, matching how Docker treats xattr
 /// application as non-fatal.
-fn set_pax_xattr(path: &Path, key: &[u8], value: &[u8]) {
+pub(crate) fn set_pax_xattr(path: &Path, key: &[u8], value: &[u8]) {
     let (Ok(p), Ok(k)) = (sys::cstr(path), std::ffi::CString::new(key)) else { return };
     // SAFETY: valid NUL-terminated path and name; value is an arbitrary
     // byte string with an explicit length.
