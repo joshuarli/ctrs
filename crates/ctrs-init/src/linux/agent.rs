@@ -158,8 +158,8 @@ fn drain_outbox(
     Ok(())
 }
 
-/// The one install child allowed at a time: its job, the read end of its
-/// result pipe and whatever record bytes have arrived so far.
+/// One install child: its job, the read end of its result pipe and
+/// whatever record bytes have arrived so far.
 struct InstallWait {
     job: layers::InstallJob,
     read: OwnedFd,
