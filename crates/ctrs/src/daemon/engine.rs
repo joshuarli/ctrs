@@ -1443,14 +1443,23 @@ impl Engine {
             && let Ok(path) = self.guest_blob_path(&blob)
             && let Ok(size) = std::fs::metadata(&blob).map(|m| m.len())
         {
-            match vm.send_layer_fetch(digest, media_type, &path, size) {
-                Ok(()) => {
-                    crate::diag::debug!("layer via share", digest = &digest[..digest.len().min(19)], mib = size >> 20);
-                    return Ok(());
-                }
-                Err(e) => {
-                    crate::diag::info!("layer fetch over virtiofs failed; streaming instead", error = e);
-                    self.layer_vfs.store(false, std::sync::atomic::Ordering::Relaxed);
+            // The share lags host file creation by a second or two, so a
+            // blob written moments ago can lose the race; retry across
+            // that window before giving up on the share for the session.
+            for attempt in 0..3 {
+                match vm.send_layer_fetch(digest, media_type, &path, size) {
+                    Ok(()) => {
+                        crate::diag::debug!("layer via share", digest = &digest[..digest.len().min(19)], mib = size >> 20);
+                        return Ok(());
+                    }
+                    Err(e) if attempt == 2 => {
+                        crate::diag::info!("layer fetch over virtiofs failed; streaming instead", error = e);
+                        self.layer_vfs.store(false, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        crate::diag::debug!("layer fetch retry", attempt = attempt, error = e);
+                        std::thread::sleep(Duration::from_millis(800));
+                    }
                 }
             }
         }
