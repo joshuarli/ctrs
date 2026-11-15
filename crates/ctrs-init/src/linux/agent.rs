@@ -752,7 +752,10 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                         Ok(run) => {
                             let cloned_ns = sys::boottime_ns();
                             Msg::Started { id: &run.id, pid: run.pid as u32 }.encode(&mut out);
-                            procs.insert(run.pid, new_proc(run, received_ns, cloned_ns));
+                            let pid = run.pid;
+                            let mut p = new_proc(run, received_ns, cloned_ns);
+                            p.bulk = bulk_connect(&p.run.id);
+                            procs.insert(pid, p);
                         }
                         Err(e) => Msg::Error(&format!("run {}: {e}", spec.id)).encode(&mut out),
                     }
