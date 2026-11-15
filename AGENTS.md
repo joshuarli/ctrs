@@ -44,6 +44,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
+| Native-host Docker workload/performance hillclimb (current) | `docs/campaign-native-performance.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
 | Evidence: gate B | `docs/evidence/gate-b.md` |
 | Evidence: h12tiny HTTP pilot | `docs/evidence/http.md` |
