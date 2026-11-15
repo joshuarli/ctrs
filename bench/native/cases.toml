@@ -94,14 +94,14 @@ note = "Real pinned upstream sources: hyperfine v2.0.0 codeload archive (sha256-
 [[case]]
 id = "W7"
 family = "native-image-build"
-title = "pilot multi-stage Dockerfile: uncached/warm/incremental work + run probe (stores remain warm)"
-fixture = "fixtures/w7"
+title = "default buildx -> loaded runnable images for two real apps: hyperfine 2.0.0 (Rust) and httpie 3.2.4 (Python); uncached/warm/incremental per app"
+fixture = "fixtures/w7 (hyperfine/Dockerfile + httpie/Dockerfile; pinned source archives via ensure_pinned_source)"
 status = "implemented"
-metrics = ["build_uncached_s", "build_warm_s", "build_incr_s"]
+metrics = ["hyperfine_uncached_s", "hyperfine_warm_s", "hyperfine_incr_s", "httpie_uncached_s", "httpie_warm_s", "httpie_incr_s"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
-correctness = ["build_uncached", "build_warm", "build_incr", "run_note", "run_smoke"]
-note = "PILOT proxy: compileall/random bytes still needs replacement by two real app builds. --no-cache bypasses reuse for the first build without pruning the shared builder; engine/base-image stores remain warm. Warm repeats the context; incremental changes stamp/note.txt. --load includes image-store import. Historical build_empty_s is not comparable to build_uncached_s."
+correctness = ["all builds rc=0 per app", "version probe output per app", "note marker reads incremental-1"]
+note = "Real pinned upstream apps in multi-stage Dockerfiles: rust:1.100.0-bookworm cargo build --release --locked -> debian:bookworm-slim, python:3.13-slim PyPI sdist -> pip wheel -> offline wheel install -> python:3.13-slim. Sources are sha256-pinned archives (codeload / PyPI digest) fetched on demand. --no-cache bypasses reuse for the first build without pruning the shared builder; engine/base-image stores remain warm. Warm repeats the identical context; incremental bumps stamp/note.txt after the compile/package stage so only tail layers rerun. --load includes image-store import; run probes verify the loaded image executes. Old synthetic compileall/urandom metrics are not comparable."
 
 [[case]]
 id = "W8"

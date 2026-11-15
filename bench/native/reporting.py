@@ -20,7 +20,8 @@ CASE_METRICS = {
     "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
     "W5": ["bind_median_s", "volume_median_s"],
     "W6": ["build_rust_s", "build_zlib_s"],
-    "W7": ["build_uncached_s", "build_warm_s", "build_incr_s"],
+    "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
+           for state in ("uncached", "warm", "incr")],
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
     "W9": ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"],
     # Legacy load_rps counts failed attempts during downtime, not useful work.

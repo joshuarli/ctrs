@@ -177,21 +177,54 @@ class WorkloadSafetyTests(unittest.TestCase):
             self.assertIn("checksum-pinned", rec["validation_errors"][0])
             engine.ensure_up.assert_not_called()
 
-    def test_w7_bypasses_cache_without_pruning_shared_builder(self):
+    def test_w7_builds_two_real_apps_without_pruning(self):
         with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "w7"
+            for app in ("hyperfine", "httpie"):
+                (fixture / app).mkdir(parents=True)
+                shutil.copy(runner.W7_DIR / app / "Dockerfile",
+                            fixture / app / "Dockerfile")
+            rust = b"rust asset"
+            httpie = b"httpie asset"
+            rust_pin = dict(runner.W6_RUST_SOURCE)
+            httpie_pin = dict(runner.W7_HTTPIE_SOURCE)
+            rust_pin["sha256"] = hashlib.sha256(rust).hexdigest()
+            httpie_pin["sha256"] = hashlib.sha256(httpie).hexdigest()
+            (fixture / "hyperfine-2.0.0.tar.gz").write_bytes(rust)
+            (fixture / "httpie-3.2.4.tar.gz").write_bytes(httpie)
             engine = fake_engine()
-            engine.sh.side_effect = lambda args, **kw: completed(
-                "incremental-1\nnpw7-ok\n" if args[0] == "run" else "")
-            rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+
+            def respond(args, **kw):
+                if args[0] == "run":
+                    if any("hyperfine" in a for a in args):
+                        return completed(
+                            "hyperfine 2.0.0\n" if "--version" in args
+                            else "incremental-1\n")
+                    if any("http" in a for a in args):
+                        return completed(
+                            "3.2.4\n" if "--version" in args
+                            else "incremental-1\n")
+                return completed()
+            engine.sh.side_effect = respond
+            apps = {"hyperfine": dict(runner.W7_APPS["hyperfine"],
+                                      source=rust_pin),
+                    "httpie": dict(runner.W7_APPS["httpie"],
+                                   source=httpie_pin)}
+            with patch.object(runner, "W7_DIR", fixture), \
+                    patch.object(runner, "W7_APPS", apps), \
+                    patch.object(runner, "start_sampler",
+                                 return_value=(None, None)):
+                rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)
             commands = [call.args[0] for call in engine.sh.call_args_list]
             self.assertFalse(any("prune" in command for command in commands))
             builds = [cmd for cmd in commands if cmd[:2] == ["buildx", "build"]]
-            self.assertEqual(len(builds), 3)
-            self.assertIn("--no-cache", builds[0])
-            self.assertNotIn("--no-cache", builds[1])
-            self.assertNotIn("build_empty_s", rec["metrics"])
-            self.assertIn("build_uncached_s", rec["metrics"])
+            # 3 builds per app: uncached + warm + incremental.
+            self.assertEqual(len(builds), 6)
+            self.assertEqual(sum("--no-cache" in b for b in builds), 2)
+            for app in ("hyperfine", "httpie"):
+                for state in ("uncached", "warm", "incr"):
+                    self.assertIn(f"{app}_{state}_s", rec["metrics"])
 
     def test_w8_keeps_shared_content_and_labels_it_warm(self):
         with tempfile.TemporaryDirectory() as tmp:

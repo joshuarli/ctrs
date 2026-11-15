@@ -66,7 +66,6 @@ API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
-W7_DIR = FIXTURES / "w7"
 W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
@@ -92,6 +91,21 @@ W6_RUST_SOURCE = {
     "sha256": "f4b71df3c78e4cf752ca6fb6ebc4b025f7ea6a5ca5c48fea75f8a1fdb4c7d721",
 }
 W6_SOURCES = {"zlib": W6_ZLIB_SOURCE, "rust": W6_RUST_SOURCE}
+
+W7_DIR = FIXTURES / "w7"
+W7_PYTHON_IMAGE = "python:3.13-slim"
+W7_DEBIAN_IMAGE = "debian:bookworm-slim"
+# W7 real apps: pinned upstream sources fetched on demand. hyperfine
+# reuses the W6 pin (same archive, fetched into W7_DIR for locality).
+# httpie hash is the PyPI-published sdist digest for 3.2.4.
+W7_HTTPIE_SOURCE = {
+    "url": "https://files.pythonhosted.org/packages/3e/bb/"
+           "aefb0abbdbadeb9e8e7f04fb0f1942bc084f4215bf8dc729236153d09e1e/"
+           "httpie-3.2.4.tar.gz",
+    "file": "httpie-3.2.4.tar.gz",
+    "sha256": "302ad436c3dc14fd0d1b19d4572ef8d62b146bcd94b505f3c2521f701e2e7a2a",
+}
+W7_SOURCES = {"hyperfine": W6_RUST_SOURCE, "httpie": W7_HTTPIE_SOURCE}
 
 
 def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
@@ -1052,70 +1066,105 @@ def build_args(engine: Engine, driver: str, extra: list[str]) -> list[str]:
     return args
 
 
+# W7 real apps: builder image, runtime base, source pin, Dockerfile,
+# version probe argv. Each gets uncached/warm/incremental builds through
+# the default or dc builder, then run probes.
+W7_APPS = {
+    "hyperfine": {
+        "builder_image": W6_RUST_IMAGE,
+        "runtime_image": W7_DEBIAN_IMAGE,
+        "source": W6_RUST_SOURCE,
+        "dockerfile": W7_DIR / "hyperfine" / "Dockerfile",
+        "probe": ["hyperfine", "--version"],
+        "expect": "hyperfine 2.0.0",
+    },
+    "httpie": {
+        "builder_image": W7_PYTHON_IMAGE,
+        "runtime_image": W7_PYTHON_IMAGE,
+        "source": W7_HTTPIE_SOURCE,
+        "dockerfile": W7_DIR / "httpie" / "Dockerfile",
+        "probe": ["http", "--version"],
+        "expect": "3.2.4",
+    },
+}
+
+
 def trial_w7(ctx, engine: Engine, state: str,
              driver: str = "default") -> dict:
-    """W7 pilot: native image build — uncached/warm/incremental states
-    on a multi-stage offline Dockerfile, then a run-time correctness
-    probe. The first build explicitly bypasses the layer cache; warm
-    repeats the identical context; incremental bumps stamp/note.txt so
-    only the last layer of stage 1 re-executes."""
+    """W7: default buildx -> loaded runnable images for two real apps
+    (hyperfine 2.0.0 Rust, gum v2.0.2 Go). Per app: uncached (--no-cache)
+    / warm (identical context) / incremental (one-file stamp bump)
+    builds, then run probes for version output and the note marker.
+    Base images pull untimed in setup; stores remain warm."""
     case_id = "W7"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
-    tag = f"npw7/app:{ctx.run_id[-6:]}"
     checks = rec["correctness"]["checks"]
     try:
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
-        # Assemble the build context in the trial dir so the incremental
-        # stamp never dirties the fixture tree.
-        ctx_dir = trial_dir / "ctx"
-        shutil.copytree(W7_DIR / "src", ctx_dir / "src")
-        shutil.copytree(W7_DIR / "stamp", ctx_dir / "stamp")
-        shutil.copy(W7_DIR / "Dockerfile", ctx_dir / "Dockerfile")
-
-        def build_ctx(note: str) -> Path:
-            (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
-            return ctx_dir
-
-        def build(context: Path, uncached: bool = False,
-                  timeout: float = 900) -> tuple[float, bool]:
-            tp = time.monotonic()
-            cp = engine.sh(
-                build_args(engine, driver,
-                           (["--no-cache"] if uncached else [])
-                           + ["-q", "-t", tag, "-f",
-                              str(context / "Dockerfile"), str(context)]),
-                timeout=timeout, check=False)
-            return round(time.monotonic() - tp, 3), cp.returncode == 0
+        sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
+                   for name, spec in W7_APPS.items()}
+        for spec in W7_APPS.values():
+            for image in (spec["builder_image"], spec["runtime_image"]):
+                cp = engine.sh(["image", "inspect", image], timeout=30,
+                               check=False)
+                if cp.returncode != 0:
+                    engine.sh(["pull", image], timeout=900)
 
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
-        rec["notes"].append("--no-cache bypasses layer reuse; engine/content stores remain warm")
-        s, ok = build(build_ctx("incremental-0"), uncached=True)
-        rec["metrics"]["build_uncached_s"] = s
-        checks["build_uncached"] = ok
+        rec["notes"].append("--no-cache bypasses layer reuse; "
+                            "engine/content stores remain warm")
+        for name, spec in W7_APPS.items():
+            tag = f"npw7/{name}:{ctx.run_id[-6:]}"
+            ctx_dir = trial_dir / f"ctx-{name}"
+            ctx_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(spec["dockerfile"], ctx_dir / "Dockerfile")
+            shutil.copy(sources[name],
+                        ctx_dir / spec["source"]["file"])
+            (ctx_dir / "stamp").mkdir(exist_ok=True)
 
-        s, ok = build(build_ctx("incremental-0"))
-        rec["metrics"]["build_warm_s"] = s
-        checks["build_warm"] = ok
+            def build_ctx(note: str) -> Path:
+                (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
+                return ctx_dir
 
-        s, ok = build(build_ctx("incremental-1"))
-        rec["metrics"]["build_incr_s"] = s
-        checks["build_incr"] = ok
+            def build(context: Path, uncached: bool = False,
+                      timeout: float = 1800) -> tuple[float, bool]:
+                tp = time.monotonic()
+                cp = engine.sh(
+                    build_args(engine, driver,
+                               (["--no-cache"] if uncached else [])
+                               + ["-q", "-t", tag, "-f",
+                                  str(context / "Dockerfile"),
+                                  str(context)]),
+                    timeout=timeout, check=False)
+                return round(time.monotonic() - tp, 3), cp.returncode == 0
 
-        run = engine.sh(["run", "--rm", tag, "cat", "/out/note.txt"],
-                        timeout=60, check=False)
-        note_ok = run.returncode == 0 and "incremental-1" in run.stdout
-        checks["run_note"] = note_ok
-        smoke = engine.sh(["run", "--rm", tag], timeout=60, check=False)
-        checks["run_smoke"] = (smoke.returncode == 0
-                               and "npw7-ok" in smoke.stdout)
-        rec["correctness"]["ok"] = all(
-            checks.get(k) for k in
-            ("build_uncached", "build_warm", "build_incr",
-             "run_note", "run_smoke"))
+            s, ok = build(build_ctx("incremental-0"), uncached=True)
+            rec["metrics"][f"{name}_uncached_s"] = s
+            checks[f"{name}_uncached"] = ok
+            if not ok:
+                rec["validation_errors"].append(
+                    f"{name} uncached build failed")
+                continue
+            s, ok = build(build_ctx("incremental-0"))
+            rec["metrics"][f"{name}_warm_s"] = s
+            checks[f"{name}_warm"] = ok
+            s, ok = build(build_ctx("incremental-1"))
+            rec["metrics"][f"{name}_incr_s"] = s
+            checks[f"{name}_incr"] = ok
+
+            ver = engine.sh(["run", "--rm", tag, *spec["probe"]],
+                            timeout=60, check=False)
+            checks[f"{name}_version"] = (ver.returncode == 0
+                                         and spec["expect"] in ver.stdout)
+            note = engine.sh(["run", "--rm", tag, "cat", "/out/note.txt"],
+                             timeout=60, check=False)
+            checks[f"{name}_note"] = (note.returncode == 0
+                                      and "incremental-1" in note.stdout)
+        rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
         rec["correctness"]["ok"] = False

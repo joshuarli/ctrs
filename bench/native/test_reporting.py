@@ -182,7 +182,7 @@ class ReportingTests(unittest.TestCase):
         records = pair(case="W7", metric="build_empty_s")
         report = reporting.analyze(records)
         self.assertEqual(metric_result(report, "build_empty_s")["assessment"], "historical-only")
-        self.assertEqual(metric_result(report, "build_uncached_s")["assessment"], "unmeasured")
+        self.assertEqual(metric_result(report, "httpie_uncached_s")["assessment"], "unmeasured")
 
     def test_truncated_json_is_visible_and_fails_report(self):
         with tempfile.TemporaryDirectory() as directory:
