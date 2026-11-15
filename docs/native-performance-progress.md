@@ -12,6 +12,23 @@ queue or turn-by-turn status diary.
 **Current task:** NP-02 — freeze digest/source/dataset/tool inputs and
 build the real W6/W7 fixtures, then measure that vertical slice.
 
+**Landed 2026-11-15:** checksum-pinned source fetch
+(`ensure_pinned_source`, `6446af0`) and the real W6 fixture (`f755f6d`):
+hyperfine v2.0.0 Rust `cargo build+test --locked` on
+rust:1.100.0-bookworm plus zlib 1.3.1 C build — Dockerfile validated
+end-to-end on OrbStack (132 tests pass, arm64 artifact produced).
+Metrics are now `build_rust_s`/`build_zlib_s` — a new fixture version.
+
+**Next executable action:** continue NP-02 with real W7 — replace the
+synthetic python/urandom proxy with two real app builds through the
+default buildx → load → first-use path (candidates: reuse the pinned
+hyperfine source in a slim multi-stage runtime image plus a second
+real app such as a pinned charmbracelet/gum Go build or an httpie
+Python image; pin sources in `assets.lock` `[sources]`/`[images.w7]`).
+Then freeze remaining `assets.lock` entries (image digests from
+`prepare.json`, tool versions) and run the W6/W7 `baseline
+--driver default` vertical slice.
+
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
 provenance hashes are recorded per trial, image architectures are
@@ -20,15 +37,6 @@ ran (`base-20261115T092425-9b5d`, W1 warm ctrs: 3/3 valid slot pairs,
 median ratios 0.986–0.997). Evidence:
 `docs/evidence/native-performance.md` → "NP-01 measurement
 qualification executed on the Mac".
-
-**Next executable action:** continue NP-02. The checksum-pinned zlib
-fetch path landed (`ensure_w6_source`, commit `6446af0`); remaining:
-freeze `assets.lock` beyond pilot status (digest-pinned images,
-datasets, tool versions), add the pinned Rust app half of W6 (new
-rust image pin + source pin + Dockerfile + trial metrics), replace the
-W7 proxy with two real app builds per `buildkit-driver.md`, then
-measure the W6/W7 vertical slice with `baseline --driver default`
-(primary lane) before any NP-04 optimization.
 
 **Soak disposition:** `run-20261115T073817` died with its launching
 session ~08:48 PST after ~70 min of the 12 h ctrs leg; no runner or
