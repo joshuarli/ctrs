@@ -948,3 +948,21 @@ gap as W6/W7, reduced but not closed. `pull_*` remains a ctrs win
 baseline showed misleading 0.02-0.04 s `run_*` because the runner
 adopted a still-running manual daemon and its `stop()` no-ops on
 adopted engines — cold-store trials require a runner-owned daemon.
+
+**Next-slice hypothesis — parallel guest layer installs:** the
+remaining run-time deploy cost is unpack+install, which the guest
+serializes twice over: `pump_installs` allows ONE install child at
+a time, `done_jobs`/`AwaitJob` require replies in request order,
+and `ensure_layers` awaits each layer before pushing the next.
+Multi-layer images (real-world 5-15 layers; W6/W7 build outputs)
+therefore pay sum-of-layers install latency. `LayerFetch` makes
+pipelining cheap — each fetch is an independent path the guest
+reads itself, so the host could enqueue all fetches at once. A
+parallel version needs multiple `InstallWait` slots, `done_jobs`
+keyed by seq rather than FIFO, and `AwaitJob` matching its own
+seq; the forked-child + result-record machinery already isolates
+installs, so the change is contained to agent.rs scheduling plus
+unlocked host pushes. Not yet implemented — the single-stream and
+parallel exec floors argue the unpack itself may be CPU/IO bound,
+so first measure whether 2-4 concurrent installs actually scale on
+the 17-vCPU guest before committing to the reorder work.
