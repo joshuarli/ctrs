@@ -45,6 +45,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Dated slice decisions (append-only) | `docs/decisions.md` |
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
 | Native-host Docker workload/performance hillclimb (current) | `docs/campaign-native-performance.md` |
+| Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
 | Evidence: gate B | `docs/evidence/gate-b.md` |
 | Evidence: h12tiny HTTP pilot | `docs/evidence/http.md` |
