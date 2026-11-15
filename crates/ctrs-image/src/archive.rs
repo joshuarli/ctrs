@@ -14,6 +14,27 @@ use crate::store::{Image, Layer, RunConfig, Store};
 
 /// Largest JSON file kept in memory while reading an archive.
 const MAX_JSON: u64 = 4 << 20;
+/// Largest single blob kept while reading an archive; the guest caps
+/// expansion, the host store must cap ingest or a crafted archive fills the
+/// disk (the blob digest only covers bytes already written).
+const MAX_BLOB: u64 = 64 << 30;
+
+/// A reader that fails once more than `left` bytes have come through.
+struct Capped<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n as u64 > self.left {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "archive member exceeds the blob size limit"));
+        }
+        self.left -= n as u64;
+        Ok(n)
+    }
+}
 
 /// Reads an archive into the store. Returns the images it named.
 pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
@@ -40,7 +61,7 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
         // (podman save, older docker save) the image config is a top-level
         // `<hex>.json`. Files no image names are removed after the manifest.
         let mut w = store.ingest()?;
-        io::copy(&mut entry, &mut w)?;
+        io::copy(&mut Capped { inner: &mut entry, left: MAX_BLOB }, &mut w)?;
         let (digest, size) = w.finish()?;
         if !existed(&digest) {
             ingested.push(digest.clone());
@@ -373,6 +394,19 @@ mod tests {
         let blobs = std::fs::read_dir(store.blob_path(&images[0].config_digest).unwrap().parent().unwrap()).unwrap().count();
         assert_eq!(blobs, 2);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn capped_reader_fails_past_the_limit() {
+        let data = b"abcd";
+        let mut over = Capped { inner: &data[..], left: 3 };
+        let mut buf = [0u8; 4];
+        let err = over.read_exact(&mut buf).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        let mut exact = Capped { inner: &data[..], left: 4 };
+        exact.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"abcd");
     }
 
     #[test]
