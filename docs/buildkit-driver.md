@@ -85,7 +85,11 @@ success (see `crates/ctrs/src/daemon/mirror.rs`,
 - gRPC/protobuf surface: SolveRequest exporter attrs are a
   `map<string,string>`; rewriting needs a small protobuf codec for
   exactly that message (hand-rolled varint is feasible; adding `prost`
-  is heavier — check existing deps first).
+  is heavier). Existing deps checked 2026-11-15: no `h2`, `prost`, or
+  `tonic` anywhere; `h12tiny` is the repo's HTTP/1.1 server
+  (feature-gated pilot) and `hyper` is an optional fork
+  (`laputa-hyper-futures-lite`) — the h2c framer is new code either
+  way, which keeps the change additive behind the unix socket.
 - buildx version drift: exporter attrs and session features vary by
   buildx release; the rewrite must fail closed (refuse the build with
   a clear error) rather than produce a wrong image.
