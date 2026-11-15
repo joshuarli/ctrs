@@ -812,3 +812,30 @@ remaining ~20% vs OrbStack on parallel bulk is vsock line rate /
 scheduler interaction, and the next lever is the campaign's
 custom-Virtio question (priority 5) rather than userspace write
 buffering.
+
+**EXP-5 virtio-vsock stream buffer — host->guest win, guest->host
+neutral (2026-11-15):** kernel source (`af_vsock.c`,
+`virtio_transport_common.c`) showed the real flow-control variable:
+`SO_VM_SOCKETS_BUFFER_SIZE` sets `vsk->buffer_size`, which becomes
+the receive window (`buf_alloc`) each side advertises; it defaults
+to **256 KiB** and is clamped to `[min=128, max=256 KiB]` — so the
+cap (`_MAX_SIZE`) must be raised *before* the size or the size
+clamps back. An earlier `_MAX_SIZE`-only attempt was therefore a
+silent no-op (measured identical, reverted). Setting both —
+`_MAX_SIZE` then `_SIZE` = 16 MiB — on every `transport::listen`
+listener (accepted conns inherit `buffer_size` from the listener)
+and on `dial`/`dial_within` sockets (`sys::vsock_stream_buffer`)
+raised the guest's advertised RX window 64x.
+
+Measured (warm bench engine, resource-matched): `cat 512 MiB |
+docker exec -i` host->guest **~1.40 s -> ~1.00 s (~520 MB/s, +40%)**,
+matching the previously documented ~1.0-1.15 s best and cutting the
+OrbStack gap (~0.55 s, ~950 MB/s) roughly in half. `docker cp` in
+512 MiB ~1.21-1.25 s (tar+fs work dominates; transport share
+smaller). Guest->host unchanged within noise: exec-cat 1 GiB
+~1.35-1.43 s single, 4x256 MiB parallel ~0.93 GB/s aggregate —
+expected, since TX credit is `min(peer_buf_alloc, buf_alloc)` and
+the peer is the host-side VZ socket whose window ctrs cannot set.
+Published-port relay and exec exit/stdin sanity verified live.
+Residual h2g gap is now the VZ host TX path / agent-frame copies,
+not the guest window.
