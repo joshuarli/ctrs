@@ -34,13 +34,22 @@ verified guest MemTotal within 0.1%); the rejected runs remain
 visible historical records. A 1-pair W7 validation
 (`base-20261115T100858-6ee7`) now pairs cleanly.
 
-**Next executable action:** monitor rerun
-`base-…` W6+W7 `--driver default` --pairs 10 (detached nohup, log
-`.work/native-perf/logs/w6w7-baseline-default-r2-20261115T100955.log`).
-When done: `report` both runs, sanity-check pair validity, record the
-scorecard in `docs/evidence/native-performance.md`, then run the
-matched-builder control (`--driver dc`) for W6/W7, then NP-03
-qualification of the remaining cases.
+**Qualified baseline landed 2026-11-15:** W6 `base-20261115T100955-dd6b`
+and W7 `base-20261115T102429-e057` — 10/10 valid pairs each, all
+correctness green, resource budgets matched. Headline: ctrs wins
+hyperfine warm/incr and httpie uncached (strict-win), non-inferior on
+hyperfine uncached and W6 rust build; **loss on W6 zlib C build
+(ratio 1.22, CI [1.06,1.36])** — worst qualified cell; httpie
+warm/incr inconclusive. Full table in
+`docs/evidence/native-performance.md`.
+
+**Next executable action:** monitor `--driver dc` matched-builder
+control for W6/W7 (detached nohup, log
+`.work/native-perf/logs/w6w7-baseline-dc-*.log`, started ~10:40 PST).
+When done: `report --match 'base-20261115T1*'`, compare default vs dc
+to isolate the builder-path gap (NP-04 input), then work the zlib
+loss cell (NP-06) — likely guest scheduler/vCPU scaling on
+`make -j$(nproc)`; profile before changing anything.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary

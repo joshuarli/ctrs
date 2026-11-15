@@ -1241,3 +1241,35 @@ Single-trial smoke runs (descriptive only, not pairs):
 
 All correctness checks green on both engines. n=1 — no performance
 conclusion; paired baseline is the next step.
+
+## First qualified paired baseline — W6/W7 default driver (2026-11-15)
+
+Runs `base-20261115T100955-dd6b` (W6) and `base-20261115T102429-e057`
+(W7): 10/10 valid pairs each, all correctness checks green, provenance
+complete, resource budgets matched (guest MemTotal within 0.1% after
+`CTRS_GUEST_RESERVE_MIB`). Earlier runs `base-20261115T094322-097d` /
+`base-20261115T095725-0e1d` completed but were fully rejected by the
+resource gate — retained as visible rejected records.
+
+Median paired ratios (ctrs/orbstack, <1 favors ctrs), 95% bootstrap CI
+of paired median, n=10:
+
+| Metric | Ratio | 95% CI | Assessment |
+| --- | --- | --- | --- |
+| W6 build_rust_s | 0.907 | [0.814, 0.981] | non-inferior |
+| W6 build_zlib_s | 1.222 | [1.058, 1.362] | **loss** |
+| W7 hyperfine_uncached_s | 0.870 | [0.780, 0.981] | non-inferior |
+| W7 hyperfine_warm_s | 0.668 | [0.601, 0.781] | strict-win |
+| W7 hyperfine_incr_s | 0.731 | [0.583, 0.915] | strict-win |
+| W7 httpie_uncached_s | 0.860 | [0.829, 0.944] | strict-win |
+| W7 httpie_warm_s | 1.004 | [0.920, 1.119] | inconclusive |
+| W7 httpie_incr_s | 0.931 | [0.868, 1.050] | inconclusive |
+
+Worst qualified cell: **W6 zlib C build — ctrs ~22% slower**
+(`make -j$(nproc)` parallel compile on gcc:14.2.0-bookworm). Second:
+httpie warm/incremental builds inconclusive (small absolute deltas,
+~0.4 s builds dominated by fixed overhead). ctrs leads the Rust
+compile+test path and most W7 build→load→probe cells.
+
+Resource metrics (peak_total_rss_kb, cpu_seconds_est) are unmeasured
+in these runs — NP-05 scope, not scored.
