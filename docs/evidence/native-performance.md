@@ -55,12 +55,62 @@ preflight and image-ID captures under `.work/native-perf/results/`.
   container. W2 requires zero transport errors and
   `items == 500 + writes_ok` in `/stats`. A fast error is a failed trial.
 
-## Scorecard — pilot results (2026-11-14, warm daemon both sides)
+## Scorecard — resource-matched re-baseline (2026-11-14/15, warm, 17 vCPU / ~43 GiB both)
 
-**Methodology correction:** an earlier pilot (superseded, raw data
-deleted) restarted the ctrs daemon per trial while OrbStack's stayed hot,
-mixing conditions. All numbers below come from runs where each engine's
-daemon/VM stayed up for the whole batch (`keep_warm` in `runner.py`).
+After the resource-parity fix, the full implemented matrix was re-run:
+5 balanced pairs per cell, `keep_warm` daemons, `resources.engine`
+recorded on every trial (both engines report ncpu=17). Raw:
+`.work/native-perf/results/base-20261114T2337*/` … `base-20261114T2350*/`.
+Medians below; every trial correctness-green except one orbstack W3
+flake (fixture readiness race, fixed in the runner — not an engine
+signal).
+
+| cell | metric | ctrs | orbstack | ctrs/orb |
+| --- | --- | --- | --- | --- |
+| W1 bring-up | wall s | 3.85 | 6.22 | **0.62 win** |
+| W2 API load | rps | 2029 | 1899 | **1.07 win** |
+| W2 | p95 ms | 6.15 | 7.08 | 0.87 win |
+| W2 | p99 ms | 10.99 | 11.60 | 0.95 ~tie |
+| W3 postgres | tx_tps | 3488 | 771 | **4.53 win** |
+| W3 | up s | 1.11 | 2.38 | 0.47 win |
+| W3 | restart s | 0.61 | 0.24 | **2.57 loss** |
+| W4 queue 1/4/16 w | drain s | 0.40/0.16/0.16 | 0.56/0.66/1.86 | **win all** |
+| W5 edit-test | bind/vol s | 0.10/0.08 | 0.31/0.29 | **win both** |
+| W6 zlib build | build s (default driver) | 2.10 | 0.52 | **loss — builder topology, see below** |
+| W7 image build | empty/warm/incr s | 5.4/0.77/1.74 | 3.78/0.41/1.65 | **loss empty+warm, ~tie incr** |
+| W8 deploy+load | pull wall s | 0.90 | 3.22 | **0.28 win** |
+| W8 | run_* s | 0.02–0.05 | 0.35–0.62 | **win all** |
+| W8 under-load | load rps | 2259 | 1416 | **1.60 win** |
+| W8 under-load | load p99 ms | 10.3 | 29.2 | **0.35 win** |
+| W8 under-load | load errors | 0 | 0 | tie |
+| W9 churn 1/4/8/16 | wall s | 0.64/0.65/0.70/0.72 | 0.86/1.08/1.40/2.11 | **win all** |
+| W10 recovery | recovery s | 0.54 | 0.37 | **1.47 loss** |
+| W10 | load rps during kill | 5244 | 1610 | 3.26 (errors expected in window) |
+| W10 | correctness | green | green | tie (no lost writes both) |
+
+**Losses to attack, in order:**
+1. **Container restart/start latency** — W3 `restart_s` 2.57x and W10
+   `recovery_s` 1.47x are the same path (`docker start`/`restart` →
+   health). ~0.2–0.35 s absolute; next hillclimb target.
+2. **Builder export path** — W6/W7 default-driver losses traced to the
+   docker-container driver's client-side image tarball export (~1.5–2 s
+   on the gcc base). Matched-driver (`--driver dc`, same pinned
+   BuildKit on both) shows ctrs *ahead*; the gap is product topology
+   (no `docker`-driver build), not engine runtime. Formal dc runs
+   pending; W7 note in cases.toml.
+3. W10 `load_errors` count difference is fast-fail vs connection-hold
+   behaviour during intentional downtime — recorded, not a defect.
+
+**Wins are broad and large:** bring-up, API load, postgres
+transactions, queue drain, edit-test, image deploy+run, under-load
+pulls, container churn — ctrs leads every one at equal resources.
+
+## Scorecard — pilot results (2026-11-14, PRE-PARITY — superseded)
+
+**Superseded:** these trials ran ctrs at its 2-vCPU/8 GiB default while
+OrbStack had 17 vCPU/~43 GiB. Kept for history only; the matched table
+above replaces it. An earlier pilot (raw data deleted) also restarted
+the ctrs daemon per trial while OrbStack's stayed hot.
 
 ### W1 web stack bring-up (warm), seconds
 
