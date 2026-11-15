@@ -43,24 +43,36 @@ re-PUT and record. Verified: two consecutive W7 default-driver
 trials pass with retags succeeding on identical rebuilds
 (`run-20261115T131124-7962`, `run-20261115T131147-d5f1`).
 
-**In flight:** W6+W7 `--driver default` 10-pair baselines re-running
-against the fixed path — log
-`.work/native-perf/logs/np04-default-baseline2-20261115T131324.log`
-(detached, survives session end; W6 then W7 sequentially). Warm
-daemon runs the signed `10cfff4` binary, `CTRS_LOG` unset (debug off
-for clean timings). Prior attempt `base-20261115T125538-2dc3` is
-valid for W6 (all 20 trials correct) but INVALID for W7 — do not
-mix its W7 trials into reports.
+**Qualified results (2026-11-15, commit `c9a5852` tree):**
+- W7 `base-20261115T133627-c5f9`: 10/10 valid pairs, all correctness
+  green. Strict wins on 5/6 cells (hyperfine warm 0.536, incr 0.537,
+  httpie uncached 0.836, warm 0.520, incr 0.550); hyperfine_uncached
+  non-inferior 0.955 [0.892, 0.983]. Both previously inconclusive
+  httpie cells resolved to strict wins.
+- W6 `base-20261115T134715-7cc9`: 10/10 valid pairs. zlib strict-win
+  0.586 [0.521, 0.699] — prior 1.222 default-driver loss eliminated.
+  rust inconclusive 0.963 [0.944, 1.059] — upper CI exceeds the 1.03
+  gate bound, so a 20-pair W6 run is in flight to tighten it.
+- One transient observed: a single buildx `/session` RST ~100 ms
+  into a zlib solve (pair 7 of `base-20261115T131324-d1cc`, 1 in ~40
+  session streams; buildkitd logged client-side context canceled).
+  Not reproduced since; watch recurrence.
 
-**Next executable action:** when the log shows both baselines
-done, run `python3.14 bench/native/runner.py report` on the new
-run ids, sanity-check pair validity (resource gate, correctness),
-and compare every cell against the dc control
-(`base-20261115T104041-95ab`, `base-20261115T105554-3c75`). The
-acceptance cell is the W6 zlib default-driver loss (was ratio
-1.22); httpie warm/incr inconclusive cells should now resolve.
-Record raw outputs/ratios/CIs in `docs/evidence/native-performance.md`
-and checkpoint this file with run ids + commit.
+**In flight:** W6 `--driver default` 20-pair baseline for a tighter
+rust-build CI — log
+`.work/native-perf/logs/np04-default-baseline4-w6x20-20261115T140212.log`
+(detached). Warm daemon runs the signed `10cfff4` binary, `CTRS_LOG`
+unset.
+
+**Next executable action:** when the 20-pair log finishes, run
+`python3.14 bench/native/runner.py report --match 'base-20261115T14*'`
+and check build_rust_s CI upper bound ≤1.03 (strict-win needs ≤0.95;
+non-inferior ≤1.03 satisfies the "meet" gate but "exceed" wants a
+strict W6 default-build win — zlib already provides it, rust only
+needs to not lose). Then update `docs/evidence/native-performance.md`
+with final ratios/CIs and checkpoint this file. After W6 qualifies,
+the remaining "exceed" gap is ≥2 strict wins among W1/W2/W5/W8 plus
+the W11 12 h reliability leg — see the campaign contract.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
