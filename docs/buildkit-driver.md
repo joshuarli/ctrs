@@ -112,3 +112,45 @@ If the rewrite proves too fragile, option C (a real moby-worker
 writing ctrs's store) is the only path to exact parity, and is
 strictly larger. Status quo (documented structural gap, matched
 `--driver dc` already shows ctrs ahead) remains the honest floor.
+
+## Implementation protocol notes (verified 2026-11-15, buildx v0.22.0 / buildkit v0.35.0)
+
+- `DialHijack("/grpc","h2c")` is an ordinary HTTP/1.1 `POST` with
+  `Connection: Upgrade` + `Upgrade: h2c`, expecting `101`. The path is
+  visible at HTTP/1.1 level — route on it; after 101 the conn is
+  prior-knowledge h2c. Same for `/session`.
+- `/grpc` conn: buildx is the gRPC **client**, buildkitd the server
+  (Control service). Byte-pipe host↔buildkitd works; only the first
+  SolveRequest needs MITM rewrite. h2 frame headers are 9 bytes;
+  HEADERS payloads (HPACK) pass through untouched — never decode.
+- SolveRequest (control.proto): `ExporterDeprecated`=3 (string),
+  `ExporterAttrsDeprecated`=4 (map), `Exporters`=13 (repeated
+  `Exporter{Type=1, Attrs=2 map<string,string>}`). gRPC frame =
+  1B flag + 4B BE len + protobuf. Rewrite type `docker`/`image`
+  without `push=true` → `type=image`, `name=<mirror push ref>`,
+  `push=true`, `registry=<mirror>`. Multi-platform/attestation/
+  `--push`/`--output` → fail closed.
+- `/session` conn: buildx is the h2 **server** (session attachables);
+  buildkitd reaches it via `session.Manager.HandleConn` →
+  `grpcClientConn` (h2 **client**). HandleConn is in-process only —
+  NOT exposed on buildkitd's TCP port. The bridge: byte-splice the
+  `/session` conn to a `Control.Session` bidi stream
+  (`rpc Session(stream BytesMessage)` on the same Control service)
+  opened by our own minimal gRPC **client** to buildkitd TCP.
+  `BytesMessage{data=1}` (tag 0x0A + varint). Roles align: buildkitd
+  is h2 client on both legs, buildx h2 server — pure byte shuttle,
+  no HPACK decode needed; only literal HPACK *encoding* for our
+  request headers. Must implement h2 client flow control
+  (SETTINGS/WINDOW_UPDATE/PING/GOAWAY/RST_STREAM) and grpc 5-byte
+  prefixes.
+- Transport: managed builder container (`buildx_buildkit_ctrs-build0`)
+  gets `--addr tcp://0.0.0.0:1234` added to `create_body` Cmd (additive;
+  unix sock remains for buildctl/dial-stdio). Daemon reaches it via
+  `ports::open_relay(vm, container_ip, 1234)`; container IP from engine
+  inspect. Extend `BuilderSnapshot`/`classify` to compare `spec.cmd`
+  so pre-change builders go stale and are replaced.
+- Ensure path: `builder::ensure_running(engine, say)` (make
+  `pub(crate)`); call it lazily on first /grpc or /session conn.
+- `/grpc` and `/session` conns must never be served by accident:
+  unknown Upgrade values and non-builder engines keep current 404/426
+  behavior; builder-not-running/foreign → actionable error, not hang.
