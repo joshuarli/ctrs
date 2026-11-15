@@ -187,9 +187,13 @@ fn stdio(p: &Prepared) -> io::Result<(ParentStdio, ChildStdio)> {
     }
     let (out_r, out_w) = sys::pipe()?;
     let (err_r, err_w) = sys::pipe()?;
-    // The agent drains these: bigger pipes mean fewer wakeups per byte.
+    // The agent drains these: bigger pipes mean fewer wakeups per byte,
+    // and nonblocking reads (as the TTY master already is) let it drain
+    // each wakeup fully.
     sys::grow_pipe(out_w.as_raw_fd(), 1 << 20);
     sys::grow_pipe(err_w.as_raw_fd(), 1 << 20);
+    sys::set_nonblocking(out_r.as_raw_fd())?;
+    sys::set_nonblocking(err_r.as_raw_fd())?;
     let (in_w, in_r) = if p.stdin {
         let (r, w) = sys::pipe()?;
         sys::grow_pipe(w.as_raw_fd(), 1 << 20);

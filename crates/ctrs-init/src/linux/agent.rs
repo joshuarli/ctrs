@@ -472,22 +472,34 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
             let p = procs.get_mut(&pid).expect("owner found it");
             let slot = if stream == Stream::Stdout { &mut p.run.stdout } else { &mut p.run.stderr };
             let fd = slot.as_ref().expect("polled fd is open").as_raw_fd();
-            // SAFETY: reading into a buffer we own from a descriptor we own.
-            let got = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
-            if got > 0 {
+            // Drain while data is ready: one poll wakeup then pays for
+            // many chunks instead of one read per cycle, which matters
+            // when several processes stream at once. Reads are
+            // nonblocking (as TTY masters already are), so EAGAIN ends
+            // the drain; `got` keeps the last read's verdict.
+            let mut got = 0;
+            for _ in 0..8 {
+                // SAFETY: reading into a buffer we own from a descriptor we own.
+                got = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+                if got <= 0 {
+                    break;
+                }
                 p.tty_hup = None;
                 out.clear();
                 Msg::Output { id: &p.run.id, stream, data: &chunk[..got as usize] }.encode(&mut out);
                 conn.write_all(&out)?;
-            } else if got < 0 && p.run.tty && p.exited.is_none() && io::Error::last_os_error().raw_os_error() == Some(libc::EIO) {
-                // Nobody holds the terminal right now, but the process lives
-                // and may open it again (systemd does): keep it.
-                p.tty_hup = Some(std::time::Instant::now());
-            } else if got == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::EAGAIN) {
-                // EOF, or EIO from a pty whose other side has closed.
-                *slot = None;
-                if p.run.tty {
-                    p.run.stdin = None;
+            }
+            if got == 0 || (got < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EAGAIN)) {
+                if got < 0 && p.run.tty && p.exited.is_none() && io::Error::last_os_error().raw_os_error() == Some(libc::EIO) {
+                    // Nobody holds the terminal right now, but the process lives
+                    // and may open it again (systemd does): keep it.
+                    p.tty_hup = Some(std::time::Instant::now());
+                } else {
+                    // EOF, or EIO from a pty whose other side has closed.
+                    *slot = None;
+                    if p.run.tty {
+                        p.run.stdin = None;
+                    }
                 }
             }
         }

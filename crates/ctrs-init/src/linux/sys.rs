@@ -222,6 +222,19 @@ pub fn grow_pipe(fd: RawFd, want: libc::c_int) {
     }
 }
 
+/// Gives a socket `want` bytes of send and receive buffering. Bulk
+/// guest→host streams (copy-out archives, exec output) are bounded by
+/// these; the kernel may cap the result. Failure is fine: the socket
+/// just keeps its default.
+pub fn sock_buffers(fd: RawFd, want: libc::c_int) {
+    // SAFETY: setsockopt on a descriptor we own; the result is advisory.
+    unsafe {
+        for opt in [libc::SO_RCVBUF, libc::SO_SNDBUF] {
+            libc::setsockopt(fd, libc::SOL_SOCKET, opt, (&want as *const libc::c_int).cast(), std::mem::size_of::<libc::c_int>() as libc::socklen_t);
+        }
+    }
+}
+
 pub fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: plain fcntl calls on a descriptor we own.
     unsafe {

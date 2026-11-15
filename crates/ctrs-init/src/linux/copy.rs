@@ -30,6 +30,9 @@ pub fn accept(listener: &OwnedFd, running: &[(&str, libc::pid_t)], paths: &Paths
         }
         // SAFETY: a fresh descriptor from accept4.
         let sock = unsafe { OwnedFd::from_raw_fd(fd) };
+        // Copy-out archives are bulk guest→host streams; give the socket
+        // room before the child inherits it.
+        sys::sock_buffers(sock.as_raw_fd(), 4 << 20);
         // SAFETY: the agent is single-threaded, so the child is a consistent
         // copy. The child only uses what it inherited, then exits.
         match unsafe { libc::fork() } {
