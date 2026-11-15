@@ -21,13 +21,14 @@ median ratios 0.986–0.997). Evidence:
 `docs/evidence/native-performance.md` → "NP-01 measurement
 qualification executed on the Mac".
 
-**Next executable action:** start NP-02. Freeze `assets.lock` beyond
-pilot status (digest-pinned sources, datasets, tool versions), then
-implement the real W6 pinned-Rust-app fixture — including the
-checksum-pinned zlib tarball fetch path — and the real W7 two-app
-buildx fixture per `cases.toml`/`buildkit-driver.md`. Measure the
-W6/W7 vertical slice with `baseline --driver default` (primary lane)
-before any optimization work in NP-04.
+**Next executable action:** continue NP-02. The checksum-pinned zlib
+fetch path landed (`ensure_w6_source`, commit `6446af0`); remaining:
+freeze `assets.lock` beyond pilot status (digest-pinned images,
+datasets, tool versions), add the pinned Rust app half of W6 (new
+rust image pin + source pin + Dockerfile + trial metrics), replace the
+W7 proxy with two real app builds per `buildkit-driver.md`, then
+measure the W6/W7 vertical slice with `baseline --driver default`
+(primary lane) before any NP-04 optimization.
 
 **Soak disposition:** `run-20261115T073817` died with its launching
 session ~08:48 PST after ~70 min of the 12 h ctrs leg; no runner or
