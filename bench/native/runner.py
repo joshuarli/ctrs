@@ -14,6 +14,7 @@ Requires Python >= 3.11 (tomllib). See README.md.
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import hashlib
 import json
@@ -77,6 +78,15 @@ DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis:7-alpine"
 W4_JOBS = 200
+# Holdout: a real third-party app never used for tuning — Gitea +
+# Postgres. REST API seed/read workload plus git smart-HTTP clones over
+# the published port. Executed once per engine at gates via the
+# `holdout` subcommand; excluded from the scored W-matrix.
+HOLDOUT_DIR = FIXTURES / "holdout"
+HOLDOUT_COMPOSE = HOLDOUT_DIR / "compose.yaml"
+HOLDOUT_IMAGE = "gitea/gitea:1.24.7"
+HOLDOUT_USER = "npadmin"
+HOLDOUT_PASSWORD = "npadmin-pass-123"
 # One worker container: pop jobs until the list is empty, store
 # md5(payload) under npw4:res:<payload>. `(nil)` ends the loop. $1 is
 # the queue container's DNS name on the trial network.
@@ -416,8 +426,10 @@ def summarize_trace(trace: Path) -> dict:
     }
 
 
-def compose_down(engine: Engine, project: str) -> None:
-    engine.compose(project, ["down", "-v", "--remove-orphans"], timeout=90)
+def compose_down(engine: Engine, project: str,
+                 compose_file: Path = COMPOSE_FILE) -> None:
+    engine.sh(["compose", "-f", str(compose_file), "-p", project,
+               "down", "-v", "--remove-orphans"], timeout=90, check=False)
     # Belt and braces: remove anything the project prefix left behind.
     for args in (["ps", "-aq", "--no-trunc", f"--filter", f"name={project}"],):
         cp = engine.sh(args, check=False, timeout=30)
@@ -1612,6 +1624,196 @@ def trial_w11(ctx, engine: Engine, state: str,
             rec["resources"]["trace"] = str(trace.relative_to(WORK))
 
 
+def _holdout_api(base: str, method: str, path: str, body: dict | None = None,
+                 timeout: float = 15.0):
+    """One Gitea API call with admin basic auth; returns (status, json)."""
+    url = f"{base}/api/v1{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization",
+                   "Basic " + base64.b64encode(
+                       f"{HOLDOUT_USER}:{HOLDOUT_PASSWORD}".encode()).decode())
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            return r.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def trial_holdout(ctx, engine: Engine, state: str,
+                  ops: int = 240, repos: int = 8, issues: int = 5,
+                  clones: int = 4, seed: int = 1) -> dict:
+    """Holdout gate: a real third-party application (Gitea + Postgres)
+    that was never tuned against — different language, framework and
+    data model from the W1 fixture. Seeds repos/issues over the REST
+    API, serves a timed read workload through the published port, and
+    finishes with real `git clone` smart-HTTP operations. Run once per
+    engine at milestone/final gates; not a scored W-cell."""
+    case_id = "HOLDOUT"
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    cenv = {"NP_GITEA_PORT": str(port)}
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    sampler = trace = None
+    t0 = time.monotonic()
+    try:
+        engine.ensure_up()
+        compose_down(engine, proj, HOLDOUT_COMPOSE)
+        sampler, trace = start_sampler(engine, trial_dir)
+        t_up = time.monotonic()
+        up = engine.sh(
+            ["compose", "-f", str(HOLDOUT_COMPOSE), "-p", proj,
+             "up", "-d"], env_extra=cenv, timeout=600, check=False)
+        rec["metrics"]["setup_seconds"] = round(time.monotonic() - t_up, 3)
+        if up.returncode != 0:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                f"compose up rc={up.returncode}: "
+                f"{(up.stderr or up.stdout)[-300:]}")
+            return rec
+
+        # /api/healthz answers once Gitea finished its first-boot schema
+        # setup against Postgres.
+        deadline = time.monotonic() + HEALTH_DEADLINE_S
+        healthy = False
+        while time.monotonic() < deadline:
+            status, body = http_json(f"{base}/api/healthz", timeout=3)
+            if status == 200:
+                healthy = True
+                break
+            time.sleep(POLL_INTERVAL_S)
+        rec["metrics"]["time_to_health_s"] = round(
+            time.monotonic() - t_up, 3)
+        checks["healthz"] = healthy
+        if not healthy:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append("gitea never became healthy")
+            return rec
+
+        # First boot with INSTALL_LOCK still leaves the instance without
+        # an admin; create one through the image's own CLI.
+        t_admin = time.monotonic()
+        adm = engine.sh(
+            ["compose", "-f", str(HOLDOUT_COMPOSE), "-p", proj,
+             "exec", "-T", "--user", "git", "gitea", "gitea",
+             "admin", "user", "create",
+             "--username", HOLDOUT_USER, "--password", HOLDOUT_PASSWORD,
+             "--email", "np@bench.local", "--admin",
+             "--must-change-password=false"],
+            timeout=60, check=False)
+        checks["admin_created"] = adm.returncode == 0
+        if not checks["admin_created"]:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                f"admin create rc={adm.returncode}: "
+                f"{(adm.stderr or adm.stdout)[-300:]}")
+            return rec
+        rec["metrics"]["admin_s"] = round(time.monotonic() - t_admin, 3)
+
+        # Seed: real REST writes — repos with auto_init, then issues.
+        t_seed = time.monotonic()
+        repo_ok = issue_ok = 0
+        for i in range(repos):
+            name = f"repo-{i:02d}"
+            st, _ = _holdout_api(
+                base, "POST", "/user/repos",
+                {"name": name, "private": False, "auto_init": True,
+                 "default_branch": "main",
+                 "description": f"holdout repo {i}"})
+            if st in (200, 201):
+                repo_ok += 1
+            for j in range(issues):
+                st, _ = _holdout_api(
+                    base, "POST", f"/repos/{HOLDOUT_USER}/{name}/issues",
+                    {"title": f"issue-{j}", "body": f"seeded {j}"})
+                if st in (200, 201):
+                    issue_ok += 1
+        rec["metrics"]["seed_s"] = round(time.monotonic() - t_seed, 3)
+        rec["metrics"]["repos_created"] = repo_ok
+        rec["metrics"]["issues_created"] = issue_ok
+        checks["repos_exact"] = repo_ok == repos
+        checks["issues_exact"] = issue_ok == repos * issues
+        if not (checks["repos_exact"] and checks["issues_exact"]):
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                f"seed incomplete: {repo_ok}/{repos} repos, "
+                f"{issue_ok}/{repos * issues} issues")
+            return rec
+
+        # Timed read workload over the published port: rotate repo get,
+        # issue list and repo list calls; every 8th op also lists
+        # branches (a second table join in Gitea).
+        t_w = time.monotonic()
+        api_errors = 0
+        for i in range(ops):
+            repo = f"repo-{i % repos:02d}"
+            if i % 8 == 7:
+                st, _ = _holdout_api(
+                    base, "GET", f"/repos/{HOLDOUT_USER}/{repo}/branches")
+            elif i % 3 == 0:
+                st, _ = _holdout_api(
+                    base, "GET",
+                    f"/repos/{HOLDOUT_USER}/{repo}/issues"
+                    "?state=all&limit=50")
+            elif i % 3 == 1:
+                st, _ = _holdout_api(
+                    base, "GET", f"/repos/{HOLDOUT_USER}/{repo}")
+            else:
+                st, _ = _holdout_api(
+                    base, "GET", "/user/repos?limit=50")
+            if st != 200:
+                api_errors += 1
+        rec["metrics"]["workload_s"] = round(time.monotonic() - t_w, 3)
+        rec["metrics"]["ops"] = ops
+        rec["metrics"]["api_errors"] = api_errors
+        rec["metrics"]["ops_per_s"] = round(
+            ops / max(rec["metrics"]["workload_s"], 1e-6), 1)
+        checks["workload_zero_errors"] = api_errors == 0
+
+        # Real git smart-HTTP: shallow clones through the published port,
+        # credentials in the URL exactly as a user would type them.
+        t_c = time.monotonic()
+        clone_ok = 0
+        for c in range(clones):
+            repo = f"repo-{c % repos:02d}"
+            dest = trial_dir / f"clone-{c}"
+            url = (f"http://{HOLDOUT_USER}:{HOLDOUT_PASSWORD}"
+                   f"@127.0.0.1:{port}/{HOLDOUT_USER}/{repo}.git")
+            cp = subprocess.run(
+                ["git", "clone", "--depth", "1", "--quiet", url,
+                 str(dest)], capture_output=True, text=True, timeout=120)
+            if cp.returncode == 0 and (dest / "README.md").exists():
+                clone_ok += 1
+        rec["metrics"]["clone_s"] = round(time.monotonic() - t_c, 3)
+        rec["metrics"]["clones"] = clones
+        checks["clones_exact"] = clone_ok == clones
+
+        checks["all"] = all(
+            v for k, v in checks.items() if k != "all")
+        rec["correctness"]["ok"] = bool(checks["all"])
+        rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
+        return rec
+    finally:
+        compose_down(engine, proj, HOLDOUT_COMPOSE)
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+
+
 class RunContext:
     def __init__(self, run_id: str):
         self.run_id = run_id
@@ -1732,6 +1934,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w10(ctx, engine, state, **kw)
         elif case_id == "W11":
             rec = trial_w11(ctx, engine, state, **kw)
+        elif case_id == "HOLDOUT":
+            rec = trial_holdout(ctx, engine, state, **kw)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1933,6 +2137,31 @@ def cmd_baseline(args) -> int:
     return 0
 
 
+def cmd_holdout(args) -> int:
+    """Independent holdout check (campaign gate f): the frozen real-app
+    fixture runs once per engine — never tuned against, never part of
+    the scored baseline."""
+    ctx = RunContext(f"holdout-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
+                     f"{random.randint(0, 0xffff):04x}")
+    kw = {"ops": args.ops, "repos": args.repos, "issues": args.issues,
+          "clones": args.clones, "seed": args.seed}
+    try:
+        for eng in [e.strip() for e in args.engines.split(",") if e.strip()]:
+            rec = run_one(ctx, eng, "HOLDOUT", "warm", **kw)
+            m = rec["metrics"]
+            print(f"{eng}: ok={rec['correctness']['ok']} "
+                  f"health={m.get('time_to_health_s')}s "
+                  f"seed={m.get('seed_s')}s "
+                  f"ops/s={m.get('ops_per_s')} "
+                  f"clone={m.get('clone_s')}s "
+                  f"errors={rec['validation_errors']}", flush=True)
+    finally:
+        for engine in ctx.engines.values():
+            engine.stop()
+    print(f"results: {ctx.jsonl}")
+    return 0
+
+
 def cmd_noop(args) -> int:
     args.a = args.b = args.engine
     args.pairs = args.pairs
@@ -2116,6 +2345,14 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true")
 
+    p = sub.add_parser("holdout")
+    p.add_argument("--engines", default="ctrs,orbstack")
+    p.add_argument("--ops", type=int, default=240)
+    p.add_argument("--repos", type=int, default=8)
+    p.add_argument("--issues", type=int, default=5)
+    p.add_argument("--clones", type=int, default=4)
+    p.add_argument("--seed", type=int, default=1)
+
     p = sub.add_parser("report")
     p.add_argument("--match", default="*",
                    help="only result dirs matching this glob, e.g. "
@@ -2133,6 +2370,8 @@ def main() -> int:
         return cmd_baseline(args)
     if args.cmd == "noop":
         return cmd_noop(args)
+    if args.cmd == "holdout":
+        return cmd_holdout(args)
     if args.cmd == "report":
         return cmd_report(args)
     return 2

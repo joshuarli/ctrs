@@ -160,3 +160,18 @@ params = { duration_s = 300, window_s = 30, concurrency = 8,
 correctness = ["engine_alive", "error_rate <= 1%", "churn_all_ok",
                "item_count >= expected"]
 note = "v1 pilot default 300 s; campaign target 12-24 h via --duration (run/baseline CLI default is 20 s — pass explicitly). Load windows are sequential 30 s runs of the W2 driver; churn bursts reuse the W9 job. 'engine_alive' counts failed `docker version` probes during the soak — any unplanned death fails the cell. Resource growth is recorded via the process sampler, not gated in v1."
+
+[[case]]
+id = "HOLDOUT"
+family = "holdout-real-app"
+title = "real third-party app never tuned against: Gitea 1.24.7 + Postgres 17 — REST API seed + timed read workload + git smart-HTTP clones over the published port"
+fixture = "fixtures/holdout"
+status = "implemented"
+metrics = ["setup_seconds", "time_to_health_s", "admin_s", "seed_s",
+           "workload_s", "ops", "ops_per_s", "api_errors", "clone_s",
+           "clones", "peak_total_rss_kb", "cpu_seconds_est"]
+states = ["warm"]
+params = { ops = 240, repos = 8, issues_per_repo = 5, clones = 4, seed = 1 }
+correctness = ["healthz", "admin_created", "repos_exact", "issues_exact",
+               "workload_zero_errors", "clones_exact"]
+note = "EXCLUDED from the scored W-matrix by design (campaign gate f): run once per engine via `runner.py holdout --engines ctrs,orbstack`, parameters frozen here, never tune against its failures. Different stack from every W fixture (Go forge + git protocol + Postgres)."

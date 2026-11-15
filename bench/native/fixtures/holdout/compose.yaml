@@ -1,0 +1,58 @@
+# Holdout fixture: a real third-party application that was never used
+# to tune ctrs — Gitea (Go git forge) + Postgres. Exercises the REST
+# API, git smart-HTTP over the published port, and two named volumes.
+# Deliberately NOT part of the scored W1-W11 matrix; the `holdout`
+# runner command executes it once per engine at milestone/final gates.
+# NP_GITEA_PORT is supplied by the runner environment.
+services:
+  gitea:
+    image: gitea/gitea:1.24.7
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: db:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: gitea
+      GITEA__database__PASSWD: gitea
+      GITEA__database__SSL_MODE: disable
+      GITEA__server__DOMAIN: localhost
+      GITEA__server__ROOT_URL: http://localhost:${NP_GITEA_PORT}/
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__SSH_PORT: "22"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__actions__ENABLED: "false"
+      GITEA__log__LEVEL: Warn
+    ports:
+      - "127.0.0.1:${NP_GITEA_PORT}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - giteadata:/data
+    networks:
+      - appnet
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: gitea
+      POSTGRES_DB: gitea
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitea -d gitea"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - appnet
+
+volumes:
+  giteadata: {}
+  pgdata: {}
+
+networks:
+  appnet: {}

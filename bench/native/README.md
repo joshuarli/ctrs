@@ -23,6 +23,7 @@ python3.14 bench/native/runner.py prepare            # pull images + build fixtu
 python3.14 bench/native/runner.py baseline --case W1 --a ctrs --b orbstack --pairs 3
 python3.14 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack --pairs 3 --duration 20
 python3.14 bench/native/runner.py noop --engine ctrs --pairs 2   # harness noise control
+python3.14 bench/native/runner.py holdout                       # independent real-app gate (once per engine)
 python3.14 bench/native/runner.py report             # aggregate .work/native-perf/**/trials.jsonl
 ```
 
@@ -84,8 +85,17 @@ billing-grade numbers.
 - OrbStack `warm` reuses its long-lived VM and build cache; ctrs `warm`
   likewise. `cold` is ctrs-only as described above; W8 has no cold cell
   because the registry and portfolio live on the warm engine.
-- W3–W7, W9–W11 are declared in `cases.toml` but not yet implemented.
 - The API fixture is purpose-built for the harness (deterministic,
   checksum-verifiable); it is a real FastAPI/Postgres/Redis app, not a
-  microbenchmark, but it is not a third-party application. A held-out
-  real app is still owed before promotion gates.
+  microbenchmark, but it is not a third-party application.
+
+## Holdout
+
+`runner.py holdout --engines ctrs,orbstack` runs the independent
+holdout once per engine (campaign gate f): Gitea 1.24.7 + Postgres —
+a real third-party app never used for tuning. It seeds repos/issues
+over the REST API, times a read workload through the published port,
+and finishes with real `git clone` smart-HTTP operations. Results land
+in `.work/native-perf/holdout-*/` like any trial but are excluded from
+the scored matrix; parameters are frozen in `cases.toml` — do not tune
+against its failures.
