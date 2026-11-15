@@ -767,7 +767,7 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
     let down_res = if framed { copy_frames(&mut from_guest, &mut client_write) } else { copy(&mut from_guest, &mut client_write) };
     let _ = client_write.shutdown(Shutdown::Write);
     let up_res = up.join();
-    crate::diag::info!("port relay ended", ms = relay_start.elapsed().as_millis(), framed = framed, down = format!("{down_res:?}"), up = format!("{up_res:?}"));
+    crate::diag::debug!("port relay ended", ms = relay_start.elapsed().as_millis(), framed = framed, down = format!("{down_res:?}"), up = format!("{up_res:?}"));
     // `guest` drops here: the vsock connection is released on the VM's queue.
     drop(guest);
     Ok(())
@@ -792,7 +792,7 @@ fn relay_tcp(client: TcpStream, guest: TcpStream) -> io::Result<()> {
     let _ = client_write.shutdown(Shutdown::Write);
     let up = up.join();
     let up_ms = start.elapsed().as_millis();
-    crate::diag::info!("nat relay ended", down_ms = down_ms, up_ms = up_ms, down = format!("{down:?}"), up = format!("{up:?}"));
+    crate::diag::debug!("nat relay ended", down_ms = down_ms, up_ms = up_ms, down = format!("{down:?}"), up = format!("{up:?}"));
     Ok(())
 }
 
