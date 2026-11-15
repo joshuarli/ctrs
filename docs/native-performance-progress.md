@@ -43,13 +43,23 @@ hyperfine uncached and W6 rust build; **loss on W6 zlib C build
 warm/incr inconclusive. Full table in
 `docs/evidence/native-performance.md`.
 
-**Next executable action:** monitor `--driver dc` matched-builder
-control for W6/W7 (detached nohup, log
-`.work/native-perf/logs/w6w7-baseline-dc-*.log`, started ~10:40 PST).
-When done: `report --match 'base-20261115T1*'`, compare default vs dc
-to isolate the builder-path gap (NP-04 input), then work the zlib
-loss cell (NP-06) — likely guest scheduler/vCPU scaling on
-`make -j$(nproc)`; profile before changing anything.
+**dc control landed 2026-11-15:** `base-20261115T104041-95ab` (W6) +
+`base-20261115T105554-3c75` (W7), 10/10 valid pairs each. With the
+builder pinned identical, **ctrs is equal-or-faster on every cell** —
+strict wins on all six W7 metrics and zlib (0.78). The whole
+remaining default-driver deficit is the build→load path (~0.2–0.6 s
+per build; flips zlib to a loss and httpie warm/incr to
+inconclusive). Full comparison table in
+`docs/evidence/native-performance.md`.
+
+**Next executable action:** NP-04 — implement the scoped
+`docs/buildkit-driver.md` design: dedicated buildkitd target,
+`/grpc` h2c endpoint on the unix socket, transparent `/session`
+proxy, SolveRequest exporter rewrite (`type=docker`/`image` →
+mirror push+retag). Fail closed on multi-platform/attestation/
+`--push`/`--output` cases. Then re-run W6/W7 `--driver default`
+baselines and compare against the dc control. zlib default-driver
+loss is the acceptance cell to flip.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary

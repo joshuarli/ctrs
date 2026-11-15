@@ -1273,3 +1273,30 @@ compile+test path and most W7 build→load→probe cells.
 
 Resource metrics (peak_total_rss_kb, cpu_seconds_est) are unmeasured
 in these runs — NP-05 scope, not scored.
+
+## Matched-builder control — W6/W7 `--driver dc` (2026-11-15)
+
+Runs `base-20261115T104041-95ab` (W6) and `base-20261115T105554-3c75`
+(W7): 10/10 valid pairs each, all correctness green, same pinned
+BuildKit image (`moby/buildkit@sha256:aa63…`) in isolated
+per-engine docker-container builders.
+
+| Metric | dc ratio | dc 95% CI | default ratio | default 95% CI |
+| --- | --- | --- | --- | --- |
+| W6 build_rust_s | 0.925 | [0.867, 0.986] | 0.907 | [0.814, 0.981] |
+| W6 build_zlib_s | **0.783** | [0.734, 0.907] | **1.222** | [1.058, 1.362] |
+| W7 hyperfine_uncached_s | 0.926 | [0.860, 0.981] | 0.870 | [0.780, 0.981] |
+| W7 hyperfine_warm_s | 0.506 | [0.393, 0.559] | 0.668 | [0.601, 0.781] |
+| W7 hyperfine_incr_s | 0.504 | [0.394, 0.559] | 0.731 | [0.583, 0.915] |
+| W7 httpie_uncached_s | 0.851 | [0.814, 0.879] | 0.860 | [0.829, 0.944] |
+| W7 httpie_warm_s | **0.659** | [0.625, 0.694] | 1.004 | [0.920, 1.119] |
+| W7 httpie_incr_s | **0.633** | [0.565, 0.662] | 0.931 | [0.868, 1.050] |
+
+**Conclusion:** with the builder held constant, ctrs is equal-or-faster
+everywhere — strict wins on all six W7 cells and the zlib build. The
+entire remaining default-driver deficit is the build→load→first-use
+path (docker-driver fallback vs OrbStack's embedded builder), exactly
+the NP-04 `/grpc` proxy + exporter-rewrite scope in
+`docs/buildkit-driver.md`. Quantified cost of the gap: ~0.2–0.45 s per
+W7 build, ~0.6 s on the zlib build, and it flips zlib from win to
+loss and both httpie warm/incr cells from win to inconclusive.
