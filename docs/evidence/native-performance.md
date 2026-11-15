@@ -195,6 +195,26 @@ CHECKPOINT → `docker restart` → exact count/sum/meta verification.
   healthy (stderr capture added for the next occurrence; not yet
   reproduced). OrbStack 5/5 clean.
 
+### W5 monorepo edit-test loop (warm, 5 pairs)
+
+60-module python repo; timed `docker run python3 run_tests.py` per
+iteration on host bind mount vs named volume (kept separate), host edit
+between bind iterations with marker verification.
+
+| metric | ctrs median | orbstack median |
+| --- | --- | --- |
+| bind_median_s | 0.102 | 0.302 |
+| volume_median_s | 0.072 | 0.287 |
+
+- Absolute times favour ctrs ~3–4× (container start dominates this
+  light workload — consistent with W9).
+- **Within-engine bind penalty:** ctrs bind/volume ≈ **1.4×** vs
+  orbstack ≈ **1.06×** — ctrs's virtiofs host-bind path costs ~40% over
+  guest-native storage where OrbStack's costs ~6%. Real architectural
+  weakness for IO-heavy bind-mount dev loops; the workload is light
+  (60 tiny files, warm cache) so a heavier IO cell may widen it.
+- All edit-coherence markers verified on all 10 trials.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -217,7 +237,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W7 | implemented, 5-pair pilot collected — **loss cell** (below) |
 | W9 | implemented, 5-pair pilot collected — large win (below) |
 | W3 | implemented, pilot collected — mixed (below) |
-| W4–W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W5 | implemented, 5-pair pilot collected (below) |
+| W4, W6, W10, W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 

@@ -60,8 +60,14 @@ note = "API ingest -> queue -> 1/4/16 workers -> checksummed outputs"
 [[case]]
 id = "W5"
 family = "monorepo-edit-test-loop"
-status = "pending"
-note = "bind-mount real TS/pnpm repo; host bind vs named volume kept separate"
+title = "60-module python repo: timed docker run test loop on host bind mount vs named volume, host edit between bind iterations"
+fixture = "fixtures/w5/repo"
+status = "implemented"
+metrics = ["bind_median_s", "volume_median_s", "bind_iters_s", "volume_iters_s"]
+states = ["warm"]
+params = { iters = 5 }
+correctness = ["volume_seed", "bind_iter_<i> marker+edit visible", "vol_iter_<i> marker"]
+note = "v1 uses a python fixture repo (offline); a TS/pnpm repo is deferred. Bind iterations verify host->guest write coherence via the printed edit marker. Host bind = virtiofs path; named volume = guest-native storage — kept as separate metrics, never blended."
 
 [[case]]
 id = "W6"

@@ -22,6 +22,7 @@ import random
 import re
 import shutil
 import signal
+import statistics
 import socket
 import subprocess
 import sys
@@ -63,6 +64,9 @@ W8_DIR = FIXTURES / "w8"
 W7_DIR = FIXTURES / "w7"
 W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
+W5_DIR = FIXTURES / "w5"
+W5_IMAGE = "python:3.13-slim"
+W5_VOL = "npw5-repo"
 W3_PASSWORD = "npw3pw"
 W3_TXS = 300
 # Deterministic transaction mix: each tx inserts one row and updates a
@@ -1003,6 +1007,75 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
 
 
+def trial_w5(ctx, engine: Engine, state: str,
+             iters: int = 5) -> dict:
+    """W5: monorepo edit-test loop — the same 60-module repo tested via
+    `docker run` on (a) a host bind mount and (b) a named volume, kept
+    as separate metrics per the campaign. Between bind iterations the
+    host edits edited.txt; run_tests.py prints the marker so output
+    proves host→guest write coherence through the mount."""
+    case_id = "W5"
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    repo = W5_DIR / "repo"
+    edited = repo / "edited.txt"
+    orig = edited.read_text()
+    vol = f"{W5_VOL}-{ctx.run_id[-6:]}"
+    try:
+        engine.ensure_up()
+        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=30)
+        # Populate the volume once (untimed): copy the fixture repo in.
+        cp = engine.sh(
+            ["run", "--rm", "-v", f"{vol}:/dst",
+             "-v", f"{repo}:/src:ro", W5_IMAGE, "sh", "-c",
+             "cp -r /src/. /dst/"],
+            timeout=120, check=False)
+        checks["volume_seed"] = cp.returncode == 0
+
+        bind_times, vol_times = [], []
+        for i in range(iters):
+            # Bind iteration: host edit, then timed test run.
+            edited.write_text(f"iter-{i}\n")
+            t0 = time.monotonic()
+            cp = engine.sh(
+                ["run", "--rm", "-v", f"{repo}:/repo:ro", "-w", "/repo",
+                 W5_IMAGE, "python3", "run_tests.py"],
+                timeout=120, check=False)
+            bind_times.append(round(time.monotonic() - t0, 3))
+            ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout
+                  and f"iter-{i}" in cp.stdout)
+            checks[f"bind_iter_{i}"] = ok
+
+            # Volume iteration: same test against the named volume.
+            t0 = time.monotonic()
+            cp = engine.sh(
+                ["run", "--rm", "-v", f"{vol}:/repo:ro", "-w", "/repo",
+                 W5_IMAGE, "python3", "run_tests.py"],
+                timeout=120, check=False)
+            vol_times.append(round(time.monotonic() - t0, 3))
+            ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout)
+            checks[f"vol_iter_{i}"] = ok
+
+        rec["metrics"]["bind_iters_s"] = bind_times
+        rec["metrics"]["volume_iters_s"] = vol_times
+        rec["metrics"]["bind_median_s"] = round(
+            statistics.median(bind_times), 3)
+        rec["metrics"]["volume_median_s"] = round(
+            statistics.median(vol_times), 3)
+        rec["correctness"]["ok"] = all(
+            v for k, v in checks.items() if k != "volume_seed"
+        ) and checks.get("volume_seed", False)
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        edited.write_text(orig)
+        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -1110,6 +1183,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w9(ctx, engine, state)
         elif case_id == "W3":
             rec = trial_w3(ctx, engine, state)
+        elif case_id == "W5":
+            rec = trial_w5(ctx, engine, state)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1405,7 +1480,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1418,7 +1493,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W7", "W8", "W9"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1434,7 +1509,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W7", "W8", "W9"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
