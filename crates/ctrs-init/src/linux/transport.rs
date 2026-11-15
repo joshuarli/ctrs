@@ -103,6 +103,9 @@ pub fn dial_within(port: u32, timeout: std::time::Duration) -> io::Result<OwnedF
     unsafe {
         let fd = sys::check(libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) as _, "vsock socket")?;
         let sock = OwnedFd::from_raw_fd(fd as RawFd);
+        // Same bulk buffers `dial` sets: exec output conns are the
+        // highest-volume guest→host streams there are.
+        sys::sock_buffers(sock.as_raw_fd(), 4 << 20);
         let tv = libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
         sys::check(
             libc::setsockopt(sock.as_raw_fd(), libc::AF_VSOCK, SO_VM_SOCKETS_CONNECT_TIMEOUT, (&tv as *const libc::timeval).cast(), std::mem::size_of::<libc::timeval>() as u32) as _,
