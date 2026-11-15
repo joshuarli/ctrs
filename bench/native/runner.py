@@ -65,6 +65,17 @@ W7_DIR = FIXTURES / "w7"
 W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
+W4_IMAGE = "redis:7-alpine"
+W4_JOBS = 200
+# One worker container: pop jobs until the list is empty, store
+# md5(payload) under npw4:res:<payload>. `(nil)` ends the loop. $1 is
+# the queue container's DNS name on the trial network.
+W4_WORKER = (
+    "while j=$(redis-cli -h \"$1\" RPOP npw4:jobs | head -1); do "
+    "case \"$j\" in ''|'(nil)') break;; esac; "
+    "h=$(printf %s \"$j\" | md5sum | cut -d' ' -f1); "
+    "redis-cli -h \"$1\" SET \"npw4:res:$j\" \"$h\" >/dev/null; done"
+)
 W5_IMAGE = "python:3.13-slim"
 W5_VOL = "npw5-repo"
 W3_PASSWORD = "npw3pw"
@@ -895,6 +906,92 @@ def trial_w9(ctx, engine: Engine, state: str,
         return rec
 
 
+def trial_w4(ctx, engine: Engine, state: str,
+             workers: tuple = (1, 4, 16)) -> dict:
+    """W4: worker queue — N deterministic jobs pushed onto a Redis list in
+    a dedicated container on a private bridge network; W worker containers
+    drain it with RPOP and store md5(payload) per job. Drain wall time per
+    worker count; afterwards every result key must exist and a
+    deterministic sample must match the runner-computed digest."""
+    case_id = "W4"
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    net = f"npw4-{''.join(c if c.isalnum() else '-' for c in ctx.run_id)}-{engine.name}"
+    q = f"{proj}-q"
+    jobs = [f"job-{i:04d}-npw4" for i in range(W4_JOBS)]
+
+    def redis(*args: str, timeout: float = 60) -> subprocess.CompletedProcess:
+        return engine.sh(["exec", q, "redis-cli", *args],
+                         timeout=timeout, check=False)
+
+    try:
+        engine.ensure_up()
+        engine.sh(["network", "create", net], timeout=60)
+        engine.sh(["run", "-d", "--name", q, "--network", net,
+                   W4_IMAGE, "redis-server", "--save", "",
+                   "--appendonly", "no"], timeout=120)
+        deadline = time.monotonic() + 60
+        while True:
+            cp = redis("ping", timeout=15)
+            if cp.returncode == 0 and "PONG" in cp.stdout:
+                break
+            if time.monotonic() > deadline:
+                raise TimeoutError("redis queue did not become ready")
+            time.sleep(0.5)
+        all_ok = True
+        for w in workers:
+            redis("FLUSHALL")
+            cp = redis("RPUSH", "npw4:jobs", *jobs, timeout=120)
+            if cp.returncode != 0:
+                rec["validation_errors"].append(
+                    f"RPUSH rc={cp.returncode}: {(cp.stderr or cp.stdout)[-200:]}")
+                checks[f"workers_{w}"] = False
+                all_ok = False
+                continue
+            t0 = time.monotonic()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=w) as ex:
+                futs = [
+                    ex.submit(engine.sh,
+                              ["run", "--rm", "--network", net,
+                               W4_IMAGE, "sh", "-c", W4_WORKER,
+                               "worker", q],
+                              timeout=300, check=False)
+                    for _ in range(w)
+                ]
+                outs = [f.result() for f in futs]
+            wall = round(time.monotonic() - t0, 3)
+            rec["metrics"][f"workers_{w}_s"] = wall
+
+            nres = redis("--scan", "--pattern", "npw4:res:*")
+            got = len([l for l in nres.stdout.splitlines() if l.strip()])
+            sample = [jobs[i] for i in
+                      range(0, W4_JOBS, max(1, W4_JOBS // 16))][:16]
+            want = {j: hashlib.md5(j.encode()).hexdigest() for j in sample}
+            mget = redis("MGET", *[f"npw4:res:{j}" for j in sample])
+            vals = mget.stdout.splitlines()
+            bad = [j for j, v in zip(sample, vals) if v.strip() != want[j]]
+            ok = (all(cp.returncode == 0 for cp in outs)
+                  and got == W4_JOBS and not bad)
+            checks[f"workers_{w}"] = ok
+            if not ok:
+                rec["validation_errors"].append(
+                    f"workers_{w}: rc={[c.returncode for c in outs]} "
+                    f"results={got}/{W4_JOBS} bad_md5={bad[:3]}")
+            all_ok = all_ok and ok
+        rec["metrics"]["jobs"] = W4_JOBS
+        rec["correctness"]["ok"] = all_ok
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        engine.sh(["rm", "-f", q], check=False, timeout=60)
+        engine.sh(["network", "rm", net], check=False, timeout=60)
+
+
 def trial_w3(ctx, engine: Engine, state: str) -> dict:
     """W3: persistent transactional Postgres — real migrations, a
     deterministic 300-transaction mix, CHECKPOINT, `docker restart`,
@@ -1298,6 +1395,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w7(ctx, engine, state)
         elif case_id == "W9":
             rec = trial_w9(ctx, engine, state)
+        elif case_id == "W4":
+            rec = trial_w4(ctx, engine, state)
         elif case_id == "W3":
             rec = trial_w3(ctx, engine, state)
         elif case_id == "W5":
@@ -1599,7 +1698,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1612,7 +1711,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1628,7 +1727,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)

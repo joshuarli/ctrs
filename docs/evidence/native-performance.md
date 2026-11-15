@@ -239,6 +239,25 @@ showed the expected +1 committed-but-unacked surplus once).
 - v1 scope: container kill only. Engine/VM-level kill deferred —
   OrbStack's shared daemon makes an engine restart non-comparable.
 
+### W4 worker-queue baseline (warm, 5 pairs, 200 jobs)
+
+Redis list on a private bridge network; 1/4/16 `docker run` worker
+containers RPOP jobs and SET md5 results. Drain wall includes worker
+container provisioning (foreground `docker run`), so it blends
+start latency with queue throughput — disclosed in the case note.
+All 30 trials correctness-green (rc=0, 200/200 results, md5 sample).
+
+| workers | ctrs median s | orbstack median s | ratio |
+| --- | --- | --- | --- |
+| 1 | 0.308 | 0.598 | 1.94x |
+| 4 | 0.225 | 0.699 | 3.11x |
+| 16 | 0.318 | 1.826 | 5.74x |
+
+cts wins every cell, and the gap widens with concurrency — consistent
+with W9's container-start/churn advantage. OrbStack's 16-worker cell is
+~8x its own 4-worker time, i.e. its per-container start cost dominates
+at high fan-out.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -263,7 +282,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W3 | implemented, pilot collected — mixed (below) |
 | W5 | implemented, 5-pair pilot collected (below) |
 | W10 | implemented, pilot collected (below) |
-| W4, W6, W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W4 | implemented, 5-pair baseline collected (below) |
+| W6, W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
