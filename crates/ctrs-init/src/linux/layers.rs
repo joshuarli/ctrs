@@ -226,7 +226,6 @@ fn untar(reader: impl Read, dest: &Path) -> io::Result<u64> {
     archive.set_preserve_permissions(true);
     archive.set_preserve_ownerships(true);
     archive.set_preserve_mtime(true);
-    archive.set_unpack_xattrs(true);
     archive.set_overwrite(true);
     let mut total = 0u64;
     for entry in archive.entries()? {
@@ -255,14 +254,48 @@ fn untar(reader: impl Read, dest: &Path) -> io::Result<u64> {
             continue;
         }
         total += entry.size();
+        let xattrs = pax_xattrs(&mut entry)?;
         // Entries whose paths escape the root (`..` components) come back
         // false and were skipped; a layer recorded as loaded with bytes
         // missing is a silent corruption, so refuse it.
         if !entry.unpack_in(dest)? {
             return Err(escapes());
         }
+        for (key, value) in xattrs {
+            set_pax_xattr(&dest.join(&path), &key, &value);
+        }
     }
     Ok(total)
+}
+
+/// The `SCHILY.xattr.*` pax keywords an entry carries, filtered to Linux
+/// xattr namespaces. tar-rs applies these verbatim and fails the whole
+/// entry on the first setxattr error, which rejects archives made by
+/// macOS tooling (`com.apple.provenance` et al. have no Linux
+/// namespace); filtering here keeps real xattrs (`user.*`, `security.*`,
+/// `trusted.*`, `system.*`) working while foreign ones are skipped.
+fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    let mut out = Vec::new();
+    let Some(exts) = entry.pax_extensions()? else { return Ok(out) };
+    for e in exts.flatten() {
+        let Some(key) = e.key_bytes().strip_prefix(b"SCHILY.xattr.") else { continue };
+        if key.starts_with(b"user.") || key.starts_with(b"trusted.") || key.starts_with(b"security.") || key.starts_with(b"system.") {
+            out.push((key.to_vec(), e.value_bytes().to_vec()));
+        }
+    }
+    Ok(out)
+}
+
+/// Best-effort setxattr for one pax keyword: a layer whose xattrs the
+/// filesystem refuses still unpacks, matching how Docker treats xattr
+/// application as non-fatal.
+fn set_pax_xattr(path: &Path, key: &[u8], value: &[u8]) {
+    let (Ok(p), Ok(k)) = (sys::cstr(path), std::ffi::CString::new(key)) else { return };
+    // SAFETY: valid NUL-terminated path and name; value is an arbitrary
+    // byte string with an explicit length.
+    unsafe {
+        libc::setxattr(p.as_ptr(), k.as_ptr(), value.as_ptr().cast(), value.len(), 0);
+    }
 }
 
 fn escapes() -> io::Error {
@@ -312,6 +345,49 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// One pax extended-header record (`"%d %s=%s\n"`, length includes
+    /// itself, the space and the newline).
+    fn pax_record(key: &str, value: &[u8]) -> Vec<u8> {
+        let body = format!("{key}=");
+        let mut len = body.len() + value.len() + 8;
+        loop {
+            let total = len.to_string().len() + 1 + body.len() + value.len() + 1;
+            if total == len {
+                break;
+            }
+            len = total;
+        }
+        let mut rec = format!("{len} {body}").into_bytes();
+        rec.extend_from_slice(value);
+        rec.push(b'\n');
+        rec
+    }
+
+    /// bsdtar-style pax xattrs: `com.apple.*` names have no Linux
+    /// namespace and must be skipped, not fail the unpack; `user.*` must
+    /// still be applied.
+    #[test]
+    fn pax_xattrs_filtered_to_linux_namespaces() {
+        let mut pax = pax_record("SCHILY.xattr.user.note", b"hello");
+        pax.extend(pax_record("SCHILY.xattr.com.apple.provenance", b"junk"));
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = header(pax.len() as u64, 0o644);
+        h.set_entry_type(tar::EntryType::XHeader);
+        b.append_data(&mut h, "PaxHeader.0/f.txt", &pax[..]).unwrap();
+        let mut h = header(1, 0o644);
+        b.append_data(&mut h, "f.txt", &b"x"[..]).unwrap();
+        let bytes = b.into_inner().unwrap();
+        let dest = scratch("pax");
+        untar(Capped { inner: &bytes[..], left: u64::MAX }, &dest).unwrap();
+        assert_eq!(fs::read(dest.join("f.txt")).unwrap(), b"x");
+        let p = sys::cstr(dest.join("f.txt")).unwrap();
+        let mut buf = [0u8; 16];
+        // SAFETY: valid path, buffer and length.
+        let n = unsafe { libc::lgetxattr(p.as_ptr(), c"user.note".as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+        assert_eq!(&buf[..n as usize], b"hello");
+        let _ = fs::remove_dir_all(&dest);
     }
 
     /// A layer whose first entry makes `foo` a symlink to `/` and whose
