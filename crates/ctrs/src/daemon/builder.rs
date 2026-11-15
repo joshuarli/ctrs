@@ -138,6 +138,9 @@ pub struct BuilderSnapshot {
     /// The image ID the container was created from: the config digest.
     pub image_id: String,
     pub owned: bool,
+    /// buildkitd was started with the TCP listener the h2c endpoints
+    /// need (containers predating it only serve buildctl over exec).
+    pub tcp: bool,
     pub created: SystemTime,
 }
 
@@ -150,6 +153,7 @@ fn snapshot(c: &super::engine::Container) -> BuilderSnapshot {
         image: c.spec.image.clone(),
         image_id: c.spec.image_id.clone(),
         owned: c.spec.labels.as_object().is_some_and(|l| l.get(LABEL).is_some_and(|v| v == "1")),
+        tcp: c.spec.cmd.iter().any(|a| a.contains("0.0.0.0:1234")),
         created: c.created,
     }
 }
@@ -190,7 +194,7 @@ fn classify(snap: Option<&BuilderSnapshot>) -> Assessment {
     if !s.owned {
         return Assessment::Foreign;
     }
-    if s.image_id == managed().config {
+    if s.image_id == managed().config && s.tcp {
         return Assessment::Matching;
     }
     // A paused container is never in the replaceable set, whatever its
@@ -552,7 +556,7 @@ fn desired_image(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<ctrs_imag
 fn create_body() -> Value {
     json!({
         "Image": PINNED,
-        "Cmd": ["--allow-insecure-entitlement=network.host"],
+        "Cmd": ["--allow-insecure-entitlement=network.host", "--addr", "tcp://0.0.0.0:1234"],
         "Labels": {LABEL: "1"},
         "HostConfig": {
             "Privileged": true,
@@ -744,6 +748,13 @@ pub fn create_for_buildx(engine: &Engine, name: Option<&str>) -> Option<Result<V
         Assessment::Foreign => Err(foreign_error(&now.expect("Foreign has a record"))),
     };
     Some(outcome)
+}
+
+/// The builder id, ensured running, for the h2c `/grpc` and `/session`
+/// endpoints (buildgrpc.rs). Same pin and lifecycle gates as classic
+/// builds; the caller reaches buildkitd's TCP listener itself.
+pub(crate) fn ensure_for_driver(engine: &Engine) -> Result<String, Error> {
+    ensure_running(engine, &mut |_| {})
 }
 
 /// The builder, made if need be, started and answering. `say` hears what
@@ -1450,6 +1461,12 @@ fn buildctl_run(engine: &Engine, id: &str, dir: &str, o: &Options, argv: Vec<Str
 /// names; give them the user's tags (or the config id, untagged) and
 /// drop the temp records and unselected platform/attestation images.
 fn retag_pushed(engine: &Engine, o: &Options, repo: &str) -> Result<Vec<ctrs_image::Image>, String> {
+    retag_pushed_names(engine, &o.tags, repo)
+}
+
+/// `retag_pushed` with the tag list spelled out: the h2c path learns
+/// the tags from the SolveRequest's exporter attrs, not build Options.
+pub(crate) fn retag_pushed_names(engine: &Engine, tags: &[String], repo: &str) -> Result<Vec<ctrs_image::Image>, String> {
     let (keep, drop) = super::mirror::take_pushed(repo);
     for name in &drop {
         let _ = engine.store.remove_image(name);
@@ -1457,7 +1474,7 @@ fn retag_pushed(engine: &Engine, o: &Options, repo: &str) -> Result<Vec<ctrs_ima
     let mut out = Vec::new();
     for name in keep {
         let Some(image) = engine.store.find(&name).map_err(|e| e.to_string())? else { continue };
-        let tags: Vec<String> = if o.tags.is_empty() { vec![image.config_digest.clone()] } else { o.tags.clone() };
+        let tags: Vec<String> = if tags.is_empty() { vec![image.config_digest.clone()] } else { tags.to_vec() };
         for tag in tags {
             let tagged = image.tagged(tag);
             engine.store.put_image(tagged.clone()).map_err(|e| e.to_string())?;
@@ -1469,6 +1486,16 @@ fn retag_pushed(engine: &Engine, o: &Options, repo: &str) -> Result<Vec<ctrs_ima
         Err("BuildKit pushed no image".into())
     } else {
         Ok(out)
+    }
+}
+
+/// A solve that never reached its trailers pushed nothing usable:
+/// drop the mirror's records and any partial images so the repo can
+/// be reused cleanly.
+pub(crate) fn discard_pushed(engine: &Engine, repo: &str) {
+    let (keep, drop) = super::mirror::take_pushed(repo);
+    for name in keep.into_iter().chain(drop) {
+        let _ = engine.store.remove_image(&name);
     }
 }
 
@@ -1599,6 +1626,7 @@ mod tests {
             image: if image_id == managed().config { PINNED.into() } else { IMAGE.into() },
             image_id: image_id.into(),
             owned,
+            tcp: true,
             created: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
         }
     }

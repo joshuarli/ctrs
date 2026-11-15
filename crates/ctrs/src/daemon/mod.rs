@@ -7,6 +7,7 @@ pub mod access;
 mod api;
 mod binds;
 mod builder;
+mod buildgrpc;
 pub mod dns;
 pub mod proxy;
 mod engine;

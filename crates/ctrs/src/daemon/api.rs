@@ -120,13 +120,17 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
     }
     let p = req.path.as_str();
     let m = req.method.as_str();
+    // The docker driver's BuildKit endpoints: h2c upgrades to the
+    // managed builder's buildkitd (buildgrpc.rs).
+    if m == "POST" && matches!(p, "/grpc" | "/session") && req.header("Upgrade").is_some_and(|u| u.eq_ignore_ascii_case("h2c")) {
+        return super::buildgrpc::serve(engine, p, w, r).map(|()| Next::Close);
+    }
     match (m, p) {
         ("GET" | "HEAD", "/_ping") => {
-            // Builder-Version 1: the classic POST /build, which Ctrs serves
-            // with its managed BuildKit (builder.rs). "2" would tell older
-            // CLIs and Compose to use BuildKit inside the engine (/session,
-            // /grpc), which Ctrs doesn't have.
-            http::respond_with(w, 200, "text/plain; charset=utf-8", "Builder-Version: 1\r\n", if m == "HEAD" { b"" } else { b"OK" })?;
+            // Builder-Version 2: BuildKit inside the engine — the
+            // h2c /grpc + /session endpoints of buildgrpc.rs front the
+            // managed builder's buildkitd for the docker driver.
+            http::respond_with(w, 200, "text/plain; charset=utf-8", "Builder-Version: 2\r\n", if m == "HEAD" { b"" } else { b"OK" })?;
             return Ok(Next::KeepAlive);
         }
         ("GET", "/version") => return reply(w, Ok(version()), 200),
