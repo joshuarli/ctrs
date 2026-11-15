@@ -1951,7 +1951,8 @@ def bootstrap_ci(vals: list[float], iters: int = 2000,
 
 
 def cmd_report(args) -> int:
-    files = sorted(RESULTS.glob("*/trials.jsonl"))
+    pat = args.match or "*"
+    files = sorted(d for d in RESULTS.glob(f"{pat}/trials.jsonl"))
     records = []
     for fp in files:
         for line in fp.read_text().splitlines():
@@ -2103,7 +2104,10 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true")
 
-    sub.add_parser("report")
+    p = sub.add_parser("report")
+    p.add_argument("--match", default="*",
+                   help="only result dirs matching this glob, e.g. "
+                        "base-2026* for frozen baselines")
 
     args = ap.parse_args()
     RESULTS.mkdir(parents=True, exist_ok=True)
