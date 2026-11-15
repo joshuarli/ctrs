@@ -904,13 +904,16 @@ staging. Host->guest bulk remains vsock-bound at ~520 MB/s; the
 residual gap to OrbStack (~950 MB/s) needs a different transport,
 not a different filesystem.
 
-**Side finding — `docker import` of bsdtar/pax archives fails
-unpack (pre-existing, unrelated to transport):** an archive made
-by macOS `tar` (pax extended headers) imported fine host-side but
-the guest `untar` rejected it (`failed to unpack .../f.txt`) via
-BOTH the vsock and virtiofs layer paths identically — a tar-compat
-gap in the guest unpacker (tar-rs + `set_unpack_xattrs`), not a
-transport fault. `tar --format=ustar` archives of identical
-content import and run cleanly. Worth a compat slice: real-world
-`docker import`/`docker cp`-style archives from macOS tooling are
-commonly pax.
+**Side finding — `docker import` of bsdtar/pax archives failed
+unpack (fixed `ddf0164`):** an archive made by macOS `tar` (pax
+extended headers carrying `SCHILY.xattr.com.apple.*` keywords)
+imported fine host-side but the guest `untar` rejected it
+(`failed to unpack .../f.txt`) via BOTH the vsock and virtiofs
+layer paths identically — tar-rs applied pax xattrs verbatim and
+`com.apple.*` has no Linux namespace. Fixed by collecting
+`SCHILY.xattr.*` keywords ourselves, filtering to Linux namespaces
+(`user.`/`trusted.`/`security.`/`system.`) and applying
+best-effort; verified live (bsdtar archive imports, unpacks,
+`docker cp` round-trips) plus a crafted-pax unit test. Real-world
+`docker import`/build-context archives from macOS tooling are
+commonly pax, so this was a genuine compat hole.
