@@ -441,6 +441,26 @@ longer pays for each one. Wire-format note: host and guest ship in the
 same binary/initramfs, so the marker needs no negotiation; an old
 guest simply never sends it (host treats streams as before).
 
+### EXP-1 large-pull-during-load (real WAN pull, node:22-bookworm ~400 MB compressed)
+
+Ad-hoc paired experiment, W1 fixture stack + W2 load driver
+(conc 8, 40 s, 30% writes, seed 7), `docker pull` started 3 s into
+the load window on a cold image. Single pair — directional evidence,
+not a frozen-baseline cell yet.
+
+| engine | pull wall | requests | errors | rps | p50 | p95 | p99 | max |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ctrs | 7.0 s | 104,584 | 0 | 2614 | 2.88 | 4.96 | 9.59 | **26.9** |
+| orbstack | 9.8 s | 100,062 | 0 | 2501 | 2.90 | 5.30 | 9.80 | **123.7** |
+
+ctrs is ahead on every aggregate and — the EXP-1 point — its worst
+single-request latency during a real image install is ~5x lower.
+OrbStack's 124 ms max is the kind of tail the forked-child install
+was built to avoid. Consistent with the W8 under-load cell (5/5
+clean pairs, 1.6x load rps). Caveats: n=1, WAN-dominated pull wall,
+pull occupied only ~20% of the window; a dedicated cold-pull cell
+with per-window latency would tighten this.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
