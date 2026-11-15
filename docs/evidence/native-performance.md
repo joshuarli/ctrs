@@ -837,5 +837,7 @@ smaller). Guest->host unchanged within noise: exec-cat 1 GiB
 expected, since TX credit is `min(peer_buf_alloc, buf_alloc)` and
 the peer is the host-side VZ socket whose window ctrs cannot set.
 Published-port relay and exec exit/stdin sanity verified live.
-Residual h2g gap is now the VZ host TX path / agent-frame copies,
-not the guest window.
+A 64 MiB bound-check was neutral (~0.96-1.09 s, same as 16 MiB),
+so 16 MiB stands — the window no longer binds and the residual h2g
+gap is the VZ host TX path / agent-frame copies, not the guest
+window.
