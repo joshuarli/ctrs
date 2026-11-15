@@ -234,8 +234,10 @@ impl VmLink {
         self._vm.lock().unwrap_or_else(|e| e.into_inner()).force_stop();
     }
 
-    /// Sends one request and waits for its reply.
-    fn call(&self, encode: impl FnOnce(&mut Vec<u8>), body: Option<(&Path, u64)>) -> io::Result<Reply> {
+    /// Queues a reply slot and writes one request, returning the receiver
+    /// its reply will arrive on. Requests complete in send order, so
+    /// callers can pipeline requests and await the replies afterwards.
+    fn post(&self, encode: impl FnOnce(&mut Vec<u8>), body: Option<(&Path, u64)>) -> io::Result<std::sync::mpsc::Receiver<Reply>> {
         let (tx, rx) = mpsc::sync_channel(1);
         {
             let mut w = self.writer.lock().unwrap_or_else(|e| e.into_inner());
@@ -259,7 +261,12 @@ impl VmLink {
                 }
             }
         }
-        match rx.recv() {
+        Ok(rx)
+    }
+
+    /// Sends one request and waits for its reply.
+    fn call(&self, encode: impl FnOnce(&mut Vec<u8>), body: Option<(&Path, u64)>) -> io::Result<Reply> {
+        match self.post(encode, body)?.recv() {
             Ok(Reply::Error(e)) => Err(io::Error::other(e)),
             Ok(r) => Ok(r),
             Err(_) => Err(io::Error::other("the VM stopped")),
@@ -303,6 +310,28 @@ impl VmLink {
     /// the virtiofs share — the store file, no copy and no vsock bytes.
     pub fn send_layer_fetch(&self, digest: &str, media_type: &str, path: &str, size: u64) -> io::Result<()> {
         self.call(|o| Msg::LayerFetch(LayerFetch { path, digest, media_type, size }).encode(o), None).map(drop)
+    }
+
+    /// A `LayerFetch` whose reply the caller awaits later, so several
+    /// fetches can be in flight while the guest installs them in
+    /// parallel. Await with [`VmLink::fetch_reply`].
+    pub fn send_layer_fetch_defer(
+        &self,
+        digest: &str,
+        media_type: &str,
+        path: &str,
+        size: u64,
+    ) -> io::Result<std::sync::mpsc::Receiver<Reply>> {
+        self.post(|o| Msg::LayerFetch(LayerFetch { path, digest, media_type, size }).encode(o), None)
+    }
+
+    /// The verdict of a deferred [`VmLink::send_layer_fetch_defer`].
+    pub fn fetch_reply(rx: std::sync::mpsc::Receiver<Reply>) -> io::Result<()> {
+        match rx.recv() {
+            Ok(Reply::Error(e)) => Err(io::Error::other(e)),
+            Ok(_) => Ok(()),
+            Err(_) => Err(io::Error::other("the VM stopped")),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

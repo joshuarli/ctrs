@@ -63,9 +63,9 @@ pub struct InstallJob {
     pub started: Instant,
 }
 
-/// What the agent reports back for one finished [`InstallJob`].
+/// What the agent reports back for one finished [`InstallJob`]; the
+/// agent keys it by the job's `seq`, so the record does not repeat it.
 pub struct InstallDone {
-    pub seq: u64,
     pub digest: String,
     pub started: Instant,
     pub result: io::Result<u64>,

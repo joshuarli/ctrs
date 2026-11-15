@@ -1421,15 +1421,77 @@ impl Engine {
     }
 
     /// Sends the guest every layer of these (digest, media type) it doesn't
-    /// have unpacked, from the blob store.
+    /// have unpacked, from the blob store. Share-eligible fetches go out
+    /// without waiting so the guest's parallel installs overlap; replies
+    /// are FIFO, so all `has_layer` queries run before the first fetch.
     fn ensure_layers<'a>(&self, layers: impl Iterator<Item = (&'a str, &'a str)>) -> io::Result<()> {
         let _one_at_a_time = self.layers.lock().unwrap_or_else(|e| e.into_inner());
+        let vm = self.vm()?;
+        let mut missing = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for (digest, media_type) in layers {
-            if !self.vm()?.has_layer(digest)? {
-                self.push_layer(digest, media_type)?;
+            // All queries before any fetch: replies are FIFO, so a query
+            // sent after a fetch would wait behind that fetch's install.
+            // Dedup by digest: two fetches for one layer would race the
+            // same `.tmp-<digest>` staging directory in the guest.
+            if seen.insert(digest.to_owned()) && !vm.has_layer(digest)? {
+                missing.push((digest.to_owned(), media_type.to_owned()));
+            }
+        }
+        let mut deferred = Vec::new();
+        for (digest, media_type) in &missing {
+            if let Some(rx) = self.defer_layer_fetch(&vm, digest, media_type)? {
+                deferred.push((digest.clone(), media_type.clone(), rx));
+                continue;
+            }
+            self.push_layer(digest, media_type)?;
+        }
+        for (digest, media_type, rx) in deferred {
+            if VmLink::fetch_reply(rx).is_err() {
+                self.push_layer(&digest, &media_type)?;
             }
         }
         Ok(())
+    }
+
+    /// The share path and size for `digest`'s store blob when the virtiofs
+    /// layer path is enabled, else None.
+    #[cfg(target_os = "macos")]
+    fn layer_fetch_target(&self, digest: &str) -> Option<(String, u64)> {
+        if !self.layer_vfs.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let blob = self.store.blob_path(digest).ok()?;
+        let path = self.guest_blob_path(&blob).ok()?;
+        let size = std::fs::metadata(&blob).ok()?.len();
+        Some((path, size))
+    }
+
+    /// A `LayerFetch` sent without waiting for its install verdict, for
+    /// pipelined deploys. Send failures latch the share path off like a
+    /// failed fetch does.
+    fn defer_layer_fetch(
+        &self,
+        vm: &VmLink,
+        digest: &str,
+        media_type: &str,
+    ) -> io::Result<Option<std::sync::mpsc::Receiver<super::vmlink::Reply>>> {
+        #[cfg(target_os = "macos")]
+        if let Some((path, size)) = self.layer_fetch_target(digest) {
+            return match vm.send_layer_fetch_defer(digest, media_type, &path, size) {
+                Ok(rx) => {
+                    crate::diag::debug!("layer fetch deferred", digest = &digest[..digest.len().min(19)], mib = size >> 20);
+                    Ok(Some(rx))
+                }
+                Err(e) => {
+                    crate::diag::info!("layer fetch send failed; streaming instead", error = e);
+                    self.layer_vfs.store(false, std::sync::atomic::Ordering::Relaxed);
+                    Ok(None)
+                }
+            };
+        }
+        let _ = (vm, digest, media_type);
+        Ok(None)
     }
 
     /// One layer into the guest: read from the store blob over the
@@ -1439,10 +1501,7 @@ impl Engine {
         let vm = self.vm()?;
         let blob = self.store.blob_path(digest)?;
         #[cfg(target_os = "macos")]
-        if self.layer_vfs.load(std::sync::atomic::Ordering::Relaxed)
-            && let Ok(path) = self.guest_blob_path(&blob)
-            && let Ok(size) = std::fs::metadata(&blob).map(|m| m.len())
-        {
+        if let Some((path, size)) = self.layer_fetch_target(digest) {
             // The share lags host file creation by a second or two, so a
             // blob written moments ago can lose the race; retry across
             // that window before giving up on the share for the session.
