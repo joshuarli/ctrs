@@ -64,15 +64,27 @@ billing-grade numbers.
 - `fixtures/w2/load.py` — stdlib threaded load driver (keep-alive
   connections, seeded RNG, read/write mix). Correctness is verified by
   `/stats`: `items == 500 + successful writes`, zero transport errors.
+- `fixtures/w8/` + per-engine `registry:2` — W8 real-image deployment.
+  `prepare` builds four "relocated" images (`FROM scratch` +
+  `COPY --from=<base> / /` of postgres:17-alpine, redis:7-alpine,
+  python:3.13-slim, busybox) so pulls never dedup against cached base
+  layers, pushes them to `127.0.0.1:<port>/npw8/*` on a per-engine
+  registry container (`npw8-reg-<engine>`, named volume
+  `npw8-reg-data-<engine>`, `--restart unless-stopped`), and records
+  digests in `.work/native-perf/w8-portfolio.json`. Trials `rmi` the
+  refs, pull each by digest (digest string must appear in pull output),
+  and run the image's own smoke command. `--under-load` serves the W1
+  stack + W2 load driver while pulls run (the EXP-1 responsiveness
+  probe). Engine-internal layer dedup may still apply — disclosed.
 
 ## Known limitations (pilot phase)
 
 - Cold cells pull fixture/third-party images over WAN inside the timed
-  region; a local OCI registry mirror (W8 infrastructure) will replace
-  this before baseline freeze.
+  region until fixtures move onto the W8 local registries.
 - OrbStack `warm` reuses its long-lived VM and build cache; ctrs `warm`
-  likewise. `cold` is ctrs-only as described above.
-- W3–W11 are declared in `cases.toml` but not yet implemented.
+  likewise. `cold` is ctrs-only as described above; W8 has no cold cell
+  because the registry and portfolio live on the warm engine.
+- W3–W7, W9–W11 are declared in `cases.toml` but not yet implemented.
 - The API fixture is purpose-built for the harness (deterministic,
   checksum-verifiable); it is a real FastAPI/Postgres/Redis app, not a
   microbenchmark, but it is not a third-party application. A held-out

@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import signal
 import socket
@@ -57,6 +58,29 @@ W1_DIR = FIXTURES / "w1"
 API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
+W8_DIR = FIXTURES / "w8"
+
+# W8: a per-engine local OCI registry (registry:2 on a published loopback
+# port, content in a named volume so it survives ctrs VM restarts) serves a
+# portfolio of self-contained "relocated" images — scratch images holding a
+# full copy of a real base rootfs, so pulls never dedup against cached base
+# layers. `verify` runs inside the pulled image as the correctness probe.
+REGISTRY_IMAGE = "registry:2"
+REGISTRY_STATE = WORK / "registry-state.json"
+PORTFOLIO_FILE = WORK / "w8-portfolio.json"
+W8_IMAGES = [
+    {"name": "busybox", "dir": "busybox",
+     "verify": ["/bin/busybox", "echo", "npw8-ok"], "expect": "npw8-ok"},
+    {"name": "redis", "dir": "redis",
+     "verify": ["/usr/local/bin/redis-server", "--version"],
+     "expect": "Redis server"},
+    {"name": "py", "dir": "py",
+     "verify": ["/usr/local/bin/python3", "-c", "print('npw8-ok')"],
+     "expect": "npw8-ok"},
+    {"name": "pg", "dir": "pg",
+     "verify": ["/usr/local/bin/postgres", "--version"],
+     "expect": "PostgreSQL"},
+]
 
 HEALTH_DEADLINE_S = 240.0
 POLL_INTERVAL_S = 0.25
@@ -170,16 +194,29 @@ class Engine:
         env["CTRS_DATA_DIR"] = str(self.dir / "data")
         env["CTRS_SOCKET"] = str(self.dir / "run" / "docker.sock")
         log = open(self.dir / "daemon.log", "ab")
-        self.proc = subprocess.Popen(
-            [str(CTRS_BIN), "daemon"], env=env,
-            stdout=log, stderr=subprocess.STDOUT, cwd=REPO)
         deadline = time.monotonic() + timeout
+        # A previous daemon can still hold the data-root lock while its VM
+        # finishes shutting down; "in use by another engine" is transient,
+        # so retry the spawn until the deadline instead of failing fast.
+        last_tail = b""
         while time.monotonic() < deadline:
+            if self.proc is None:
+                log = open(self.dir / "daemon.log", "ab")
+                self.proc = subprocess.Popen(
+                    [str(CTRS_BIN), "daemon"], env=env,
+                    stdout=log, stderr=subprocess.STDOUT, cwd=REPO)
             if self.proc.poll() is not None:
-                tail = (self.dir / "daemon.log").read_bytes()[-2000:]
+                last_tail = (self.dir / "daemon.log").read_bytes()[-2000:]
+                if b"in use by another engine" in last_tail:
+                    time.sleep(2.0)
+                    log = open(self.dir / "daemon.log", "ab")
+                    self.proc = subprocess.Popen(
+                        [str(CTRS_BIN), "daemon"], env=env,
+                        stdout=log, stderr=subprocess.STDOUT, cwd=REPO)
+                    continue
                 raise RuntimeError(
                     f"ctrs daemon exited {self.proc.returncode}: "
-                    f"{tail.decode(errors='replace')}")
+                    f"{last_tail.decode(errors='replace')}")
             try:
                 self.sh(["version"], timeout=10)
                 return
@@ -462,6 +499,263 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             rec["resources"]["trace"] = str(trace.relative_to(WORK))
 
 
+def registry_name(engine_name: str) -> str:
+    return f"npw8-reg-{engine_name}"
+
+
+def registry_volume(engine_name: str) -> str:
+    return f"npw8-reg-data-{engine_name}"
+
+
+def load_registry_state() -> dict:
+    if REGISTRY_STATE.exists():
+        try:
+            return json.loads(REGISTRY_STATE.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
+def save_registry_state(state: dict) -> None:
+    REGISTRY_STATE.parent.mkdir(parents=True, exist_ok=True)
+    REGISTRY_STATE.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def registry_alive(engine: Engine, port: int) -> bool:
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/v2/", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def ensure_registry(engine: Engine) -> int:
+    """Return the host loopback port of this engine's W8 registry,
+    creating or reviving the container as needed. The registry image and
+    its data volume persist across ctrs daemon restarts."""
+    engine.ensure_up()
+    name = registry_name(engine.name)
+    state = load_registry_state()
+    port = state.get(engine.name, {}).get("port")
+
+    cp = engine.sh(
+        ["ps", "-a", "--filter", f"name=^{name}$",
+         "--format", "{{.Names}} {{.Status}}"],
+        check=False, timeout=30)
+    line = next((l for l in cp.stdout.splitlines()
+                 if l.split()[0] == name), "")
+    running = "Up" in line
+
+    if running and port and registry_alive(engine, port):
+        return port
+    if running and port is None:
+        cp = engine.sh(["port", name, "5000/tcp"], check=False, timeout=30)
+        m = re.search(r"127\.0\.0\.1:(\d+)", cp.stdout)
+        if m and registry_alive(engine, int(m.group(1))):
+            state.setdefault(engine.name, {})["port"] = int(m.group(1))
+            save_registry_state(state)
+            return int(m.group(1))
+        port = None
+
+    if not running:
+        # Exists but stopped (e.g. after a ctrs VM restart without a
+        # restart policy taking effect) or absent entirely.
+        engine.sh(["rm", "-f", name], check=False, timeout=30)
+    if port is None:
+        port = free_port()
+    engine.sh(
+        ["run", "-d", "--name", name, "--restart", "unless-stopped",
+         "-p", f"127.0.0.1:{port}:5000",
+         "-v", f"{registry_volume(engine.name)}:/var/lib/registry",
+         REGISTRY_IMAGE], timeout=120)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if registry_alive(engine, port):
+            state.setdefault(engine.name, {})["port"] = port
+            save_registry_state(state)
+            return port
+        time.sleep(0.5)
+    raise TimeoutError(f"{name} registry did not come up on :{port}")
+
+
+def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
+             duration: float = 30.0, concurrency: int = 8,
+             write_ratio: float = 0.3, seed: int = 1) -> dict:
+    """W8: pull a pinned portfolio of real rootfs images from the local
+    registry by digest and run each image's own smoke command. With
+    `under_load`, the W1 stack serves load.py while the pulls run — the
+    EXP-1 responsiveness probe."""
+    case_id = "W8"
+    proj = project_name(ctx.run_id, engine.name, case_id)
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    sampler = trace = None
+    t0 = time.monotonic()
+    load_proc = None
+    load_out = trial_dir / "load.json"
+    w1_proj = project_name(ctx.run_id, engine.name, "W1")
+    try:
+        port = ensure_registry(engine)
+        portfolio = {}
+        if PORTFOLIO_FILE.exists():
+            portfolio = json.loads(PORTFOLIO_FILE.read_text()).get(
+                engine.name, {})
+        # verify/expect come from W8_IMAGES (source of truth); the
+        # portfolio file only carries per-engine refs and digests.
+        specs = {s["name"]: s for s in W8_IMAGES}
+        items = []
+        for name, item in portfolio.items():
+            spec = specs.get(name)
+            if spec is None:
+                continue
+            merged = dict(item)
+            merged["verify"] = spec["verify"]
+            merged["expect"] = spec["expect"]
+            items.append((name, merged))
+        portfolio = dict(items)
+        if not portfolio:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(
+                "no W8 portfolio; run `runner.py prepare` first")
+            return rec
+        engine.ensure_up()
+        sampler, trace = start_sampler(engine, trial_dir)
+
+        # Untimed: drop every local reference and the engine's content
+        # store so each trial performs a real fetch+install, not a dedup
+        # hit. OrbStack/containerd releases content on `image prune`;
+        # ctrs keeps unreferenced layers until the next VM boot, so its
+        # daemon is restarted (untimed) to reach the same cold store.
+        for item in portfolio.values():
+            for ref in {item["pull_ref"], item["tag_ref"],
+                        item.get("local_ref", "")}:
+                engine.sh(["rmi", "-f", ref], check=False, timeout=60)
+        if engine.name == "orbstack":
+            engine.sh(["image", "prune", "-f"], check=False, timeout=120)
+        else:
+            engine.stop()
+            engine.ensure_up()
+
+        base = None
+        if under_load:
+            cport = free_port()
+            base = f"http://127.0.0.1:{cport}"
+            cenv = {"NP_API_PORT": str(cport), "NP_API_TAG": API_TAG}
+            up = engine.compose(w1_proj, ["up", "-d"], env_extra=cenv,
+                                timeout=300)
+            if up.returncode != 0:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(
+                    f"under-load stack up failed: "
+                    f"{(up.stderr or up.stdout)[-300:]}")
+                return rec
+            t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+            if t_ready is None:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(
+                    "under-load stack never became healthy")
+                return rec
+            rec["metrics"]["setup_seconds"] = round(time.monotonic() - t0, 3)
+            load_proc = subprocess.Popen(
+                [sys.executable, str(LOAD_PY), "--url", base,
+                 "--concurrency", str(concurrency),
+                 "--duration", str(duration),
+                 "--write-ratio", str(write_ratio),
+                 "--seed", str(seed), "--out", str(load_out)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Let the load reach steady state before the pulls start.
+            time.sleep(2.0)
+
+        pull_start = time.monotonic()
+        rec["metrics"]["setup_seconds"] = round(pull_start - t0, 3)
+        pulls_ok = True
+        for name, item in portfolio.items():
+            ref = item["pull_ref"]
+            tp = time.monotonic()
+            cp = engine.sh(["pull", ref], timeout=600, check=False)
+            pull_s = round(time.monotonic() - tp, 3)
+            rec["metrics"][f"pull_{name}_s"] = pull_s
+            out = cp.stdout + cp.stderr
+            ok = (cp.returncode == 0
+                  and item["digest"] in out)
+            rec["correctness"]["checks"][f"pull_{name}"] = ok
+            pulls_ok = pulls_ok and ok
+            # Transparency: how many layers were actually fetched vs
+            # deduped ("Already exists"), so store-warmth differences
+            # between engines are visible per trial, not hidden.
+            rec["metrics"][f"pull_{name}_fetched"] = out.count(
+                "Pull complete") + out.count("Downloading")
+            rec["metrics"][f"pull_{name}_cached"] = out.count(
+                "Already exists")
+            if not ok:
+                rec["validation_errors"].append(
+                    f"pull {name} rc={cp.returncode}: {out[-300:]}")
+
+            tr = time.monotonic()
+            run = engine.sh(["run", "--rm", ref, *item["verify"]],
+                            timeout=180, check=False)
+            run_s = round(time.monotonic() - tr, 3)
+            rec["metrics"][f"run_{name}_s"] = run_s
+            ok_run = (run.returncode == 0
+                      and item["expect"] in run.stdout)
+            rec["correctness"]["checks"][f"run_{name}"] = ok_run
+            pulls_ok = pulls_ok and ok_run
+            if not ok_run:
+                rec["validation_errors"].append(
+                    f"run {name} rc={run.returncode}: "
+                    f"{(run.stdout + run.stderr)[-300:]}")
+        rec["metrics"]["pull_wall_seconds"] = round(
+            time.monotonic() - pull_start, 3)
+        rec["metrics"]["wall_seconds"] = round(
+            time.monotonic() - pull_start, 3)
+
+        if under_load:
+            if load_proc is not None:
+                try:
+                    load_proc.wait(timeout=duration + 120)
+                except subprocess.TimeoutExpired:
+                    load_proc.kill()
+                    load_proc.wait(timeout=10)
+            if load_out.exists():
+                summary = json.loads(load_out.read_text())
+                rec["metrics"].update({
+                    "load_duration_s": summary["duration_s"],
+                    "load_rps": summary["rps"],
+                    "load_requests": summary["requests"],
+                    "load_errors": summary["errors"],
+                    "load_p50_ms": summary["latency_ms"]["p50"],
+                    "load_p95_ms": summary["latency_ms"]["p95"],
+                    "load_p99_ms": summary["latency_ms"]["p99"],
+                })
+                st, stats = http_json(f"{base}/stats", timeout=10)
+                expected = 500 + summary["writes_ok"]
+                got = stats.get("items") if isinstance(stats, dict) else None
+                count_ok = got == expected
+                rec["correctness"]["checks"]["item_count"] = {
+                    "expected": expected, "got": got, "ok": count_ok}
+                rec["correctness"]["checks"]["load_errors_zero"] = (
+                    summary["errors"] == 0)
+                pulls_ok = pulls_ok and count_ok and summary["errors"] == 0
+        rec["correctness"]["ok"] = bool(pulls_ok)
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+    finally:
+        if load_proc is not None and load_proc.poll() is None:
+            load_proc.kill()
+            load_proc.wait(timeout=10)
+        compose_down(engine, w1_proj)
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -561,6 +855,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w1(ctx, engine, state)
         elif case_id == "W2":
             rec = trial_w2(ctx, engine, state, **kw)
+        elif case_id == "W8":
+            rec = trial_w8(ctx, engine, state, **kw)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -639,13 +935,16 @@ def cmd_prepare(args) -> int:
     engines = args.engines.split(",")
     ctx = RunContext(f"prep-{datetime.now().strftime('%Y%m%dT%H%M%S')}")
     summary = {}
+    portfolio = {}
     for name in engines:
         engine = Engine(name, ctx.run_id)
         try:
             engine.ensure_up()
-            for img in SERVICE_IMAGES:
+            for img in SERVICE_IMAGES + [REGISTRY_IMAGE]:
                 engine.sh(["pull", img], timeout=600)
-            engine.sh(["build", "-t", f"np-fixture-api:{API_TAG}",
+            # --load: ctrs's buildx docker-container driver otherwise
+            # leaves results in the build cache only.
+            engine.sh(["build", "--load", "-t", f"np-fixture-api:{API_TAG}",
                        str(API_DOCKERFILE_DIR)], timeout=900)
             ids = {}
             for img in SERVICE_IMAGES + [f"np-fixture-api:{API_TAG}"]:
@@ -655,12 +954,47 @@ def cmd_prepare(args) -> int:
                     check=False, timeout=30)
                 ids[img] = cp.stdout.strip() or cp.stderr.strip()
             summary[name] = {"images": ids}
-            print(f"{name}: prepared {len(ids)} images")
+
+            # W8: local registry + relocated-image portfolio. Builds load
+            # locally (buildkit inside the VM cannot reach the host-side
+            # registry), then the engine pushes and every local ref is
+            # dropped again; each trial's store-cold reset makes the pull
+            # a real fetch+install regardless.
+            port = ensure_registry(engine)
+            reg = f"127.0.0.1:{port}"
+            engine_portfolio = {}
+            for spec in W8_IMAGES:
+                local = f"npw8/{spec['name']}:v1"
+                ref = f"{reg}/npw8/{spec['name']}:v1"
+                # --load: ctrs's buildx docker-container driver otherwise
+                # leaves results in the build cache only.
+                engine.sh(["build", "--load", "-q", "-t", local,
+                           str(W8_DIR / spec["dir"])], timeout=900)
+                engine.sh(["tag", local, ref], timeout=60)
+                engine.sh(["push", ref], timeout=900)
+                cp = engine.sh(
+                    ["image", "inspect", "-f",
+                     "{{index .RepoDigests 0}}", ref], timeout=30)
+                digest = cp.stdout.strip().rsplit("@", 1)[-1]
+                for drop in (local, ref):
+                    engine.sh(["rmi", "-f", drop], check=False, timeout=60)
+                engine_portfolio[spec["name"]] = {
+                    "pull_ref": f"{ref.rsplit(':', 1)[0]}@{digest}",
+                    "tag_ref": ref,
+                    "local_ref": local,
+                    "digest": digest,
+                    "verify": spec["verify"],
+                    "expect": spec["expect"],
+                }
+            portfolio[name] = engine_portfolio
+            print(f"{name}: prepared {len(ids)} images + "
+                  f"{len(engine_portfolio)} W8 portfolio images")
         finally:
             engine.stop()
     out = ctx.results_dir / "prepare.json"
     out.write_text(json.dumps(summary, indent=2) + "\n")
-    print(f"wrote {out}")
+    PORTFOLIO_FILE.write_text(json.dumps(portfolio, indent=2) + "\n")
+    print(f"wrote {out} and {PORTFOLIO_FILE}")
     return 0
 
 
@@ -668,9 +1002,11 @@ def cmd_run(args) -> int:
     ctx = RunContext(f"run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
     kw = {}
-    if args.case == "W2":
+    if args.case in ("W2", "W8"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
+    if args.case == "W8" and getattr(args, "under_load", False):
+        kw["under_load"] = True
     rec = run_one(ctx, args.engine, args.case, args.state,
                   cold=args.cold, **kw)
     m = rec["metrics"]
@@ -693,11 +1029,13 @@ def cmd_baseline(args) -> int:
                 rng.shuffle(order)
             for idx, eng in enumerate(order):
                 kw = {}
-                if args.case == "W2":
+                if args.case in ("W2", "W8"):
                     kw = {"concurrency": args.concurrency,
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
                           "seed": args.seed + pair * 10 + idx}
+                if args.case == "W8" and getattr(args, "under_load", False):
+                    kw["under_load"] = True
                 rec = run_one(ctx, eng, args.case, args.state,
                               cold=args.cold and eng == "ctrs",
                               pair_id=pair, order_index=idx, keep_warm=True,
@@ -814,7 +1152,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W8"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -823,9 +1161,11 @@ def main() -> int:
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--under-load", action="store_true",
+                   help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W8"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -836,16 +1176,19 @@ def main() -> int:
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--write-ratio", type=float, default=0.3)
+    p.add_argument("--under-load", action="store_true",
+                   help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W8"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=15.0)
     p.add_argument("--write-ratio", default=0.3)
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--under-load", action="store_true")
 
     sub.add_parser("report")
 

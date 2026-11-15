@@ -24,7 +24,8 @@ def pct(sorted_vals, q):
     return sorted_vals[idx]
 
 
-def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop):
+def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop,
+           error_log, t_start):
     rng = random.Random(rng_seed)
     host, port = base
     conn = http.client.HTTPConnection(host, port, timeout=10)
@@ -44,8 +45,15 @@ def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop):
             resp = conn.getresponse()
             resp.read()
             ok = 200 <= resp.status < 300
-        except Exception:
+        except Exception as exc:
             ok = False
+            kind = type(exc).__name__
+            if len(error_log) < 200:
+                error_log.append({
+                    "t": round(time.monotonic() - t_start, 3),
+                    "worker": wid, "kind": kind,
+                    "detail": str(exc)[:160],
+                })
             try:
                 conn.close()
             except Exception:
@@ -83,21 +91,23 @@ def main():
     latencies = []
     counts = {"reads": 0, "writes": 0, "errors": 0}
     stop = threading.Event()
+    error_log = []
+    t_start = time.monotonic()
     threads = [
         threading.Thread(
             target=worker,
             args=(i, base, args.duration, args.write_ratio,
-                  args.seed * 1000 + i, latencies, counts, stop),
+                  args.seed * 1000 + i, latencies, counts, stop,
+                  error_log, t_start),
             daemon=True,
         )
         for i in range(args.concurrency)
     ]
-    t0 = time.monotonic()
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    elapsed = time.monotonic() - t0
+    elapsed = time.monotonic() - t_start
 
     latencies.sort()
     total = sum(counts.values())
@@ -122,6 +132,9 @@ def main():
     if args.out:
         with open(args.out, "w") as f:
             f.write(text + "\n")
+        with open(args.out + ".errors.jsonl", "w") as f:
+            for e in error_log:
+                f.write(json.dumps(e) + "\n")
     sys.exit(0 if counts["errors"] == 0 else 1)
 
 

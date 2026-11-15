@@ -72,8 +72,19 @@ note = "multi-stage Dockerfiles, empty/warm/incremental cache states; matched-Bu
 [[case]]
 id = "W8"
 family = "real-image-deployment"
-status = "pending"
-note = "pinned portfolio from a controlled local OCI registry; digest verification"
+title = "pull pinned portfolio of relocated real-rootfs images from local OCI registry by digest; run each image's smoke command; optional W2 load during pulls"
+fixture = "fixtures/w8 + per-engine registry:2"
+status = "implemented"
+metrics = ["wall_seconds", "pull_wall_seconds", "setup_seconds",
+           "pull_<name>_s", "run_<name>_s",
+           "load_rps", "load_p95_ms", "load_p99_ms",
+           "peak_total_rss_kb", "cpu_seconds_est"]
+states = ["warm"]                    # cold unsupported: registry+portfolio live on the warm engine
+params = { under_load = [false, true], duration_s = 30, concurrency = 8,
+           write_ratio = 0.3 }
+correctness = ["pull_<name>_digest_match", "run_<name>",
+               "load item_count + zero errors (under_load only)"]
+note = "Images are scratch+COPY relocated rootfs of postgres:17-alpine, redis:7-alpine, python:3.13-slim, busybox so pulls never dedup against cached bases; per-engine digests recorded in .work/native-perf/w8-portfolio.json. Engine-internal layer dedup may still apply — disclosed."
 
 [[case]]
 id = "W9"
