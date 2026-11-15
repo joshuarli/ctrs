@@ -1005,3 +1005,25 @@ W8's single-layer portfolio does not exercise the gain; real
 multi-layer images (build outputs, base+app stacks) are where it
 lands. vsock `LayerBegin` layers still stage on the agent loop and
 queue behind fetch jobs, preserving stream order.
+
+**Re-baseline after transport + deploy work (2026-11-15,
+`base-20261115T061138`, `base-20261115T061422`, warm, 3 pairs):**
+W2 holds and slightly extends its win — ctrs rps 2559-2638 vs
+orbstack 2266-2453 (~1.11x, frozen was 1.07x), p95 4.9-5.0 ms vs
+5.6-6.1 ms, zero errors both engines. W9 holds — jobs_1/4/8/16
+0.63-0.76 s vs 0.85-2.09 s (frozen 0.64-0.72 vs 0.86-2.11). No
+regression from the bulk-conn, stdin-widening, or vsock-window
+changes; both engines ran faster than the frozen window (host
+conditions), so read the ratio, not the absolutes.
+
+**virtiofs `dax=always` probe — falsified, reverted:** kernel
+source confirms virtiofs (`fs/fuse/virtio_fs.c`) accepts only
+`dax` mount params; all FUSE cache/timeout options are rejected,
+so the W5 bind penalty has no guest-side tuning lever. Adding
+`dax=always` to the `/mnt/mac` mount parsed correctly but the VZ
+device exposes no DAX cache region — kernel logged "dax can't be
+enabled as filesystem device does not support it" and the mount
+itself then failed EINVAL, breaking all bind mounts until
+reverted. The remaining ~40% bind-vs-volume penalty is inherent
+per-op virtiofs RTT; only a guest-side metadata cache (not
+exposed by the kernel or VZ) could close it.
