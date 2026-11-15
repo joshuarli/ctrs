@@ -59,6 +59,7 @@ API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
+W7_DIR = FIXTURES / "w7"
 
 # W8: a per-engine local OCI registry (registry:2 on a published loopback
 # port, content in a named volume so it survives ctrs VM restarts) serves a
@@ -756,6 +757,72 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
             rec["resources"]["trace"] = str(trace.relative_to(WORK))
 
 
+def trial_w7(ctx, engine: Engine, state: str) -> dict:
+    """W7: native image build — empty/warm/incremental build-cache states
+    on a multi-stage offline Dockerfile, then a run-time correctness
+    probe. The build cache is pruned before the empty build; warm
+    repeats the identical context; incremental bumps stamp/note.txt so
+    only the last layer of stage 1 re-executes."""
+    case_id = "W7"
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    tag = f"npw7/app:{ctx.run_id[-6:]}"
+    checks = rec["correctness"]["checks"]
+    try:
+        engine.ensure_up()
+        # Assemble the build context in the trial dir so the incremental
+        # stamp never dirties the fixture tree.
+        ctx_dir = trial_dir / "ctx"
+        shutil.copytree(W7_DIR / "src", ctx_dir / "src")
+        shutil.copytree(W7_DIR / "stamp", ctx_dir / "stamp")
+        shutil.copy(W7_DIR / "Dockerfile", ctx_dir / "Dockerfile")
+
+        def build_ctx(note: str) -> Path:
+            (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
+            return ctx_dir
+
+        def build(context: Path, timeout: float = 900) -> tuple[float, bool]:
+            tp = time.monotonic()
+            cp = engine.sh(
+                ["build", "--load", "-q", "-t", tag,
+                 "-f", str(context / "Dockerfile"), str(context)],
+                timeout=timeout, check=False)
+            return round(time.monotonic() - tp, 3), cp.returncode == 0
+
+        cp = engine.sh(["buildx", "prune", "-af"], timeout=300,
+                       check=False)
+        rec["metrics"]["prune_ok"] = cp.returncode == 0
+
+        s, ok = build(build_ctx("incremental-0"))
+        rec["metrics"]["build_empty_s"] = s
+        checks["build_empty"] = ok
+
+        s, ok = build(build_ctx("incremental-0"))
+        rec["metrics"]["build_warm_s"] = s
+        checks["build_warm"] = ok
+
+        s, ok = build(build_ctx("incremental-1"))
+        rec["metrics"]["build_incr_s"] = s
+        checks["build_incr"] = ok
+
+        run = engine.sh(["run", "--rm", tag, "cat", "/out/note.txt"],
+                        timeout=60, check=False)
+        note_ok = run.returncode == 0 and "incremental-1" in run.stdout
+        checks["run_note"] = note_ok
+        smoke = engine.sh(["run", "--rm", tag], timeout=60, check=False)
+        checks["run_smoke"] = (smoke.returncode == 0
+                               and "npw7-ok" in smoke.stdout)
+        rec["correctness"]["ok"] = all(
+            checks.get(k) for k in
+            ("build_empty", "build_warm", "build_incr",
+             "run_note", "run_smoke"))
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+
+
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
     req = urllib.request.Request(
         url, data=json.dumps(obj).encode(), method="POST",
@@ -857,6 +924,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w2(ctx, engine, state, **kw)
         elif case_id == "W8":
             rec = trial_w8(ctx, engine, state, **kw)
+        elif case_id == "W7":
+            rec = trial_w7(ctx, engine, state)
         else:
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
@@ -1152,7 +1221,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W8"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1165,7 +1234,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W8"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W7", "W8"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1181,7 +1250,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W8"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W7", "W8"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)

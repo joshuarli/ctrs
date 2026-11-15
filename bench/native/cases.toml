@@ -66,8 +66,14 @@ note = "real repo checkout -> deps -> compile -> tests -> artifact SHA"
 [[case]]
 id = "W7"
 family = "native-image-build"
-status = "pending"
-note = "multi-stage Dockerfiles, empty/warm/incremental cache states; matched-BuildKit control lane"
+title = "multi-stage offline Dockerfile: empty/warm/incremental build-cache states + run probe"
+fixture = "fixtures/w7"
+status = "implemented"
+metrics = ["build_empty_s", "build_warm_s", "build_incr_s"]
+states = ["warm"]
+params = {}
+correctness = ["build_empty", "build_warm", "build_incr", "run_note", "run_smoke"]
+note = "Base image python:3.13-slim is a prepared service image, so builds are offline. 'empty' prunes the whole buildx cache first (shared with other fixtures — disclosed); warm repeats the identical context; incremental bumps stamp/note.txt so only stage-1's last layer re-runs. --load is used so docker-container drivers land the image in the store."
 
 [[case]]
 id = "W8"

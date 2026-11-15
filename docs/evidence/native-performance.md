@@ -133,6 +133,26 @@ Portfolio = postgres/redis/python/busybox relocated rootfs images
 - Caveat: n=4 OrbStack trials; the rps gap is large enough to be
   credible but the frozen ≥10-pair baseline will firm it up.
 
+### W7 native image build (warm engine, multi-stage offline Dockerfile, 5 pairs)
+
+Build-cache states measured per trial: `buildx prune -af` → empty build
+→ identical rebuild (warm) → `stamp/note.txt` bump (incremental). Base
+image `python:3.13-slim` is a prepared service image, so builds are
+offline; `--load` lands results in each engine's store.
+
+| metric | ctrs median | orbstack median | ratio (ctrs/orb) |
+| --- | --- | --- | --- |
+| build_empty_s | 4.47 | 3.63 | **1.23 — loss** |
+| build_warm_s | 0.75 | 0.41 | **1.83 — loss** |
+| build_incr_s | 1.54 | 1.62 | 0.95 — wash |
+
+- The warm-build gap (~0.34 s fixed) points at per-build overhead in
+  ctrs's build/load path (context export, `--load` image import, or
+  layer-store sync), not buildkit execution — both engines run real
+  buildkit in-VM. Hillclimb candidate; not yet root-caused.
+- Incremental is a wash; empty-build loss (~0.9 s) is consistent with
+  the same fixed overhead plus possibly slower layer export.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -152,7 +172,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | --- | --- |
 | W1, W2 | implemented, pilot trials collected |
 | W8 | implemented (incl. under-load cell), pilot trials collected |
-| W3–W7, W9–W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W7 | implemented, 5-pair pilot collected — **loss cell** (below) |
+| W3–W6, W9–W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
