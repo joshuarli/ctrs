@@ -46,3 +46,8 @@ w2_load = "bench/native/fixtures/w2/load.py (stdlib, seeded RNG)"
 [sources]
 # Checksum-pinned upstream inputs fetched on demand by the runner.
 w6_zlib = { url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz", sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23", verified_against = "official madler/zlib v1.3.1 GitHub release asset, 2026-11-15" }
+w6_hyperfine = { url = "https://codeload.github.com/sharkdp/hyperfine/tar.gz/refs/tags/v2.0.0", sha256 = "f4b71df3c78e4cf752ca6fb6ebc4b025f7ea6a5ca5c48fea75f8a1fdb4c7d721", verified_against = "sharkdp/hyperfine v2.0.0 tag archive, 2026-11-15" }
+
+[images.w6]
+rust = "rust:1.100.0-bookworm"
+gcc = "gcc:14.2.0-bookworm"

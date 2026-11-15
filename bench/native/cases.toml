@@ -82,14 +82,14 @@ note = "v1 uses a python fixture repo (offline); a TS/pnpm repo is deferred. Bin
 [[case]]
 id = "W6"
 family = "compiled-app-ci"
-title = "timed docker build of vendored zlib 1.3.1 (configure -> make -j -> make check) on gcc:14.2.0-bookworm + libz.a sha256 probe"
-fixture = "fixtures/w6 (zlib-1.3.1.tar.gz + Dockerfile)"
+title = "timed docker builds: pinned hyperfine 2.0.0 (Rust cargo build+test --locked) and zlib 1.3.1 (C configure/make/check); artifact sha256 probes"
+fixture = "fixtures/w6 (zlib-1.3.1.tar.gz + hyperfine-2.0.0.tar.gz, checksum-pinned fetch; rust/Dockerfile + Dockerfile)"
 status = "implemented"
-metrics = ["build_s", "artifact_sha256"]
+metrics = ["build_rust_s", "build_zlib_s", "artifact_rust_sha256", "artifact_zlib_sha256"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
-correctness = ["build rc=0", "artifact sha256 present"]
-note = "PILOT: zlib 1.3.1 is the 'other language' half only — the pinned Rust app is still missing. Source archive is gitignored and fetched on demand via ensure_w6_source() with a pinned sha256 (official madler/zlib v1.3.1 GitHub release asset). Explicit --no-cache and a per-pair stamp ensure distinct compilation attempts with identical A/B input; retained base images mean this is not engine-cold. The artifact sha256 probe records the produced libz.a hash but does not yet assert an expected value. Default and controlled dc builder results remain separate. Old run_id-only cache-stamp measurements require a new baseline."
+correctness = ["both build rc=0 (includes cargo test / make check)", "artifact sha256 present for each"]
+note = "Real pinned upstream sources: hyperfine v2.0.0 codeload archive (sha256-pinned, Cargo.lock --locked) on rust:1.100.0-bookworm, zlib 1.3.1 GitHub release asset on gcc:14.2.0-bookworm. Archives are gitignored and fetched on demand via ensure_pinned_source(). Per-pair stamp + explicit --no-cache give distinct compilation with identical A/B input; retained base images mean this is not engine-cold. Artifact hashes are recorded, not yet asserted against pinned expected values. Default and controlled dc builder results remain separate; old run_id-only cache-stamp measurements are not comparable."
 
 [[case]]
 id = "W7"

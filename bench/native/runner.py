@@ -71,38 +71,48 @@ W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
 W6_IMAGE = "gcc:14.2.0-bookworm"
+W6_RUST_IMAGE = "rust:1.100.0-bookworm"
 W6_DIR = FIXTURES / "w6"
-# Checksum-pinned upstream source for W6. The archive is gitignored
-# (too large for the repo); ensure_w6_source fetches it on demand and
-# refuses anything that does not match the pinned sha256. Hash verified
-# against the official madler/zlib v1.3.1 GitHub release asset.
-W6_SOURCE = {
+# Checksum-pinned upstream sources for W6 (the "pinned Rust app plus
+# another language" cell). Archives are gitignored (too large for the
+# repo); ensure_pinned_source fetches them on demand and refuses
+# anything that does not match the pinned sha256. Hashes verified
+# 2026-11-15: zlib against the official madler/zlib v1.3.1 GitHub
+# release asset; hyperfine against the sharkdp v2.0.0 codeload archive.
+W6_ZLIB_SOURCE = {
     "url": "https://github.com/madler/zlib/releases/download/v1.3.1/"
            "zlib-1.3.1.tar.gz",
     "file": "zlib-1.3.1.tar.gz",
     "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
 }
+W6_RUST_SOURCE = {
+    "url": "https://codeload.github.com/sharkdp/hyperfine/tar.gz/"
+           "refs/tags/v2.0.0",
+    "file": "hyperfine-2.0.0.tar.gz",
+    "sha256": "f4b71df3c78e4cf752ca6fb6ebc4b025f7ea6a5ca5c48fea75f8a1fdb4c7d721",
+}
+W6_SOURCES = {"zlib": W6_ZLIB_SOURCE, "rust": W6_RUST_SOURCE}
 
 
-def ensure_w6_source(dest_dir: Path | None = None) -> Path:
-    """Return the pinned W6 source archive, fetching it if absent.
+def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
+    """Return a pinned source archive, fetching it if absent or corrupt.
 
     A present file with the wrong checksum is replaced only after the
     download verifies; a corrupt fetch never overwrites a good archive.
     """
-    dest_dir = W6_DIR if dest_dir is None else dest_dir
-    target = dest_dir / W6_SOURCE["file"]
-    if target.is_file() and sha256_file(target) == W6_SOURCE["sha256"]:
+    target = dest_dir / source["file"]
+    if target.is_file() and sha256_file(target) == source["sha256"]:
         return target
     dest_dir.mkdir(parents=True, exist_ok=True)
-    tmp = dest_dir / (W6_SOURCE["file"] + ".part")
+    tmp = dest_dir / (source["file"] + ".part")
     try:
-        with urllib.request.urlopen(W6_SOURCE["url"], timeout=300) as r, \
+        with urllib.request.urlopen(source["url"], timeout=300) as r, \
                 tmp.open("wb") as out:
             shutil.copyfileobj(r, out, length=1024 * 1024)
-        if sha256_file(tmp) != W6_SOURCE["sha256"]:
+        if sha256_file(tmp) != source["sha256"]:
             raise RuntimeError(
-                "W6 source archive checksum mismatch; refusing to use it")
+                f"pinned source {source['file']} checksum mismatch; "
+                "refusing to use it")
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)
@@ -1115,52 +1125,77 @@ def trial_w7(ctx, engine: Engine, state: str,
 
 def trial_w6(ctx, engine: Engine, state: str,
              driver: str = "default") -> dict:
-    """W6: compiled-app CI — one timed `docker build` of vendored zlib
-    1.3.1 (configure -> make -j -> make check) on gcc:14.2.0-bookworm,
-    then a run probe that sha256s the produced libz.a. The base image is
-    pulled untimed in setup if absent (prepare also pulls it)."""
+    """W6: compiled-app CI — two timed `docker build`s per trial on
+    pinned upstream sources: hyperfine 2.0.0 (Rust: cargo build
+    --release --locked + cargo test on rust:1.100.0-bookworm) and zlib
+    1.3.1 (C: configure -> make -j -> make check on
+    gcc:14.2.0-bookworm). Each build ends with a run probe that sha256s
+    the produced binary/lib. Base images are pulled untimed in setup if
+    absent (prepare also pulls them)."""
     case_id = "W6"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
-    tag = f"npw6/zlib:{ctx.run_id[-6:]}"
+    tag_zlib = f"npw6/zlib:{ctx.run_id[-6:]}"
+    tag_rust = f"npw6/hyperfine:{ctx.run_id[-6:]}"
     checks = rec["correctness"]["checks"]
     try:
-        source = ensure_w6_source(W6_DIR)
+        zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
+        rust_src = ensure_pinned_source(W6_RUST_SOURCE, W6_DIR)
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
-        cp = engine.sh(["image", "inspect", W6_IMAGE], timeout=30,
-                       check=False)
-        if cp.returncode != 0:
-            engine.sh(["pull", W6_IMAGE], timeout=900)
-        # Per-trial context: stamp.txt busts the layer cache so every
-        # timed build is a real compile, not a cache hit.
-        ctx_dir = trial_dir / "ctx"
-        ctx_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(W6_DIR / "Dockerfile", ctx_dir / "Dockerfile")
-        shutil.copy(source, ctx_dir / W6_SOURCE["file"])
-        (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
+        for image in (W6_RUST_IMAGE, W6_IMAGE):
+            cp = engine.sh(["image", "inspect", image], timeout=30,
+                           check=False)
+            if cp.returncode != 0:
+                engine.sh(["pull", image], timeout=900)
+
+        def build_one(name: str, dockerfile: Path,
+                      sources: list[tuple[Path, str]],
+                      tag: str, probe: list[str],
+                      metric: str, timeout: float = 1800) -> None:
+            # Per-trial context: stamp.txt busts the layer cache so every
+            # timed build is a real compile, not a cache hit.
+            ctx_dir = trial_dir / f"ctx-{name}"
+            ctx_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(dockerfile, ctx_dir / "Dockerfile")
+            for src, fname in sources:
+                shutil.copy(src, ctx_dir / fname)
+            (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
+            tp = time.monotonic()
+            build = engine.sh(
+                build_args(engine, driver, ["--no-cache", "-q", "-t", tag,
+                                            "-f", str(ctx_dir / "Dockerfile"),
+                                            str(ctx_dir)]),
+                timeout=timeout, check=False)
+            rec["metrics"][metric] = round(time.monotonic() - tp, 3)
+            checks[f"build_{name}"] = build.returncode == 0
+            if build.returncode != 0:
+                rec["validation_errors"].append(
+                    f"{name} build rc={build.returncode}: "
+                    f"{(build.stderr or build.stdout)[-400:]}")
+                return
+            run = engine.sh(["run", "--rm", tag, *probe],
+                            timeout=120, check=False)
+            out = run.stdout.strip()
+            sha = out.split()[0] if run.returncode == 0 else ""
+            rec["metrics"][f"artifact_{name}_sha256"] = sha
+            checks[f"artifact_{name}"] = (
+                run.returncode == 0
+                and re.fullmatch(r"[0-9a-f]{64}", sha) is not None)
+
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
-        tp = time.monotonic()
-        build = engine.sh(
-            build_args(engine, driver, ["--no-cache", "-q", "-t", tag,
-                                       "-f", str(ctx_dir / "Dockerfile"),
-                                       str(ctx_dir)]),
-            timeout=1800, check=False)
-        rec["metrics"]["build_s"] = round(time.monotonic() - tp, 3)
-        checks["build"] = build.returncode == 0
-        if build.returncode != 0:
-            rec["validation_errors"].append(
-                f"build rc={build.returncode}: "
-                f"{(build.stderr or build.stdout)[-400:]}")
-        probe = engine.sh(
-            ["run", "--rm", tag, "sha256sum", "/src/libz.a"],
-            timeout=120, check=False)
-        sha = probe.stdout.split()[0] if probe.returncode == 0 else ""
-        rec["metrics"]["artifact_sha256"] = sha
-        checks["artifact"] = (probe.returncode == 0
-                              and re.fullmatch(r"[0-9a-f]{64}", sha) is not None)
+        build_one(
+            "rust", W6_DIR / "rust" / "Dockerfile",
+            [(rust_src, W6_RUST_SOURCE["file"])],
+            tag_rust,
+            ["sha256sum", "/src/target/release/hyperfine"], "build_rust_s")
+        build_one(
+            "zlib", W6_DIR / "Dockerfile",
+            [(zlib_src, W6_ZLIB_SOURCE["file"])],
+            tag_zlib,
+            ["sha256sum", "/src/libz.a"], "build_zlib_s")
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -2192,7 +2227,8 @@ def cmd_prepare(args) -> int:
     on each selected engine."""
     engines = args.engines.split(",")
     ctx = RunContext(f"prep-{datetime.now().strftime('%Y%m%dT%H%M%S')}")
-    ensure_w6_source()
+    for pin in W6_SOURCES.values():
+        ensure_pinned_source(pin, W6_DIR)
     summary = {}
     portfolio = {}
     for name in engines:
