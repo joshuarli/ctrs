@@ -1421,6 +1421,7 @@ case_compatibility() {
 run_case() {
   local name=$1
   ISO_PRESERVE=0
+  local rc=0
   case "$name" in
     environment) case_environment ;;
     compatibility) case_compatibility ;;
@@ -1429,6 +1430,9 @@ run_case() {
     cross)         case_cross ;;
     lifecycle)     case_lifecycle ;;
   esac
+  rc=$?
+  [ "${ISO_MINE:-0}" = 1 ] && iso_release "$rc"
+  return $rc
 }
 
 

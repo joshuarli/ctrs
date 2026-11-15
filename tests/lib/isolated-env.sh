@@ -134,8 +134,18 @@ iso_on_term() { ISO_RC_FLAG=143; exit 143; }
 iso_cleanup() {
   local rc=$?
   [ -n "$ISO_RC_FLAG" ] && rc=$ISO_RC_FLAG
+  iso_release "$rc"
+  exit "$rc"
+}
+
+# Releases the resources created by the last iso_prepare without exiting, so
+# callers that run several harnesses in one process (`--all`) do not leak
+# engines. `rc` is honored for the failure-preserve semantics.
+iso_release() {
+  local rc=${1:-0}
+  [ "${ISO_MINE:-0}" = 1 ] || return 0
   local preserved=""
-  if [ -n "$CONTAINER" ] && { [ "${ISO_PRESERVE:-0}" = 1 ] || [ $rc -ne 0 ]; } && "$D" inspect "$CONTAINER" >/dev/null 2>&1; then
+  if [ -n "$CONTAINER" ] && { [ "${ISO_PRESERVE:-0}" = 1 ] || [ "$rc" -ne 0 ]; } && "$D" inspect "$CONTAINER" >/dev/null 2>&1; then
     "$D" logs "$CONTAINER" > "$WORK/daemon.log" 2>&1 || true
     "$D" inspect "$CONTAINER" > "$WORK/inspect.json" 2>&1 || true
     preserved="$WORK"
@@ -148,7 +158,13 @@ iso_cleanup() {
   else
     [ -n "$WORK" ] && rm -rf "$WORK"
   fi
-  exit $rc
+  CONTAINER=""
+  VOL_STATE=""
+  VOL_STORE=""
+  WORK=""
+  ISO_MINE=0
+  export ISO_PRESERVE=0
+  return 0
 }
 
 # Starts the privileged harness with BIN bound read-only at /opt/ctrs and a

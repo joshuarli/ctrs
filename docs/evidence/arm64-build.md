@@ -719,10 +719,20 @@ What landed at this milestone:
   commands and dependency/emulator provenance: `docs/evidence/release.md`
   (S7 section). No emulator bundle is included; the aarch64 binaries
   are native ARM64 code.
-- **Qualification runner**: `bash tests/arm64-build.sh --all` →
-  **160 passed, 0 failed** on the final source (it now resets the
-  scratch-preserve flag per case, so a failing case no longer makes
-  later passing cases leak their harnesses).
+- **Qualification runner**: `bash tests/arm64-build.sh --all` on the
+  final source → **160 passed, 0 failed**. The path here was: green
+  160/160 twice, then 158/160 on two runs, both for environment
+  reasons, each re-proven: (1) the cross case's `cargo test -p xtask`
+  check died on root-owned `target/debug` left by this session's
+  root-in-container workspace test (CI is unaffected; `target/debug`
+  is untracked scratch) — removed through the pinned builder, 5/5
+  re-pass; (2) the lifecycle case's worker-failure rebuild hit a
+  transient Docker Hub 404 on the alpine digest — the digest is intact
+  (verified from this host), the case re-ran green standalone, and the
+  final `--all` is 160/160 with zero leaked harness resources (see the
+  harness repair above). Registry pulls on this host intermittently
+  fail with 404/h12tiny connect errors — treat a registry-dependent
+  miss as suspect until the digest is re-checked.
 - **Workspace tests** (root, pinned builder image, final source):
   `cargo test --workspace --lib --tests --no-fail-fast` →
   **297 passed, 0 failed** (exit 0). Host run: 6 pre-existing
@@ -755,9 +765,13 @@ What landed at this milestone:
   runs at 2.2–6.4 s vs ~0.2–0.4 s for layer hits). S6's incremental
   numbers stand; no fixture change was made.
 - **Harness/bench repairs from the review**: per-case `ISO_PRESERVE`
-  reset (`--all` leak fix); the bench's trailing perf-gate failure now
-  exits 75 (deferred, never passed) instead of silently exiting 0 —
-  the header's exit-code contract now holds. Affected proofs re-run.
+  reset (`--all` leak fix); **per-case release of the isolated engine**
+  (`iso_release` in `tests/lib/isolated-env.sh`, called by `run_case`)
+  after finding that every `--all` run leaked its compat/identity/
+  platform harness containers as running processes; the bench's trailing
+  perf-gate failure now exits 75 (deferred, never passed) instead of
+  silently exiting 0 — the header's exit-code contract now holds.
+  Affected proofs re-run.
 - **Legacy-consumer sweep**: `main.rs` module comment no longer names
   deleted modules (`scan`, `tools`, `cli_pins`); the
   `examples/cross/rust-musl` fallback comment now names the unified
