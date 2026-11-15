@@ -9,41 +9,32 @@ queue or turn-by-turn status diary.
 
 ## Resume here
 
-**Current task:** NP-01, finish qualifying the measurement path on the
-actual Mac. The reorientation repairs offline-verifiable harness defects;
-it is not a new macOS benchmark result.
+**Current task:** NP-02 — freeze digest/source/dataset/tool inputs and
+build the real W6/W7 fixtures, then measure that vertical slice.
 
-Offline reorientation verification: **34 stdlib regression tests passed**,
-manifest validation passed without Docker, and patch whitespace checks
-passed. A dedicated offline CI job now runs those checks. Mac runtime
-and hosted CI results remain to be observed.
+**NP-01 qualified on the Mac (2026-11-15):** all three harness checks
+pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
+provenance hashes are recorded per trial, image architectures are
+captured by `prepare`, and a real three-pair same-engine noise control
+ran (`base-20261115T092425-9b5d`, W1 warm ctrs: 3/3 valid slot pairs,
+median ratios 0.986–0.997). Evidence:
+`docs/evidence/native-performance.md` → "NP-01 measurement
+qualification executed on the Mac".
 
-**Next executable action:** on the Mac, record the current source/binary
-and any already-running W11/watch job identities, inspect their status
-once, then run:
+**Next executable action:** start NP-02. Freeze `assets.lock` beyond
+pilot status (digest-pinned sources, datasets, tool versions), then
+implement the real W6 pinned-Rust-app fixture — including the
+checksum-pinned zlib tarball fetch path — and the real W7 two-app
+buildx fixture per `cases.toml`/`buildkit-driver.md`. Measure the
+W6/W7 vertical slice with `baseline --driver default` (primary lane)
+before any optimization work in NP-04.
 
-```sh
-python3.14 bench/native/runner.py validate-manifest
-python3.14 -m unittest discover -s bench/native -p 'test_*.py' -v
-python3.14 bench/native/runner.py preflight
-```
-
-Use Python ≥3.11; verify the interpreter (historical default `python3`
-was 3.9). Apply the campaign's ownership and exclusive-measurement rules
-before engine workloads. Preserve existing soak output as historical
-observations. Stop only identified campaign-owned watch/churn load; never
-run it beside scored trials. An old-binary soak can finish its fixed
-deadline if useful, but cannot qualify a newer candidate or block
-independent source/review work.
-
-**Then:** close NP-01's remaining environment/provenance gaps, start NP-02
-with real W6/W7 fixtures, and measure that vertical slice. Do not rerun
-the entire old proxy matrix to reaffirm its headline.
-
-**Environment limit for this reorientation:** prepared in a Linux
-workspace without the Mac, OrbStack or its raw `.work/native-perf/`
-records. Runtime results and long-job status require observation on that
-Mac; no new speed, stability or physical-memory result is claimed.
+**Soak disposition:** `run-20261115T073817` died with its launching
+session ~08:48 PST after ~70 min of the 12 h ctrs leg; no runner or
+engine processes remain. Its partial records are preserved under
+`.work/native-perf/results/run-20261115T073817-00b8/` as historical
+observations only — they do not qualify W11. A fresh 12 h-per-engine
+W11 belongs to NP-07 after a candidate freezes; do not relaunch it now.
 
 ## Work queue
 
@@ -53,7 +44,7 @@ build workload. A task is done only with the evidence in its row.
 
 | ID | State | Task and exit evidence |
 | --- | --- | --- |
-| NP-01 | **ready; safeguards partly landed** | Qualify measurement: offline regression tests; no global prune/context edits; actual Mac/guest/image native architecture; running binary/guest identity, builder endpoint and parameters; failures fail commands/reports; exclusive measurement ownership; three-pair no-op noise control |
+| NP-01 | **done 2026-11-15 (Mac)** | Qualify measurement: offline regression tests; no global prune/context edits; actual Mac/guest/image native architecture; running binary/guest identity, builder endpoint and parameters; failures fail commands/reports; exclusive measurement ownership; three-pair no-op noise control |
 | NP-02 | **ready after relevant NP-01 checks** | Freeze digest/source/dataset/tool inputs; real W6/W7 first, then W4/W5/W8/W9; prove clean compile and warm reuse, paired input equality and equivalent outputs; version changed fixtures; fetch missing assets with verified checksums |
 | NP-03 | **ready per qualified fixture** | ≥10 complete balanced paired baselines for default-user experience; separate resource-/BuildKit-matched controls; loss-first matrix includes missing cells, failures, declared loads/cache states and exact run IDs; no historical pooling |
 | NP-04 | **next optimization after W6/W7 baseline** | Profile and close default build→load→first-use cost; implement bounded slices from `buildkit-driver.md` or a better measured approach; default builds achieve parity then strict wins, preserving output/cancel/auth/tag/digest behavior |
@@ -73,11 +64,11 @@ running does not make every queue item blocked.
   substituted zero for missing resources. Recompute from complete raw
   records when possible; never reconstruct pairs from prose medians.
   The patched reporter remains descriptive until qualification.
-- **Noise control:** the existing `noop` command records two slots of
-  the same engine, while the corrected cross-engine reporter rejects
-  duplicate engine records. Add explicit A/B slot identity and a separate
-  noise-control report; do not weaken duplicate detection or present
-  same-engine noise observations as OrbStack performance wins.
+- **Noise control:** resolved 2026-11-15 — records now carry explicit
+  A/B `slot` identity plus `design: "noise-control"`; the cross-engine
+  reporter excludes them (`noise_excluded`) and `report --noise`
+  renders a separate same-engine slot-pair report. First real run:
+  `base-20261115T092425-9b5d` (W1 warm ctrs, 3 pairs).
 - **Inputs:** `assets.lock` explicitly remains pilot and service images
   use mutable tags. W8 independently builds each engine's portfolio;
   freeze one identical multi-layer portfolio and independent local
@@ -115,15 +106,15 @@ running does not make every queue item blocked.
 Replace these historical placeholders with observed facts on the Mac.
 Never infer a live PID, successful exit or current counters from prose.
 
-| Field | Last known information |
+| Field | Observed 2026-11-15 ~09:12 PST |
 | --- | --- |
-| Historical run | `run-20261115T073817` was reported as 12h ctrs then 12h OrbStack; its completion was not inspected during this reorientation |
-| PID and process start | Unknown; inspect once on the Mac |
-| Binary/guest/input hashes | Recover from launch record or mark unqualified |
-| Start and fixed deadline | Recover actual metadata; never reset the clock to keep watching |
-| Logs/results/exit status | Locate existing run under `.work/native-perf/`; preserve final record and process exit status |
-| Work while waiting | NP-02 source/fixture work and NP-04 implementation/review on noncontending resources; no parallel performance run |
-| Completion action | Record one outcome, close the job, execute next ready task; do not extend a healthy soak |
+| Run | `run-20261115T073817-00b8`; only trial `001-ctrs-W11-warm` exists — the planned orbstack leg never started |
+| PID and process start | None — runner and both ctrs daemon/VM processes are gone; soak died with its session ~08:48 PST |
+| Binary/guest/input hashes | Recoverable only for the harness side (`runner_sha256` etc. absent — records predates provenance fields); mark unqualified |
+| Start and fixed deadline | Started 07:38 PST; fixed 12 h deadline would have been ~19:38 PST; process exited ~70 min in |
+| Logs/results/exit status | `.work/native-perf/results/run-20261115T073817-00b8/` — 137 load windows + `resources.jsonl` through 08:47; no summary/exit record; preserved as historical, not a W11 result |
+| Work while waiting | N/A — job is closed; NP-02 fixture work proceeds normally |
+| Completion action | Recorded above; next ready task is NP-02 |
 
 ## Checkpoint format
 

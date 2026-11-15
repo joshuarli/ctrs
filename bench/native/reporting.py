@@ -128,13 +128,17 @@ def _resource_mismatch(a: dict, b: dict) -> bool:
                 and max(x, y) / min(x, y) > 1.01)
 
 
-def _analyze_cohort(identity: dict, records: list[dict]) -> dict:
+def _analyze_cohort(identity: dict, records: list[dict],
+                    sides: tuple[str, str] = ("ctrs", "orbstack"),
+                    side_of=None,
+                    same_engine_required: bool = False) -> dict:
+    side_of = side_of or (lambda record: record.get("engine"))
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
               "metrics": [], "metadata_gaps": []}
-    for engine in ("ctrs", "orbstack"):
-        rows = [r for r in records if r.get("engine") == engine]
-        result["engines"][engine] = {
+    for side in sides:
+        rows = [r for r in records if side_of(r) == side]
+        result["engines"][side] = {
             "trials": len(rows), "correct": sum(_correct(r) for r in rows),
             "failed": sum(not _correct(r) for r in rows),
             "versions": sorted({str(r.get("engine_server_version", "missing")) for r in rows}),
@@ -144,7 +148,8 @@ def _analyze_cohort(identity: dict, records: list[dict]) -> dict:
             result["metadata_gaps"].append(key)
     provenance = identity.get("provenance")
     for key in ("cases_sha256", "assets_sha256", "fixture_sha256",
-                "runner_sha256", "ctrs_binary_sha256"):
+                "runner_sha256", "ctrs_binary_sha256", "guest_kernel_sha256",
+                "guest_initramfs_sha256", "guest_data_sha256"):
         value = provenance.get(key) if isinstance(provenance, dict) else None
         if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
             result["metadata_gaps"].append(f"provenance.{key}")
@@ -158,13 +163,15 @@ def _analyze_cohort(identity: dict, records: list[dict]) -> dict:
     valid = []
     version_drift = any(len(info["versions"]) > 1 for info in result["engines"].values())
     for pair_id, rows in sorted(paired.items()):
-        a = [r for r in rows if r.get("engine") == "ctrs"]
-        b = [r for r in rows if r.get("engine") == "orbstack"]
+        a = [r for r in rows if side_of(r) == sides[0]]
+        b = [r for r in rows if side_of(r) == sides[1]]
         reason = None
         if len(a) > 1 or len(b) > 1:
-            reason = "duplicate engine records; no overwrite permitted"
+            reason = "duplicate side records; no overwrite permitted"
         elif len(a) != 1 or len(b) != 1 or len(rows) != 2:
             reason = "incomplete or mismatched pair"
+        elif same_engine_required and a[0].get("engine") != b[0].get("engine"):
+            reason = "noise-control pair spans different engines"
         elif not (_correct(a[0]) and _correct(b[0])):
             reason = "failed correctness or validation"
         elif version_drift:
@@ -222,13 +229,18 @@ def analyze(records: list[dict], input_issues: list[str] | None = None) -> dict:
     groups: dict[str, tuple[dict, list[dict]]] = {}
     result = {"evidence_status": "pilot", "promotion_eligible": False,
               "input_issues": list(input_issues or []), "holdout_excluded": 0,
-              "cohorts": []}
+              "noise_excluded": 0, "cohorts": []}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             result["input_issues"].append(f"record {index}: expected an object")
             continue
         if record.get("case") == "HOLDOUT":
             result["holdout_excluded"] += 1
+            continue
+        if record.get("design") == "noise-control":
+            # Same-engine slot repeats size measurement noise; they are
+            # never cross-engine performance evidence.
+            result["noise_excluded"] += 1
             continue
         invalid = [k for k in IDENTITY_FIELDS if not isinstance(record.get(k), str) or not record[k]]
         if invalid or record.get("case") not in CASE_METRICS:
@@ -245,6 +257,55 @@ def analyze(records: list[dict], input_issues: list[str] | None = None) -> dict:
         groups.setdefault(key, (identity, []))[1].append(record)
     result["cohorts"] = [_analyze_cohort(identity, rows)
                          for _, (identity, rows) in sorted(groups.items())]
+    return result
+
+
+def analyze_noise(records: list[dict], input_issues: list[str] | None = None) -> dict:
+    """Same-engine A/B slot noise control.
+
+    Pairs slot "a" against slot "b" within each cohort. Ratios should
+    center on 1; they size run-to-run noise and are never engine
+    performance evidence.
+    """
+    groups: dict[str, tuple[dict, list[dict]]] = {}
+    result = {"evidence_status": "pilot", "promotion_eligible": False,
+              "input_issues": list(input_issues or []), "skipped_records": 0,
+              "cohorts": [],
+              "note": "Same-engine noise control only; ratios near 1 indicate "
+                      "measurement noise, never an OrbStack comparison."}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            result["input_issues"].append(f"record {index}: expected an object")
+            continue
+        if record.get("design") != "noise-control":
+            result["skipped_records"] += 1
+            continue
+        invalid = [k for k in IDENTITY_FIELDS
+                   if not isinstance(record.get(k), str) or not record[k]]
+        if invalid or record.get("case") not in CASE_METRICS:
+            result["input_issues"].append(
+                f"record {index}: invalid identity/case ({', '.join(invalid)})")
+            continue
+        if record.get("engine") not in ("ctrs", "orbstack"):
+            result["input_issues"].append(f"record {index}: unknown engine")
+            continue
+        if record.get("slot") not in ("a", "b"):
+            result["input_issues"].append(
+                f"record {index}: noise-control record lacks slot a/b identity")
+            continue
+        if any(not isinstance(record.get(key, {}), dict)
+               for key in ("metrics", "resources", "correctness")):
+            result["input_issues"].append(
+                f"record {index}: malformed metric/resource/correctness object")
+            continue
+        identity = cohort_identity(record)
+        key = _canonical(identity)
+        groups.setdefault(key, (identity, []))[1].append(record)
+    result["cohorts"] = [
+        _analyze_cohort(identity, rows, sides=("a", "b"),
+                        side_of=lambda record: record.get("slot"),
+                        same_engine_required=True)
+        for _, (identity, rows) in sorted(groups.items())]
     return result
 
 
@@ -267,7 +328,8 @@ def render_markdown(report: dict) -> str:
              "host isolation or a promotion. Each run/configuration is separate; histories",
              "are never pooled. Ratios below 1 favor ctrs (throughput is inverted).",
              "CIs bootstrap the paired median. Fewer than 10 valid pairs cannot establish a win.", "",
-             f"Holdout records excluded from scoring: {report['holdout_excluded']}."]
+             f"Holdout records excluded from scoring: {report['holdout_excluded']}.",
+             f"Noise-control records excluded from scoring: {report.get('noise_excluded', 0)}."]
     if report["input_issues"]:
         lines += ["", "## Invalid input", ""]
         lines += [f"- {issue}" for issue in report["input_issues"]]
@@ -299,6 +361,46 @@ def render_markdown(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_noise_markdown(report: dict) -> str:
+    lines = ["# Native noise-control report — same-engine slot pairs", "",
+             "Slot a vs slot b on ONE engine sizes measurement noise. These",
+             "ratios are never engine performance evidence and cannot",
+             "support any ctrs-vs-OrbStack claim.", ""]
+    if report["input_issues"]:
+        lines += ["## Invalid input", ""]
+        lines += [f"- {issue}" for issue in report["input_issues"]]
+    for cohort in report["cohorts"]:
+        ident = cohort["identity"]
+        lines += ["", f"## {ident['case']} / {ident['state']} / {ident['run_id']}", "",
+                  f"Host: `{ident['host_id']}` (`{ident['arch']}`); source: `{ident['git_sha']}`.",
+                  f"Parameters: `{_canonical(ident['workload_params'])}`.", "",
+                  "| Slot | Trials | Correct | Failed | Server versions |",
+                  "| --- | ---: | ---: | ---: | --- |"]
+        for side, info in cohort["engines"].items():
+            lines.append(f"| {side} | {info['trials']} | {info['correct']} | "
+                         f"{info['failed']} | {', '.join(info['versions'])} |")
+        if cohort["rejections"]:
+            lines += ["", "Rejected observations (visible, never successes):", ""]
+            lines += [f"- Pair {item['pair_id']}: {item['reason']}."
+                      for item in cohort["rejections"]]
+        if cohort["metrics"]:
+            lines += ["", "| Metric | Valid pairs | Missing pairs | Median ratio | 95% CI | Assessment (noise only) |",
+                      "| --- | ---: | ---: | ---: | --- | --- |"]
+            for metric in cohort["metrics"]:
+                median = metric["ratio_median"]
+                ratio = f"{median:.4f}" if median is not None else "unmeasured"
+                ci = metric["ci95"]
+                interval = f"[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else "unmeasured"
+                lines.append(f"| {metric['metric']} | {metric['valid_pairs']} | "
+                             f"{len(metric['missing_pairs'])} | {ratio} | {interval} | "
+                             f"{metric['assessment']} |")
+    return "\n".join(lines) + "\n"
+
+
+def invalid_noise_report(report: dict) -> bool:
+    return bool(report["input_issues"] or any(c["rejections"] for c in report["cohorts"]))
+
+
 def invalid_report(report: dict) -> bool:
     return bool(report["input_issues"] or any(c["rejections"] for c in report["cohorts"]))
 
@@ -309,11 +411,18 @@ def main() -> int:
     parser.add_argument("--results", type=Path,
                         default=Path(__file__).resolve().parents[2] / ".work/native-perf/results")
     parser.add_argument("--match", default="*")
+    parser.add_argument("--noise", action="store_true",
+                        help="report same-engine A/B slot noise control")
     args = parser.parse_args()
-    records, issues = load_records(sorted(args.results.glob(f"{args.match}/trials.jsonl")))
+    files = sorted(args.results.glob(f"{args.match}/trials.jsonl"))
+    records, issues = load_records(files)
     if not records and not issues:
         print("no trial records found")
         return 1
+    if args.noise:
+        report = analyze_noise(records, issues)
+        print(render_noise_markdown(report), end="")
+        return int(invalid_noise_report(report))
     report = analyze(records, issues)
     print(render_markdown(report), end="")
     return int(invalid_report(report))

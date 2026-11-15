@@ -200,6 +200,43 @@ def sha256_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def guest_provenance() -> dict:
+    """Hashes of the guest kernel/initramfs/data disk — the guest-side
+    identity behind `ctrs_binary_sha256`. data.img is a 64 GiB sparse
+    file (~27 s to hash), so results are cached by stat signature and
+    only rehashed when the asset is rebuilt."""
+    assets = {"guest_kernel_sha256": "Image",
+              "guest_initramfs_sha256": "initramfs.cpio",
+              "guest_data_sha256": "data.img"}
+    cache_path = WORK / "guest-asset-hashes.json"
+    try:
+        cache = json.loads(cache_path.read_text())
+    except Exception:
+        cache = {}
+    out, dirty = {}, False
+    for key, name in assets.items():
+        path = REPO / "guest" / "out" / name
+        entry = cache.get(name)
+        st = path.stat() if path.is_file() else None
+        if (st is not None and isinstance(entry, dict)
+                and entry.get("size") == st.st_size
+                and entry.get("mtime_ns") == st.st_mtime_ns):
+            out[key] = entry["sha256"]
+            continue
+        digest = sha256_file(path)
+        out[key] = digest
+        if st is not None:
+            cache[name] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                           "sha256": digest}
+            dirty = True
+    if dirty:
+        try:
+            cache_path.write_text(json.dumps(cache, indent=2))
+        except OSError:
+            pass
+    return out
+
+
 def fixture_sha256() -> str:
     digest = hashlib.sha256()
     for path in sorted(FIXTURES.rglob("*")):
@@ -1919,12 +1956,17 @@ class RunContext:
         self.provenance.update({
             "runner_sha256": sha256_file(Path(__file__)),
             "ctrs_binary_sha256": sha256_file(CTRS_BIN),
+            **guest_provenance(),
             "worktree_dirty": bool(subprocess.run(
                 ["git", "status", "--porcelain", "--untracked-files=normal"],
                 cwd=REPO, capture_output=True, text=True).stdout.strip()),
         })
         self.workload_params: dict = {}
         self.workload_id = f"{run_id}:standalone"
+        # "paired" = cross-engine A/B trial; "noise-control" = same-engine
+        # slot repeat used only to size measurement noise, never scored
+        # as engine performance.
+        self.design = "paired"
 
     def trial_dir(self, engine: str, case: str, state: str) -> Path:
         self._seq += 1
@@ -1945,6 +1987,8 @@ class RunContext:
             "state": state,
             "pair_id": None,
             "order_index": None,
+            "slot": None,
+            "design": self.design,
             "host_id": self.host_id,
             "arch": self.arch,
             "git_sha": self.git_sha,
@@ -1996,7 +2040,7 @@ def safe_engine_info(engine: Engine) -> dict | None:
 def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
-            **kw) -> dict:
+            slot: str | None = None, **kw) -> dict:
     trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
@@ -2029,6 +2073,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         rec = trial(ctx, engine, state, **kw)
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
+        rec["slot"] = slot
         # The trial starts the engine. Sampling before ensure_up() records
         # a false version change on the first cold/stopped-engine trial.
         rec["engine_server_version"] = safe_version(engine)
@@ -2125,14 +2170,20 @@ def cmd_prepare(args) -> int:
             # leaves results in the build cache only.
             engine.sh(["build", "--load", "-t", f"np-fixture-api:{API_TAG}",
                        str(API_DOCKERFILE_DIR)], timeout=900)
-            ids = {}
+            ids, arches = {}, {}
             for img in SERVICE_IMAGES + [f"np-fixture-api:{API_TAG}"]:
                 cp = engine.sh(
                     ["image", "inspect", "-f",
-                     "{{.Id}} {{json .RepoDigests}}", img],
+                     "{{.Id}} {{.Architecture}} {{json .RepoDigests}}", img],
                     check=False, timeout=30)
+                parts = cp.stdout.split(None, 2)
                 ids[img] = cp.stdout.strip() or cp.stderr.strip()
-            summary[name] = {"images": ids}
+                if len(parts) >= 2:
+                    arches[img] = parts[1]
+            summary[name] = {"images": ids, "architectures": arches}
+            odd = {img: a for img, a in arches.items() if a != "arm64"}
+            if odd:
+                print(f"{name}: WARNING non-arm64 images: {odd}")
 
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side
@@ -2200,16 +2251,21 @@ def cmd_run(args) -> int:
 def cmd_baseline(args) -> int:
     ctx = RunContext(f"base-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
+    ctx.design = ("noise-control" if getattr(args, "noise_control", False)
+                  else "paired")
     a, b = args.a, args.b
     rng = random.Random(args.seed)
     failed = False
     try:
         for pair in range(1, args.pairs + 1):
-            order = [a, b] if (pair % 2 == 1) else [b, a]
+            # Slots identify the configured A/B position, not the engine:
+            # noise-control runs put the same engine in both slots.
+            sides = [(a, "a"), (b, "b")]
+            order = sides if (pair % 2 == 1) else sides[::-1]
             if args.randomize:
-                order = [a, b]
+                order = [sides[0], sides[1]]
                 rng.shuffle(order)
-            for idx, eng in enumerate(order):
+            for idx, (eng, slot) in enumerate(order):
                 kw = {}
                 if args.case in ("W2", "W8", "W10", "W11"):
                     kw = {"concurrency": args.concurrency,
@@ -2223,7 +2279,7 @@ def cmd_baseline(args) -> int:
                 rec = run_one(ctx, eng, args.case, args.state,
                               cold=args.cold and eng == "ctrs",
                               pair_id=pair, order_index=idx, keep_warm=True,
-                              **kw)
+                              slot=slot, **kw)
                 ok = rec["correctness"]["ok"]
                 failed = failed or not ok or bool(rec.get("validation_errors"))
                 wall = rec["metrics"].get("wall_seconds")
@@ -2268,6 +2324,7 @@ def cmd_noop(args) -> int:
     args.a = args.b = args.engine
     args.pairs = args.pairs
     args.randomize = False
+    args.noise_control = True
     args.case = args.case or "W1"
     args.state = args.state or "warm"
     args.cold = False
@@ -2289,12 +2346,18 @@ def bootstrap_ci(vals: list[float], iters: int = 2000,
 def cmd_report(args) -> int:
     # The standalone module also works without Docker, VM assets or macOS:
     # python3 bench/native/reporting.py --match '<exact-run-id>'
-    from reporting import analyze, invalid_report, load_records, render_markdown
+    from reporting import (analyze, analyze_noise, invalid_noise_report,
+                           invalid_report, load_records, render_markdown,
+                           render_noise_markdown)
     files = sorted(RESULTS.glob(f"{args.match or '*'}/trials.jsonl"))
     records, issues = load_records(files)
     if not records and not issues:
         print("no trial records found")
         return 1
+    if getattr(args, "noise", False):
+        report = analyze_noise(records, issues)
+        print(render_noise_markdown(report), end="")
+        return int(invalid_noise_report(report))
     report = analyze(records, issues)
     print(render_markdown(report), end="")
     return int(invalid_report(report))
@@ -2371,6 +2434,9 @@ def main() -> int:
     p.add_argument("--match", default="*",
                    help="only result dirs matching this glob, e.g. "
                         "base-2026* for frozen baselines")
+    p.add_argument("--noise", action="store_true",
+                   help="report same-engine A/B slot noise control from "
+                        "noop runs; never cross-engine scores")
 
     args = ap.parse_args()
     try:

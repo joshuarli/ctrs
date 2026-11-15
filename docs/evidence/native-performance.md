@@ -1169,3 +1169,45 @@ severity only. `conformance/run.sh`'s five netns fixtures self-report
 in-guest, qualified in `docs/evidence/crabtables.md`), so the macOS
 host lane shows them as harness-level skips, not engine failures.
 `tests/linux-host.sh` remains needs-native-host.
+
+### NP-01 measurement qualification executed on the Mac (2026-11-15)
+
+Resumed `docs/native-performance-progress.md` on the campaign host.
+Observed state first: the `run-20261115T073817` W11 soak was **not**
+running — its runner and both ctrs daemons/VMs were gone; the trial
+directory holds 137 load windows + `resources.jsonl` ending
+2026-11-15 08:48 PST, ~70 min into the planned 12 h ctrs leg. Recorded
+as an incomplete historical observation, not a qualification result.
+
+Harness qualification then ran on this Mac (host `sentry`, arm64,
+macOS 27.2):
+
+- `validate-manifest` OK; `unittest discover` **41/41 pass** (34 prior
+  + 7 new); `preflight` clean (no failures/warnings).
+- Verified native identity: host `arm64`, guest `Image` is an ARM64
+  Linux boot executable, `target/release/ctrs` is arm64 Mach-O.
+- Provenance extended: every trial record now carries
+  `guest_kernel_sha256` / `guest_initramfs_sha256` /
+  `guest_data_sha256` (data.img is a 64 GiB sparse file, ~27 s to
+  hash, cached by stat signature in `.work/native-perf/`). Reporter
+  treats all three as required qualification metadata.
+- `prepare` now records per-image `Architecture` for service +
+  fixture images on both engines and warns on non-arm64.
+- **Noise control implemented and executed**: `noop` runs now assign
+  explicit A/B `slot` identity with `design: "noise-control"`; the
+  cross-engine reporter excludes them (`noise_excluded`) instead of
+  rejecting pairs, and `report --noise` produces a separate
+  same-engine slot-pair report that is descriptive-only. Three-pair
+  W1-warm ctrs noise run `base-20261115T092425-9b5d`: 3/3 valid slot
+  pairs, all correctness checks green, median slot ratios 0.986–0.997
+  (slot b marginally faster — ordering noise, CI wide at n=3). Foreign
+  host load was present (one ~100% CPU `smolvm` process from another
+  project); not campaign-owned, left running — treat these bounds as
+  conservative.
+
+NP-01 exit evidence is now met on the Mac: offline regressions, no
+global prune/context edits, native arch verified and recorded,
+binary/guest provenance hashes, verified builder endpoint for the `dc`
+control, fail-closed reporting, dedicated measurement roots, and a
+three-pair noise control. Remaining queue work starts at NP-02
+(freeze inputs; real W6/W7 fixtures).

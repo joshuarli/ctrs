@@ -271,6 +271,38 @@ class ExitStatusTests(unittest.TestCase):
         self.assertEqual(calls[2][1]["seed"], calls[3][1]["seed"])
         self.assertNotEqual(calls[0][1]["seed"], calls[2][1]["seed"])
 
+    def test_noop_assigns_distinct_slots_on_one_engine(self):
+        args = argparse.Namespace(a="ctrs", b="ctrs", seed=3, pairs=2,
+                                  randomize=False, case="W1", state="warm",
+                                  cold=False, concurrency=8, duration=20,
+                                  write_ratio=0.3, noise_control=True)
+        context = Mock(engines={}, jsonl="trials.jsonl")
+        calls = []
+
+        def trial(ctx, engine, case, state, **kw):
+            calls.append((engine, kw))
+            return {"correctness": {"ok": True}, "metrics": {}}
+
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "run_one", side_effect=trial), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.cmd_baseline(args), 0)
+        self.assertEqual(context.design, "noise-control")
+        self.assertEqual([(c[0], c[1]["slot"]) for c in calls],
+                         [("ctrs", "a"), ("ctrs", "b"),
+                          ("ctrs", "b"), ("ctrs", "a")])
+
+    def test_noop_command_marks_noise_control(self):
+        args = argparse.Namespace(engine="ctrs", pairs=3, case=None,
+                                  state=None, cold=False, seed=None,
+                                  concurrency=8, duration=15.0,
+                                  write_ratio=0.3)
+        with patch.object(runner, "cmd_baseline", return_value=0) as baseline:
+            self.assertEqual(runner.cmd_noop(args), 0)
+        self.assertTrue(args.noise_control)
+        self.assertEqual((args.a, args.b), ("ctrs", "ctrs"))
+        baseline.assert_called_once_with(args)
+
     def test_holdout_failure_is_not_exit_zero(self):
         args = argparse.Namespace(engines="ctrs,orbstack", ops=240, repos=8,
                                   issues=5, clones=4, seed=1)
@@ -279,6 +311,29 @@ class ExitStatusTests(unittest.TestCase):
                 patch.object(runner, "run_one", return_value=rec), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_holdout(args), 1)
+
+
+class GuestProvenanceTests(unittest.TestCase):
+    def test_guest_hashes_cached_by_stat_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "guest" / "out"
+            out.mkdir(parents=True)
+            for name in ("Image", "initramfs.cpio", "data.img"):
+                (out / name).write_bytes(name.encode())
+            work = Path(tmp) / "work"
+            work.mkdir()
+            with patch.object(runner, "REPO", Path(tmp)), \
+                    patch.object(runner, "WORK", work), \
+                    patch.object(runner, "sha256_file",
+                                 side_effect=lambda p: "ab" * 32) as digest:
+                first = runner.guest_provenance()
+                second = runner.guest_provenance()
+            self.assertEqual(first, second)
+            self.assertEqual(set(first), {"guest_kernel_sha256",
+                                          "guest_initramfs_sha256",
+                                          "guest_data_sha256"})
+            self.assertEqual(digest.call_count, 3)
+            self.assertTrue((work / "guest-asset-hashes.json").is_file())
 
 
 class LoadMetricTests(unittest.TestCase):
