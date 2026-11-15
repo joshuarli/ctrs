@@ -54,9 +54,13 @@ jobs:
           - runner: ubuntu-26.04
             target: x86_64-unknown-linux-musl
             docker_platform: linux/amd64
-          - runner: ubuntu-26.04-arm
+          # Cross-compiled natively on the build platform (no target emulator),
+          # mirroring `cargo xtask linux --arch arm64`. Native ARM64 test
+          # coverage lives in ci.yml (linux-musl, every push).
+          - runner: ubuntu-26.04
             target: aarch64-unknown-linux-musl
-            docker_platform: linux/arm64
+            docker_platform: ''
+            cross: true
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,27 +81,27 @@ jobs:
           cache-from: type=gha,scope=ctrs-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=ctrs-${{ matrix.target }}
       - name: Install Rust toolchain
-        if: matrix.docker_platform == ''
+        if: matrix.target == 'aarch64-apple-darwin'
         run: |
           channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
           test -n "$channel"
           rustup toolchain install --profile minimal "$channel"
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: matrix.docker_platform == ''
+        if: matrix.target == 'aarch64-apple-darwin'
         with:
           key: ${{ matrix.runner }}-${{ matrix.target }}
       - name: Build macOS release
-        if: matrix.docker_platform == ''
+        if: matrix.target == 'aarch64-apple-darwin'
         run: cargo build --profile dist -p ctrs --target "${{ matrix.target }}"
       - name: Test macOS release
-        if: matrix.docker_platform == ''
+        if: matrix.target == 'aarch64-apple-darwin'
         run: cargo test --workspace --lib --target "${{ matrix.target }}"
       - name: Sign macOS release
-        if: matrix.docker_platform == ''
+        if: matrix.target == 'aarch64-apple-darwin'
         run: |
           cp "target/${{ matrix.target }}/dist/ctrs" ctrs-${{ matrix.target }}
           codesign --force --sign - --entitlements crates/ctrs/ctrs.entitlements ctrs-${{ matrix.target }}
-      - name: Build and verify Linux releases
+      - name: Build and verify x86_64 Linux releases
         if: matrix.docker_platform != ''
         run: |
           docker run --rm --init \
@@ -116,6 +120,29 @@ jobs:
               done
               cargo test --workspace --lib
             '
+      # Pinned cross toolchain on the build platform, mirroring `cargo xtask
+      # linux --arch arm64`; never a target emulator. No qemu is registered on
+      # this row, so the ARM64 binaries cannot run here: native ARM64 tests are
+      # ci.yml's linux-musl job on every push.
+      - name: Build and verify aarch64 Linux releases
+        if: matrix.cross == true
+        run: |
+          docker run --rm --init \
+            --platform linux/amd64 \
+            -e CI \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -w /src \
+            -e RUSTUP_TOOLCHAIN=stable \
+            -e CARGO_ENCODED_RUSTFLAGS= \
+            -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-unknown-linux-musl-gcc \
+            messense/rust-musl-cross:aarch64-musl@sha256:02e790506c5f15a533bc05b3af8719b16a8a2314480f6f0fdc0166432035d9b4 \
+            sh -ec 'cargo build --profile dist --target aarch64-unknown-linux-musl -p ctrs -p ctrs-init'
+          cp target/aarch64-unknown-linux-musl/dist/ctrs ctrs-${{ matrix.target }}
+          cp target/aarch64-unknown-linux-musl/dist/ctrs-init ctrs-init-${{ matrix.target }}
+          for bin in ctrs-${{ matrix.target }} ctrs-init-${{ matrix.target }}; do
+            readelf -l "$bin" | grep -q INTERP && { echo "$bin has a dynamic ELF interpreter" >&2; exit 1; }
+            readelf -d "$bin" | grep -q NEEDED && { echo "$bin has a dynamic library dependency" >&2; exit 1; }
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctrs-${{ matrix.target }}
