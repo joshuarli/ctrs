@@ -1027,3 +1027,16 @@ itself then failed EINVAL, breaking all bind mounts until
 reverted. The remaining ~40% bind-vs-volume penalty is inherent
 per-op virtiofs RTT; only a guest-side metadata cache (not
 exposed by the kernel or VZ) could close it.
+
+**W11 5-min soak pilot, post-concurrency work (2026-11-15,
+`base-20261115T061917`, warm, 1 pair, 10x30 s W2 windows + churn
+bursts):** all correctness gates green on both engines — zero
+errors (781,854 vs 683,857 requests), zero engine deaths, 16/16
+churn jobs, exact item counts. ctrs sustained rps_mean 2586 vs
+2247 (**~1.15x**), consistent with the W2 re-baseline. Resources:
+peak_total_rss_kb 2.14 GB vs 10.86 GB (~5x lower; sampler sums
+per-process RSS so shared pages double-count, but the gap is far
+beyond method noise); cpu_seconds_est 527 vs 406 (ctrs did ~14%
+more requests — ~0.67 vs ~0.59 ms/req, within sampler noise).
+The parallel-install/deferred-fetch/bulk-conn changes survived
+~782k mixed requests with no leak signal in the RSS trace.
