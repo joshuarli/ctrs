@@ -25,6 +25,22 @@ skipped() { printf 'SKIP %s (%s)\n' "$1" "$2" | tee -a "$LOG"; skip=$((skip+1));
 step() { printf -- '== %s (%s)\n' "$1" "$(date +%H:%M:%S)" | tee -a "$LOG"; }
 : >"$LOG"
 
+# A probed-free loopback port for S9's publish clash. The probe binds and
+# releases, so the port is not reserved between probe and use; acceptable
+# for this serial harness (same caveat as iso_alloc_ports).
+free_port() {
+  local tries=0 p
+  while [ $tries -lt 100 ]; do
+    p=$((20000 + RANDOM % 20000))
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+      echo "$p"
+      return 0
+    fi
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
 command -v docker >/dev/null || { echo 'docker CLI not on PATH' >&2; exit 2; }
 BIN=$ROOT/target/release/ctrs
 [ -x "$BIN" ] || { echo 'target/release/ctrs missing; run cargo xtask host' >&2; exit 2; }
@@ -259,12 +275,17 @@ else bad 'S8 first engine did not come up'; fi
 step 'S9: network rollback — port clash, unknown network'
 if fresh_engine s9; then
   load_alpine
-  dockq run -d --name ctrs21-f9a -p 127.0.0.1:18081:80 public.ecr.aws/docker/library/alpine:latest sleep 60 >/dev/null 2>&1
-  if dockq run -d --name ctrs21-f9b -p 127.0.0.1:18081:80 public.ecr.aws/docker/library/alpine:latest sleep 60 >"$LOG.s9" 2>&1; then
-    bad 'S9 second publish on the same port succeeded'
-  else ok 'S9 second publish on the same port refused'; fi
-  up=$(dockq ps --format '{{.Names}}' --filter name=ctrs21-f9a)
-  [ "$up" = "ctrs21-f9a" ] && ok 'S9 first container still running' || bad 'S9 first container down: $up'
+  s9_port=$(free_port) || s9_port=""
+  if [ -n "$s9_port" ]; then
+    dockq run -d --name ctrs21-f9a -p 127.0.0.1:$s9_port:80 public.ecr.aws/docker/library/alpine:latest sleep 60 >/dev/null 2>&1
+    if dockq run -d --name ctrs21-f9b -p 127.0.0.1:$s9_port:80 public.ecr.aws/docker/library/alpine:latest sleep 60 >"$LOG.s9" 2>&1; then
+      bad 'S9 second publish on the same port succeeded'
+    else ok 'S9 second publish on the same port refused'; fi
+    up=$(dockq ps --format '{{.Names}}' --filter name=ctrs21-f9a)
+    [ "$up" = "ctrs21-f9a" ] && ok 'S9 first container still running' || bad 'S9 first container down: $up'
+  else
+    bad 'S9 could not allocate a free loopback port'
+  fi
   if saft docker run --rm --network ctrs21-nope public.ecr.aws/docker/library/alpine:latest true >/dev/null 2>&1; then
     bad 'S9 start on an unknown network unexpectedly succeeded'
   else ok 'S9 start on an unknown network refused'; fi

@@ -5,7 +5,7 @@
 #
 #   iso_endpoint_check            # local unix socket, linux/amd64; exits 2 otherwise
 #   iso_bin_check                 # both executables are 64-bit x86-64 ELFs
-#   iso_alloc_ports 3             # sets ISO_PORTS
+#   iso_alloc_ports 3             # sets ISO_PORTS (see the race note below)
 #   iso_prepare NAME              # refuses pre-existing resources, scratch, DOCKER_CONFIG
 #   iso_trap_install              # owns cleanup from here on
 #   iso_start                     # starts the harness container, waits for its engine
@@ -17,6 +17,13 @@
 # and volumes are removed; failure logs (daemon.log, inspect.json) are
 # preserved in the scratch directory when ISO_PRESERVE=1 or the exit code is
 # non-zero. Refuses-before-create paths are side-effect free.
+#
+# Known limitation of iso_alloc_ports: a port is probed for freeness and
+# then handed out with no reservation held in between (check-then-use). A
+# concurrent process can bind the port first; the container using it would
+# reach nothing and the failure shows up there, not here. This is accepted
+# for the serial harness this file serves. Run two copies of it only against
+# disjoint port ranges, or tolerate spurious publish/bind failures.
 
 set -u
 
