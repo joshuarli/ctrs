@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::io;
-use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
@@ -195,6 +195,20 @@ impl Drop for VsockStream {
 /// queue, so it should hand the stream to a thread and return.
 pub type Handler = Box<dyn Fn(VsockStream) + Send + Sync>;
 
+/// Bulk guest→host streams (published-port relays, exec output) are
+/// bounded by the receive window each side advertises; the guest sets a
+/// 16 MiB vsock buffer, so give the host socket the same room. VZ clamps
+/// to whatever it supports, and a refused setsockopt is harmless.
+fn tune_vsock_fd(fd: std::os::fd::RawFd) {
+    for opt in [libc::SO_RCVBUF, libc::SO_SNDBUF] {
+        let size: libc::c_int = 16 << 20;
+        // SAFETY: `fd` is a live socket; setsockopt on it is harmless.
+        unsafe {
+            libc::setsockopt(fd, libc::SOL_SOCKET, opt, (&size as *const libc::c_int).cast(), size_of::<libc::c_int>() as libc::socklen_t);
+        }
+    }
+}
+
 impl Vm {
     /// Asks the guest (through the balloon) to run in `bytes` of memory. The
     /// guest gives the rest back to macOS. Returns the previous target.
@@ -309,6 +323,7 @@ impl Connector {
         }
         // SAFETY: `fd` is a fresh descriptor that nothing else owns.
         let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        tune_vsock_fd(fd.as_raw_fd());
         Ok(VsockStream { fd, conn: Some(conn), queue: self.queue.clone() })
     }
 }
@@ -528,6 +543,7 @@ define_class!(
             }
             // SAFETY: `fd` is a fresh descriptor that nothing else owns.
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+            tune_vsock_fd(fd.as_raw_fd());
             let stream = VsockStream { fd, conn: Some(OnQueue(conn.retain())), queue: self.ivars().queue.clone() };
             (self.ivars().handler)(stream);
             Bool::YES
