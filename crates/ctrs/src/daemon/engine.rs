@@ -1249,6 +1249,12 @@ impl Engine {
             return;
         }
         let me = Arc::downgrade(self);
+        // Reclaiming just after the last request taxes the next one:
+        // ballooned pages return zeroed and every container re-faults
+        // them. Hold the shrink target for a grace window of API quiet,
+        // then shrink in steps; growth is never delayed.
+        let quiet_secs: u64 = std::env::var("CTRS_BALLOON_QUIET_SECS")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(120);
         let _ = std::thread::Builder::new().name("ctrs-balloon".into()).spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_secs(1));
@@ -1280,8 +1286,16 @@ impl Engine {
                     continue;
                 }
                 let want = (used + MEMORY_HEADROOM).clamp(MEMORY_FLOOR, ceiling);
+                let quiet = now_secs().saturating_sub(
+                    engine.last_activity.load(std::sync::atomic::Ordering::Relaxed));
                 // Shrink in steps (so the guest's caches go gradually), grow at once.
-                let next = if want < *target { want.max(target.saturating_sub(256 << 20)) } else { want };
+                let next = if want > *target {
+                    want
+                } else if quiet >= quiet_secs {
+                    want.max(target.saturating_sub(256 << 20))
+                } else {
+                    *target
+                };
                 if next.abs_diff(*target) >= 64 << 20 {
                     *target = next;
                     vm.set_memory_target(next);
