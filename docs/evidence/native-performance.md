@@ -110,6 +110,29 @@ record survives `docker restart` of the db container → stack down.
   trials. ctrs `setup_seconds` ~3.0 vs orbstack ~5.4 (untimed, but
   consistent with the W1 gap — likely container-create/start path).
 
+### W8 real-image deployment under load (warm, 8 concurrent, 30 s, 30% writes, store-cold pulls each trial)
+
+Pulls are real fetch+install every trial: ctrs restarts its daemon
+(untimed, wipes the guest layer store), OrbStack runs `image prune`.
+Portfolio = postgres/redis/python/busybox relocated rootfs images
+(~178 MB total) pulled by digest from each engine's local `registry:2`.
+
+| engine | trials | load errors | load rps (median) | load p99_ms (median) | load max_ms | pull_wall_s (median) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ctrs | 9 | 0 | ~2850 | ~10.9 | ~240 | ~0.68 |
+| orbstack | 4 | 0 | ~2060 | ~13.5 | — | ~2.44 |
+
+- ctrs serves ~**35–40% more requests/s** during real image pulls and
+  installs, with better median p99 — the EXP-1 forked-child install
+  keeps the app responsive while ~178 MB of layers unpack.
+- ctrs pull wall ~0.68 s vs orbstack ~2.4 s for the same portfolio —
+  ~3.5× faster deploy path on this fixture.
+- Two earlier ctrs trials on the *old* NAT published-port path failed
+  with 8 disconnects each; after EXP-2 (vsock default) ctrs is 9/9
+  clean. OrbStack was clean throughout.
+- Caveat: n=4 OrbStack trials; the rps gap is large enough to be
+  credible but the frozen ≥10-pair baseline will firm it up.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -128,7 +151,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | Case | Status |
 | --- | --- |
 | W1, W2 | implemented, pilot trials collected |
-| W3–W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W8 | implemented (incl. under-load cell), pilot trials collected |
+| W3–W7, W9–W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 
@@ -142,6 +166,9 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 5. The historical "nine unexplained macOS daemon deaths" (closeout
    evidence) are not yet re-qualified under sustained W11-style load;
    W1/W2 trials showed zero daemon deaths but that is not a soak.
+6. `docker import` returns "bad request framing" on ctrs (works on
+   OrbStack) — an API-compatibility gap found while staging a bulk
+   fixture; needs a repro and a fix or a documented limitation.
 
 ## Experiment log
 
