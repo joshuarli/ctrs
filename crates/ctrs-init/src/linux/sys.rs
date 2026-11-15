@@ -235,6 +235,23 @@ pub fn sock_buffers(fd: RawFd, want: libc::c_int) {
     }
 }
 
+/// `SO_VM_SOCKETS_BUFFER_SIZE` / `_MAX_SIZE` / `_MIN_SIZE`
+/// (linux/vm_sockets.h; libc doesn't name them). virtio-vsock flow
+/// control runs on `buffer_size` — the receive window each side
+/// advertises — which defaults to only 256 KiB. `SO_SNDBUF` does not
+/// affect it. The size is clamped to [min, max], so the cap must be
+/// raised first. Failure is fine: the socket keeps its default.
+pub fn vsock_stream_buffer(fd: RawFd, want: u64) {
+    const SO_VM_SOCKETS_BUFFER_SIZE: libc::c_int = 0;
+    const SO_VM_SOCKETS_BUFFER_MAX_SIZE: libc::c_int = 2;
+    // SAFETY: setsockopt on a descriptor we own; the result is advisory.
+    unsafe {
+        for opt in [SO_VM_SOCKETS_BUFFER_MAX_SIZE, SO_VM_SOCKETS_BUFFER_SIZE] {
+            libc::setsockopt(fd, libc::AF_VSOCK, opt, (&want as *const u64).cast(), std::mem::size_of::<u64>() as libc::socklen_t);
+        }
+    }
+}
+
 pub fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: plain fcntl calls on a descriptor we own.
     unsafe {

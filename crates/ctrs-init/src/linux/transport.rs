@@ -53,6 +53,9 @@ pub fn listen(port: u32) -> io::Result<OwnedFd> {
         }
         let fd = sys::check(libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0) as _, "vsock socket")?;
         let sock = OwnedFd::from_raw_fd(fd as RawFd);
+        // Accepted sockets inherit the listener's stream buffer; bulk
+        // host->guest traffic (cp in, published ports) needs the window.
+        sys::vsock_stream_buffer(sock.as_raw_fd(), 16 << 20);
         let mut addr: libc::sockaddr_vm = std::mem::zeroed();
         addr.svm_family = libc::AF_VSOCK as libc::sa_family_t;
         addr.svm_cid = libc::VMADDR_CID_ANY;
@@ -79,6 +82,7 @@ pub fn dial(port: u32) -> io::Result<OwnedFd> {
         // Bulk guest→host streams (exec output, cp out) are bounded by the
         // socket buffers on both ends; give them room up front.
         sys::sock_buffers(sock.as_raw_fd(), 4 << 20);
+        sys::vsock_stream_buffer(sock.as_raw_fd(), 16 << 20);
         let mut addr: libc::sockaddr_vm = std::mem::zeroed();
         addr.svm_family = libc::AF_VSOCK as libc::sa_family_t;
         addr.svm_cid = VMADDR_CID_HOST;
@@ -106,6 +110,7 @@ pub fn dial_within(port: u32, timeout: std::time::Duration) -> io::Result<OwnedF
         // Same bulk buffers `dial` sets: exec output conns are the
         // highest-volume guest→host streams there are.
         sys::sock_buffers(sock.as_raw_fd(), 4 << 20);
+        sys::vsock_stream_buffer(sock.as_raw_fd(), 16 << 20);
         let tv = libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
         sys::check(
             libc::setsockopt(sock.as_raw_fd(), libc::AF_VSOCK, SO_VM_SOCKETS_CONNECT_TIMEOUT, (&tv as *const libc::timeval).cast(), std::mem::size_of::<libc::timeval>() as u32) as _,
