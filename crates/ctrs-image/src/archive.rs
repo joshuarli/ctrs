@@ -18,6 +18,9 @@ const MAX_JSON: u64 = 4 << 20;
 /// expansion, the host store must cap ingest or a crafted archive fills the
 /// disk (the blob digest only covers bytes already written).
 const MAX_BLOB: u64 = 64 << 30;
+/// Largest whole archive kept while reading: a crafted tar of many sub-cap
+/// blobs would otherwise fill the disk. Fails closed past the budget.
+const MAX_TOTAL: u64 = 64 << 30;
 
 /// A reader that fails once more than `left` bytes have come through.
 struct Capped<R> {
@@ -29,7 +32,7 @@ impl<R: Read> Read for Capped<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.inner.read(buf)?;
         if n as u64 > self.left {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "archive member exceeds the blob size limit"));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "archive member exceeds the size limit"));
         }
         self.left -= n as u64;
         Ok(n)
@@ -37,14 +40,47 @@ impl<R: Read> Read for Capped<R> {
 }
 
 /// Reads an archive into the store. Returns the images it named.
+///
+/// Any failure undoes what this load ingested (blobs no image recorded
+/// references), so a crafted archive cannot park up to MAX_TOTAL bytes in
+/// the store by failing late. Blobs an image record already points at are
+/// kept.
 pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
+    let before: Vec<Image> = store.images()?;
+    let existed = |d: &str| before.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
+    let mut ingested: Vec<String> = Vec::new();
+    let mut total: u64 = 0;
+    let mut loaded: Vec<Image> = Vec::new();
+    let result = load_inner(store, archive, &existed, &mut ingested, &mut total, &mut loaded);
+    // Files no recorded image uses do not stay. On a failure, blobs no
+    // recorded image points at are removed instead: the index is the source
+    // of truth, so an image whose put_image wrote images.json but failed
+    // later keeps its blobs. If the index cannot be read, nothing is
+    // removed.
+    match store.images() {
+        Ok(images) => {
+            let used = |d: &str| images.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
+            for d in ingested.iter().filter(|d| !used(d)) {
+                if let Ok(path) = store.blob_path(d) {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        // The index is unreadable, so nothing can be pruned safely.
+        // Orphaned blobs are harmless; a blob an image still needs is not.
+        Err(_) => {}
+    }
+    result.map(|()| loaded)
+}
+
+/// The load itself: read every regular file into the store, then verify the
+/// manifest and record its images. The caller prunes `ingested` afterwards,
+/// on both the success and the failure path.
+fn load_inner(store: &Store, archive: impl Read, existed: &dyn Fn(&str) -> bool, ingested: &mut Vec<String>, total: &mut u64, loaded: &mut Vec<Image>) -> io::Result<()> {
     let mut tar = tar::Archive::new(archive);
     // Archive path → blob digest and size, for every regular file.
     let mut files: HashMap<String, (String, u64)> = HashMap::new();
     let mut manifest: Option<Vec<u8>> = None;
-    let before: Vec<Image> = store.images()?;
-    let existed = |d: &str| before.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
-    let mut ingested: Vec<String> = Vec::new();
     for entry in tar.entries()? {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
@@ -60,9 +96,13 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
         // Every other file is kept, `.json` ones too: in the classic layout
         // (podman save, older docker save) the image config is a top-level
         // `<hex>.json`. Files no image names are removed after the manifest.
+        if *total >= MAX_TOTAL {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "archive exceeds the total size limit"));
+        }
         let mut w = store.ingest()?;
-        io::copy(&mut Capped { inner: &mut entry, left: MAX_BLOB }, &mut w)?;
+        io::copy(&mut Capped { inner: &mut entry, left: MAX_BLOB.min(MAX_TOTAL - *total) }, &mut w)?;
         let (digest, size) = w.finish()?;
+        *total += size;
         if !existed(&digest) {
             ingested.push(digest.clone());
         }
@@ -71,7 +111,6 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
     let manifest = manifest.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "not an image archive: no manifest.json"))?;
     let entries: Vec<Value> = serde_json::from_slice(&manifest).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("manifest.json: {e}")))?;
     let lookup = |p: &str| files.get(p.trim_start_matches("./")).cloned().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("archive is missing {p}")));
-    let mut loaded = Vec::new();
     for m in &entries {
         let (config_digest, _) = lookup(m["Config"].as_str().unwrap_or_default())?;
         let config: Value = serde_json::from_slice(&store.read_config(&config_digest)?)
@@ -97,14 +136,7 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
             loaded.push(image);
         }
     }
-    // Files no image uses (OCI index blobs and the like) do not stay.
-    let used = |d: &str| loaded.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
-    for d in ingested.iter().filter(|d| !used(d)) {
-        if let Ok(path) = store.blob_path(d) {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-    Ok(loaded)
+    Ok(())
 }
 
 /// Writes `images` as one archive `docker load` reads back.
@@ -392,6 +424,74 @@ mod tests {
         assert_eq!(images[0].layers.len(), 1);
         // Only the config and the layer stay in the store.
         let blobs = std::fs::read_dir(store.blob_path(&images[0].config_digest).unwrap().parent().unwrap()).unwrap().count();
+        assert_eq!(blobs, 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A load that fails after ingesting blobs removes what no image record
+    /// uses: a crafted archive cannot park its bytes in the store by
+    /// failing late.
+    #[test]
+    fn a_failed_load_does_not_park_blobs_in_the_store() {
+        let dir = scratch();
+        let store = Store::open(&dir).unwrap();
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_ustar();
+        h.set_size(4);
+        h.set_mode(0o644);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, "layer", &b"data"[..]).unwrap();
+        let bytes = b.into_inner().unwrap(); // no manifest.json
+        assert!(load(&store, bytes.as_slice()).is_err());
+        let blobs = std::fs::read_dir(dir.join("blobs/sha256")).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(blobs, 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An image whose record was written before a later entry fails keeps
+    /// its blobs: the index is the source of truth for pruning.
+    #[test]
+    fn a_failed_load_keeps_blobs_for_images_it_recorded() {
+        // Built by a producer store so the consumer's `before` is empty and
+        // the blobs count as freshly ingested.
+        let producer = scratch();
+        let bytes = {
+            let store = Store::open(&producer).unwrap();
+            let put = |bytes: &[u8]| {
+                let mut w = store.ingest().unwrap();
+                std::io::Write::write_all(&mut w, bytes).unwrap();
+                w.finish().unwrap()
+            };
+            let config = json!({"os": "linux", "architecture": "arm64", "created": "2026-01-01T00:00:00Z", "config": {"Cmd": ["echo"]}});
+            let config_bytes = serde_json::to_vec(&config).unwrap();
+            let (config_digest, _) = put(&config_bytes);
+            let (layer_digest, _) = put(b"layer-bytes");
+            let hex = |d: &str| d.strip_prefix("sha256:").unwrap_or(d).to_owned();
+            let mut b = tar::Builder::new(Vec::new());
+            let mut add = |name: &str, data: &[u8]| {
+                let mut h = tar::Header::new_ustar();
+                h.set_size(data.len() as u64);
+                h.set_mode(0o644);
+                h.set_entry_type(tar::EntryType::Regular);
+                b.append_data(&mut h, name, data).unwrap();
+            };
+            add(&format!("{}.json", hex(&config_digest)), &config_bytes);
+            add(&layer_digest, b"layer-bytes");
+            // The second entry references a config the archive does not
+            // carry, so the load fails after the first image is recorded.
+            let manifest = json!([
+                {"Config": format!("{}.json", hex(&config_digest)), "RepoTags": ["keep:1"], "Layers": [layer_digest]},
+                {"Config": "0000000000000000000000000000000000000000000000000000000000000000.json", "RepoTags": ["drop:1"], "Layers": []},
+            ]);
+            add("manifest.json", &serde_json::to_vec(&manifest).unwrap());
+            b.into_inner().unwrap()
+        };
+        std::fs::remove_dir_all(&producer).unwrap();
+        let dir = scratch();
+        let store = Store::open(&dir).unwrap();
+        assert!(load(&store, bytes.as_slice()).is_err());
+        assert!(store.find("keep:1").unwrap().is_some());
+        let blobs = std::fs::read_dir(dir.join("blobs/sha256")).unwrap().count();
         assert_eq!(blobs, 2);
         std::fs::remove_dir_all(&dir).unwrap();
     }

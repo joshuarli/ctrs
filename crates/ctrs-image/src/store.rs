@@ -261,8 +261,12 @@ impl Store {
     fn write_index(&self, images: &[Image]) -> io::Result<()> {
         let tmp = self.root.join("tmp/images.json");
         let bytes = serde_json::to_vec_pretty(images).map_err(io::Error::other)?;
-        fs::write(&tmp, bytes)?;
-        fs::rename(tmp, self.root.join("images.json"))
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, self.root.join("images.json"))?;
+        fs::File::open(&self.root)?.sync_all()
     }
 }
 
