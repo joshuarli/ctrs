@@ -453,6 +453,33 @@ the docker-container driver's full-image tar round-trip
 embedded `docker` driver skips. Closing it requires embedded
 buildkitd with direct store access (multi-session feature).
 
+**Why embedded buildkitd alone cannot close it (2026-11-15
+analysis):** ctrs's image store is host-side by design — every image
+byte must cross vsock host-ward exactly once no matter who produces
+it, and `archive::load` must ingest it (measured ~0.73 s for a
+468 MB store tar, already *faster* than OrbStack's `docker load` at
+1.23 s, and mostly digest-dedup checks on repeat loads). OrbStack's
+`docker` driver skips the whole hop because its image store lives
+inside the same VM as buildkitd — an architectural difference, not a
+protocol one. A proxied/embedded buildkitd would still owe the
+vsock crossing + ingest; it would only remove the buildx-CLI relay
+(~0.3 s of the ~1.3 s delta on a 1.4 GB image). Closing the cell
+outright needs either the image store moved guest-ward (a
+fundamental redesign) or a store-aware exporter that ships only
+changed layers (no such BuildKit docker-driver mechanism exists
+either — moby pays the same full-image cost, which is why the
+matched `--driver dc` control already shows ctrs *ahead*). Recorded
+as the campaign's one structural feature gap: `docker`-driver
+builds exist and work, they just cost ~0.3–1.3 s more per build,
+scaling with image size.
+
+**Adjacent-path probes (same session, warm engines):** `docker save`
+of the 468 MB gcc store — ctrs 0.52 s vs OrbStack 2.51 s (~5x,
+host-side store reads directly); `docker export` ~1.5 s/GB on both
+(parity); container churn 16-parallel `run --rm` 0.63 s vs OrbStack
+1.68 s, sequential ~64 ms vs ~268 ms per run — the new per-process
+bulk connections did not regress start paths.
+
 ### W10 relay-churn fix: guest refusal marker + host negative cache
 
 W10's residual loss (~0.55 s vs ~0.30 s recovery) was traced to refused
