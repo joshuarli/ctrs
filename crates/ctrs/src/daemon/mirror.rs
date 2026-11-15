@@ -39,6 +39,12 @@ static PUSH_IMAGES: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::ne
 static PUSH_INDEX_PICK: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static PUSH_REFS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static PUSH_UPLOADS: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+/// repo → manifest digests PUT under it. `manifests()` is global by
+/// digest (an index resolves children across PUTs), but a `sha256:`
+/// GET must only answer for repos that actually received the PUT —
+/// otherwise an identical rebuild's manifest looks "already pushed"
+/// and buildkit skips the PUT, leaving nothing to retag.
+static PUSH_REPO_MANIFESTS: OnceLock<Mutex<HashMap<String, std::collections::HashSet<String>>>> = OnceLock::new();
 
 fn manifests() -> &'static Mutex<HashMap<String, Vec<u8>>> {
     PUSH_MANIFESTS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -57,6 +63,9 @@ fn refs() -> &'static Mutex<HashMap<String, String>> {
 }
 fn uploads() -> &'static Mutex<HashMap<String, PathBuf>> {
     PUSH_UPLOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn repo_manifests() -> &'static Mutex<HashMap<String, std::collections::HashSet<String>>> {
+    PUSH_REPO_MANIFESTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// The mirror's secret path segment, kept in the state directory so it
@@ -220,6 +229,7 @@ pub fn push_ref(engine: &Engine, repo: &str) -> Option<String> {
 pub fn take_pushed(repo: &str) -> (Vec<String>, Vec<String>) {
     let names = push_images().lock().unwrap_or_else(|e| e.into_inner()).remove(repo).unwrap_or_default();
     let pick = index_picks().lock().unwrap_or_else(|e| e.into_inner()).remove(&format!("{repo}:latest"));
+    crate::diag::debug!("take_pushed", repo = repo, names = format!("{names:?}"), pick = format!("{pick:?}"));
     let mut manifests = image_manifests().lock().unwrap_or_else(|e| e.into_inner());
     let (keep, drop): (Vec<String>, Vec<String>) = names.into_iter().partition(|n| pick.is_none() || manifests.get(n) == pick.as_ref());
     for n in &drop {
@@ -555,6 +565,12 @@ fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, pus
                 body(r, len, chunked).take(MAX_MANIFEST).read_to_end(&mut bytes)?;
                 record_manifest(engine, &repo, &reference, &bytes)?;
                 let digest = ctrs_image::store::sha256_digest(&bytes);
+                repo_manifests()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(repo.clone())
+                    .or_default()
+                    .insert(digest.clone());
                 manifests_ref_insert(&repo, &reference, &digest);
                 head(w, "201 Created", &format!("Docker-Content-Digest: {digest}\r\n"), 0)?;
             }
@@ -567,7 +583,15 @@ fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, pus
 /// `repo:ref` → the digest of the manifest last PUT under it.
 fn manifests_ref(repo: &str, reference: &str) -> Option<String> {
     if reference.starts_with("sha256:") {
-        return Some(reference.to_owned());
+        // Digest refs are content-addressed, but only within the repo
+        // that PUT them: a digest pushed under another build's repo
+        // must 404 here so buildkit re-PUTs and records it.
+        return repo_manifests()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(repo)
+            .filter(|s| s.contains(reference))
+            .map(|_| reference.to_owned());
     }
     refs().lock().unwrap_or_else(|e| e.into_inner()).get(&format!("{repo}:{reference}")).cloned()
 }
@@ -582,6 +606,7 @@ fn manifests_ref_insert(repo: &str, reference: &str, digest: &str) {
 fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -> io::Result<()> {
     let v: Value = serde_json::from_slice(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("manifest: {e}")))?;
     let digest = ctrs_image::store::sha256_digest(bytes);
+    crate::diag::debug!("mirror manifest PUT", repo = repo, reference = reference, digest = digest.clone(), index = v["manifests"].is_array());
     manifests().lock().unwrap_or_else(|e| e.into_inner()).insert(digest.clone(), bytes.to_vec());
     if let Some(entries) = v["manifests"].as_array() {
         // An index (or manifest list): pick the entry for this host's
@@ -615,6 +640,7 @@ fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -
     }
     // Attestation manifests carry no layers; they are not images.
     if layers.is_empty() {
+        crate::diag::debug!("mirror manifest skipped", repo = repo, reference = reference, reason = "no layers");
         return Ok(());
     }
     // A registry refuses a manifest whose blobs it does not have
@@ -622,6 +648,7 @@ fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -
     // layers can never deploy.
     for l in &layers {
         if !engine.store.has_blob(&l.digest, l.size) {
+            crate::diag::debug!("mirror manifest skipped", repo = repo, reference = reference, reason = format!("missing blob {}", l.digest));
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("manifest references missing blob {}", l.digest)));
         }
     }
