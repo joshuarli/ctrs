@@ -1080,3 +1080,15 @@ statistically flat — already bounded by the guest-advertised
 window and VZ internals. Smoke 21/21 on the signed build. The
 remaining h2g residual vs OrbStack is the VZ vsock line rate
 itself, not socket buffering.
+
+**Silent-death forensics instrumented (2026-11-15):** the nine
+historical daemon deaths left no log line, no panic-hook output and
+no crash file — consistent with a fatal signal (Virtualization.framework
+is the prime suspect) rather than a Rust panic, since `panic =
+"abort"` still runs the hook first. `diag::init` now installs
+async-signal-safe handlers for SIGSEGV/SIGBUS/SIGABRT/SIGILL/
+SIGTRAP/SIGFPE (plus a sigaltstack for stack-overflow faults) that
+write `signal=<n> fault=0x<addr> pid=<pid>` to
+`<state>/crashes/signals.log` and `_exit`. Any recurrence during the
+W11 soak or later is now attributable instead of silent. Fork-based
+unit test verifies the marker; `cargo test -p ctrs` 174/174.

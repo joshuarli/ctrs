@@ -218,6 +218,7 @@ pub fn init(part: Part) {
         std::mem::forget(enter_op(op));
     }
     install_panic_hook();
+    install_signal_handlers();
     if part != Part::Cli {
         capture_stderr();
     }
@@ -401,6 +402,97 @@ pub fn capture_stderr() {
         unsafe { libc::dup2(orig, 2) };
     }
 }
+
+// ---------------------------------------------------------------- signals
+
+/// Fatal-signal forensics. The historical silent daemon deaths left no
+/// log line, no panic-hook output and no crash file, which points at a
+/// signal (most plausibly inside Virtualization.framework) rather than a
+/// Rust panic — `panic = "abort"` would still have run the hook first.
+/// These handlers are async-signal-safe: one `write` to a file opened at
+/// init, then `_exit`. The next silent death leaves
+/// `<state>/crashes/signals.log` saying which signal and fault address.
+#[cfg(unix)]
+mod signal_crash {
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::io::RawFd;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicI32, Ordering};
+
+    static LOG_FD: AtomicI32 = AtomicI32::new(-1);
+
+    extern "C" fn handler(sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
+        let fd = LOG_FD.load(Ordering::Relaxed);
+        if fd >= 0 {
+            // SAFETY: read-only access to the siginfo the kernel passed us.
+            let addr = if info.is_null() { std::ptr::null_mut() } else { unsafe { (*info).si_addr() } };
+            let mut buf = [0u8; 192];
+            // SAFETY: snprintf into a stack buffer; async-signal-safe in
+            // practice on macOS and Linux (no allocation, no locks).
+            let n = unsafe {
+                libc::snprintf(
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    c"signal=%d fault=%p pid=%d\n".as_ptr(),
+                    sig,
+                    addr,
+                    libc::getpid(),
+                )
+            };
+            if n > 0 {
+                // SAFETY: `fd` is our own append-mode file; write is
+                // async-signal-safe and partial writes don't matter.
+                unsafe { libc::write(fd, buf.as_ptr().cast(), n as usize) };
+            }
+        }
+        // SAFETY: _exit is the async-signal-safe way to die with a status.
+        unsafe { libc::_exit(128 + sig) };
+    }
+
+    /// Opens `path` and installs handlers for the fatal signals. Failure
+    /// to open the log just means no marker; the signals still get
+    /// default-crash semantics via `_exit`.
+    pub fn install(path: &Path) {
+        use std::os::unix::fs::OpenOptionsExt;
+        let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path) else {
+            return;
+        };
+        let fd: RawFd = file.into_raw_fd();
+        LOG_FD.store(fd, Ordering::Relaxed);
+        // A stack overflow faults with no stack left for the handler;
+        // give it a dedicated one.
+        // SAFETY: malloc'd block lives for the process; sigaltstack
+        // takes ownership of the pointer we hand it.
+        unsafe {
+            let stack = libc::malloc(64 * 1024);
+            if !stack.is_null() {
+                let mut ss: libc::stack_t = std::mem::zeroed();
+                ss.ss_sp = stack;
+                ss.ss_size = 64 * 1024;
+                ss.ss_flags = 0;
+                libc::sigaltstack(&ss, std::ptr::null_mut());
+            }
+            for sig in [libc::SIGSEGV, libc::SIGBUS, libc::SIGABRT, libc::SIGILL, libc::SIGTRAP, libc::SIGFPE] {
+                let mut sa: libc::sigaction = std::mem::zeroed();
+                sa.sa_sigaction = handler as *const () as libc::sighandler_t;
+                sa.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK | libc::SA_RESETHAND;
+                libc::sigemptyset(&mut sa.sa_mask);
+                libc::sigaction(sig, &sa, std::ptr::null_mut());
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn install_signal_handlers() {
+    if let Some(dir) = crashes_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        signal_crash::install(&dir.join("signals.log"));
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {}
 
 // ---------------------------------------------------------------- crashes
 
@@ -654,6 +746,31 @@ mod tests {
         let text = crash_text(t, "ctrs-api", "src/x.rs:1:2", "boom", "0: main");
         assert!(text.contains("Message:  boom") && text.contains("Thread:   ctrs-api") && text.contains("Backtrace:\n0: main"), "{text}");
         assert!(text.contains(&format!("Version:  ctrs {}", env!("CARGO_PKG_VERSION"))));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fatal_signal_leaves_a_marker() {
+        let dir = temp("signals");
+        let log = dir.join("signals.log");
+        // Install before forking so the child inherits the handlers and
+        // the log fd; the child then only calls raise(), which is
+        // async-signal-safe even from a forked multithreaded process.
+        signal_crash::install(&log);
+        match unsafe { libc::fork() } {
+            0 => unsafe {
+                libc::raise(libc::SIGSEGV);
+                libc::_exit(0);
+            },
+            pid => {
+                let mut status = 0;
+                unsafe { libc::waitpid(pid, &mut status, 0) };
+                assert!(libc::WIFEXITED(status) || libc::WIFSIGNALED(status), "child status {status}");
+            }
+        }
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(text.contains("signal=11"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
