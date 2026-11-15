@@ -4,9 +4,10 @@
 Drives real application fixtures (bench/native/fixtures) against two
 engines — ctrs (fresh Virtualization.framework guest per data root) and
 OrbStack (the pinned macOS competitor) — through the same docker CLI,
-records one JSONL trial per run under .work/native-perf/, and never
-touches user engine state: every resource is project-scoped and removed
-after each trial.
+records pilot JSONL trials under .work/native-perf/, and confines cleanup
+to fixture resources. Shared image/build caches are retained; dedicated
+benchmark builders persist between trials. See README for remaining
+qualification and resource-accounting limits.
 
 Requires Python >= 3.11 (tomllib). See README.md.
 """
@@ -17,10 +18,12 @@ import argparse
 import base64
 import concurrent.futures
 import hashlib
+import inspect
 import json
 import os
 import random
 import re
+import shlex
 import shutil
 import signal
 import statistics
@@ -73,7 +76,6 @@ W6_DIR = FIXTURES / "w6"
 # builder usable on *both* engines, so W6/W7 can separate engine runtime
 # from builder topology. The image is ctrs's pinned buildkit digest so
 # both sides run the same BuildKit version.
-DC_BUILDER = "np-dc"
 DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis:7-alpine"
@@ -168,7 +170,9 @@ def find_docker() -> str:
     sys.exit("docker CLI not found on PATH or in known locations")
 
 
-DOCKER = find_docker()
+# Offline manifest validation/reporting must work without a Docker install.
+# Runtime commands resolve this only after validating their inputs.
+DOCKER: str | None = None
 
 
 def api_tag() -> str:
@@ -184,6 +188,50 @@ API_TAG = api_tag()
 def load_cases() -> dict:
     with open(CASES_FILE, "rb") as f:
         return tomllib.load(f)
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def fixture_sha256() -> str:
+    digest = hashlib.sha256()
+    for path in sorted(FIXTURES.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        digest.update(str(path.relative_to(FIXTURES)).encode() + b"\0")
+        digest.update(bytes.fromhex(sha256_file(path)))
+    return digest.hexdigest()
+
+
+def validate_manifest() -> dict:
+    """Parse contracts before any engine access; hashes are provenance,
+    not a claim that mutable image tags or the pilot suite are frozen."""
+    cases = load_cases()
+    ids = [case["id"] for case in cases.get("case", [])]
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("case IDs must be nonempty and unique")
+    with (BENCH / "assets.lock").open("rb") as src:
+        assets = tomllib.load(src)
+    json.loads((BENCH / "schema.json").read_text())
+    return {"cases": ids, "asset_freeze_status": assets["freeze"]["status"],
+            "cases_sha256": sha256_file(CASES_FILE),
+            "assets_sha256": sha256_file(BENCH / "assets.lock"),
+            "fixture_sha256": fixture_sha256()}
+
+
+def workload_id(run_id: str, case_id: str, pair_id: int | None,
+                sequence: int) -> str:
+    # Both engines in a pair get exactly the same inputs. Another pair
+    # gets a different stamp, so W6 cannot silently become a cache hit.
+    sample = f"pair-{pair_id}" if pair_id is not None else f"trial-{sequence}"
+    return f"{run_id}:{case_id}:{sample}"
 
 
 _ORB_RESOURCES: tuple[int, int] | None = None
@@ -228,6 +276,9 @@ class Engine:
             self.dir = Path(base)
             (self.dir / "run").mkdir(parents=True, exist_ok=True)
             self.socket = f"unix://{self.dir / 'run' / 'docker.sock'}"
+        endpoint_hash = hashlib.sha256(self.socket.encode()).hexdigest()[:12]
+        self.builder_name = f"np-dc-{self.name}-{endpoint_hash}"
+        self.buildx_config = WORK / "buildx" / f"{self.name}-{endpoint_hash}"
 
     def env(self, extra: dict | None = None) -> dict:
         env = os.environ.copy()
@@ -243,6 +294,11 @@ class Engine:
         env.pop("DOCKER_TLS_VERIFY", None)
         env.pop("COMPOSE_PROJECT_NAME", None)
         env.pop("COMPOSE_FILE", None)
+        # Builder selection is client-global unless isolated explicitly.
+        # Keep credentials/plugins in the normal Docker config, but never
+        # select, reuse, or prune the user's buildx builders.
+        env.pop("BUILDX_BUILDER", None)
+        env["BUILDX_CONFIG"] = str(self.buildx_config)
         if extra:
             env.update(extra)
         return env
@@ -738,20 +794,16 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
         engine.ensure_up()
         sampler, trace = start_sampler(engine, trial_dir)
 
-        # Untimed: drop every local reference and the engine's content
-        # store so each trial performs a real fetch+install, not a dedup
-        # hit. OrbStack/containerd releases content on `image prune`;
-        # ctrs keeps unreferenced layers until the next VM boot, so its
-        # daemon is restarted (untimed) to reach the same cold store.
+        # Drop only fixture refs. Both engines keep their content caches;
+        # removing tags cannot establish an empty-store comparison.
+        # In particular, never prune the user's shared OrbStack daemon.
         for item in portfolio.values():
             for ref in {item["pull_ref"], item["tag_ref"],
                         item.get("local_ref", "")}:
-                engine.sh(["rmi", "-f", ref], check=False, timeout=60)
-        if engine.name == "orbstack":
-            engine.sh(["image", "prune", "-f"], check=False, timeout=120)
-        else:
-            engine.stop()
-            engine.ensure_up()
+                if ref:
+                    engine.sh(["rmi", "-f", ref], check=False, timeout=60)
+        rec["metrics"]["cache_mode"] = "fixture-refs-removed-content-retained"
+        rec["notes"].append("W8 is a warm-content pilot, not an empty-store pull")
 
         base = None
         if under_load:
@@ -853,6 +905,10 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
                 rec["correctness"]["checks"]["load_errors_zero"] = (
                     summary["errors"] == 0)
                 pulls_ok = pulls_ok and count_ok and summary["errors"] == 0
+                pulls_ok = pulls_ok and load_proc.returncode == 0
+            else:
+                pulls_ok = False
+                rec["validation_errors"].append("load driver produced no summary")
         rec["correctness"]["ok"] = bool(pulls_ok)
         return rec
     except Exception as exc:
@@ -872,34 +928,51 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
 
 
 def ensure_dc_builder(engine: Engine) -> None:
-    """Create the shared docker-container BuildKit builder on this engine
-    if absent (untimed setup). Both engines get the same pinned BuildKit
-    image so `--driver dc` isolates builder topology from engine runtime."""
-    cp = engine.sh(["buildx", "inspect", DC_BUILDER], timeout=30,
-                   check=False)
-    if cp.returncode == 0:
-        return
-    engine.sh(
-        ["buildx", "create", "--name", DC_BUILDER,
-         "--driver", "docker-container",
-         "--driver-opt", f"image={DC_BUILDER_IMAGE}", "--bootstrap"],
-        timeout=600)
+    """Use a benchmark-owned builder bound to this exact engine socket.
+    Buildx names/config are client-global by default, so names alone do
+    not prove that a builder sends work to the intended competitor."""
+    # The recorded buildx v0.22 has no inspect --format option. Parse
+    # its labelled fields and fail closed on missing/ambiguous values.
+    inspect = ["buildx", "inspect", engine.builder_name]
+    cp = engine.sh(inspect, timeout=30, check=False)
+    if cp.returncode != 0:
+        engine.sh(
+            ["buildx", "create", "--name", engine.builder_name,
+             "--driver", "docker-container",
+             "--driver-opt", f"image={DC_BUILDER_IMAGE}", "--bootstrap",
+             engine.socket], timeout=600)
+        cp = engine.sh(inspect, timeout=30, check=False)
+    if cp.returncode != 0:
+        raise RuntimeError("cannot verify benchmark builder endpoint")
+    fields: dict[str, list[str]] = {}
+    for line in cp.stdout.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            fields.setdefault(key.strip(), []).append(value.strip())
+    if (fields.get("Driver") != ["docker-container"]
+            or fields.get("Endpoint") != [engine.socket]):
+        raise RuntimeError("benchmark builder belongs to a different endpoint/driver")
+    options = fields.get("Driver Options", [])
+    if (len(options) != 1
+            or f"image={DC_BUILDER_IMAGE}" not in shlex.split(options[0])):
+        raise RuntimeError("benchmark builder does not use the pinned BuildKit image")
 
 
-def build_args(driver: str, extra: list[str]) -> list[str]:
-    """`docker buildx build --load` argv; `driver="dc"` pins the shared
-    docker-container builder on both engines."""
+def build_args(engine: Engine, driver: str, extra: list[str]) -> list[str]:
+    """`docker buildx build --load` argv with explicit builder selection."""
     args = ["buildx", "build", "--load", *extra]
     if driver == "dc":
-        args += ["--builder", DC_BUILDER]
+        args += ["--builder", engine.builder_name]
+    else:
+        args += ["--builder", "default"]
     return args
 
 
 def trial_w7(ctx, engine: Engine, state: str,
              driver: str = "default") -> dict:
-    """W7: native image build — empty/warm/incremental build-cache states
+    """W7 pilot: native image build — uncached/warm/incremental states
     on a multi-stage offline Dockerfile, then a run-time correctness
-    probe. The build cache is pruned before the empty build; warm
+    probe. The first build explicitly bypasses the layer cache; warm
     repeats the identical context; incremental bumps stamp/note.txt so
     only the last layer of stage 1 re-executes."""
     case_id = "W7"
@@ -923,24 +996,22 @@ def trial_w7(ctx, engine: Engine, state: str,
             (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
             return ctx_dir
 
-        def build(context: Path, timeout: float = 900) -> tuple[float, bool]:
+        def build(context: Path, uncached: bool = False,
+                  timeout: float = 900) -> tuple[float, bool]:
             tp = time.monotonic()
             cp = engine.sh(
-                build_args(driver, ["-q", "-t", tag,
-                                    "-f", str(context / "Dockerfile"),
-                                    str(context)]),
+                build_args(engine, driver,
+                           (["--no-cache"] if uncached else [])
+                           + ["-q", "-t", tag, "-f",
+                              str(context / "Dockerfile"), str(context)]),
                 timeout=timeout, check=False)
             return round(time.monotonic() - tp, 3), cp.returncode == 0
 
-        prune = ["buildx", "prune", "-af"]
-        if driver == "dc":
-            prune += ["--builder", DC_BUILDER]
-        cp = engine.sh(prune, timeout=300, check=False)
-        rec["metrics"]["prune_ok"] = cp.returncode == 0
-
-        s, ok = build(build_ctx("incremental-0"))
-        rec["metrics"]["build_empty_s"] = s
-        checks["build_empty"] = ok
+        rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
+        rec["notes"].append("--no-cache bypasses layer reuse; engine/content stores remain warm")
+        s, ok = build(build_ctx("incremental-0"), uncached=True)
+        rec["metrics"]["build_uncached_s"] = s
+        checks["build_uncached"] = ok
 
         s, ok = build(build_ctx("incremental-0"))
         rec["metrics"]["build_warm_s"] = s
@@ -959,7 +1030,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                                and "npw7-ok" in smoke.stdout)
         rec["correctness"]["ok"] = all(
             checks.get(k) for k in
-            ("build_empty", "build_warm", "build_incr",
+            ("build_uncached", "build_warm", "build_incr",
              "run_note", "run_smoke"))
         return rec
     except Exception as exc:
@@ -980,6 +1051,9 @@ def trial_w6(ctx, engine: Engine, state: str,
     tag = f"npw6/zlib:{ctx.run_id[-6:]}"
     checks = rec["correctness"]["checks"]
     try:
+        if not (W6_DIR / "zlib-1.3.1.tar.gz").is_file():
+            raise RuntimeError("W6 source archive is absent from this checkout; "
+                               "implement checksum-pinned asset preparation before measuring W6")
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
@@ -995,12 +1069,13 @@ def trial_w6(ctx, engine: Engine, state: str,
         shutil.copy(W6_DIR / "Dockerfile", ctx_dir / "Dockerfile")
         shutil.copy(W6_DIR / "zlib-1.3.1.tar.gz",
                     ctx_dir / "zlib-1.3.1.tar.gz")
-        (ctx_dir / "stamp.txt").write_text(f"{ctx.run_id}\n")
+        (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
+        rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
         tp = time.monotonic()
         build = engine.sh(
-            build_args(driver, ["-q", "-t", tag,
-                                "-f", str(ctx_dir / "Dockerfile"),
-                                str(ctx_dir)]),
+            build_args(engine, driver, ["--no-cache", "-q", "-t", tag,
+                                       "-f", str(ctx_dir / "Dockerfile"),
+                                       str(ctx_dir)]),
             timeout=1800, check=False)
         rec["metrics"]["build_s"] = round(time.monotonic() - tp, 3)
         checks["build"] = build.returncode == 0
@@ -1014,7 +1089,7 @@ def trial_w6(ctx, engine: Engine, state: str,
         sha = probe.stdout.split()[0] if probe.returncode == 0 else ""
         rec["metrics"]["artifact_sha256"] = sha
         checks["artifact"] = (probe.returncode == 0
-                              and len(sha) == 64)
+                              and re.fullmatch(r"[0-9a-f]{64}", sha) is not None)
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -1506,7 +1581,7 @@ def trial_w11(ctx, engine: Engine, state: str,
     """W11: sustained-operation soak — the W1 stack under repeated
     load windows interleaved with container-churn bursts until the
     duration deadline. Gates: engine answers `docker version` at the
-    end (no unplanned death), aggregate error rate stays under 1%,
+    end (no unplanned death), every load window has zero errors,
     every churn job exits 0. The resource sampler runs for the whole
     trial so RSS/CPU growth is captured. v1 pilot default is 300 s;
     the campaign target is 12-24 h via --duration."""
@@ -1540,28 +1615,34 @@ def trial_w11(ctx, engine: Engine, state: str,
             return rec
         rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
 
-        total_req = total_err = total_writes = windows = churn_done = 0
-        churn_fail = version_fail = 0
+        total_req = total_ok = total_err = total_writes = windows = churn_done = 0
+        churn_fail = version_fail = invalid_windows = 0
         wseed = seed
         while time.monotonic() < deadline:
             windows += 1
             wseed += 1
             out = trial_dir / f"load-{windows:03d}.json"
+            window_duration = min(window, max(0.0, deadline - time.monotonic()))
             load = subprocess.run(
                 [sys.executable, str(LOAD_PY), "--url", base,
                  "--concurrency", str(concurrency),
-                 "--duration", str(window),
+                 "--duration", str(window_duration),
                  "--write-ratio", str(write_ratio),
                  "--seed", str(wseed), "--out", str(out)],
                 capture_output=True, text=True,
-                timeout=window + 120)
+                timeout=window_duration + 120)
             if out.exists():
                 s = json.loads(out.read_text())
-                total_req += s.get("requests", 0)
-                total_err += s.get("errors", 0)
-                total_writes += s.get("writes_ok", 0)
+                total_req += s["requests"]
+                total_err += s["errors"]
+                total_writes += s["writes_ok"]
+                total_ok += s["reads_ok"] + s["writes_ok"]
+                if load.returncode != 0 or s["requests"] <= 0:
+                    invalid_windows += 1
+                    rec["validation_errors"].append(
+                        f"window {windows}: invalid load result (rc={load.returncode})")
             else:
-                total_err += 1
+                invalid_windows += 1
                 rec["validation_errors"].append(
                     f"window {windows}: load driver no summary: "
                     f"{load.stderr[-200:]}")
@@ -1584,28 +1665,35 @@ def trial_w11(ctx, engine: Engine, state: str,
                     1 for c in outs
                     if c.returncode == 0 and "ok" in c.stdout)
                 churn_fail += sum(1 for c in outs if c.returncode != 0)
+                churn_fail += sum(1 for c in outs
+                                  if c.returncode == 0 and "ok" not in c.stdout)
 
         rec["metrics"].update({
             "soak_seconds": round(time.monotonic() - t0, 3),
             "windows": windows,
             "requests": total_req,
+            "requests_ok": total_ok,
             "errors": total_err,
             "error_pct": round(100.0 * total_err / max(total_req, 1), 4),
             "writes_ok": total_writes,
-            "rps_mean": round(total_req / max(
+            "rps_mean": round(total_ok / max(
                 time.monotonic() - t0 - rec["metrics"]["setup_seconds"], 1), 1),
             "churn_jobs_completed": churn_done,
             "churn_failures": churn_fail,
             "engine_version_check_failures": version_fail,
+            "invalid_load_windows": invalid_windows,
         })
         status, stats = http_json(f"{base}/stats", timeout=10)
         expected_items = 500 + total_writes
         got_items = stats.get("items") if isinstance(stats, dict) else None
         checks["item_count"] = {
-            "expected_min": expected_items, "got": got_items,
-            "ok": got_items is not None and got_items >= expected_items}
+            "expected": expected_items, "got": got_items,
+            "ok": status == 200 and got_items == expected_items}
         checks["engine_alive"] = version_fail == 0
-        checks["error_rate"] = total_err <= max(1, total_req // 100)
+        checks["errors_zero"] = total_err == 0
+        checks["load_windows_valid"] = (
+            windows > 0 and total_ok > 0 and invalid_windows == 0
+            and total_req == total_ok + total_err)
         checks["churn_all_ok"] = churn_fail == 0
         rec["correctness"]["ok"] = all(
             v is True or (isinstance(v, dict) and v.get("ok"))
@@ -1825,6 +1913,18 @@ class RunContext:
         self.git_sha = git_sha()
         self._seq = 0
         self.engines: dict[str, Engine] = {}
+        manifest = validate_manifest()
+        self.provenance = {
+            key: value for key, value in manifest.items() if key.endswith("sha256")}
+        self.provenance.update({
+            "runner_sha256": sha256_file(Path(__file__)),
+            "ctrs_binary_sha256": sha256_file(CTRS_BIN),
+            "worktree_dirty": bool(subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                cwd=REPO, capture_output=True, text=True).stdout.strip()),
+        })
+        self.workload_params: dict = {}
+        self.workload_id = f"{run_id}:standalone"
 
     def trial_dir(self, engine: str, case: str, state: str) -> Path:
         self._seq += 1
@@ -1841,13 +1941,17 @@ class RunContext:
             "run_id": self.run_id,
             "case": case,
             "engine": engine.name,
-            "engine_server_version": safe_version(engine),
+            "engine_server_version": "not-observed",
             "state": state,
             "pair_id": None,
             "order_index": None,
             "host_id": self.host_id,
             "arch": self.arch,
             "git_sha": self.git_sha,
+            "evidence_status": "pilot",
+            "provenance": dict(self.provenance),
+            "workload_params": dict(self.workload_params),
+            "workload_id": self.workload_id,
             "started_utc": utcnow(),
             "metrics": {},
             "correctness": {"ok": True, "checks": {}},
@@ -1893,6 +1997,18 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
             **kw) -> dict:
+    trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3,
+              "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
+              "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
+              "W10": trial_w10, "W11": trial_w11, "HOLDOUT": trial_holdout}
+    if case_id not in trials:
+        raise ValueError(f"case {case_id} not implemented")
+    trial = trials[case_id]
+    defaults = {name: parameter.default
+                for name, parameter in inspect.signature(trial).parameters.items()
+                if parameter.default is not inspect.Parameter.empty}
+    ctx.workload_id = workload_id(ctx.run_id, case_id, pair_id, ctx._seq + 1)
+    ctx.workload_params = {"cold": cold, **defaults, **kw}
     if cold:
         # Socket paths must stay under SUN_LEN (~104): keep cold engine
         # dirs short and outside the deep results tree.
@@ -1910,36 +2026,15 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             ctx.engines[engine_name] = engine
         stop = not keep_warm
     try:
-        if case_id == "W1":
-            rec = trial_w1(ctx, engine, state)
-        elif case_id == "W2":
-            rec = trial_w2(ctx, engine, state, **kw)
-        elif case_id == "W8":
-            rec = trial_w8(ctx, engine, state, **kw)
-        elif case_id == "W7":
-            rec = trial_w7(ctx, engine, state,
-                           driver=kw.get("driver", "default"))
-        elif case_id == "W9":
-            rec = trial_w9(ctx, engine, state)
-        elif case_id == "W4":
-            rec = trial_w4(ctx, engine, state)
-        elif case_id == "W6":
-            rec = trial_w6(ctx, engine, state,
-                           driver=kw.get("driver", "default"))
-        elif case_id == "W3":
-            rec = trial_w3(ctx, engine, state)
-        elif case_id == "W5":
-            rec = trial_w5(ctx, engine, state)
-        elif case_id == "W10":
-            rec = trial_w10(ctx, engine, state, **kw)
-        elif case_id == "W11":
-            rec = trial_w11(ctx, engine, state, **kw)
-        elif case_id == "HOLDOUT":
-            rec = trial_holdout(ctx, engine, state, **kw)
-        else:
-            raise ValueError(f"case {case_id} not implemented")
+        rec = trial(ctx, engine, state, **kw)
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
+        # The trial starts the engine. Sampling before ensure_up() records
+        # a false version change on the first cold/stopped-engine trial.
+        rec["engine_server_version"] = safe_version(engine)
+        if rec["engine_server_version"] == "unreachable":
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append("engine unreachable after trial")
         info = safe_engine_info(engine)
         if info is not None:
             rec["resources"]["engine"] = info
@@ -1956,6 +2051,8 @@ def cmd_preflight(args) -> int:
     report = {"utc": utcnow(), "host_id": socket.gethostname(),
               "arch": os.uname().machine}
 
+    if os.uname().sysname != "Darwin":
+        failures.append("this campaign requires a macOS host")
     if os.uname().machine != "arm64":
         failures.append("host is not arm64; macOS lane requires Apple Silicon")
     for path, label in (
@@ -2040,8 +2137,8 @@ def cmd_prepare(args) -> int:
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side
             # registry), then the engine pushes and every local ref is
-            # dropped again; each trial's store-cold reset makes the pull
-            # a real fetch+install regardless.
+            # dropped again. Layer/content caches may remain: these
+            # warm-engine pilots do not prove an empty-store pull.
             port = ensure_registry(engine)
             reg = f"127.0.0.1:{port}"
             engine_portfolio = {}
@@ -2105,6 +2202,7 @@ def cmd_baseline(args) -> int:
                      f"{random.randint(0, 0xffff):04x}")
     a, b = args.a, args.b
     rng = random.Random(args.seed)
+    failed = False
     try:
         for pair in range(1, args.pairs + 1):
             order = [a, b] if (pair % 2 == 1) else [b, a]
@@ -2117,7 +2215,7 @@ def cmd_baseline(args) -> int:
                     kw = {"concurrency": args.concurrency,
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
-                          "seed": args.seed + pair * 10 + idx}
+                          "seed": args.seed + pair * 10}
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
                 if args.case == "W8" and getattr(args, "under_load", False):
@@ -2127,6 +2225,7 @@ def cmd_baseline(args) -> int:
                               pair_id=pair, order_index=idx, keep_warm=True,
                               **kw)
                 ok = rec["correctness"]["ok"]
+                failed = failed or not ok or bool(rec.get("validation_errors"))
                 wall = rec["metrics"].get("wall_seconds")
                 print(f"pair {pair} {eng} {'OK' if ok else 'FAIL'} "
                       f"wall={wall}", flush=True)
@@ -2134,7 +2233,7 @@ def cmd_baseline(args) -> int:
         for engine in ctx.engines.values():
             engine.stop()
     print(f"results: {ctx.jsonl}")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_holdout(args) -> int:
@@ -2145,10 +2244,13 @@ def cmd_holdout(args) -> int:
                      f"{random.randint(0, 0xffff):04x}")
     kw = {"ops": args.ops, "repos": args.repos, "issues": args.issues,
           "clones": args.clones, "seed": args.seed}
+    failed = False
     try:
         for eng in [e.strip() for e in args.engines.split(",") if e.strip()]:
             rec = run_one(ctx, eng, "HOLDOUT", "warm", **kw)
             m = rec["metrics"]
+            failed = failed or not rec["correctness"]["ok"] or bool(
+                rec.get("validation_errors"))
             print(f"{eng}: ok={rec['correctness']['ok']} "
                   f"health={m.get('time_to_health_s')}s "
                   f"seed={m.get('seed_s')}s "
@@ -2159,7 +2261,7 @@ def cmd_holdout(args) -> int:
         for engine in ctx.engines.values():
             engine.stop()
     print(f"results: {ctx.jsonl}")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_noop(args) -> int:
@@ -2180,119 +2282,31 @@ def cmd_noop(args) -> int:
 
 def bootstrap_ci(vals: list[float], iters: int = 2000,
                  seed: int = 7) -> tuple[float, float]:
-    if len(vals) < 2:
-        return (float("nan"), float("nan"))
-    rng = random.Random(seed)
-    n = len(vals)
-    means = []
-    for _ in range(iters):
-        means.append(sum(vals[rng.randrange(n)] for _ in range(n)) / n)
-    means.sort()
-    return means[int(0.025 * iters)], means[int(0.975 * iters)]
+    from reporting import bootstrap_ci as paired_median_ci
+    return paired_median_ci(vals, iters, seed)
 
 
 def cmd_report(args) -> int:
-    pat = args.match or "*"
-    files = sorted(d for d in RESULTS.glob(f"{pat}/trials.jsonl"))
-    records = []
-    for fp in files:
-        for line in fp.read_text().splitlines():
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
-    if not records:
+    # The standalone module also works without Docker, VM assets or macOS:
+    # python3 bench/native/reporting.py --match '<exact-run-id>'
+    from reporting import analyze, invalid_report, load_records, render_markdown
+    files = sorted(RESULTS.glob(f"{args.match or '*'}/trials.jsonl"))
+    records, issues = load_records(files)
+    if not records and not issues:
         print("no trial records found")
         return 1
-    groups: dict[tuple, list[dict]] = {}
-    for r in records:
-        # The dc-driver attribution runs share case IDs with the default
-        # driver; keep them out of the headline ratios.
-        if r.get("case") in ("W6", "W7") and \
-                r.get("metrics", {}).get("builder_driver") == "dc":
-            continue
-        groups.setdefault((r["case"], r["state"]), []).append(r)
-
-    print("# Native performance report (generated)\n")
-    print("| case | state | engine | n | ok | wall_s median | "
-          "p95_ms med | rps med | peak_rss_mb med | cpu_s med |")
-    print("|---|---|---|---|---|---|---|---|---|---|")
-    for (case, state), rs in sorted(groups.items()):
-        for eng in sorted({r["engine"] for r in rs}):
-            ers = [r for r in rs if r["engine"] == eng]
-            ok = sum(1 for r in ers if r["correctness"]["ok"])
-            walls = sorted(r["metrics"].get("wall_seconds", 0)
-                           for r in ers if r["metrics"].get("wall_seconds"))
-            p95 = sorted(r["metrics"]["p95_ms"] for r in ers
-                         if r["metrics"].get("p95_ms") is not None)
-            rps = sorted(r["metrics"]["rps"] for r in ers
-                         if r["metrics"].get("rps") is not None)
-            rss = sorted(r["resources"].get("peak_total_rss_kb", 0) / 1024
-                         for r in ers)
-            cpu = sorted(r["resources"].get("cpu_seconds_est", 0)
-                         for r in ers)
-            med = lambda xs: xs[len(xs) // 2] if xs else None
-            print(f"| {case} | {state} | {eng} | {len(ers)} | {ok} | "
-                  f"{med(walls)} | {med(p95)} | {med(rps)} | "
-                  f"{med(rss)} | {med(cpu)} |")
-
-    print("\n## Paired ratios (ctrs / orbstack; <1 favors ctrs)\n")
-    for (case, state), rs in sorted(groups.items()):
-        by_pair: dict[int, dict] = {}
-        for r in rs:
-            if r.get("pair_id") is None:
-                continue
-            by_pair.setdefault(r["pair_id"], {})[r["engine"]] = r
-        for metric in case_metrics(case):
-            ratios = []
-            for pair, d in sorted(by_pair.items()):
-                if "ctrs" in d and "orbstack" in d:
-                    a = d["ctrs"]["metrics"].get(metric)
-                    b = d["orbstack"]["metrics"].get(metric)
-                    if a and b:
-                        ratios.append(
-                            b / a if metric in HIGHER_BETTER else a / b)
-            if ratios:
-                lo, hi = bootstrap_ci(ratios)
-                med = sorted(ratios)[len(ratios) // 2]
-                print(f"- {case}/{state} {metric}: median={med:.3f} "
-                      f"CI95=[{lo:.3f},{hi:.3f}] n={len(ratios)}")
-    return 0
-
-
-# Headline metric per case for the paired-ratio report, in scorecard
-# order; `wall_seconds`, latency and rps are added for every case.
-# Metrics where a bigger number is better are listed in HIGHER_BETTER.
-CASE_HEADLINE = {
-    "W1": ["time_to_health_s", "time_to_roundtrip_s"],
-    "W2": ["rps", "p95_ms", "p99_ms"],
-    "W3": ["tx_tps", "up_s", "restart_s"],
-    "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
-    "W5": ["bind_median_s", "volume_median_s"],
-    "W6": ["build_s"],
-    "W7": ["build_empty_s", "build_warm_s", "build_incr_s"],
-    "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms"],
-    "W9": ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"],
-    "W10": ["recovery_s", "load_rps"],
-    "W11": ["rps_mean", "requests", "errors"],
-}
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "rps_mean", "requests"}
-
-
-def case_metrics(case: str) -> list[str]:
-    seen = []
-    for m in ["wall_seconds", "p95_ms", "p99_ms", "rps",
-              *CASE_HEADLINE.get(case, [])]:
-        if m not in seen:
-            seen.append(m)
-    return seen
+    report = analyze(records, issues)
+    print(render_markdown(report), end="")
+    return int(invalid_report(report))
 
 
 def main() -> int:
+    global DOCKER
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("preflight")
+    sub.add_parser("validate-manifest", help="offline contract syntax/hash check; no Docker required")
 
     p = sub.add_parser("prepare")
     p.add_argument("--engines", default="ctrs,orbstack")
@@ -2311,8 +2325,8 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
     p.add_argument("--driver", default="default",
                    choices=["default", "dc"],
-                   help="W6/W7: dc pins the shared docker-container "
-                        "BuildKit builder on both engines (attribution "
+                   help="W6/W7: dc pins matching BuildKit images in "
+                        "isolated per-engine builders (attribution "
                         "control for builder topology)")
 
     p = sub.add_parser("baseline")
@@ -2331,8 +2345,8 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
     p.add_argument("--driver", default="default",
                    choices=["default", "dc"],
-                   help="W6/W7: dc pins the shared docker-container "
-                        "BuildKit builder on both engines")
+                   help="W6/W7: dc pins matching BuildKit images in "
+                        "isolated per-engine builders")
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
@@ -2341,7 +2355,7 @@ def main() -> int:
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=15.0)
-    p.add_argument("--write-ratio", default=0.3)
+    p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true")
 
@@ -2359,6 +2373,36 @@ def main() -> int:
                         "base-2026* for frozen baselines")
 
     args = ap.parse_args()
+    try:
+        manifest = validate_manifest()
+    except (OSError, ValueError, KeyError) as exc:
+        ap.error(f"invalid benchmark manifest: {exc}")
+    if args.cmd == "validate-manifest":
+        print(json.dumps(manifest, indent=2))
+        return 0
+    if args.cmd == "report":
+        return cmd_report(args)
+    for name in ("duration", "pairs", "concurrency", "ops", "repos", "issues", "clones"):
+        value = getattr(args, name, None)
+        if value is not None and value <= 0:
+            ap.error(f"--{name} must be positive")
+    if hasattr(args, "write_ratio") and not 0 <= args.write_ratio <= 1:
+        ap.error("--write-ratio must be between 0 and 1")
+    if hasattr(args, "engines"):
+        engines = [name.strip() for name in args.engines.split(",")]
+        if (not engines or any(name not in ("ctrs", "orbstack") for name in engines)
+                or len(set(engines)) != len(engines)):
+            ap.error("--engines requires distinct ctrs and/or orbstack entries")
+        args.engines = ",".join(engines)
+    if getattr(args, "cold", False) or getattr(args, "state", "warm") == "cold":
+        if (args.cmd != "run" or args.engine != "ctrs" or not args.cold
+                or args.case == "W8"):
+            ap.error("engine-cold is only supported by run --engine ctrs --cold "
+                     "(except W8); a shared OrbStack cold comparison is unavailable")
+        args.state = "cold"
+    if args.cmd != "preflight" and os.uname().sysname != "Darwin":
+        ap.error("runtime commands require macOS; use validate-manifest/report offline")
+    DOCKER = find_docker()
     RESULTS.mkdir(parents=True, exist_ok=True)
     if args.cmd == "preflight":
         return cmd_preflight(args)
@@ -2372,8 +2416,6 @@ def main() -> int:
         return cmd_noop(args)
     if args.cmd == "holdout":
         return cmd_holdout(args)
-    if args.cmd == "report":
-        return cmd_report(args)
     return 2
 
 

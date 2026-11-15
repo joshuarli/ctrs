@@ -60,7 +60,11 @@ def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop,
                 pass
             conn = http.client.HTTPConnection(host, port, timeout=10)
         lat = (time.monotonic() - t0) * 1000.0
-        latencies.append(lat)
+        # Failed connection attempts are not useful work. Keep successful
+        # request latency/throughput separate from the error counts, so a
+        # fast-refusing engine cannot appear faster during W10 downtime.
+        if ok:
+            latencies.append(lat)
         with counts_lock:
             if ok:
                 counts["writes" if write else "reads"] += 1
@@ -111,15 +115,19 @@ def main():
 
     latencies.sort()
     total = sum(counts.values())
+    successful = counts["reads"] + counts["writes"]
     summary = {
         "duration_s": round(elapsed, 3),
         "concurrency": args.concurrency,
         "write_ratio": args.write_ratio,
         "requests": total,
+        "requests_ok": successful,
         "reads_ok": counts["reads"],
         "writes_ok": counts["writes"],
         "errors": counts["errors"],
-        "rps": round(total / elapsed, 2) if elapsed else None,
+        "rps": round(successful / elapsed, 2) if elapsed else None,
+        "attempted_rps": round(total / elapsed, 2) if elapsed else None,
+        "latency_scope": "successful_requests",
         "latency_ms": {
             "p50": pct(latencies, 0.50),
             "p95": pct(latencies, 0.95),

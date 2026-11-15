@@ -1,7 +1,12 @@
 # Docker-driver `docker buildx build` — design note
 
-Status: scoped, not implemented. This is the campaign's one remaining
-scored loss (W6/W7 default-driver builds). Verified against buildx
+Status: scoped, not implemented; active implementation task NP-04 in
+`docs/native-performance-progress.md`. Historical pilots identified a
+W6/W7 default-driver gap, but the 2026-11-15 scoring/input audit withdrew
+their qualification and precise magnitudes. Rebaseline real application
+builds before choosing/promoting a change; this design note does not
+close the gap or establish that it is the only remaining loss.
+Protocol observations below were verified against buildx
 v0.22.0 source and live `docker buildx ls`/`build` probes on 2026-11-15.
 
 ## What buildx actually requires

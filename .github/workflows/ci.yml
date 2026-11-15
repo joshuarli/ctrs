@@ -16,6 +16,21 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  benchmark-harness:
+    name: Benchmark harness (offline)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate benchmark contracts and regression checks
+        run: |
+          python3 bench/native/runner.py validate-manifest
+          python3 -m unittest discover -s bench/native -p 'test_*.py' -v
+
   macos:
     name: Test (macOS)
     runs-on: xcode-27

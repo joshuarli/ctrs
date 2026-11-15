@@ -1,8 +1,10 @@
-# Frozen workload scorecard for the native-performance campaign.
+# Declared PILOT workloads for the native-performance campaign; NOT frozen.
 # IDs match docs/campaign-native-performance.md. `status`:
 #   implemented = fixture + runner path exist and have produced trials
 #   pending     = declared, not yet implemented
 #   blocked     = cannot run on this host (record reason in evidence doc)
+# Implementation status does not establish representative-workload,
+# asset, environment, or statistical qualification. See the progress queue.
 
 schema_version = 1
 
@@ -10,7 +12,9 @@ schema_version = 1
 campaign = "native-performance"
 created = "2026-11-14"
 competitors = ["orbstack"]          # macOS lane; Docker Desktop excluded
-native_linux_competitor = "docker-ce"  # needs a bare-metal Linux host (unavailable)
+active_lane = "macos-arm64"
+evidence_status = "pilot"
+measurement_revision = "2026-11-15-reorientation"
 strict_win_pct = 5.0
 noninferiority_pct = 3.0
 bootstrap_iters = 2000
@@ -85,21 +89,19 @@ metrics = ["build_s", "artifact_sha256"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
 correctness = ["build rc=0", "artifact sha256 present"]
-params = { driver = ["default", "dc"] }
-correctness = ["build rc=0", "artifact sha256 present"]
-note = "v1: single timed build; deps are vendored so no registry access inside the timed region. 'Real repo checkout' is approximated by a vendored upstream release tarball — disclosed. Base image pulled untimed if absent. IMPORTANT: `docker build` uses each engine's default builder — ctrs only has docker-container (client-side image export ~1.5-2 s on large bases), orbstack has native docker driver. See evidence/native-performance.md W6 section; matched-driver A/B shows ctrs ahead."
+note = "PILOT: source preparation is incomplete in a fresh checkout (zlib archive is untracked); require a checksum-pinned fetch. Explicit --no-cache and a per-pair stamp ensure distinct compilation attempts with identical A/B input; retained base images mean this is not engine-cold. Existing hash probe does not yet assert an expected artifact. Default and controlled dc builder results remain separate. Old run_id-only cache-stamp measurements require a new baseline."
 
 [[case]]
 id = "W7"
 family = "native-image-build"
-title = "multi-stage offline Dockerfile: empty/warm/incremental build-cache states + run probe"
+title = "pilot multi-stage Dockerfile: uncached/warm/incremental work + run probe (stores remain warm)"
 fixture = "fixtures/w7"
 status = "implemented"
-metrics = ["build_empty_s", "build_warm_s", "build_incr_s"]
+metrics = ["build_uncached_s", "build_warm_s", "build_incr_s"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
-correctness = ["build_empty", "build_warm", "build_incr", "run_note", "run_smoke"]
-note = "Base image python:3.13-slim is a prepared service image, so builds are offline. 'empty' prunes the whole buildx cache first (shared with other fixtures — disclosed); warm repeats the identical context; incremental bumps stamp/note.txt so only stage-1's last layer re-runs. --load is used so docker-container drivers land the image in the store."
+correctness = ["build_uncached", "build_warm", "build_incr", "run_note", "run_smoke"]
+note = "PILOT proxy: compileall/random bytes still needs replacement by two real app builds. --no-cache bypasses reuse for the first build without pruning the shared builder; engine/base-image stores remain warm. Warm repeats the context; incremental changes stamp/note.txt. --load includes image-store import. Historical build_empty_s is not comparable to build_uncached_s."
 
 [[case]]
 id = "W8"
@@ -112,11 +114,10 @@ metrics = ["wall_seconds", "pull_wall_seconds", "setup_seconds",
            "load_rps", "load_p95_ms", "load_p99_ms",
            "peak_total_rss_kb", "cpu_seconds_est"]
 states = ["warm"]                    # cold unsupported: registry+portfolio live on the warm engine
-params = { under_load = [false, true], duration_s = 30, concurrency = 8,
-           write_ratio = 0.3 }
+params = { under_load = [false, true], duration_s = 30, concurrency = 8, write_ratio = 0.3 }
 correctness = ["pull_<name>_digest_match", "run_<name>",
                "load item_count + zero errors (under_load only)"]
-note = "Images are scratch+COPY relocated rootfs of postgres:17-alpine, redis:7-alpine, python:3.13-slim, busybox so pulls never dedup against cached bases; per-engine digests recorded in .work/native-perf/w8-portfolio.json. Engine-internal layer dedup may still apply — disclosed."
+note = "PILOT: per-engine scratch+COPY portfolios are not yet identical pinned multi-layer assets. Only fixture refs are removed; content remains warm on both engines, so dedup may eliminate fetch/install. No shared image prune or ctrs restart. Requires independent local registry, common digests and real deploy-to-health before qualification."
 
 [[case]]
 id = "W9"
@@ -138,28 +139,26 @@ fixture = "fixtures/w1 + fixtures/w2/load.py"
 status = "implemented"
 metrics = ["recovery_s", "load_errors", "load_rps", "load_p95_ms", "load_p99_ms", "items_got"]
 states = ["warm"]
-params = { duration_s = 20, concurrency = 8, write_ratio = 0.3,
-           kill_at_s = 6, down_for_s = 3 }
+params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3 }
 correctness = ["api_found", "kill_rc", "start_rc", "recovered",
                "no_lost_writes (items >= 500 + acked writes)"]
-note = "v1 kills the API container only; engine/VM-level kill is deferred (OrbStack shared-daemon restart is not comparable). Errors inside the kill window are expected and not a failure; lost committed writes or failure to recover are."
+note = "PILOT: API-container interruption only; engine/VM recovery remains unqualified and shared OrbStack must not be restarted. load_rps now counts successful responses, unlike historical attempted throughput; the historical reporter excludes W10 throughput. Expected outage errors and recovered tails need explicit attribution. Lost committed writes or failed recovery always fail."
 
 [[case]]
 id = "W11"
 family = "soak"
-title = "sustained mixed load: repeated W2 load windows + container-churn bursts; engine-death, error-rate and resource-growth gates"
+title = "pilot sustained load windows + container churn; correctness gates, resource-growth qualification pending"
 fixture = "fixtures/w1 + fixtures/w2/load.py + inline churn"
 status = "implemented"
-metrics = ["soak_seconds", "windows", "requests", "errors", "error_pct",
+metrics = ["soak_seconds", "windows", "requests", "requests_ok", "errors", "error_pct",
            "rps_mean", "churn_jobs_completed", "churn_failures",
-           "engine_version_check_failures", "peak_total_rss_kb",
+           "engine_version_check_failures", "invalid_load_windows", "peak_total_rss_kb",
            "cpu_seconds_est"]
 states = ["warm"]
-params = { duration_s = 300, window_s = 30, concurrency = 8,
-           write_ratio = 0.3, churn_jobs = 8, churn_every = 4 }
-correctness = ["engine_alive", "error_rate <= 1%", "churn_all_ok",
-               "item_count >= expected"]
-note = "v1 pilot default 300 s; campaign target 12-24 h via --duration (run/baseline CLI default is 20 s — pass explicitly). Load windows are sequential 30 s runs of the W2 driver; churn bursts reuse the W9 job. 'engine_alive' counts failed `docker version` probes during the soak — any unplanned death fails the cell. Resource growth is recorded via the process sampler, not gated in v1."
+params = { duration_s = 300, window_s = 30, concurrency = 8, write_ratio = 0.3, churn_jobs = 8, churn_every = 4 }
+correctness = ["engine_alive", "errors_zero", "load_windows_valid",
+               "churn_all_ok", "item_count == expected"]
+note = "PILOT default 300 s in fixture (CLI defaults to 20 s, so pass --duration explicitly). Qualification is one finite 12-hour run per engine on a frozen candidate, after representative mixed workloads and growth gates are implemented. Requires zero errors, valid nonempty window summaries, exact acknowledged writes and successful churn. Alive probes do not yet establish continuous process identity. Resource growth is sampled but not gated; raw window/request/churn counts are not speed claims."
 
 [[case]]
 id = "HOLDOUT"
@@ -174,4 +173,4 @@ states = ["warm"]
 params = { ops = 240, repos = 8, issues_per_repo = 5, clones = 4, seed = 1 }
 correctness = ["healthz", "admin_created", "repos_exact", "issues_exact",
                "workload_zero_errors", "clones_exact"]
-note = "EXCLUDED from the scored W-matrix by design (campaign gate f): run once per engine via `runner.py holdout --engines ctrs,orbstack`, parameters frozen here, never tune against its failures. Different stack from every W fixture (Go forge + git protocol + Postgres)."
+note = "EXCLUDED from the scored W-matrix. Declared pilot parameters require input/version qualification before final confirmation. Run once per engine for the frozen candidate; if a failure is used for tuning, retire it as independent evidence and choose a fresh holdout. Different stack from W fixtures (Go forge + git protocol + Postgres)."

@@ -1,231 +1,284 @@
-# Campaign: native-workload benchmarking and unattended performance hillclimb
+# Campaign: beat OrbStack on macOS
 
-**Status:** executable steering specification, not a benchmark result. **Date:** 2026-11-14. **Target:** `ctrs` versus stock Docker Engine on native Linux, and **OrbStack** on native-architecture macOS. **Execution:** unattended, evidence-gated, one writer. **Current lane:** macOS/OrbStack only; the Linux lane stays `needs native host` until bare-metal hardware is qualified. **Scope exclusion:** absolutely no CPU emulation or cross-architecture builds. Docker Desktop is **not** the macOS competitor for this campaign.
+**Owner steering: 2026-11-15. ACTIVE, unattended, not complete.** This is
+the current execution contract. It supersedes the previous campaign's
+Linux requirements, 30-candidate stop, and monitoring-driven closeout.
+On every resume read `AGENTS.md`, this document, and
+[`native-performance-progress.md`](native-performance-progress.md).
+The progress file is the single work queue and continuation checkpoint;
+`docs/evidence/native-performance.md` is the historical experiment log.
 
-## Mission and honest victory condition
+## Objective and current position
 
-Make ctrs **faster, more resource-efficient, and at least as correct and reliable as the best applicable stock Docker installation** across a frozen, representative matrix of *real application workflows*. Treat "better on all counts" as a demanding engineering target, **not** a marketing claim or license to cherry-pick metrics.
+Make normal headless ctrs workflows on **Apple Silicon macOS** meet and
+exceed **OrbStack on the same Mac**, using native `linux/arm64`
+containers. Improve completed useful work per second and time to correct
+results without materially regressing resources, durability, correctness,
+or reliability. Include the default build/export/import/first-use path.
+A matched-builder control cannot substitute for the default experience.
 
-- Measure end-to-end user outcomes: a real app becoming healthy, a real build/test pipeline finishing with the right outputs, a database-backed service serving correct responses under load, or a working multi-service stack recovering from failure.
-- Score *latency, throughput, tail latency, CPU time, total physical memory, storage amplification, startup/teardown, long-run stability, and behavioral parity*. A regression in an important dimension cannot be erased by a larger win elsewhere.
-- A **strict win** is a statistically supported improvement in a specified workload/metric, not a numerical result barely outside noise. **Non-inferior** means a defensible absence of material regression, not a strict win. **Unsupported**, **failed**, and **untested** are never wins.
-- The final matrix must show every cell, including Docker wins, ties, crashes, missing features, and incomplete host coverage. Claim "universal win" **only** if *every predeclared comparable cell* is a strict win and all correctness/security/reliability gates are green on every in-scope platform. Otherwise report exactly how much of the matrix ctrs dominates and why the rest is red/indeterminate.
-- Do not chase performance by weakening POSIX/Docker semantics, filesystem durability, isolation, cache correctness, TLS validation, resource accounting, or the existing limits that protect against DoS.
+“96 windows, zero errors” and “29,776 churns, zero deaths” are reliability
+observations, not optimization iterations. The 2026-11-15 audit found
+scoring defects, unfrozen assets, proxy workloads, and an unresolved
+default-builder gap. Earlier “all win or tie except W6/W7” statements are
+**historical pilot observations**, not qualification. Read the correction
+at the top of [`evidence/native-performance.md`](evidence/native-performance.md).
 
-## In scope / out of scope
+**Execution scope is macOS only.** Linux performance/runtime qualification,
+WSL, emulation (QEMU/FEX/Rosetta/binfmt), cross-ISA builds, UI, Kubernetes,
+and other competitors are out of this campaign. Preserve portable code
+contracts and existing tests, but never wait for Linux hardware or add
+Linux acceptance dependencies. Hardware virtualization of ARM64 Linux
+on Apple Silicon is intended. No VMM rewrite without a demonstrated
+application bottleneck that requires it.
 
-**In scope**
-1. **Bare-metal/native Linux amd64**: ctrs agent directly on the Linux host versus rootful, stable Docker Engine CE + its normal containerd/runc stack. Run both on the same physical host, separately, with their own sockets and clean data roots. Native Linux arm64 is an additional mandatory lane **when suitable hardware is available**.
-2. **Apple Silicon macOS**: ctrs with its existing Apple Virtualization.framework Linux/arm64 guest versus **OrbStack** running **native linux/arm64** workloads through its `docker`/Docker-compatible socket. Mac virtualization is hardware-assisted, same-ISA execution, **not emulation**. Pin the installed OrbStack version, its Docker Engine compatibility version, machine CPU/memory allocation, and filesystem/networking mode at baseline freeze. OrbStack is the single macOS competitor; an OrbStack machine that cannot run a fixture correctly is reported as that exact failure, never counted as a ctrs speed win.
-3. Single-container applications, multi-container Compose, normal registry and image workflows, native multi-stage builds, local development bind mounts, persistent data, networking, and long-running services.
-4. Performance **and** completion/restart/cancellation/error behavior under realistic concurrency.
+## Productive loop
 
-**Absolutely out of scope**
-- QEMU, FEX, Rosetta, binfmt_misc handlers, BuildKit cross-platform workers, multi-platform manifests *as a build target*, `--platform` targeting a foreign ISA, and any AMD64↔ARM64 performance comparisons. The presence of old emulation tests in this repo is irrelevant to this campaign: **do not execute, tune, or extend them**.
-- Windows, WSL, Docker Desktop (macOS and Linux), nested benchmark engines in a privileged Docker container, Colima, and per-task microVM exploration.
-- Microbenchmark *scores*: `alpine true` loops, `/_ping`, naked API CRUD, `dd /dev/zero`, `iperf3`, synthetic syscall counts, zero-byte image/layer benchmarks, and hand-crafted "hello world" HTTP echo servers. Old `bench/suite.sh`, `bench/api.sh`, `bench/compare.sh`, `scripts/perf.py` and `bench/arm64-build.sh` are **not** this campaign's scoreboard. Internal profiling may isolate a suspect code path after an application-level loss has been demonstrated, but only the application result justifies promotion.
-- GPU, Kubernetes, Swarm, remote TCP API, and unsupported Docker capabilities whose implementation would overwhelm the scoped optimization campaign.
+One coordinator owns the queue and integration. Delegate independent
+implementation, fixture and review tasks in separate worktrees. Only one
+job owns measured host workloads. Builds, extra engines, watch churn,
+and other benchmarks must not contend with a scored run.
 
-Reject a workload at preflight if the image's actual architecture does not match the physical host, the guest uses an emulator, or the test is being run through a nested engine. Record `uname -m`, `docker image inspect` architecture, ctrs-selected OCI platform, and Docker's selected platform. No "fall back and keep timing."
+1. **Resume the checkpoint.** Read the current task, experiment, blockers
+   and exact next action. Inspect any existing long job once for identity,
+   status and deadline. Do not duplicate it or spend the next turn
+   repeating its counters.
+2. **Choose work.** First fix a reproduced correctness/harness defect;
+   next close missing representative workloads or measurements;
+   otherwise choose the largest credible OrbStack loss or smallest
+   margin. Work a vertical slice: fixture → baseline → profile → code →
+   comparison. Full coverage is required for final victory, not before
+   starting any useful optimization.
+3. **Write one hypothesis before editing.** Name the case, metric,
+   observed cost, suspected cause, expected effect, side effects and
+   planned paired batch. Profile actual application work to separate
+   engine, builder, polling, cache and load-generator costs. Architecture
+   notes are hypotheses, not proof of an unavoidable ceiling.
+4. **Implement and evaluate.** Build an identified release binary in an
+   isolated worktree; compare baseline ctrs, candidate ctrs and frozen
+   OrbStack on the same host/workload. Use planned sample counts and
+   retain failures. A code diff is not a performance win.
+5. **Decide.** Accept a verified material gain or reproduced correctness
+   fix passing the regression budget. Otherwise discard only the
+   experiment's changes, record why, and select another hypothesis.
+   Do not accumulate speculative optimizations on main.
+6. **Checkpoint and continue.** Record files/commit, exact commands,
+   binary/input hashes, run IDs, results and next executable action.
+   Commit useful source and compact evidence directly to main after
+   review and relevant verification. Continue authorized work without
+   asking whether to proceed.
 
-## Why a new suite is necessary
+Every working session must leave a substantive artifact: a validated
+fixture, harness repair, measured/profiled experiment, implemented slice,
+or concrete blocker with alternatives tried. Larger counters, repeated
+health summaries and renaming a known gap do not qualify. There is no
+commit-per-turn quota; split large work into reviewable milestones.
 
-Read before acting:
-- `docs/architecture.md`, `docs/development.md`, `docs/security.md`, `docs/evidence/closeout.md`, `docs/evidence/net.md`, `docs/decisions.md`, `tests/e2e.sh`, `conformance/failure.sh`, and `bench/ubuntu-2026-10-26.md`.
-- The old Ubuntu comparison is **WSL 2**, not a native-host proof. Its strong lifecycle and file-I/O results are hypotheses, not the new baseline. The old report also records published-port losses versus Docker and an initially invalid stdin test; do not extrapolate its rankings.
-- Linux host compilation exists, but the prior campaign explicitly parked native Linux **runtime qualification** (N-1). This is a **phase-zero blocker for Linux claims**, not permission to substitute WSL.
-- The macOS closeout reported **nine unexplained silent daemon deaths**; `conformance/watch.sh` is the evidence surface. A crash in a long-running workload is an immediate failed gate, irrespective of speed.
-- `docs/evidence/net.md` shows that macOS published ports sometimes use the slower **vsock relay** due to local-network privacy/routing; test the actual transport and permission state. Never bypass OS privacy controls to win a benchmark.
-- `crates/ctrs/src/daemon/builder.rs` currently pins managed BuildKit **v0.35.0**; Docker Engine 29.9.3 bundled BuildKit **v0.34.2** (as of this document). Do not attribute a newer BuildKit's independent speed to ctrs's runtime. Use both a stock/default user-experience comparison and a controlled, matched-BuildKit comparison.
-- `crates/ctrs/src/daemon/http.rs` is thread-per-connection; `ports.rs` has relay/NAT routing and explicit connection/rate limits; `ctrs-image` manages the registry/blob store; `ctrs-init` owns container lifecycle, mounts, and cgroups. These are **profiling candidates**, not authorized optimizations without workload evidence.
-- Previous Mac evidence recorded substantial memory in the Virtualization.framework helper beyond daemon RSS. Count the *whole* engine footprint, including helpers, guest, managed builder, and any always-on services; do the corresponding accounting for Docker/Desktop/containerd.
+**Anti-stall rule:** after one status-only turn, select the first ready
+queue item. After three failed/neutral hypotheses on a bottleneck,
+change approach: profile another boundary, obtain independent review,
+evaluate a bounded architectural slice, or work another cell. Three
+failures and 30 candidates are **review checkpoints, never stop
+conditions**. Missing buildx support is implementation work, not an
+environment blocker. Inconclusive results get one predeclared larger
+batch or a noise investigation, not reruns until they win.
 
-Use the latest stable official Docker package **at baseline freeze**; 29.9.3 is the current Engine 29 release on 2026-11-14, not a permanently pinned "latest." Capture exact Engine, CLI, Compose, buildx, BuildKit, containerd, runc, and OrbStack versions, kernel, distribution, host CPU/RAM, filesystem, storage device, and ctrs commit. A new Docker release after freeze starts a **new** comparison campaign, never silently changes the control.
+## Finish criteria: coverage, parity, leadership
 
-References: https://docs.docker.com/engine/release-notes/29/ ; https://docs.docker.com/build/builders/drivers/docker-container/ ; https://docs.orbstack.dev/ .
+Freeze workload versions, metrics, resource budgets and statistical
+procedure before optimization. Normalize cost as `ctrs / OrbStack` and
+successful throughput as `OrbStack / ctrs`, so smaller always favors
+ctrs. These are engineering targets, not current performance claims.
 
-## Deliverable: one lean, reproducible native benchmark harness
-
-Create `bench/native/`, not another metrics framework. Prefer **Python 3 standard library + POSIX-ish shell + existing Docker CLI/Compose/buildx**, pinned for reproducibility; use no dashboard service, required external SaaS, Python dependency bundle, or new Rust rendering engine. A small native load driver from an existing well-maintained tool is acceptable if **pinned by digest/version** and used identically for both engines. End-to-end correctness assertions live with the workload, not in the report formatter.
-
-Suggested file contract (implement and update it if evidence demands a simpler shape):
-
-| Path | Responsibility |
+| Gate | Required evidence |
 | --- | --- |
-| `bench/native/README.md` | Requirements, host isolation, invocation, cleanup, limitations |
-| `bench/native/cases.toml` | Immutable scenario IDs; input digests, workloads, load/concurrency, metrics, thresholds |
-| `bench/native/assets.lock` | Exact source commits, image digests, seed dataset checksums, tool versions |
-| `bench/native/runner.py` | `preflight`, `baseline`, `compare`, `holdout`, `report`; stdlib and subprocesses |
-| `bench/native/fixtures/` | Reproducible application stacks and ground-truth assertions |
-| `bench/native/collect.py` | Cross-platform sampling with explicit missing/unsupported fields |
-| `bench/native/schema.json` | Versioned, validated, machine-readable result schema |
-| `docs/evidence/native-performance.md` | Human-readable maintained scorecard, methodology, full losing cells |
+| Coverage | W1–W10 use pinned representative inputs and asserted outputs; both engines complete identical work at all declared states/loads; no omitted failed, unsupported or unmeasured cell |
+| Meet OrbStack | Every predeclared critical timing, tail-latency, CPU, physical-memory and allocated-storage cell has paired 95% upper confidence bound ≤1.03; correctness/recovery gates pass |
+| Exceed OrbStack | Equal-family W1–W10 primary-performance geometric-mean ratio has upper 95% bound ≤0.90; strict ≥5% normalized improvements in **W6 and W7 default builds** and at least two of W1/W2/W5/W8; no losing critical cell hidden by the mean |
+| Reliability | Frozen candidate and OrbStack each complete one 12-hour W11 mixed-workload qualification: zero unexplained deaths, zero unexpected errors, correct durable data and bounded resource growth |
+| Reproducibility | Fresh signed release build and isolated roots reproduce results; independent held-out app/workload passes; commands, hashes, failures, CIs, limitations and evidence locations recorded |
 
-Keep all sampled traces, flamegraphs, full logs, data roots and large JSONL results under `.work/native-perf/` (gitignored). Commit **only** the source, lockfiles, compact summaries, source/host revision IDs, trial counts, confidence intervals, failed experiments, and checksums sufficient to audit a run. Do not publish untrusted workload secrets.
+Keep pursuing every remaining comparable weakness. Claim universal
+superiority only if every declared comparable cell is a strict win.
+Claim “meets and exceeds on this macOS matrix” only after **all** gates
+pass. Unknown measurements are **unqualified**, not zero, ties or
+optional omissions. A statistical label alone does not qualify a fixture.
 
-### Host and competitor contract
+## Workloads and metrics
 
-- Use one host per native-ISA/platform lane; never compare absolute times from different machines. Two engines do **not** run workload trials simultaneously. Balance order across paired trials: ABBA/BAAB or a seeded randomized balanced crossover; record the seed and wall-clock order.
-- Use the **same** Docker CLI/Compose/buildx versions, application image digests, native platform, CPU and memory budgets, storage class/filesystem, bind source and destination, DNS upstream, port exposure, and load-generator settings. The `ctrs` wrapper itself invokes Docker's CLI; do not time it against a different Docker binary.
-- Use dedicated, uniquely named ports, networks, volumes, socket paths, and state directories. Never call `docker system prune` on the user's existing daemon, alter the active Docker context, replace `/var/run/docker.sock`, or reuse production data. Never disable firewalls, EDR, privacy prompts, TLS verification, or seccomp for convenience.
-- On Linux benchmark ctrs **natively** (not as a child of Docker); benchmark official `dockerd` in the same privilege mode. No benchmark-side containerization of either engine. The registry server/load generator can be independent but must be held identical and accounted for separately.
-- On Mac pin the OrbStack machine's CPU/memory allocation, filesystem sharing mode and network mode, and use identical native ARM64 images. When OrbStack cannot run a fixture correctly, report that exact failure and compare only the working lane; never count an incompatible OrbStack failure as a speed win. OrbStack's shared daemon cannot provide a true engine-cold data root without disturbing user state: label its cold cells `project-cold` (fixture images removed, engine caches retained) and never present them as equivalent to ctrs's fresh `CTRS_DATA_DIR`.
-- Run Docker's **normal installed configuration** against ctrs's normal configuration as the primary user-visible lane. A second **matched-resource/matched-BuildKit** lane separates engine effects from optional feature defaults. Neither lane may replace the other; pin kernel, builder, drivers, cache semantics and persistent-state choices in the report.
-- Do not put shared application caches outside the timed boundary for one engine only. Freeze and declare cold/warm state *per engine*. Engine-cold (empty image/BuildKit store) is not necessarily OS page-cache-cold; label it honestly. For cached builds, assert reuse of identical layers and outputs. Use independent local registry mirrors to remove WAN noise; report WAN observations separately as descriptive, never promotion evidence.
-- Power, background load, free disk, CPU frequency/thermal throttling and host updates must be sampled. Do not silently discard outliers; use predeclared invalidation criteria such as competing host load or thermal-state mismatch, then rerun both sides of the pair.
+Retain W IDs for traceability. Changed inputs, assertions, cache semantics
+or metrics start a new fixture/baseline version; never pool history.
+Current proxies remain pilots until upgraded.
 
-## Frozen real-workload scorecard
-
-Implement **at least** the following workload families before tuning. These are *complete user tasks*; a request/operation inside them may be instrumented but cannot be a standalone victory metric. All source trees/datasets/images and build artifacts must be checksum-pinned. If a proposed upstream app lacks a runnable, native build, pick another representative real app and record the substitution **before** collecting the baseline.
-
-| ID | Real user-visible transaction | Scored output and integrity check |
+| ID | Complete user task | Primary outcomes and integrity |
 | --- | --- | --- |
-| **W1: web stack bring-up** | `docker compose up` for a nontrivial API + Postgres + Redis (or cache) using named volumes, env, private network, published port and real readiness logic | Time from command to successful app HTTP health + successful DB/cache roundtrip; startup failures; persisted records after restart |
-| **W2: API service under load** | Sustained mixed read/write authenticated JSON API traffic against seeded DB state; realistic response sizes/concurrency; host→published-port and container→container paths | Correct responses/state, completed requests/s, p50/p95/p99 end-user latency, errors/timeouts, host CPU-s and total memory |
-| **W3: persistent transactional workload** | Real migrations + seeded Postgres tables + read/write transaction mix + checkpoint + restart + verification | End-to-end completion, p95 transactions, WAL/fsync durability, no lost/duplicated rows, disk growth and write amplification |
-| **W4: worker queue** | API ingests actual tasks, cache/queue distributes them to 1/4/16 workers, workers produce checksummed outputs and retries | Time to complete a fixed batch, duplicates/loss, queue lag p95/p99, CPU time/RAM and graceful shutdown |
-| **W5: monorepo edit→test loop** | Bind-mount a real TypeScript/pnpm or similar application repo; install dependencies, edit a file, rebuild affected code, run tests and watch/reload | Human-action→correct rebuilt/tested result, missed file changes, workspace integrity; host bind and named-volume cases separate |
-| **W6: compiled application CI** | Real Rust (and, when practical, Python) repository checkout→dependency install→compile→unit/integration test→package; run image and verify artifact | Cold and warm CI wall time, successful tests, artifact SHA, CPU-s, disk amplification, peak/steady memory |
-| **W7: native container image build** | Real multi-stage Dockerfiles for at least two languages using `docker buildx build`; test empty cache, warmed cache, and one-file incremental change; load/run final image | Build→usable artifact time, OCI identity/output semantics, cache-hit correctness and BuildKit lifetime costs |
-| **W8: real image deployment** | Fetch and verify a pinned portfolio of realistic multi-layer app/DB images from a controlled local OCI registry, create networks/volumes and deploy | Empty-store→healthy time, digest verification, failed/cancelled pulls, reused layers, allocated bytes; fixed registry throughput |
-| **W9: parallel CI and churn** | Parallel real build/test jobs (1/4/8/16 as host capacity allows), each with temporary networks, writable layers, mounts, logs and artifact export | Completed valid jobs/min, p95 job finish, container/FD/cgroup leaks, errors, cleanup latency and storage reclaimed |
-| **W10: failure + recovery** | Kill/restart engine/agent/container during real web/DB/queue work, restart host service, repeat, check recovered writes and healthy responses | Recovery time, lost data, stuck resources, duplicate executions, retries and sustained p99 after recovery |
-| **W11: 12–24 h mixed soak** | Continual low/medium API, queue, DB, build and teardown load with periodic bursts and real application assertions | Zero silent daemon deaths, no unbounded resident-memory/FD/disk growth, steady-state p95/p99, bounded background CPU |
+| W1 | Compose up API + Postgres + Redis | Command-to-health and verified read/write; persisted data after restart; startup failures |
+| W2 | API reads/writes at fixed offered load and saturation | Successful requests/s; end-user p50/p95/p99; exact accepted records; published-port and container-to-container paths |
+| W3 | Migrate/seed database, transact, checkpoint, restart | Fixed successful transactions/s, p95, recovery, exact data and allocated bytes; equivalent durability |
+| W4 | API ingest → queue → 1/4/16 real workers → artifacts | Fixed batch completion, queue tails, no lost/duplicate outputs; shell hashing is diagnostic only |
+| W5 | Edit → watch/rebuild → test a pinned upstream TS/JS app | Host-bind and named-volume latency separately; real dependencies, change propagation, tests/checksums |
+| W6 | Compile/test/package a pinned Rust app plus another language | Clean/warm CI duration, successful tests and equivalent artifacts; CPU/memory; clean trials actually compile |
+| W7 | Default buildx → loaded runnable images for two real apps | Uncached/warm/one-file incremental completion; contents and behavior; export/import/first-use included |
+| W8 | Deploy identical multi-layer images from independent local registry | Pull-to-healthy including guest install; digests; app latency under load; cancellation/cleanup |
+| W9 | 1/4/8/16 parallel real fixed-work build/test jobs as capacity allows | Valid jobs/min, p95 completion, artifacts, networks/volumes, logs, teardown/leaks; no timed busy loop |
+| W10 | Interrupt/recover real service/database/queue work | Verified recovery, exact committed data, retries, recovered p99, cleanup; errors are not throughput |
+| W11 | 12-hour mixed app/DB/queue/build/teardown qualification | No unexplained deaths/errors; complete outputs; memory/FD/disk trends; no raw churn-count speed claim |
 
-The harness must also keep **held-out, never-tuned** variants: a different real application, different source tree, larger seeded dataset and an unfamiliar network/bind-mount mix. Holdout parameters and acceptance are frozen with the baseline; do not repeatedly tune against holdout failures. Workload coverage must include both stateless and stateful, I/O- and CPU-heavy, low and high concurrency. Revisit **which real applications represent those families before baseline freeze**, never afterward merely to improve a score.
+Collect total engine CPU-seconds per unit of successful work, peak/steady
+physical footprint, idle CPU/footprint and allocated storage where
+meaningful. Count daemon, VM/VZ helper, guest, managed builder and owned
+services. Add startup, idle wake, shutdown and reclaim-to-next-use cells;
+do not trade a smaller idle screenshot for slower next-use.
 
-### Measured state matrix
+`collect.py` currently gives process-name RSS and sampled CPU, **not**
+qualified physical-memory/CPU accounting. Implement ownership attribution,
+validate the Mac method, expose unknowns, and freeze numerical idle/growth
+budgets before claiming these gates. Check post-warmup trends and return
+to bounded budgets after cleanup. Never invent data from prose tables.
 
-For every applicable W1–W10 case, separate:
-- **First-ever/cold** (new independent data root, no engine image/layer/build cache); initialization or VM wake included as the user experiences it. Record first install/setup independently from normal launches, not hidden as a free amortized step.
-- **Steady/warm** (identical pre-pulled data, hot daemon/builder); existing volumes preserved or reset as the fixture contract specifies.
-- **Parallel/saturated** at 1/4/8/16 jobs or the highest safe equal-capacity setting; list excluded levels.
-- **Host filesystem versus engine-managed named volume** when the workload depends on filesystem performance; never pool those results.
+## Measurement rules
 
-Do not manufacture a "cold" condition by deleting the shared operating-system page cache for just one competitor.
+- **Pin and enforce inputs.** Parse `cases.toml` and `assets.lock` before
+  work; the latter remains pilot until digest/source/dataset/tool locks
+  are enforced. Record host/OS, power/thermal/load state, actual image
+  architecture, OrbStack/config, CLI/Compose/buildx/BuildKit versions,
+  source and executable hashes, guest assets, fixture hash, cache state,
+  workload parameters and sampler version. Identify the actual running
+  binary, including adopted daemons; HEAD alone is insufficient.
+- **Separate the lanes.** Primary = normal installed/default user
+  experience, with configuration disclosed. Controlled = equal resources
+  and pinned identical BuildKit/driver to attribute costs. Neither lane
+  substitutes for the other. Default W6/W7 losses remain red when the
+  docker-container control wins. Do not credit BuildKit version changes
+  to ctrs. An upgrade after freeze starts a new comparison version.
+- **Same work and state.** Paired trials share seeds, bytes, requested
+  load and cache semantics. Alternate AB/BA or use balanced randomized
+  order. Cache-busting identity differs between pairs, not A/B engines.
+  Assert clean build steps executed and warm reuse is correct. Use one
+  identical multi-layer portfolio and independent local registry. WAN
+  timing and independent per-engine rebuilds do not qualify.
+- **Preserve user state.** Dedicated ctrs roots/sockets; unique owned
+  containers/networks/volumes/builders/ports; explicit Docker endpoint;
+  verified builder endpoint. No global image/build/system prune, context
+  changes, shared-daemon restart, user container stop, or security/privacy
+  changes. Cleanup verifies ownership, not merely an `np*` prefix.
+  `--no-cache` measures uncached work, not an empty store or cold engine.
+  Unavailable equivalent cold states remain missing.
+- **Exclusive measurements.** Capture then stop only identified
+  campaign-owned watch/churn jobs before scoring; never run them with
+  W11. Quiesce campaign-owned non-tested load. User activity invalidates
+  affected pairs or requires another window; do not kill it. Idle
+  resident engines require a frozen policy that measures background
+  activity and prevents cross-attribution. Never rebuild or replace a
+  binary/asset underneath a running trial or soak.
+- **Correctness first.** Nonzero exits, malformed/missing summaries,
+  mismatched inputs, duplicate/incomplete pairs and integrity failures
+  remain visible; failed runs exit nonzero. They cannot produce favorable
+  ratios. Preserve failure counts and coverage denominators. Errors are
+  not throughput; missing resources are not zero. Planned W10 outage
+  errors must be distinguished from unexpected errors/recovery failures.
+- **Consistent statistics.** Three pairs are pilots. Require at least
+  ten valid complete pairs per qualified cell, identified by run and
+  configuration plus pair ID. Display the median paired ratio and 95%
+  bootstrap interval of that same median over whole pairs. Strict win:
+  upper bound ≤0.95. Non-inferior: upper bound ≤1.03. Loss: lower bound
+  >1.03, or a hard correctness failure. Otherwise inconclusive. Failure
+  to show significance is not proof of parity. W11 has a separate
+  reliability gate, not an ordinary ten-pair speed requirement.
+- **No selection bias.** Freeze counts, invalidation rules, primary
+  metrics and equal family weights before tuning. Confirm selected
+  changes with fresh independent batches. For family/aggregate CIs,
+  resample whole paired batches, preserving related-metric dependence.
+  Never average away a loss. If a holdout failure guides tuning, retire
+  it as a holdout and freeze a fresh independent case for confirmation.
 
-### Required measurements per completed trial
+The corrected reporter is a descriptive audit aid, not an implementation
+of every qualification gate above. A “strict win” statistical label does
+not establish representative inputs, durability or physical accounting.
 
-- Wall time to *verified successful task completion*; p50/p95/p99 for HTTP/queue/transaction **under a fixed valid load**, completed correct transactions/second, throughput to a defined saturation/error SLO, timeout/error rates.
-- Total host **CPU-seconds** spent by the engine ecosystem plus workload and its required guest/VM/containerd/shims, and incremental per-task CPU-seconds after subtracting the measured idle baseline. Do not score raw system-call counts.
-- Peak and idle **memory footprint of the entire engine** (daemon, guest/VM helper, containerd, shims, managed BuildKit), plus peak application footprint separately. On Linux use PSS/cgroup where supported; on macOS use physical footprint/VM allocation and report shared-memory ambiguity instead of summing double-counted RSS.
-- Persistent disk bytes allocated, temporary peak, image/layer duplication, cleanup reclamation, write amplification where measurable, and verified durability after restart.
-- Idle CPU, number of leaked sockets/FDs/cgroups, startup and shutdown success, unexpected exit count, resource pressure and optional joules/task if equivalent platform counters are available.
-- For Docker API/Compose/buildx compatibility: response/exit codes, logs, signal handling, healthchecks, mounts/permissions, network isolation, volume and cache content, cancellation/retry behavior. A fast error is a **failed task**, not a low latency sample.
+## Immediate implementation priorities
 
-Store one JSONL record per trial with schema version, host ID, engine config, source SHA, workload ID, cache state, native architecture, order seed, complete timestamps, inputs/digests, success and correctness hashes, raw latency distribution or histogram, resource trace references, and validation errors. Never convert a missing observation to zero.
+Follow the ordered queue in `native-performance-progress.md`: measurement
+validity → real W6/W7 baseline → default build-path improvement, alongside
+missing fixtures and resource accounting. Read
+[`buildkit-driver.md`](buildkit-driver.md) as a proposal, not a reason to
+park the default-build gap. Its historical timings need requalification.
 
-## Statistical decision procedure (freeze before any optimization)
+Trace real context transfer, solve, export, image ingest, guest install
+and first run. Implement one bounded milestone at a time: compatible
+endpoint/session plumbing, correctly loaded image, cancellation/error
+cleanup, or removal of a measured copy/export crossing. Preserve output
+modes, auth/secrets, attestations, digests/tags and explicit unsupported
+errors. A control win, header probe or another design note does not close
+this work. Evaluate reusable protocol components; do not assume custom
+HTTP/2/protobuf code is preferable solely to avoid a dependency.
 
-1. **Pilot** three paired trials per state to detect broken fixtures, glaring regressions and natural variability. Pilot numbers **cannot** be promoted as wins.
-2. **Baseline** a minimum of **10 valid paired repetitions** per scored case/state, with randomized/ABBA order and enough work per trial to include realistic startup, service warmup and workload saturation. For expensive multi-hour or soak cases, use predeclared smaller replication and explicitly lower confidence; never call them statistically decisive.
-3. Summarize paired *ratios* for ctrs/Docker (less is better for latency/resource, inverse for throughput), median effect, p95/p99 where applicable, and a **bootstrap 95% confidence interval over whole paired trials**. Preserve each observed trial, including losses.
-4. A measured cell is **strict win** only if the complete 95% confidence interval clears a predeclared material threshold: at least **5%** better for latency/throughput/CPU/RAM/disk, or a more meaningful workload-specific SLO improvement defined before baseline. **Statistical tie / indeterminate** if the evidence cannot distinguish them. A **loss** is a reliably worse result outside a **3% non-inferiority margin**, or any correctness/security/reliability failure. Small apparent advantages inside noise are not wins.
-5. Freeze a balanced rollup for prioritization only: W1–W10 have **equal family weight**, first aggregate within a family across its predeclared states, then use a geometric mean of **valid** normalized throughput/latency improvements. **Never** use that rollup to hide a losing cell or claim full coverage. Report metric-family wins/losses next to the rollup.
-6. End-to-end performance promotion requires: (a) affected-workload integrity gates pass, (b) full relevant regression and conformance suites pass, (c) ≥5% statistically credible improvement in a *real task* **or** a previously failing semantics/reliability gate is corrected with no material performance regression, (d) no statistically credible >3% deterioration in any predeclared critical metric, (e) no newly unsupported/failed case, (f) an independent holdout check at milestone/final gates. A failure of any hard gate means reject/revert, regardless of mean speed.
-7. A platform without sufficient measurements is **unqualified**, not green. Do not silently use macOS evidence to justify a Linux optimization or vice versa. Baseline versus Docker/OrbStack version and machine configuration remain attached to the metric forever.
+Other candidates must follow current profiles: bulk/control interference,
+parallel installs, real host-bind loops, published-port tails, builder
+lifecycle and memory reclaim. Several transport/install optimizations
+already landed; do not repeat old queued work blindly. Resolve persistent
+VZ disk flushing and cache-versus-authoritative-volume policy before
+claiming database/storage superiority. Never weaken durability to win.
 
-Avoid sequential peeking: tune with a designated development set and keep a frozen independent confirmation/holdout set for promotion gates. If the 95% interval overlaps the margin, gather a predeclared additional paired batch or declare "inconclusive"; do not rerun until favorable.
+## Finite reliability jobs and continuation
 
-## Mandatory hard gates before judging performance
+Short pilots unblock development. Full 12-hour-per-engine W11 belongs
+once a candidate is frozen for qualification. A job has a run ID, binary/
+input hashes, PID/start identity, fixed start/deadline, logs, results and
+saved exit status. Preserve exit codes; never pipe launches through
+`tail` and confuse an empty log with a running job. Do not extend/restart
+a healthy soak just to fill turns. Rerun for a demonstrated failure or
+an explicitly new candidate's qualification.
 
-**G0 — host, isolation, environment.** Verify physical/native architecture; no emulator; suitable host load; qualified native Linux root/control paths; locked Docker/OrbStack versions and machine settings; dedicated sockets/state directories; no shared customer volumes; stable local registry. The preflight must *fail closed*. On an unavailable bare-metal Linux machine, continue coding the harness and Mac lane, then mark Linux **needs native host**. Never substitute WSL or a privileged container and call it qualified.
+While W11 owns the Mac, do review, source/fixture work or implementation
+on noncontending resources without changing the job's binary/assets.
+If nothing independent remains, wait for its completion event/deadline
+through the execution harness instead of spending model turns polling.
+Record one outcome, close the job and take the next queue item. A watch
+that survived its finite budget is finished; more `alpine true` churn
+cannot improve this scorecard.
 
-**G1 — parity and data correctness.** `cargo check --workspace`, `cargo test --workspace`, `conformance/smoke.sh`, `conformance/run.sh`, `tests/e2e.sh`, `conformance/failure.sh`, `conformance/isolation.sh`, native `tests/linux-host.sh` where applicable, and focused IPv6/security tests on the host that supports them. Do not treat a "plan runner" printing steps as a successful executed suite. Native host and macOS proof are independent. Do not weaken a parity assertion because Docker passed and ctrs failed.
+**“Goal paused after 50 turns” is an external execution-harness limit.**
+Repository text cannot disable it. Use supported persistence/continuation
+configuration when available; do not invent `/goal` flags or bypass an
+imposed limit. Save the checkpoint and exact next action before a
+boundary. Resume that action without another monitoring loop. If the
+harness cannot continue automatically, report that operational blocker;
+do not describe the campaign as complete.
 
-**G2 — long-run reliability.** Real workload W10/W11, not ping, must survive planned daemon restarts, SIGTERM, container crashes, builder cancellation, host disk-pressure recovery (in isolated scratch), and concurrency; zero unexplained daemon deaths for qualified runs. The nine historical unexplained macOS deaths remain an explicit risk until a reproducible closeout verifies they are gone, not merely unobserved for one minute.
+Stop only for verified finish criteria, explicit owner stop, or a specific
+external blocker preventing **all** remaining authorized work. A blocked
+case does not stop independent work. Record the failed command, diagnosis,
+safe alternatives tried, unfinished cells and minimal missing access/
+hardware/permission. Missing Mac access permits source/harness work with
+runtime validation pending; never fabricate results.
 
-**G3 — security and cleanup.** Socket permissions, secret-bearing state files, image/archive extraction budgets, durable layer/index writes, namespace/cgroup isolation, seccomp, firewall rule ownership, no host bind escape, no orphaned helper/VM, correct cleanup after failure. Security controls may never be disabled as an optimization. Fix a discovered gate regression before continuing measurement.
+## Promotion and deliverables
 
-**G4 — externally reproducible win.** Reproduce a passing candidate after a fresh binary build and a cold scratch root; compare against the frozen stock Docker version with the same workload and native ISA on the same host. Repeat on all available in-scope host lanes. An optimization with only a local one-off benchmark is not accepted.
+Use `cargo check --workspace`, `cargo test --workspace`, focused
+regressions, and applicable macOS `conformance/smoke.sh`, `tests/e2e.sh`,
+`conformance/failure.sh` and `conformance/isolation.sh`. Run relevant gates
+per slice and full applicable gates at milestones, not unchanged suites
+to occupy time. `conformance/run.sh` plans/skips and Linux-root fixtures
+are not macOS execution evidence. Preserve socket locality, isolation,
+extraction limits, durability, bounded queues, secrets and wire/on-disk
+contracts.
 
-## Unattended sequence and scope of authority
+Deliver source/fixtures/locks and lean executable harness; a complete
+loss-first scorecard with commands, versions, hashes, counts and CIs;
+accepted/rejected experiments; current progress/next action; and fresh
+reproduction/limitations. Large traces stay in `.work/native-perf/` with
+compact checksummed references. Direct verified commits are authorized;
+tags, releases and workstation reconfiguration are outside this campaign.
 
-### Phase A: groundwork / stop obvious false claims
+### Resume prompt
 
-1. Inspect the implementation, benchmark scripts, conformance tests and evidence docs above. Inventory every supported Docker API/app feature required by W1–W11. Reject unsupported cases as **coverage gaps**, not benchmark successes.
-2. Qualify an actual native Linux runtime before making Linux performance claims; on macOS run current conformance and record whether the previously documented daemon deaths recur. Record OrbStack machine configuration and macOS Local Network permission/state without modifying it.
-3. Select **pinned real applications** for W1–W11, construct fixtures, seed data and an independent local OCI registry. Implement the clean root/socket isolation, native architecture guard, exact-output assertions, dual competitor configuration, snapshot/cleanup and raw JSONL reporter.
-4. Run the preflight and a **no-op control** (same engine/config against itself in balanced order) to establish harness noise. The no-op control is a methodology validation, not a performance workload/score. Refuse to score unstable host conditions.
-
-**Deliverable:** benchmark harness, frozen lockfiles, `README`, native preflight transcript, valid/blocked lane register.
-
-### Phase B: an honest Docker baseline
-
-1. Run the whole W1–W10 matrix on current ctrs and the pinned **OrbStack** configuration on macOS (stock Docker Engine CE remains the Linux competitor when a native host exists). Capture the actual native ISA and all config versions.
-2. Repeat selected build workloads using identical pinned BuildKit image/driver on both engines as an **attribution control**. Report the stock/default experience separately; account for ctrs's managed builder idle/startup lifecycle. Do not blame or credit the container engine for BuildKit's own algorithm without isolation.
-3. Run W11 once at an appropriate duration on both engines. Finalize which cells are slow, which fail correctness, which leak, and which are unqualified. Put the full baseline matrix under `docs/evidence/native-performance.md`.
-
-**Deliverable:** baseline plus Pareto frontier of credible bottlenecks, not a cherry-picked speed leaderboard.
-
-### Phase C: hillclimb — one bottleneck, one hypothesis, one proven change
-
-Select the **highest-impact losing real-workload cell**: severity × frequency × ability to improve without weakening a hard gate. For each iteration:
-
-1. Reproduce the loss in the actual fixture and rule out load-generator saturation, cache/dataset drift, platform mismatch, version drift and known macOS network-permission effects.
-2. Profile the *real workload while it runs*: Linux `perf`/eBPF or equivalent sampling; macOS Instruments/host memory tools and guest traces where supported; filesystem and network counters. Profiling is diagnostic; **no substitute microbenchmark scoreboard**.
-3. Form exactly one falsifiable bottleneck hypothesis and choose the **smallest** code change (one subsystem). Write its expected observable W-ID/metric improvement and suspected side effects into the experiment log.
-4. Experiment in an isolated worktree, using a reproducible release build and dedicated engine data root. Execute the affected workload against **both ctrs-before and ctrs-after** on the same host; compare to the already pinned Docker reference. Then run correctness, targeted regressions, and the complete promoted scorecard as required by the statistical policy.
-5. If green and materially better, commit to `main` (Conventional Commit) and record the before/after matrix and experiment ID. If it fails, **revert the experiment**, record the failure and proceed to the next hypothesis. Do not pile failed speculative "optimizations" into main.
-6. After each accepted slice, rebaseline ctrs HEAD and choose the next worst credible cell. Do not switch the Docker control mid-loop. A gate-fixing correctness or security patch may land without a performance win if it causes no material performance regression and has a reproduced test.
-
-**Hypothesis queue, not permission to rewrite prematurely:**
-- **Supervisor/data-path boundary (priority 1, see below):** `daemon/vmlink.rs` shared writer + ordered reply queue; `ctrs-init` `agent.rs` running `layers::receive()` (read, decompress, extract, `syncfs`) inline on the single event loop that also services exec I/O, logs, DNS and relays. Cross-workload interference, not a microbenchmark artifact.
-- **Mac app-facing networking:** `daemon/ports.rs`, guest relay, actual VZ NAT availability, long-tail connections and backpressure; preserve per-peer/session DoS bounds and OS permission semantics. A `VZVmnetNetworkDeviceAttachment` + vmnet port-forwarding evaluation is queued (priority 3) with the full Docker publish-semantics qualification list.
-- **Linux published ports and DNS:** loopback proxy versus kernel forwarding, connection setup under W2/W9, guest/host DNS relays, networking state cleanup; preserve firewall ownership/isolation.
-- **Dev-loop bind mounts:** VZ virtiofs path, metadata round trips, layer/overlay lookup, file-watch correctness under W5; never "optimize" by stale-caching edits. Guest-native working sets versus transparent host binds are different performance classes; an optional synchronized-workspace mode, if ever built, gets its own benchmark label.
-- **BuildKit lifecycle:** builder first-start, image import/export, cache reuse, context transfer, idle lifetime, OCI layer storage; distinguish external BuildKit work from ctrs work in W6/W7.
-- **Image distribution/unpack:** registry client, dedup, compression/checksum paths, tar extraction, host↔guest stream, fsync batching where safe; preserve digest verification/durable writes in W8.
-- **Parallelism/control plane:** thread-per-connection `daemon/http.rs`, locks, per-container state serialization, guest `poll()` scheduling, cgroup/exec supervision under W9 and W11. Prefer bounded concurrency proven by the workload; no cargo-cult async runtime.
-- **Memory and cold/wake:** VZ helper/guest balloon, idle image/builder caches, resident layers and orphan helpers; optimize **total physical footprint** and post-reclaim next-operation latency, not just idle RSS or screenshot memory.
-- **Real recovery:** eliminate lost/stdin/log/port operations, unexpected XPC/daemon deaths, stale resources and stuck creates from W10/W11 before performance work resumes.
-- **Durability audit (gate, before any database/storage speed claim):** `apple.rs` attaches the data disk `Cached`+`Fsync`; `.fsync` does not guarantee persistence beyond the device cache while `.full` does. Audit whether reconstructible image/build caches and authoritative user volumes share one disk/policy; split policies explicitly rather than winning a database benchmark on weaker durability.
-
-### Architectural experiment queue (2026-11-14 design review)
-
-Targeted architectural experiments are permitted — not just local tuning —
-under the same one-hypothesis/one-change rules. macOS 27 exposes custom
-Virtio devices inside Virtualization.framework (`VZCustomVirtioDevice`),
-so owning a performance-critical transport no longer requires replacing
-the VMM.
-
-| Priority | Experiment | Required evidence |
-| --- | --- | --- |
-| 1 | Separate control, interactive-stream and bulk-transfer traffic into independent bounded queues with request IDs; offload synchronous layer extraction/install to bounded guest workers with an explicit durable commit point | Running apps and lifecycle ops stay responsive during real pulls/builds/log-streaming/cancel; same crash-consistency contract; benefit must also hold on native Linux |
-| 2 | Redesign layer persistence and storage placement (async bounded install pipeline, narrower flush scope, separate cache vs authoritative-data disks) | Faster deployment/builds, lower interference, unchanged durability contract; resolve the `.fsync`/`.full` audit first |
-| 3 | Evaluate explicit `VZVmnetNetworkDeviceAttachment` networking with framework-managed port forwarding | Better app throughput/tails **with full publish semantics**: dynamic add/remove, loopback vs all-interface binds, IPv6, UDP, source address, conflicts, restart recovery, VPNs, macOS permissions; keep a bounded relay fallback and make the chosen path observable per trial |
-| 4 | Guest-local working sets and memory-reclamation policy | Better complete edit/build/test cycles, not smaller idle RSS |
-| 5 | Prototype one custom Virtio transport for a *demonstrated* remaining bottleneck (layer transfer or high-volume attach I/O) | Material end-to-end gain beyond the corrected transport; independent queues, bounded descriptors, batching, notification coalescing; watch the serial-dispatch-queue trap; strict descriptor bounds, ownership/cancellation/reset semantics, malformed-input and VM-death tests; negotiated fallback retained |
-| 6 | Evaluate an alternate HVF-capable VMM (e.g. a pinned libkrun release — note Docker VMM is no longer libkrun) | Only after a measured VZ-specific ceiling survives priorities 1–5; same guest, workloads, budgets and state semantics |
-
-Rules for this queue: one architectural experiment per branch; never
-combine protocol, storage, networking and VMM changes into one
-unmeasurable rewrite; keep the guest supervisor responsible for
-lifecycle while bulk work moves to bounded workers — **audit the
-`clone3` pre-exec path before adding any thread pool to the agent**;
-preserving POSIX/Docker semantics and the on-disk/wire contracts is a
-hard gate, not a tradeoff.
-
-Keep footprint/complexity small. Prefer deleting unnecessary copies, redundant round trips, incorrect waits or duplication over speculative heavy new subsystems. No mandatory containerd, runc, Tokio, Hyper, desktop UI, remote engine or altered data formats.
-
-### Phase D: adversarial remeasurement and closeout
-
-- Re-run all core native workload cases against frozen Docker and the pre-campaign ctrs baseline **on fresh scratch roots**, with the candidate binary rebuilt from clean source. Execute the **held-out real app/dataset** exactly once for confirmation, or mark inconclusive and stop tuning it.
-- Validate app outputs, transaction logs, file-watch behavior, persistent volumes and service restart semantics. Soak W11. Repeat on each available qualified native host. A Mac-only success does not close Linux.
-- Write a **loss-first** report: host + versions, exact fixtures, commands, matrix of strict wins/ties/losses/unsupported, weighted aggregate, tail latencies, CPU-s, total physical memory, disk, reliability, BuildKit-controlled findings, applied commits, rejected experiments, and unresolved blocking features. Make the row labels and denominators explicit.
-- Stop when all applicable cases achieve **measured strict dominance** and G0–G4 pass, **or** when no credible improvement remains after three failed/neutral hypotheses per remaining bottleneck, 30 total candidate changes, a hard environment blocker, or a correctness/security/reliability gate that cannot be resolved in scope. **Stop means report honestly**, not quietly declare victory.
-- No tags, releases, remote pushes of user data, mass `prune`, Docker daemon reconfiguration outside isolated scratch, workstation sleep, or production host changes. Respect pre-existing Docker resources and user projects. Unattended permission applies to *in-repo code/bench source and verified commits*, not destructive host actions.
-
-## Steering prompt for the execution agent
-
-> You are the sole performance engineer for `joshuarli/ctrs`. Read `AGENTS.md` and this entire campaign, especially native architecture exclusion, benchmark fairness, hard gates and the no-microbenchmark rule. Build a lean, fully reproducible benchmark suite for real native-host Docker workloads. Qualify Linux natively when a real native Linux host is available; on Apple Silicon use only native ARM64 containers inside the existing hardware-virtualized Linux guest. Compare against pinned, current Docker Engine CE on Linux and pinned OrbStack on Mac. Never use FEX, QEMU, Rosetta, binfmt or cross-architecture builds. Run the full app/CI/Compose/database/queue/bind-mount/image/failure matrix with correctness hashes and full engine-ecosystem resource accounting. Publish every loss and limitation, including Docker wins. Profile actual losing workloads, hypothesize narrowly, optimize one subsystem, repeat valid paired A/B runs, and land only genuinely beneficial, fully tested slices on main. Keep iterating unattended until strict workload dominance or an explicit stop condition; leave a rigorous handoff, not invented benchmark results. You must not use `alpine true`, empty HTTP, `dd`, `iperf`, `/_ping`, or other microbenchmarks as the optimization score. If hardware, OS permissions or a Docker backend are unavailable, deliver the executable harness and mark the affected lane blocked; never substitute an emulator or claim a win.
-
-## Initial acceptance checklist (for the first executor session)
-
-- [ ] Read current repository and prior evidence; identify Linux runtime and Mac daemon-death blockers.
-- [ ] Create pinned, real application fixtures with deterministic correctness assertions for W1–W11.
-- [ ] Implement fail-closed native-ISA and privileged-nested-engine rejection, isolated cleanup, and competitor/version lock.
-- [ ] Get a clean `cargo test --workspace` plus each executable applicable parity suite; distinguish a plan from an actual run.
-- [ ] Produce a real Docker-versus-ctrs baseline **on whichever native hosts are truly available**, with valid trials and all losing/unsupported cells.
-- [ ] Execute a full, evidence-based optimization/promotion iteration only after baseline validity.
-- [ ] Commit compact results and update the loss-first scorecard; make unavailable lanes explicit.
+> Continue `docs/campaign-native-performance.md`. Read
+> `docs/native-performance-progress.md` and execute the first ready task.
+> Establish existing job status once, then implement, measure, decide,
+> checkpoint and continue. Healthy soak/watch counters are not progress.
+> Qualify real workloads and attack default W6/W7 builds using profiles
+> and paired evidence. Stay native ARM64/macOS, preserve correctness,
+> durability and user resources, land verified slices directly, and
+> continue until the stated gates or a specific external blocker. Save
+> exact continuation before a harness limit; a pause is not completion.

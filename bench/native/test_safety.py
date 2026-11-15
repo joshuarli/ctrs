@@ -1,0 +1,326 @@
+"""Offline regression tests for benchmark isolation and honest outcomes.
+
+No engine, VM, Docker installation, network service, or user data is used.
+"""
+
+import argparse
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+from unittest.mock import Mock, patch
+
+import runner
+
+
+def completed(stdout="", code=0):
+    return subprocess.CompletedProcess([], code, stdout, "")
+
+
+class FixtureContext:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.run_id = "test-run-000001"
+        self.workload_id = "test-run-000001:W6:pair-1"
+
+    def trial_dir(self, engine, case, state):
+        path = self.root / engine / case
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def new_record(self, *_):
+        return {"metrics": {}, "correctness": {"ok": True, "checks": {}},
+                "resources": {}, "validation_errors": [], "notes": []}
+
+
+def fake_engine(name="orbstack"):
+    engine = Mock()
+    engine.name = name
+    engine.socket = f"unix:///bench/{name}.sock"
+    engine.builder_name = f"np-dc-{name}-verified"
+    engine.sh.return_value = completed()
+    engine.compose.return_value = completed()
+    return engine
+
+
+class ManifestTests(unittest.TestCase):
+    def test_validation_needs_no_docker_or_path(self):
+        env = {**os.environ, "PATH": ""}
+        result = subprocess.run(
+            [sys.executable, str(Path(runner.__file__)), "validate-manifest"],
+            capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(result.stdout)
+        self.assertIn("W6", manifest["cases"])
+        self.assertEqual(len(manifest["cases_sha256"]), 64)
+
+    def test_bad_contract_stops_before_engine_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "cases.toml"
+            manifest.write_text("schema_version=1\nschema_version=2\n")
+            with patch.object(runner, "CASES_FILE", manifest), \
+                    patch.object(runner, "find_docker") as lookup, \
+                    patch.object(sys, "argv", ["runner.py", "prepare"]), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as err:
+                    runner.main()
+                self.assertEqual(err.exception.code, 2)
+                lookup.assert_not_called()
+
+    def test_shared_orbstack_cold_comparison_rejected_offline(self):
+        argv = ["runner.py", "baseline", "--case", "W7", "--a", "ctrs",
+                "--b", "orbstack", "--cold"]
+        with patch.object(sys, "argv", argv), \
+                patch.object(runner, "find_docker") as lookup, \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as err:
+                runner.main()
+            self.assertEqual(err.exception.code, 2)
+            lookup.assert_not_called()
+
+
+class BuilderIsolationTests(unittest.TestCase):
+    def test_engine_specific_builder_config_ignores_ambient_selection(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(runner, "WORK", Path(tmp)), \
+                patch.object(runner, "DOCKER", "/usr/bin/docker"), \
+                patch.dict(os.environ, {"BUILDX_BUILDER": "user-production"}):
+            ctrs = runner.Engine("ctrs", "test")
+            orb = runner.Engine("orbstack", "test")
+            self.assertNotEqual(ctrs.builder_name, orb.builder_name)
+            self.assertNotEqual(ctrs.buildx_config, orb.buildx_config)
+            self.assertNotIn("BUILDX_BUILDER", ctrs.env())
+            self.assertEqual(ctrs.env()["BUILDX_CONFIG"], str(ctrs.buildx_config))
+
+    def test_existing_builder_with_wrong_endpoint_is_refused(self):
+        engine = fake_engine()
+        engine.sh.return_value = completed(
+            "Name: np-test\nDriver: docker-container\nNodes:\nEndpoint: unix:///wrong\n")
+        with self.assertRaisesRegex(RuntimeError, "different endpoint"):
+            runner.ensure_dc_builder(engine)
+        self.assertEqual(engine.sh.call_count, 1)
+
+    def test_new_builder_gets_explicit_endpoint_and_is_verified(self):
+        engine = fake_engine()
+        engine.sh.side_effect = [completed(code=1), completed(), completed(
+            "Name: np-test\nDriver: docker-container\nNodes:\n"
+            f"Endpoint: {engine.socket}\n"
+            f'Driver Options: image="{runner.DC_BUILDER_IMAGE}"\n')]
+        runner.ensure_dc_builder(engine)
+        create = engine.sh.call_args_list[1].args[0]
+        self.assertEqual(create[-1], engine.socket)
+        self.assertIn(engine.builder_name, create)
+        self.assertNotIn("--use", create)
+
+    def test_matching_endpoint_with_wrong_image_is_refused(self):
+        engine = fake_engine()
+        engine.sh.return_value = completed(
+            "Name: np-test\nDriver: docker-container\nNodes:\n"
+            f"Endpoint: {engine.socket}\nDriver Options: image=mutable:latest\n")
+        with self.assertRaisesRegex(RuntimeError, "pinned BuildKit"):
+            runner.ensure_dc_builder(engine)
+
+
+class WorkloadSafetyTests(unittest.TestCase):
+    def test_w6_compiles_each_pair_and_records_paired_stamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = FixtureContext(tmp)
+            engine = fake_engine()
+            engine.sh.side_effect = lambda args, **kw: completed(
+                "a" * 64 + "  /src/libz.a\n" if args[0] == "run" else "")
+            fixture = Path(tmp) / "source"
+            fixture.mkdir()
+            shutil.copy(runner.W6_DIR / "Dockerfile", fixture / "Dockerfile")
+            # A fake source archive is sufficient for this mocked build:
+            # the test checks orchestration, never executes compilation.
+            (fixture / "zlib-1.3.1.tar.gz").write_bytes(b"test-only asset")
+            with patch.object(runner, "W6_DIR", fixture):
+                rec = runner.trial_w6(ctx, engine, "warm")
+            self.assertTrue(rec["correctness"]["ok"], rec)
+            builds = [call.args[0] for call in engine.sh.call_args_list
+                      if call.args[0][:2] == ["buildx", "build"]]
+            self.assertEqual(len(builds), 1)
+            self.assertIn("--no-cache", builds[0])
+            self.assertEqual((Path(tmp) / "orbstack/W6/ctx/stamp.txt").read_text(),
+                             ctx.workload_id + "\n")
+            first = runner.workload_id("run", "W6", 1, 1)
+            self.assertEqual(first, runner.workload_id("run", "W6", 1, 2))
+            self.assertNotEqual(first, runner.workload_id("run", "W6", 2, 3))
+
+    def test_missing_w6_asset_fails_before_starting_engine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = fake_engine()
+            with patch.object(runner, "W6_DIR", Path(tmp) / "absent"):
+                rec = runner.trial_w6(FixtureContext(tmp), engine, "warm")
+            self.assertFalse(rec["correctness"]["ok"])
+            self.assertIn("checksum-pinned", rec["validation_errors"][0])
+            engine.ensure_up.assert_not_called()
+
+    def test_w7_bypasses_cache_without_pruning_shared_builder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = fake_engine()
+            engine.sh.side_effect = lambda args, **kw: completed(
+                "incremental-1\nnpw7-ok\n" if args[0] == "run" else "")
+            rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+            self.assertTrue(rec["correctness"]["ok"], rec)
+            commands = [call.args[0] for call in engine.sh.call_args_list]
+            self.assertFalse(any("prune" in command for command in commands))
+            builds = [cmd for cmd in commands if cmd[:2] == ["buildx", "build"]]
+            self.assertEqual(len(builds), 3)
+            self.assertIn("--no-cache", builds[0])
+            self.assertNotIn("--no-cache", builds[1])
+            self.assertNotIn("build_empty_s", rec["metrics"])
+            self.assertIn("build_uncached_s", rec["metrics"])
+
+    def test_w8_keeps_shared_content_and_labels_it_warm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            portfolio = Path(tmp) / "portfolio.json"
+            portfolio.write_text(json.dumps({"orbstack": {"busybox": {
+                "pull_ref": "127.0.0.1:5000/npw8/busybox@sha256:abc",
+                "tag_ref": "127.0.0.1:5000/npw8/busybox:v1", "digest": "sha256:abc"}}}))
+            engine = fake_engine()
+            engine.sh.side_effect = lambda args, **kw: completed("sha256:abc npw8-ok")
+            with patch.object(runner, "PORTFOLIO_FILE", portfolio), \
+                    patch.object(runner, "ensure_registry", return_value=5000), \
+                    patch.object(runner, "start_sampler", return_value=(None, None)), \
+                    patch.object(runner, "compose_down"):
+                rec = runner.trial_w8(FixtureContext(tmp), engine, "warm")
+            self.assertTrue(rec["correctness"]["ok"], rec)
+            commands = [call.args[0] for call in engine.sh.call_args_list]
+            self.assertFalse(any("prune" in command for command in commands))
+            engine.stop.assert_not_called()
+            self.assertEqual(rec["metrics"]["cache_mode"],
+                             "fixture-refs-removed-content-retained")
+
+    def soak_result(self, summary, code=0):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = [0.0]
+            engine = fake_engine()
+
+            def load(args, **kwargs):
+                if summary is not None:
+                    Path(args[args.index("--out") + 1]).write_text(json.dumps(summary))
+                clock[0] = 2.0
+                return completed(code=code)
+
+            with patch.object(runner.time, "monotonic", side_effect=lambda: clock[0]), \
+                    patch.object(runner, "start_sampler", return_value=(None, None)), \
+                    patch.object(runner, "wait_health", return_value=(0.0, {})), \
+                    patch.object(runner, "compose_down"), \
+                    patch.object(runner, "http_json", return_value=(200, {"items": 500})), \
+                    patch.object(runner.subprocess, "run", side_effect=load):
+                return runner.trial_w11(FixtureContext(tmp), engine, "warm", duration=1.0)
+
+    def test_soak_rejects_even_one_percent_errors(self):
+        rec = self.soak_result({"requests": 100, "errors": 1,
+                                "reads_ok": 99, "writes_ok": 0})
+        self.assertFalse(rec["correctness"]["ok"])
+        self.assertFalse(rec["correctness"]["checks"]["errors_zero"])
+
+    def test_soak_rejects_missing_summary_and_failed_driver(self):
+        for summary, code in [(None, 0), ({"requests": 1, "errors": 0,
+                                          "reads_ok": 1, "writes_ok": 0}, 1)]:
+            with self.subTest(summary=summary, code=code):
+                rec = self.soak_result(summary, code)
+                self.assertFalse(rec["correctness"]["ok"])
+                self.assertEqual(rec["metrics"]["invalid_load_windows"], 1)
+
+
+class ExitStatusTests(unittest.TestCase):
+    def test_record_captures_executed_defaults_and_post_trial_version(self):
+        engine = fake_engine()
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine})
+
+        def trial(ctx, engine, state, duration=300.0, window=30.0, seed=1):
+            return {"correctness": {"ok": True}, "resources": {}, "validation_errors": []}
+
+        with patch.object(runner, "trial_w11", trial), \
+                patch.object(runner, "safe_version", return_value="observed-after-start"), \
+                patch.object(runner, "safe_engine_info", return_value=None):
+            rec = runner.run_one(context, "orbstack", "W11", "warm",
+                                 pair_id=1, order_index=0, duration=10.0, seed=4)
+        self.assertEqual(context.workload_params,
+                         {"cold": False, "duration": 10.0, "window": 30.0, "seed": 4})
+        self.assertEqual(rec["engine_server_version"], "observed-after-start")
+        self.assertEqual(context.workload_id, "one-run:W11:pair-1")
+
+    def test_baseline_returns_failure_and_pairs_seed(self):
+        args = argparse.Namespace(a="ctrs", b="orbstack", seed=7, pairs=2,
+                                  randomize=False, case="W2", state="warm", cold=False,
+                                  concurrency=8, duration=20, write_ratio=0.3)
+        context = Mock(engines={}, jsonl="trials.jsonl")
+        calls = []
+
+        def trial(ctx, engine, case, state, **kw):
+            calls.append((engine, kw))
+            return {"correctness": {"ok": len(calls) != 1}, "metrics": {}}
+
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "run_one", side_effect=trial), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        self.assertEqual(calls[0][1]["seed"], calls[1][1]["seed"])
+        self.assertEqual(calls[2][1]["seed"], calls[3][1]["seed"])
+        self.assertNotEqual(calls[0][1]["seed"], calls[2][1]["seed"])
+
+    def test_holdout_failure_is_not_exit_zero(self):
+        args = argparse.Namespace(engines="ctrs,orbstack", ops=240, repos=8,
+                                  issues=5, clones=4, seed=1)
+        rec = {"correctness": {"ok": False}, "metrics": {}, "validation_errors": ["failed"]}
+        with patch.object(runner, "RunContext", return_value=Mock(engines={}, jsonl="trials")), \
+                patch.object(runner, "run_one", return_value=rec), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.cmd_holdout(args), 1)
+
+
+class LoadMetricTests(unittest.TestCase):
+    def test_throughput_counts_successes_and_attempts_separately(self):
+        spec = importlib.util.spec_from_file_location("native_load", runner.LOAD_PY)
+        load = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(load)
+
+        def worker(wid, base, duration, write_ratio, rng_seed,
+                   latencies, counts, stop, error_log, t_start):
+            counts.update(reads=3, writes=2, errors=5)
+            latencies.extend([1.0] * 5)
+
+        output = io.StringIO()
+        with patch.object(load, "worker", worker), \
+                patch.object(sys, "argv", ["load.py", "--url", "http://unused",
+                                            "--concurrency", "1"]), \
+                contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as err:
+                load.main()
+        self.assertEqual(err.exception.code, 1)
+        summary = json.loads(output.getvalue())
+        self.assertEqual(summary["requests"], 10)
+        self.assertEqual(summary["requests_ok"], 5)
+        self.assertAlmostEqual(summary["attempted_rps"], 2 * summary["rps"], delta=0.02)
+
+    def test_failed_requests_do_not_enter_success_latency(self):
+        spec = importlib.util.spec_from_file_location("native_load", runner.LOAD_PY)
+        load = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(load)
+        stop = threading.Event()
+        conn = Mock()
+        conn.request.side_effect = lambda *a, **kw: stop.set()
+        conn.getresponse.return_value.status = 503
+        counts = {"reads": 0, "writes": 0, "errors": 0}
+        latencies = []
+        with patch.object(load.http.client, "HTTPConnection", return_value=conn):
+            load.worker(0, ("unused", 80), 1, 0, 1, latencies, counts,
+                        stop, [], 0)
+        self.assertEqual(counts["errors"], 1)
+        self.assertEqual(latencies, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -5,6 +5,16 @@ compatible container engine for macOS (Virtualization.framework guest) and
 Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 `docs/`.
 
+## Active performance campaign
+
+For performance/hillclimb work, first read
+`docs/campaign-native-performance.md` and
+`docs/native-performance-progress.md`, then execute the saved next action.
+The current lane is native ARM64 macOS versus OrbStack. Healthy soak/watch
+counters are not progress: do not repeat monitoring turns or stop at an
+arbitrary candidate count. Persist an exact continuation before an external
+turn limit; the campaign remains active until its measured gates pass.
+
 ## Commands
 
 ```sh
@@ -44,7 +54,8 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
-| Native-host Docker workload/performance hillclimb (current) | `docs/campaign-native-performance.md` |
+| macOS OrbStack performance hillclimb (current contract) | `docs/campaign-native-performance.md` |
+| Performance work queue and continuation checkpoint | `docs/native-performance-progress.md` |
 | Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
 | Evidence: gate B | `docs/evidence/gate-b.md` |
