@@ -580,14 +580,16 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     break;
                 }
                 p.tty_hup = None;
-                out.clear();
-                Msg::Output { id: &p.run.id, stream, data: &chunk[..got as usize] }.encode(&mut out);
                 if let Some(b) = p.bulk.as_mut() {
-                    b.pending.extend_from_slice(&out);
+                    // Encode straight into the pending buffer: one copy
+                    // less per chunk on the bulk path.
+                    Msg::Output { id: &p.run.id, stream, data: &chunk[..got as usize] }.encode(&mut b.pending);
                     if bulk_flush(b).is_err() {
                         p.bulk = None;
                     }
                 } else {
+                    out.clear();
+                    Msg::Output { id: &p.run.id, stream, data: &chunk[..got as usize] }.encode(&mut out);
                     conn.write_all(&out)?;
                 }
             }
