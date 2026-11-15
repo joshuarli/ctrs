@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::Path;
 
-use ctrs_proto::{Exited, MAX_OUTPUT_CHUNK, Msg, Stats, Stream};
+use ctrs_proto::{Exited, LayerStored, MAX_OUTPUT_CHUNK, Msg, Stats, Stream};
 
 use super::container::{self, NetCtx, Paths, Process};
 use super::net::{self, Bridges, Dhcp};
@@ -36,6 +36,156 @@ struct Proc {
 
 /// How long a hung-up terminal waits before it's polled again.
 const TTY_HUP_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// One reply slot in `outbox`, in the order the host sent the requests.
+/// `AwaitJob` is a `LayerBegin` whose `LayerStored`/`Error` the install
+/// worker still owes; everything behind it waits so replies stay FIFO.
+enum OutItem {
+    Ready(Vec<u8>),
+    AwaitJob { seq: u64 },
+}
+
+/// Writes the ready prefix of `outbox` to the host connection. An
+/// `AwaitJob` at the front is ready once the worker's done for its seq is
+/// the next completed install (installs finish in request order).
+fn drain_outbox(
+    conn: &mut File,
+    out: &mut Vec<u8>,
+    outbox: &mut VecDeque<OutItem>,
+    done_jobs: &mut VecDeque<layers::InstallDone>,
+) -> io::Result<()> {
+    loop {
+        match outbox.front() {
+            Some(OutItem::Ready(_)) => {}
+            Some(OutItem::AwaitJob { seq }) => match done_jobs.front() {
+                Some(d) if d.seq == *seq => {}
+                _ => break,
+            },
+            None => break,
+        }
+        match outbox.pop_front().expect("front checked above") {
+            OutItem::Ready(bytes) => conn.write_all(&bytes)?,
+            OutItem::AwaitJob { .. } => {
+                let done = done_jobs.pop_front().expect("matched above");
+                out.clear();
+                match &done.result {
+                    Ok(unpacked) => Msg::LayerStored(LayerStored {
+                        unpacked_bytes: *unpacked,
+                        elapsed_ns: done.started.elapsed().as_nanos() as u64,
+                    })
+                    .encode(out),
+                    Err(e) => Msg::Error(&format!("unpack {}: {e}", done.digest)).encode(out),
+                }
+                conn.write_all(out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The one install child allowed at a time: its job, the read end of its
+/// result pipe and whatever record bytes have arrived so far.
+struct InstallWait {
+    job: layers::InstallJob,
+    read: OwnedFd,
+    pid: libc::pid_t,
+    buf: Vec<u8>,
+}
+
+/// Forks the child that unpacks and installs `job`'s staged blob. The child
+/// keeps only its result pipe, like the `docker cp` children, so it cannot
+/// hold the agent's connection or a container's pipes open.
+fn start_install(root: &Path, job: &layers::InstallJob) -> io::Result<(OwnedFd, libc::pid_t)> {
+    let mut fds = [0; 2];
+    sys::check(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } as _, "pipe")?;
+    // SAFETY: pipe2 just opened both; each side is owned immediately.
+    let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+    let result_fd = write.as_raw_fd();
+    // SAFETY: the agent is single-threaded, so the child is a consistent
+    // copy. It touches only the layer store, writes one record, exits.
+    let pid = unsafe { libc::fork() };
+    if pid == 0 {
+        install_child(root, job, result_fd);
+    }
+    if pid < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((read, pid))
+}
+
+/// Runs in the forked install child and never returns: every descriptor but
+/// stdio and the result pipe is closed, the staged blob is installed, one
+/// result record (`tag | u64 len | payload`) is written, then _exit.
+fn install_child(root: &Path, job: &layers::InstallJob, result_fd: RawFd) -> ! {
+    // SAFETY: closing descriptor ranges in this child only.
+    unsafe {
+        if result_fd > 3 {
+            libc::syscall(libc::SYS_close_range, 3, (result_fd - 1) as libc::c_uint, 0);
+        }
+        libc::syscall(libc::SYS_close_range, (result_fd + 1) as libc::c_uint, libc::c_uint::MAX, 0);
+    }
+    let mut rec = Vec::with_capacity(24);
+    match layers::finish_job(root, job) {
+        Ok(unpacked) => {
+            rec.push(b'O');
+            rec.extend_from_slice(&8u64.to_le_bytes());
+            rec.extend_from_slice(&unpacked.to_le_bytes());
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            rec.push(b'E');
+            rec.extend_from_slice(&(msg.len() as u64).to_le_bytes());
+            rec.extend_from_slice(msg.as_bytes());
+        }
+    }
+    // SAFETY: writing a record we built to a descriptor we own.
+    unsafe { libc::write(result_fd, rec.as_ptr().cast(), rec.len()) };
+    // SAFETY: leaving the child without running the parent's destructors.
+    unsafe { libc::_exit(0) }
+}
+
+/// Starts forked installs while none runs and jobs wait. A fork or pipe
+/// failure fails only that job: installs are an optimization of ordering,
+/// not a reason to wedge every later reply.
+fn pump_installs(
+    root: &Path,
+    queue: &mut VecDeque<layers::InstallJob>,
+    wait: &mut Option<InstallWait>,
+    done: &mut VecDeque<layers::InstallDone>,
+) {
+    while wait.is_none() {
+        let Some(job) = queue.pop_front() else { return };
+        match start_install(root, &job) {
+            Ok((read, pid)) => *wait = Some(InstallWait { job, read, pid, buf: Vec::new() }),
+            Err(e) => done.push_back(layers::InstallDone {
+                seq: job.seq,
+                digest: job.digest,
+                started: job.started,
+                result: Err(e),
+            }),
+        }
+    }
+}
+
+/// Takes one complete result record off `buf`, if one has arrived.
+fn take_install_record(buf: &mut Vec<u8>) -> Option<io::Result<u64>> {
+    if buf.len() < 9 {
+        return None;
+    }
+    let tag = buf[0];
+    let len = u64::from_le_bytes(buf[1..9].try_into().expect("9 checked")) as usize;
+    if buf.len() < 9 + len {
+        return None;
+    }
+    let payload = &buf[9..9 + len];
+    let result = match tag {
+        b'O' if len == 8 => Ok(u64::from_le_bytes(payload.try_into().expect("len checked"))),
+        b'E' => Err(io::Error::new(io::ErrorKind::InvalidData, String::from_utf8_lossy(payload).into_owned())),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidData, "bad install record")),
+    };
+    buf.drain(..9 + len);
+    Some(result)
+}
 
 pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let sigfd = child_signals()?;
@@ -90,6 +240,17 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let usage_ring = std::sync::Arc::new(usage_ring);
     let (usage_tx, usage_rx) = std::sync::mpsc::channel::<Vec<String>>();
     let mut measuring = false;
+    // Bulk layer installs run in forked children so decompression,
+    // extraction and the filesystem flush never stall the event loop. A
+    // child, not a thread: clone3 copies this process for container setup
+    // and needs it single-threaded. Installs stay serialized, so the
+    // layer store sees the same one-at-a-time order as before. Replies
+    // still reach the host in request order through `outbox`.
+    let mut install_seq = 0u64;
+    let mut install_queue: VecDeque<layers::InstallJob> = VecDeque::new();
+    let mut install_wait: Option<InstallWait> = None;
+    let mut outbox: VecDeque<OutItem> = VecDeque::new();
+    let mut done_jobs: VecDeque<layers::InstallDone> = VecDeque::new();
     let mut relays: Vec<super::relay::Relay> = Vec::new();
     let mut procs: HashMap<libc::pid_t, Proc> = HashMap::new();
     let mut fds: Vec<libc::pollfd> = Vec::with_capacity(16);
@@ -116,6 +277,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
         fds.push(libc::pollfd { fd: pressure.as_ref().map_or(-1, |f| f.as_raw_fd()), events: libc::POLLPRI, revents: 0 });
         fds.push(libc::pollfd { fd: term.as_ref().map_or(-1, |f| f.as_raw_fd()), events: libc::POLLIN, revents: 0 });
         fds.push(libc::pollfd { fd: usage_wake.as_raw_fd(), events: libc::POLLIN, revents: 0 });
+        fds.push(libc::pollfd { fd: install_wait.as_ref().map_or(-1, |w| w.read.as_raw_fd()), events: libc::POLLIN, revents: 0 });
         for r in &relays {
             r.interest(&mut fds);
         }
@@ -190,6 +352,53 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     out.clear();
                     ctrs_proto::encode_usage(&mut out, &lines);
                     conn.write_all(&out)?;
+                }
+                continue;
+            }
+            if install_wait.as_ref().is_some_and(|w| w.read.as_raw_fd() == pfd.fd) {
+                let mut eof = false;
+                {
+                    let w = install_wait.as_mut().expect("checked above");
+                    let mut tmp = [0u8; 512];
+                    loop {
+                        // SAFETY: reading into a stack buffer from a descriptor we own.
+                        let n = unsafe { libc::read(w.read.as_raw_fd(), tmp.as_mut_ptr().cast(), tmp.len()) };
+                        if n > 0 {
+                            w.buf.extend_from_slice(&tmp[..n as usize]);
+                        } else if n == 0 {
+                            eof = true;
+                            break;
+                        } else if io::Error::last_os_error().raw_os_error() == Some(libc::EAGAIN) {
+                            break;
+                        } else {
+                            eof = true;
+                            break;
+                        }
+                    }
+                }
+                // A record means the child finished its install; EOF or an
+                // error first means it died mid-install. Either way the job
+                // is over and the next one may start.
+                let record = take_install_record(&mut install_wait.as_mut().expect("still waiting").buf);
+                if record.is_some() || eof {
+                    let w = install_wait.take().expect("waited on it");
+                    let result = match record {
+                        Some(r) => r,
+                        None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "install child exited without a result")),
+                    };
+                    // SAFETY: plain waitpid on the child we forked; it has
+                    // written its record or died, and reap() may already
+                    // have collected it, which is fine.
+                    let mut status = 0;
+                    unsafe { libc::waitpid(w.pid, &mut status, 0) };
+                    done_jobs.push_back(layers::InstallDone {
+                        seq: w.job.seq,
+                        digest: w.job.digest,
+                        started: w.job.started,
+                        result,
+                    });
+                    pump_installs(&paths.layers, &mut install_queue, &mut install_wait, &mut done_jobs);
+                    drain_outbox(&mut conn, &mut out, &mut outbox, &mut done_jobs)?;
                 }
                 continue;
             }
@@ -349,11 +558,32 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                         .encode(&mut out)
                 }
                 Ok(Msg::LayerQuery(digest)) => Msg::LayerStatus(layers::present(&paths.layers, digest)).encode(&mut out),
-                // The blob follows the frame on the same stream.
-                Ok(Msg::LayerBegin(begin)) => match layers::receive(&mut conn, &begin, &paths.layers) {
-                    Ok(stored) => Msg::LayerStored(stored).encode(&mut out),
-                    Err(e) => Msg::Error(&format!("unpack {}: {e}", begin.digest)).encode(&mut out),
-                },
+                // The blob follows the frame on the same stream; it is staged
+                // here (stream order demands it) but unpacked and flushed on
+                // the install worker, so a large layer cannot stall output,
+                // exits, execs or relays. Its Stored/Error reply keeps its
+                // place in the outbox.
+                Ok(Msg::LayerBegin(begin)) => {
+                    let seq = install_seq;
+                    install_seq += 1;
+                    match layers::stage_blob(&mut conn, &begin, &paths.layers, seq) {
+                        Ok(blob) => {
+                            install_queue.push_back(layers::InstallJob {
+                                seq,
+                                digest: begin.digest.to_owned(),
+                                media_type: begin.media_type.to_owned(),
+                                size: begin.size,
+                                blob,
+                                started: std::time::Instant::now(),
+                            });
+                            outbox.push_back(OutItem::AwaitJob { seq });
+                            pump_installs(&paths.layers, &mut install_queue, &mut install_wait, &mut done_jobs);
+                            drain_outbox(&mut conn, &mut out, &mut outbox, &mut done_jobs)?;
+                            continue;
+                        }
+                        Err(e) => Msg::Error(&format!("unpack {}: {e}", begin.digest)).encode(&mut out),
+                    }
+                }
                 Ok(Msg::Run(spec)) => {
                     // A container that wants the network must not start before the
                     // VM has it: right after boot the DHCP lease can be a few
@@ -617,7 +847,15 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 Ok(other) => Msg::Error(&format!("unexpected {other:?}")).encode(&mut out),
                 Err(e) => Msg::Error(&format!("bad frame: {e:?}")).encode(&mut out),
             }
-            conn.write_all(&out)?;
+            // `out` holds this frame's reply. With installs outstanding it
+            // queues behind them so the host's FIFO reply matching holds;
+            // the drain then writes whatever the front allows.
+            if outbox.is_empty() {
+                conn.write_all(&out)?;
+            } else {
+                outbox.push_back(OutItem::Ready(out.clone()));
+            }
+            drain_outbox(&mut conn, &mut out, &mut outbox, &mut done_jobs)?;
         }
     }
 }

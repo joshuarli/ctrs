@@ -170,14 +170,41 @@ Select the **highest-impact losing real-workload cell**: severity × frequency �
 6. After each accepted slice, rebaseline ctrs HEAD and choose the next worst credible cell. Do not switch the Docker control mid-loop. A gate-fixing correctness or security patch may land without a performance win if it causes no material performance regression and has a reproduced test.
 
 **Hypothesis queue, not permission to rewrite prematurely:**
-- **Mac app-facing networking:** `daemon/ports.rs`, guest relay, actual VZ NAT availability, long-tail connections and backpressure; preserve per-peer/session DoS bounds and OS permission semantics.
+- **Supervisor/data-path boundary (priority 1, see below):** `daemon/vmlink.rs` shared writer + ordered reply queue; `ctrs-init` `agent.rs` running `layers::receive()` (read, decompress, extract, `syncfs`) inline on the single event loop that also services exec I/O, logs, DNS and relays. Cross-workload interference, not a microbenchmark artifact.
+- **Mac app-facing networking:** `daemon/ports.rs`, guest relay, actual VZ NAT availability, long-tail connections and backpressure; preserve per-peer/session DoS bounds and OS permission semantics. A `VZVmnetNetworkDeviceAttachment` + vmnet port-forwarding evaluation is queued (priority 3) with the full Docker publish-semantics qualification list.
 - **Linux published ports and DNS:** loopback proxy versus kernel forwarding, connection setup under W2/W9, guest/host DNS relays, networking state cleanup; preserve firewall ownership/isolation.
-- **Dev-loop bind mounts:** VZ virtiofs path, metadata round trips, layer/overlay lookup, file-watch correctness under W5; never "optimize" by stale-caching edits.
+- **Dev-loop bind mounts:** VZ virtiofs path, metadata round trips, layer/overlay lookup, file-watch correctness under W5; never "optimize" by stale-caching edits. Guest-native working sets versus transparent host binds are different performance classes; an optional synchronized-workspace mode, if ever built, gets its own benchmark label.
 - **BuildKit lifecycle:** builder first-start, image import/export, cache reuse, context transfer, idle lifetime, OCI layer storage; distinguish external BuildKit work from ctrs work in W6/W7.
 - **Image distribution/unpack:** registry client, dedup, compression/checksum paths, tar extraction, host↔guest stream, fsync batching where safe; preserve digest verification/durable writes in W8.
 - **Parallelism/control plane:** thread-per-connection `daemon/http.rs`, locks, per-container state serialization, guest `poll()` scheduling, cgroup/exec supervision under W9 and W11. Prefer bounded concurrency proven by the workload; no cargo-cult async runtime.
-- **Memory and cold/wake:** VZ helper/guest balloon, idle image/builder caches, resident layers and orphan helpers; optimize **total physical footprint**, not just daemon RSS.
+- **Memory and cold/wake:** VZ helper/guest balloon, idle image/builder caches, resident layers and orphan helpers; optimize **total physical footprint** and post-reclaim next-operation latency, not just idle RSS or screenshot memory.
 - **Real recovery:** eliminate lost/stdin/log/port operations, unexpected XPC/daemon deaths, stale resources and stuck creates from W10/W11 before performance work resumes.
+- **Durability audit (gate, before any database/storage speed claim):** `apple.rs` attaches the data disk `Cached`+`Fsync`; `.fsync` does not guarantee persistence beyond the device cache while `.full` does. Audit whether reconstructible image/build caches and authoritative user volumes share one disk/policy; split policies explicitly rather than winning a database benchmark on weaker durability.
+
+### Architectural experiment queue (2026-11-14 design review)
+
+Targeted architectural experiments are permitted — not just local tuning —
+under the same one-hypothesis/one-change rules. macOS 27 exposes custom
+Virtio devices inside Virtualization.framework (`VZCustomVirtioDevice`),
+so owning a performance-critical transport no longer requires replacing
+the VMM.
+
+| Priority | Experiment | Required evidence |
+| --- | --- | --- |
+| 1 | Separate control, interactive-stream and bulk-transfer traffic into independent bounded queues with request IDs; offload synchronous layer extraction/install to bounded guest workers with an explicit durable commit point | Running apps and lifecycle ops stay responsive during real pulls/builds/log-streaming/cancel; same crash-consistency contract; benefit must also hold on native Linux |
+| 2 | Redesign layer persistence and storage placement (async bounded install pipeline, narrower flush scope, separate cache vs authoritative-data disks) | Faster deployment/builds, lower interference, unchanged durability contract; resolve the `.fsync`/`.full` audit first |
+| 3 | Evaluate explicit `VZVmnetNetworkDeviceAttachment` networking with framework-managed port forwarding | Better app throughput/tails **with full publish semantics**: dynamic add/remove, loopback vs all-interface binds, IPv6, UDP, source address, conflicts, restart recovery, VPNs, macOS permissions; keep a bounded relay fallback and make the chosen path observable per trial |
+| 4 | Guest-local working sets and memory-reclamation policy | Better complete edit/build/test cycles, not smaller idle RSS |
+| 5 | Prototype one custom Virtio transport for a *demonstrated* remaining bottleneck (layer transfer or high-volume attach I/O) | Material end-to-end gain beyond the corrected transport; independent queues, bounded descriptors, batching, notification coalescing; watch the serial-dispatch-queue trap; strict descriptor bounds, ownership/cancellation/reset semantics, malformed-input and VM-death tests; negotiated fallback retained |
+| 6 | Evaluate an alternate HVF-capable VMM (e.g. a pinned libkrun release — note Docker VMM is no longer libkrun) | Only after a measured VZ-specific ceiling survives priorities 1–5; same guest, workloads, budgets and state semantics |
+
+Rules for this queue: one architectural experiment per branch; never
+combine protocol, storage, networking and VMM changes into one
+unmeasurable rewrite; keep the guest supervisor responsible for
+lifecycle while bulk work moves to bounded workers — **audit the
+`clone3` pre-exec path before adding any thread pool to the agent**;
+preserving POSIX/Docker semantics and the on-disk/wire contracts is a
+hard gate, not a tradeoff.
 
 Keep footprint/complexity small. Prefer deleting unnecessary copies, redundant round trips, incorrect waits or duplication over speculative heavy new subsystems. No mandatory containerd, runc, Tokio, Hyper, desktop UI, remote engine or altered data formats.
 

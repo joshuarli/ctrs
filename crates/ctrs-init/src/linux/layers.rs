@@ -11,7 +11,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use ctrs_proto::{LayerBegin, LayerStored};
+use ctrs_proto::LayerBegin;
+#[cfg(test)]
+use ctrs_proto::LayerStored;
 
 use super::sys;
 
@@ -36,26 +38,91 @@ pub fn present(root: &Path, digest: &str) -> bool {
 }
 
 /// Reads exactly `begin.size` bytes of blob from `stream` and unpacks them.
-/// The stream stays in sync even if unpacking fails part-way.
+/// The stream stays in sync even if unpacking fails part-way. Synchronous
+/// reference path kept for tests; the agent stages then installs in a
+/// forked child instead.
+#[cfg(test)]
 pub fn receive(stream: &mut impl Read, begin: &LayerBegin<'_>, root: &Path) -> io::Result<LayerStored> {
     let started = Instant::now();
-    let final_dir = dir(root, begin.digest)?;
-    let tmp = root.join(format!(".tmp-{}", hex(begin.digest)?));
+    let blob = stage_blob(stream, begin, root, 0)?;
+    let result = install_blob(root, begin.digest, begin.media_type, begin.size, &blob);
+    let _ = fs::remove_file(&blob);
+    result.map(|unpacked_bytes| LayerStored { unpacked_bytes, elapsed_ns: started.elapsed().as_nanos() as u64 })
+}
+
+/// A layer install handed to a forked child: the compressed blob is already
+/// staged beside the layer store; the child unpacks and installs it off the
+/// event loop. `seq` makes the staging name unique so two queued jobs for
+/// the same digest cannot overwrite each other's blob.
+pub struct InstallJob {
+    pub seq: u64,
+    pub digest: String,
+    pub media_type: String,
+    pub size: u64,
+    pub blob: PathBuf,
+    pub started: Instant,
+}
+
+/// What the agent reports back for one finished [`InstallJob`].
+pub struct InstallDone {
+    pub seq: u64,
+    pub digest: String,
+    pub started: Instant,
+    pub result: io::Result<u64>,
+}
+
+fn blob_tmp(root: &Path, digest: &str, seq: u64) -> io::Result<PathBuf> {
+    Ok(root.join(format!(".blob-{seq}-{}", hex(digest)?)))
+}
+
+/// Reads exactly `begin.size` blob bytes from `stream` into a staging file
+/// in the layer store. The stream stays in sync even on error: whatever
+/// was not written is drained, so the next frame still lines up.
+pub fn stage_blob(stream: &mut impl Read, begin: &LayerBegin<'_>, root: &Path, seq: u64) -> io::Result<PathBuf> {
+    let blob = blob_tmp(root, begin.digest, seq)?;
+    let _ = fs::remove_file(&blob);
+    let result = (|| -> io::Result<()> {
+        let mut file = fs::File::create(&blob)?;
+        let mut limited = stream.take(begin.size);
+        io::copy(&mut limited, &mut file)?;
+        io::copy(&mut limited, &mut io::sink())?;
+        if file.metadata()?.len() != begin.size {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "layer blob shrank in transit"));
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&blob);
+    }
+    result.map(|()| blob)
+}
+
+/// Unpacks a staged blob and installs it: the worker half of the receive
+/// path. Returns the unpacked byte count.
+pub fn install_blob(root: &Path, digest: &str, media_type: &str, size: u64, blob: &Path) -> io::Result<u64> {
+    let tmp = root.join(format!(".tmp-{}", hex(digest)?));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp)?;
-
-    let mut limited = stream.take(begin.size);
-    let result = unpack(&mut limited, begin.media_type, &tmp, begin.size);
-    // Whatever happened, consume the rest of the blob so the next frame lines up.
-    io::copy(&mut limited, &mut io::sink())?;
-
-    match result.and_then(|unpacked_bytes| install(root, begin.digest, &tmp, &final_dir).map(|()| unpacked_bytes)) {
-        Ok(unpacked_bytes) => Ok(LayerStored { unpacked_bytes, elapsed_ns: started.elapsed().as_nanos() as u64 }),
+    let result = (|| -> io::Result<u64> {
+        let file = fs::File::open(blob)?;
+        unpack(&mut file.take(size), media_type, &tmp, size)
+    })();
+    match result.and_then(|unpacked| install(root, digest, &tmp, &dir(root, digest)?).map(|()| unpacked)) {
+        Ok(unpacked) => Ok(unpacked),
         Err(e) => {
             let _ = fs::remove_dir_all(&tmp);
             Err(e)
         }
     }
+}
+
+/// The forked child's half of a staged install: unpack, install, drop the
+/// staging file. Runs in a copy of the single-threaded agent, like the
+/// `docker cp` children.
+pub fn finish_job(root: &Path, job: &InstallJob) -> io::Result<u64> {
+    let result = install_blob(root, &job.digest, &job.media_type, job.size, &job.blob);
+    let _ = fs::remove_file(&job.blob);
+    result
 }
 
 /// Puts an unpacked layer in place: its files reach the disk first, then
@@ -95,7 +162,7 @@ pub fn retain<'a>(root: &Path, keep: impl Iterator<Item = &'a str>) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        let leftover = name.starts_with(".tmp-") || name.starts_with(".stale-");
+        let leftover = name.starts_with(".tmp-") || name.starts_with(".stale-") || name.starts_with(".blob-");
         let (h, is_marker) = match name.strip_suffix(".done") {
             Some(h) => (h, true),
             None => (name, false),

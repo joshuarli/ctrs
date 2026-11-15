@@ -142,3 +142,33 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 5. The historical "nine unexplained macOS daemon deaths" (closeout
    evidence) are not yet re-qualified under sustained W11-style load;
    W1/W2 trials showed zero daemon deaths but that is not a soak.
+
+## Experiment log
+
+### EXP-1 — guest layer install off the agent event loop (priority 1, slice A)
+
+- **Date:** 2026-11-14. **Status:** implemented, smoke-verified; benchmark
+  A/B pending.
+- **Hypothesis:** `layers::receive()` ran decompress + untar + `syncfs`
+  inline in the single-threaded `agent.rs` poll loop, so a large image
+  pull stalled exec I/O, logs, exits, DNS and relays for unrelated
+  containers. Moving install to a forked child should keep running apps
+  responsive during real pulls without changing wire semantics.
+- **Change:** `stage_blob()` drains the blob stream into `.blob-<seq>-*`
+  (stream order preserved, unique per job); a serialized queue feeds one
+  forked child at a time (`install_child` keeps only its result pipe, like
+  the `docker cp` children — the agent stays single-threaded for `clone3`).
+  Results return through a length-tagged pipe record; `outbox` keeps
+  `LayerStored`/`Error` replies FIFO against later requests. Durable
+  install order is unchanged: `syncfs` → rename → `.done` marker.
+- **Rejected first attempt:** a `std::thread` worker broke every
+  `clone3` container spawn (`switch user: ENOENT/0`) — the documented
+  single-threaded SAFETY invariant is real. Reverted to the forked-child
+  pattern already used by `copy.rs`.
+- **Verification so far:** `cargo check --workspace`, musl-target check
+  incl. `--tests`, `cargo xtask guest`, `conformance/smoke.sh` 21/0,
+  fresh `alpine:3.20` pull + run, `redis:7` pull concurrent with `exec`
+  on a running container.
+- **Pending:** paired before/after W1/W2 trials plus a pull-during-load
+  responsiveness cell; host-side bulk-stream separation (second vsock
+  connection) remains a separate slice of priority 1.
