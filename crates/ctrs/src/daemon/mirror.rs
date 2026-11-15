@@ -563,7 +563,16 @@ fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, pus
             "PUT" => {
                 let mut bytes = Vec::new();
                 body(r, len, chunked).take(MAX_MANIFEST).read_to_end(&mut bytes)?;
-                record_manifest(engine, &repo, &reference, &bytes)?;
+                if let Err(e) = record_manifest(engine, &repo, &reference, &bytes) {
+                    // A registry answers a bad manifest with a status,
+                    // not a dropped connection: buildkitd retries PUTs
+                    // on EOF and an unanswerable conn turns one bad
+                    // manifest into a failed push.
+                    let msg = format!("{{\"errors\":[{{\"code\":\"BLOB_UNKNOWN\",\"message\":\"{}\"}}]}}", e.to_string().replace('"', "'"));
+                    head(w, "400 Bad Request", "Content-Type: application/json\r\n", msg.len() as u64)?;
+                    w.write_all(msg.as_bytes())?;
+                    return w.flush();
+                }
                 let digest = ctrs_image::store::sha256_digest(&bytes);
                 repo_manifests()
                     .lock()
@@ -628,8 +637,6 @@ fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -
     }
     // An image manifest: config + layers, already pushed as blobs.
     let config_digest = v["config"]["digest"].as_str().unwrap_or_default().to_owned();
-    let config_bytes = engine.store.read_config(&config_digest)?;
-    let config: Value = serde_json::from_slice(&config_bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("image config: {e}")))?;
     let mut layers = Vec::new();
     for l in v["layers"].as_array().into_iter().flatten() {
         layers.push(ctrs_image::Layer {
@@ -645,13 +652,30 @@ fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -
     }
     // A registry refuses a manifest whose blobs it does not have
     // (BLOB_UNKNOWN); recording one anyway would leave an image whose
-    // layers can never deploy.
-    for l in &layers {
-        if !engine.store.has_blob(&l.digest, l.size) {
-            crate::diag::debug!("mirror manifest skipped", repo = repo, reference = reference, reason = format!("missing blob {}", l.digest));
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("manifest references missing blob {}", l.digest)));
+    // layers can never deploy. Concurrent pushes share blob uploads
+    // inside buildkitd, so a manifest can legitimately arrive while a
+    // sibling push's identical blob is still committing — wait briefly
+    // for presence (commits are atomic renames, so presence is proof)
+    // before refusing.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let config_ready = engine.store.blob_path(&config_digest).is_ok_and(|p| p.is_file());
+        let missing = layers.iter().find(|l| !engine.store.has_blob(&l.digest, l.size));
+        if config_ready && missing.is_none() {
+            break;
         }
+        if std::time::Instant::now() >= deadline {
+            let what = match missing {
+                Some(l) => format!("missing blob {}", l.digest),
+                None => format!("missing config blob {config_digest}"),
+            };
+            crate::diag::debug!("mirror manifest skipped", repo = repo, reference = reference, reason = what.clone());
+            return Err(io::Error::new(io::ErrorKind::InvalidData, what));
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
+    let config_bytes = engine.store.read_config(&config_digest)?;
+    let config: Value = serde_json::from_slice(&config_bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("image config: {e}")))?;
     // Digest refs name the image `m<hex>`; tag refs keep the tag.
     let name = if reference.starts_with("sha256:") {
         format!("{repo}:m{}", digest.get(7..23).unwrap_or(&digest))

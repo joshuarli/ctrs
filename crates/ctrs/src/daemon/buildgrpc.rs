@@ -257,6 +257,16 @@ impl Win {
 
     fn take(&self, sid: u32, len: usize) {
         let mut w = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        if w.0 < len as u64 || w.2.get(&sid).copied().unwrap_or(w.1) < len as u64 {
+            crate::diag::warn!(
+                "flow window overdraw",
+                sid = sid,
+                len = len,
+                conn = w.0,
+                stream = w.2.get(&sid).copied().unwrap_or(w.1),
+                default = w.1
+            );
+        }
         w.0 = w.0.saturating_sub(len as u64);
         let d = w.1;
         if let Some(s) = w.2.get_mut(&sid) {
@@ -802,7 +812,10 @@ fn relay_c2b_run<R: Read>(
                 p.copy_from_slice(&f.payload[..f.payload.len().min(8)]);
                 cli_ep.frame(F_PING, FL_ACK, 0, &p)?;
             }
-            F_GOAWAY => break Ok(()),
+            F_GOAWAY => {
+                crate::diag::warn!("builder sent GOAWAY on grpc relay", payload = format!("{:?}", &f.payload[..f.payload.len().min(8)]));
+                break Ok(());
+            }
             F_HEADERS | F_CONTINUATION if f.sid != 0 => {
                 let (block, _) = strip_flags(&f.payload, f.flags);
                 let end_stream = f.ftype == F_HEADERS && f.flags & FL_END_STREAM != 0;
@@ -875,6 +888,10 @@ fn relay_c2b_run<R: Read>(
                     s.close(c, b);
                 }
                 be_send.close(b);
+                if f.payload.len() >= 4 {
+                    let code = u32::from_be_bytes([f.payload[0], f.payload[1], f.payload[2], f.payload[3]]);
+                    crate::diag::warn!("builder reset grpc stream", sid = b, code = code);
+                }
                 be_ep.frame(F_RST, 0, b, &f.payload)?;
             }
             _ => {}
@@ -944,7 +961,10 @@ fn relay_b2c_run<R: Read>(
                 p.copy_from_slice(&f.payload[..f.payload.len().min(8)]);
                 be_ep.frame(F_PING, FL_ACK, 0, &p)?;
             }
-            F_GOAWAY => break Ok(()),
+            F_GOAWAY => {
+                crate::diag::warn!("client sent GOAWAY on grpc relay");
+                break Ok(());
+            }
             F_HEADERS | F_CONTINUATION if f.sid != 0 => {
                 let end_stream = f.ftype == F_HEADERS && f.flags & FL_END_STREAM != 0;
                 // Trailers for a rewritten solve: retag now.
@@ -990,6 +1010,10 @@ fn relay_b2c_run<R: Read>(
             }
             F_RST if f.sid != 0 => {
                 let b = f.sid;
+                if f.payload.len() >= 4 {
+                    let code = u32::from_be_bytes([f.payload[0], f.payload[1], f.payload[2], f.payload[3]]);
+                    crate::diag::warn!("builder reset grpc stream (b2c)", sid = b, code = code);
+                }
                 let c = {
                     let s = sids.lock().unwrap_or_else(|e| e.into_inner());
                     s.c_of(b)
@@ -1175,6 +1199,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                 while off < msg.len() {
                     let n2 = (msg.len() - off).min(OUT_FRAME);
                     send_win.wait(1, n2);
+                    crate::diag::debug!("session DATA", len = n2, off = off, msg_len = msg.len());
                     send_ep.frame(F_DATA, 0, 1, &msg[off..off + n2])?;
                     send_win.take(1, n2);
                     off += n2;
@@ -1191,6 +1216,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
             Ok(None) => break Err(io_err("builder closed the session")),
             Err(e) => break Err(e),
         };
+        crate::diag::debug!("session rx frame", ty = f.ftype, flags = f.flags, sid = f.sid, len = f.payload.len());
         match f.ftype {
             F_SETTINGS if f.flags & FL_ACK == 0 => {
                 let mut i = 0;
@@ -1210,6 +1236,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
             }
             F_WINDOW_UPDATE if f.payload.len() >= 4 => {
                 let inc = u32::from_be_bytes([f.payload[0], f.payload[1], f.payload[2], f.payload[3]]) & 0x7fff_ffff;
+                crate::diag::debug!("session WINDOW_UPDATE", sid = f.sid, inc = inc);
                 be_send.update(f.sid, inc);
             }
             F_PING if f.flags & FL_ACK == 0 => {
@@ -1255,7 +1282,14 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                 }
             }
             F_HEADERS if f.sid == 1 && f.flags & FL_END_STREAM != 0 => break Ok(()),
-            F_RST if f.sid == 1 => break Err(io_err("builder reset the session")),
+            F_RST if f.sid == 1 => {
+                let code = if f.payload.len() >= 4 {
+                    u32::from_be_bytes([f.payload[0], f.payload[1], f.payload[2], f.payload[3]])
+                } else {
+                    u32::MAX
+                };
+                break Err(io_err(&format!("builder reset the session (code {code})")));
+            }
             F_GOAWAY => break Err(io_err("builder sent GOAWAY")),
             _ => {}
         }
