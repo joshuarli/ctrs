@@ -856,3 +856,61 @@ A 64 MiB bound-check was neutral (~0.96-1.09 s, same as 16 MiB),
 so 16 MiB stands — the window no longer binds and the residual h2g
 gap is the VZ host TX path / agent-frame copies, not the guest
 window.
+
+**EXP-6 layer fetch over virtiofs — landed (`ade1da0`); stdin-over-
+virtiofs — falsified, reverted (2026-11-15):** `push_layer` now
+sends `LayerFetch` (proto 5, kind 76) with the blob's `/mnt/mac`
+path when the store metadata is available, and the guest agent
+opens the blob straight off the share into the existing
+`stage_blob`/install path — no layer bytes cross vsock. A failed
+fetch latches `layer_vfs` off and falls back to the inline
+`LayerBegin` stream, so old agents and share-less boots are
+unaffected; store blobs are minutes-to-days old at fetch time so
+the share's freshness lag (below) does not apply in practice.
+
+The follow-on experiment — staging bulk exec stdin through the
+same share (`InputFetch` + `Hello.share_ok`, ~2 MiB inline
+threshold, `INPUT_WINDOW` credits unchanged) — **failed and was
+reverted in full**. Host-staged files under
+`data/vfs-stdin/<exec-id>` were written and announced correctly,
+but the guest could not reliably read them: directory lookups
+returned ENOENT for hundreds of ms after host creation, then
+succeeded while `pread` still returned short reads because the
+cached inode `i_size` predated the host's writes. Two
+compounding causes were isolated:
+
+- **Server/entry freshness lag**: a file created on the host is
+  invisible through the share for ~1-2 s. A control probe —
+  `docker run -v <file-created-this-second>:/x` — fails with the
+  same ENOENT, proving this is a property of the VZ share itself
+  affecting *all* consumers, including ordinary bind mounts of
+  freshly-created files (a pre-existing limitation, not specific
+  to the new code).
+- **Guest attr caching**: even after the entry appears, the
+  guest's cached attributes serve a stale size, so range reads
+  past the old EOF return short. Legacy `mount(2)` rejects all
+  option strings on this kernel (6.18, virtiofs is new-mount-API
+  only), so `attr_timeout=0`/`cache=none` would require an
+  `fsopen`/`fsconfig`/`fsmount` mount path plus a second share
+  tag — and would still not fix the server-side lag above.
+
+Per-chunk immutable files were considered (correct size at first
+getattr) but hit the same entry-visibility lag, and a fixed
+pre-announce delay would add seconds to every bulk stdin for at
+best parity with the ~520 MB/s vsock path. Conclusion: the share
+is suitable for static, long-lived files (layers, bind sources
+that already exist) but not for millisecond-latency protocol
+staging. Host->guest bulk remains vsock-bound at ~520 MB/s; the
+residual gap to OrbStack (~950 MB/s) needs a different transport,
+not a different filesystem.
+
+**Side finding — `docker import` of bsdtar/pax archives fails
+unpack (pre-existing, unrelated to transport):** an archive made
+by macOS `tar` (pax extended headers) imported fine host-side but
+the guest `untar` rejected it (`failed to unpack .../f.txt`) via
+BOTH the vsock and virtiofs layer paths identically — a tar-compat
+gap in the guest unpacker (tar-rs + `set_unpack_xattrs`), not a
+transport fault. `tar --format=ustar` archives of identical
+content import and run cleanly. Worth a compat slice: real-world
+`docker import`/`docker cp`-style archives from macOS tooling are
+commonly pax.
