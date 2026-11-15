@@ -703,3 +703,17 @@ prune, search, network connect/disconnect all answer correctly.
 Remaining unsupported surface is cleanly 404'd (checkpoint,
 plugin, secret/config, manifest, swarm) — feature gaps, not
 misroutes.
+
+**EXP-4 residual analysis (next slice, unproven):** the agent's
+control conn saturates ~800-950 MB/s guest→host regardless of
+stream count (1x ~800, 4x ~790 aggregate), while dedicated relay
+conns exceed 1 GB/s. Hypothesis: `conn.write_all` per frame is
+blocking — when vsock TX is full the whole single-threaded agent
+stalls, so pipe reads and frame production stop between writes,
+leaving the vsock pipe underfilled. Relay conns avoid this with a
+nonblocking fd + persistent buffer (`relay.rs::pump`). Candidate
+fix: give the agent conn the same treatment — nonblocking conn,
+FIFO frame buffer, POLLOUT-driven flush, production gated on a
+buffer cap for backpressure. ~10 `conn.write_all` sites share the
+`out`/`outbox` encoding already; must preserve frame order and the
+single-writer invariant. Not yet implemented.
