@@ -121,16 +121,16 @@ fn expansion_cap(compressed: u64) -> u64 {
 }
 
 /// A reader that fails once more than `left` bytes have come through.
-struct Capped<R> {
-    inner: R,
-    left: u64,
+pub(super) struct Capped<R> {
+    pub(super) inner: R,
+    pub(super) left: u64,
 }
 
 impl<R: Read> Read for Capped<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.inner.read(buf)?;
         if n as u64 > self.left {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "layer expands beyond its allowed size"));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "stream exceeds the allowed size"));
         }
         self.left -= n as u64;
         Ok(n)

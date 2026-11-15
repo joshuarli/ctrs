@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::path::PathBuf;
 
 use ctrs_proto::{COPY_PORT, CopySpec, FsEntry, Msg, copy_flags, copy_op};
 
@@ -116,6 +117,28 @@ fn enter(spec: &CopySpec<'_>, running: &[(&str, libc::pid_t)], paths: &Paths) ->
     Ok(())
 }
 
+/// The most an archive unpacked via `docker cp` may total. The host is the
+/// sender (trusted), so this bounds a buggy or compromised host, not an
+/// attacker on the network.
+const MAX_COPY: u64 = 64 << 30;
+
+/// The extraction path for an archive member: relative, made only of normal
+/// components, as `unpack_in` requires. Used for the pre-check so it cannot
+/// stat a path outside the destination.
+fn checked_join(dest: &std::path::Path, path: &std::path::Path) -> io::Result<PathBuf> {
+    let mut out = dest.to_path_buf();
+    for part in path.components() {
+        match part {
+            std::path::Component::Normal(n) => out.push(n),
+            std::path::Component::CurDir => {}
+            _ => {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("archive member path {} escapes the destination", path.display())));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Unpacks the archive that follows into `spec.path`, a directory.
 fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
     let dest = std::path::Path::new(spec.path);
@@ -125,6 +148,10 @@ fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
         Err(_) => return Err(io::Error::new(io::ErrorKind::NotFound, format!("notfound: Could not find the file {} in container {}", spec.path, spec.id))),
     }
     let source: Box<dyn Read + '_> = if spec.flags & copy_flags::CHUNKED != 0 { Box::new(Chunks::new(&mut *conn)) } else { Box::new(&mut *conn) };
+    // The host decompresses before it sends, so this bounds the tar's total
+    // size, every member included: a buggy or compromised host cannot make
+    // the guest unpack without limit.
+    let source = super::layers::Capped { inner: source, left: MAX_COPY };
     let mut reader = BufReader::with_capacity(256 * 1024, source);
     {
         let mut archive = tar::Archive::new(&mut reader);
@@ -135,8 +162,9 @@ fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
         archive.set_overwrite(true);
         for entry in archive.entries()? {
             let mut entry = entry?;
+            let path = entry.path()?.into_owned();
             if spec.flags & copy_flags::NO_OVERWRITE_DIR_NON_DIR != 0 {
-                let target = dest.join(entry.path()?);
+                let target = checked_join(dest, &path)?;
                 if let Ok(m) = fs::symlink_metadata(&target)
                     && m.is_dir() != entry.header().entry_type().is_dir()
                 {
@@ -146,7 +174,11 @@ fn copy_in(conn: &mut fs::File, spec: &CopySpec<'_>) -> io::Result<()> {
                     ));
                 }
             }
-            entry.unpack_in(dest)?;
+            // unpack_in refuses entries whose paths escape the destination;
+            // refuse them loudly too, rather than record a short copy.
+            if !entry.unpack_in(dest)? {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, format!("archive member {} escapes the destination", path.display())));
+            }
         }
     }
     // The archive's trailing padding: read it so the host's writes complete.
