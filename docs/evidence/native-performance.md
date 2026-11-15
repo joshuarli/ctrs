@@ -473,6 +473,21 @@ as the campaign's one structural feature gap: `docker`-driver
 builds exist and work, they just cost ~0.3–1.3 s more per build,
 scaling with image size.
 
+**Mirror push export for `POST /build` (2026-11-15, `e41c3bf`):**
+the classic builder API now exports `type=image` to the host mirror
+(`/v2/<token>/push/<repo>/…`, OCI push protocol) instead of an
+uncompressed docker-archive tar through exec output. Blobs land
+content-addressed in the store, so warm/incremental builds push only
+new layers (HEAD-skipped when present), manifests become image
+records under a per-build temp repo, and the daemon retags on
+success. Verified end-to-end: tagged and untagged builds, a 64 MiB
+layer push (~0.2 s), image run probes, no temp-image or upload-file
+leaks, archive fallback when the mirror is down. Scope note: this
+serves `POST /build` (legacy/API clients) only — the scored W6/W7
+path is `docker buildx build --load` on buildx's own
+`buildx_buildkit_default` container, which never touches
+`builder.rs`; the scored gap above is unchanged by this work.
+
 **Exec stdin path (2026-11-15):** bulk `exec -i` measured ~400 MB/s
 vs OrbStack ~880 MB/s — a real loss, root-caused to two stacked
 costs. `forward_stdin` read 32 KiB per `Input` frame; the guest's
