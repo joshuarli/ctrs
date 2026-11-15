@@ -13,21 +13,21 @@ queue or turn-by-turn status diary.
 build the real W6/W7 fixtures, then measure that vertical slice.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
-(`ensure_pinned_source`, `6446af0`) and the real W6 fixture (`f755f6d`):
-hyperfine v2.0.0 Rust `cargo build+test --locked` on
-rust:1.100.0-bookworm plus zlib 1.3.1 C build — Dockerfile validated
-end-to-end on OrbStack (132 tests pass, arm64 artifact produced).
-Metrics are now `build_rust_s`/`build_zlib_s` — a new fixture version.
+(`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
+and the real W7 fixture (`67759ce`): two real apps per build —
+hyperfine v2.0.0 (Rust, `cargo build --release --locked` →
+debian:bookworm-slim) and httpie 3.2.4 (PyPI sdist → pip wheel →
+offline install → python:3.13-slim). Both W7 app Dockerfiles were
+validated end-to-end on OrbStack (builds succeed, `hyperfine 2.0.0`
+and `http 3.2.4` probes pass, note marker readable). W7 keeps
+uncached/warm/incremental per app → 6 metrics
+(`{hyperfine,httpie}_{uncached,warm,incr}_s`).
 
-**Next executable action:** continue NP-02 with real W7 — replace the
-synthetic python/urandom proxy with two real app builds through the
-default buildx → load → first-use path (candidates: reuse the pinned
-hyperfine source in a slim multi-stage runtime image plus a second
-real app such as a pinned charmbracelet/gum Go build or an httpie
-Python image; pin sources in `assets.lock` `[sources]`/`[images.w7]`).
-Then freeze remaining `assets.lock` entries (image digests from
-`prepare.json`, tool versions) and run the W6/W7 `baseline
---driver default` vertical slice.
+**Next executable action:** finish NP-02 input freeze — pin remaining
+image tags to digests in `assets.lock` (rust/gcc/python/debian base
+images currently tag-pinned; tool versions docker/buildx/buildkit
+already recorded by `preflight`/`prepare`), then run the W6/W7
+`baseline --driver default` vertical slice.
 
 **NP-01 qualified on the Mac (2026-11-15):** all three harness checks
 pass on `sentry` (41/41 unit tests, clean preflight), guest/binary
