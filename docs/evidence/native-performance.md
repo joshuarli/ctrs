@@ -633,3 +633,24 @@ with both engines showing correlated tail outliers late in the run.
 Was 1.807 pre-fix. The residual gap is inside run-to-run noise; W10's
 raw `load_errors` asymmetry is a metric artifact (ctrs fast-refuses,
 OrbStack hang-accepts) and is not scored.
+
+### Campaign verification status (2026-11-15, post-frozen-baseline)
+
+- `cargo check --workspace`: clean.
+- `cargo test --workspace`: green (earlier doctest failure was a
+  missing `rustdoc` on the ad-hoc toolchain PATH, not code).
+- `conformance/smoke.sh`: **21/21**, incl. host hygiene
+  (`~/.local/share/ctrs` untouched after the `CTRS_STATE_DIR`
+  isolation fix in `97650b9`).
+- `tests/e2e.sh` against an isolated scratch engine seeded with the
+  benchmark image store: **488/488, 0 skipped**. The `always`
+  restart-policy fix (`2fb2591`) is verified in-suite; an earlier
+  `filter-ancestor` failure was self-inflicted pollution from manual
+  `--restart always` test containers, not an engine defect.
+- Frozen 10-pair baselines: W1–W10 + W8-under-load + W11 soak, all
+  correctness gates green; scorecard in
+  `docs/evidence/native-performance.md` above.
+- Known open item: W6/W7 *default* `docker`-driver builds trail
+  OrbStack because ctrs ships no embedded BuildKit; on matched
+  `--driver dc` topology ctrs matches or beats OrbStack on every
+  build cell. Tracked as a feature gap, not an engine-perf loss.
