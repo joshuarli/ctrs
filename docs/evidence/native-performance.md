@@ -688,3 +688,18 @@ alone). Residual vs OrbStack (~1.0-1.05 GB/s aggregate on the same
 probes) is the vsock line rate itself; closing it is the custom-
 Virtio question, not agent scheduling. `conformance/smoke.sh`
 21/21 on the drain-loop agent.
+
+### EXP-5 — unmeasured Docker API surface audit (2026-11-15)
+
+Probing paths outside the W1–W11 cells found `docker import`
+outright broken (every `/images/create` went to `pull`; the tar
+body tripped the in-memory cap → "bad request framing"). Fixed in
+`3593040`: streamed rootfs→store ingest, `--change` support,
+correct `repo`/`tag` folding. 300 MiB import: **0.45 s vs OrbStack
+3.95 s**. Full audit of the route table (`api.rs` + `ops.rs`)
+followed: commit, export, top, stats, pause/unpause, rename,
+update, changes, history, events, system df, image/container
+prune, search, network connect/disconnect all answer correctly.
+Remaining unsupported surface is cleanly 404'd (checkpoint,
+plugin, secret/config, manifest, swarm) — feature gaps, not
+misroutes.
