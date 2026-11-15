@@ -1040,3 +1040,17 @@ beyond method noise); cpu_seconds_est 527 vs 406 (ctrs did ~14%
 more requests — ~0.67 vs ~0.59 ms/req, within sampler noise).
 The parallel-install/deferred-fetch/bulk-conn changes survived
 ~782k mixed requests with no leak signal in the RSS trace.
+
+**Remaining-cell re-baseline, same day (warm, 2-3 pairs):** W1
+bring-up 3.0 s vs 5.4 s to health (~1.8x); W3 postgres tx_tps
+3798-4225 vs 518-843 (~5-7x, up_s 1.66 vs 3.3-3.4); W4 queue drain
+0.31/0.14/0.14 s vs 0.55-0.66/0.58-0.66/1.84-1.98 s at 1/4/16
+workers (workers_1 improved ~25% vs frozen — bulk conns help the
+drain path); W5 edit-test bind 0.088 s vs 0.287 s, volume 0.066 s
+vs 0.270 s (~3-4x, bind penalty now 1.33x within-engine); W10
+recovery 0.34 s vs 0.33 s (~tie, was a win at frozen — 2 pairs,
+within noise), load p95/p99 4.1/5.2 ms vs 5.4/7.9 ms, all
+correctness green (kill-window errors scale with ctrs's ~3x higher
+attempted rps; committed item counts exact). Every scored cell has
+now been re-measured against current code: all win or tie except
+the documented W6/W7 builder-topology gap.
