@@ -543,7 +543,10 @@ impl Networks {
     pub fn load(root: &std::path::Path) -> io::Result<Networks> {
         let path = root.join("networks.json");
         let saved: Vec<Network> = match std::fs::read(&path) {
-            Ok(b) => serde_json::from_slice::<Vec<Network>>(&b).unwrap_or_default().into_iter().filter(|n| !n.builtin()).collect(),
+            Ok(b) => serde_json::from_slice::<Vec<Network>>(&b).unwrap_or_else(|e| {
+                crate::diag::error!("ignoring unreadable network records", file = path.display(), error = e);
+                Vec::new()
+            }).into_iter().filter(|n| !n.builtin()).collect(),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
@@ -573,7 +576,7 @@ impl Networks {
         let user: Vec<&Network> = self.list.iter().filter(|n| !n.builtin()).collect();
         if let Ok(json) = serde_json::to_vec(&user) {
             let tmp = self.path.with_extension("json.tmp");
-            if let Err(e) = std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &self.path)) {
+            if let Err(e) = super::write_private(&tmp, &json).and_then(|()| std::fs::rename(&tmp, &self.path)) {
                 crate::diag::error!("saving networks failed", error = e);
             }
         }

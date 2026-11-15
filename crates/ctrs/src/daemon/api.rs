@@ -45,7 +45,18 @@ pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
         if req.header("X-Ctrs-Background").is_none() {
             engine.touch();
         }
-        match route(&req, &engine, &mut w, &mut r) {
+        // A handler that panics (an expect on attacker-influenced JSON) must
+        // not take the connection thread down silently: answer 500 and close.
+        let dispatched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| route(&req, &engine, &mut w, &mut r)));
+        let result = match dispatched {
+            Ok(result) => result,
+            Err(payload) => {
+                crate::diag::error!("handler panicked", method = req.method, path = req.path, panic = panic_payload(&payload));
+                let _ = http::error(&mut w, 500, "internal server error");
+                return Ok(());
+            }
+        };
+        match result {
             Ok(Next::KeepAlive) => {}
             Ok(Next::Close) => return Ok(()),
             Err(e) => {
@@ -70,6 +81,16 @@ fn streams_body(method: &str, path: &str) -> bool {
 pub(super) enum Next {
     KeepAlive,
     Close,
+}
+
+fn panic_payload(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_owned()
+    }
 }
 
 pub(super) fn reply(w: &mut UnixStream, result: Result<Value, Error>, ok: u16) -> io::Result<Next> {

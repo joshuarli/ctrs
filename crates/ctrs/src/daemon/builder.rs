@@ -445,7 +445,7 @@ pub fn set_settings(req: &Request) -> Result<(), Error> {
     }
     let path = settings_path().ok_or_else(|| Error::Io(io::Error::other("HOME is not set")))?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, s.to_string()).and_then(|()| std::fs::rename(&tmp, &path)).map_err(Error::Io)
+    super::write_private(&tmp, s.to_string().as_bytes()).and_then(|()| std::fs::rename(&tmp, &path)).map_err(Error::Io)
 }
 
 // --- The container -------------------------------------------------------

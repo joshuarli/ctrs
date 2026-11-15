@@ -40,7 +40,7 @@ pub fn settings() -> Value {
 pub fn save(v: &Value) -> std::io::Result<()> {
     let path = path().ok_or_else(|| std::io::Error::other("HOME is not set"))?;
     let tmp = path.with_extension("json.tmp");
-    write_private(&tmp, v.to_string().as_bytes())?;
+    super::write_private(&tmp, v.to_string().as_bytes())?;
     std::fs::rename(&tmp, &path)?;
     *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
@@ -178,23 +178,6 @@ pub fn container_env() -> Vec<String> {
 pub fn report() -> Value {
     let e = effective();
     json!({"settings": settings(), "effective": {"http": e.http, "https": e.https, "no_proxy": e.no_proxy, "pac": e.pac}})
-}
-
-
-/// Writes a file only this user can read: proxy settings may carry a
-/// `http://user:pass@host` credential.
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-        f.write_all(bytes)
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, bytes)
-    }
 }
 
 #[cfg(test)]

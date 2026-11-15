@@ -1009,7 +1009,7 @@ impl Engine {
         let Ok(json) = json else { return };
         let _one_writer = self.saving.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = self.records.with_extension("json.tmp");
-        if let Err(e) = std::fs::write(&tmp, &json).and_then(|()| std::fs::rename(&tmp, &self.records)) {
+        if let Err(e) = super::write_private(&tmp, &json).and_then(|()| std::fs::rename(&tmp, &self.records)) {
             crate::diag::error!("saving containers failed", error = e);
         }
     }
@@ -1090,6 +1090,12 @@ impl Engine {
                             let backoff = RESTART_BASE.saturating_mul(1 << c.restart_count.min(10)).min(RESTART_CAP);
                             c.restart_count += 1;
                             restart_in = Some(backoff);
+                        }
+                        // A run that ended cleanly zeroes the backoff for the
+                        // next one; only consecutive failures grow it. (After
+                        // the decision above so this exit's delay is unchanged.)
+                        if code == 0 {
+                            c.restart_count = 0;
                         }
                         c.spec.auto_remove
                     }

@@ -38,6 +38,23 @@ use std::time::Instant;
 
 use crate::diag;
 
+/// Writes a file only this user can read: the record files may carry
+/// secrets (`containers.json` Spec.env routinely holds API tokens, and a
+/// docker config may carry registry credentials). Create with 0600, not
+/// the umask's 0644.
+pub(super) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+        f.write_all(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, bytes)
+    }
+}
 
 /// The data root, created and validated before the lock is taken. A
 /// daemon meeting a data root it must not trust stops rather than writes

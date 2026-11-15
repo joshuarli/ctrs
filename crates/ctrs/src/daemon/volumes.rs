@@ -44,7 +44,10 @@ impl Volumes {
     pub fn load(root: &std::path::Path) -> io::Result<Volumes> {
         let path = root.join("volumes.json");
         let list = match std::fs::read(&path) {
-            Ok(b) => serde_json::from_slice(&b).unwrap_or_default(),
+            Ok(b) => serde_json::from_slice(&b).unwrap_or_else(|e| {
+                crate::diag::error!("ignoring unreadable volume records", file = path.display(), error = e);
+                Vec::new()
+            }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
@@ -54,7 +57,7 @@ impl Volumes {
     fn save(&self) {
         if let Ok(json) = serde_json::to_vec(&self.list) {
             let tmp = self.path.with_extension("json.tmp");
-            if let Err(e) = std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &self.path)) {
+            if let Err(e) = super::write_private(&tmp, &json).and_then(|()| std::fs::rename(&tmp, &self.path)) {
                 crate::diag::error!("saving volumes failed", error = e);
             }
         }

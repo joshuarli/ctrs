@@ -45,6 +45,10 @@ Deleted in CTRS-06/07: `ctrs-win`, `ctrs-share-proto`, `crates/ctrs/src/ui/`, `w
 
 `vm.json` (CPUs/memory) lives in the diag state dir; the image/VM data root is `CTRS_DATA_DIR` or `~/.local/share/ctrs/data` (0700, enforced on open). No migration planned; `CTRS_*` env vars stay compatible (D2). `CTRS_STATE_DIR` redirects the diag state dir for tests and `CTRS_DATA_DIR` for all image/VM state (`docs/decisions.md`).
 
+## Restart policy
+
+`--restart always|unless-stopped|on-failure` re-runs an exited container after a delay of `RESTART_BASE << min(restart_count, 10)`, capped at `RESTART_CAP` (100 ms … 60 s, `engine.rs`). `restart_count` is persisted in `containers.json`, so it survives a daemon restart; it is zeroed by `docker start` (and `ctrs start`), and by any run that exits with code 0 — computed after this exit's backoff, so a crash loop grows to the cap and a clean run starts again from the base delay. `on-failure` additionally honors `--restart-max-retries`; `unless-stopped` and `always` re-run even after an exit code 0. Pinned by `conformance/failure.sh` S8 (RestartCount ≥ 2 under a crash loop).
+
 ## External delegations (audit, CTRS-10)
 
 Every process the engine or its CLI spawns, and what to make of it. Test-only spawns (Linux ACL tests use `useradd`/`userdel`/`groupadd`/`groupdel`) and build tooling (`xtask` spawns cargo/docker/codesign for the build) are excluded.
