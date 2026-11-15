@@ -617,6 +617,14 @@ fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -
     if layers.is_empty() {
         return Ok(());
     }
+    // A registry refuses a manifest whose blobs it does not have
+    // (BLOB_UNKNOWN); recording one anyway would leave an image whose
+    // layers can never deploy.
+    for l in &layers {
+        if !engine.store.has_blob(&l.digest, l.size) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("manifest references missing blob {}", l.digest)));
+        }
+    }
     // Digest refs name the image `m<hex>`; tag refs keep the tag.
     let name = if reference.starts_with("sha256:") {
         format!("{repo}:m{}", digest.get(7..23).unwrap_or(&digest))
