@@ -211,7 +211,8 @@ fn kernel(root: &Path, arch: Arch) -> io::Result<()> {
         &format!("{}:/src:ro", src.display()),
         "-v",
         &format!("{}:/out", out.display()),
-        "debian:trixie",
+        // Pinned by index digest (verified 2026-11-15); the mutable tag is not a release input.
+        "debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
         "sh",
         "/src/build.sh",
     ]))
@@ -228,7 +229,7 @@ fn disk(root: &Path) -> io::Result<()> {
         "--rm",
         "-v",
         &format!("{}:/out", out.display()),
-        "debian:trixie",
+        "debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
         "sh",
         "-c",
         "set -e; apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs >/dev/null; \
