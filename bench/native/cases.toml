@@ -85,7 +85,7 @@ metrics = ["build_s", "artifact_sha256"]
 states = ["warm"]
 params = {}
 correctness = ["build rc=0", "artifact sha256 present"]
-note = "v1: single timed build; deps are vendored so no registry access inside the timed region. 'Real repo checkout' is approximated by a vendored upstream release tarball — disclosed. Base image pulled untimed if absent."
+note = "v1: single timed build; deps are vendored so no registry access inside the timed region. 'Real repo checkout' is approximated by a vendored upstream release tarball — disclosed. Base image pulled untimed if absent. IMPORTANT: `docker build` uses each engine's default builder — ctrs only has docker-container (client-side image export ~1.5-2 s on large bases), orbstack has native docker driver. See evidence/native-performance.md W6 section; matched-driver A/B shows ctrs ahead."
 
 [[case]]
 id = "W7"
