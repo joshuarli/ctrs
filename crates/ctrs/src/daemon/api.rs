@@ -2217,7 +2217,10 @@ fn forward_stdin(engine: Arc<Engine>, id: String, r: &mut dyn http::DynBufRead) 
         if !early.is_empty() && engine.input(&id, &early).is_err() {
             return;
         }
-        let mut buf = vec![0u8; 32 * 1024];
+        // Read at the protocol's chunk size: smaller reads become one
+        // `Input` frame each, and per-frame cost capped bulk stdin near
+        // half the link's rate.
+        let mut buf = vec![0u8; ctrs_proto::MAX_OUTPUT_CHUNK];
         loop {
             wait_readable(&stream);
             match io::Read::read(&mut stream, &mut buf) {
