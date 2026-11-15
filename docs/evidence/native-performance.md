@@ -1300,3 +1300,39 @@ the NP-04 `/grpc` proxy + exporter-rewrite scope in
 `docs/buildkit-driver.md`. Quantified cost of the gap: ~0.2–0.45 s per
 W7 build, ~0.6 s on the zlib build, and it flips zlib from win to
 loss and both httpie warm/incr cells from win to inconclusive.
+
+## NP-04 default-driver path — first qualified rerun (2026-11-15)
+
+Commit `10cfff4` (h2c `/grpc` + `/session` proxy, `moby` exporter
+rewrite to mirror push + retag; repo-scoped manifest GET fix).
+Daemon: warm engine, signed release binary, `CTRS_LOG` unset.
+
+**W7 `base-20261115T133627-c5f9` — 10/10 valid pairs, all correctness
+green.** Median ratios (ctrs/orbstack, <1 favors ctrs):
+
+| Metric | Ratio | 95% CI | Assessment |
+| --- | --- | --- | --- |
+| hyperfine_uncached_s | 0.955 | [0.892, 0.983] | non-inferior |
+| hyperfine_warm_s | 0.536 | [0.484, 0.645] | strict-win |
+| hyperfine_incr_s | 0.537 | [0.464, 0.592] | strict-win |
+| httpie_uncached_s | 0.836 | [0.801, 0.869] | strict-win |
+| httpie_warm_s | 0.520 | [0.477, 0.567] | strict-win |
+| httpie_incr_s | 0.550 | [0.474, 0.593] | strict-win |
+
+The two previously inconclusive httpie warm/incr cells are now strict
+wins; every W7 cell meets or beats OrbStack on the default driver.
+
+**W6 `base-20261115T131324-d1cc` — 9/10 valid pairs** (pair 7 ctrs
+trial failed: buildx session stream RST ~100 ms into the zlib solve,
+buildkitd logged `Solve ... context canceled`; 1 occurrence in ~40
+session streams — treated as a transient, under observation). Ratios
+on the 9 valid pairs: build_rust_s 0.914 [0.887, 1.002],
+build_zlib_s **0.562** [0.477, 0.611] — the prior zlib default-driver
+loss (1.222) is gone by a wide margin, consistent with the dc-control
+0.783 once the archive round-trip is removed. Reporter requires 10
+valid pairs to establish a win, so W6 is being rerun
+(`np04-default-baseline3-w6-*.log`).
+
+Invalidated: `base-20261115T125538-2dc3` W7 trials (mirror retag bug,
+fixed in `10cfff4`); its W6 trials remain valid but are superseded by
+the same-commit rerun.
