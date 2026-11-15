@@ -138,7 +138,10 @@ W8_IMAGES = [
 ]
 
 HEALTH_DEADLINE_S = 240.0
-POLL_INTERVAL_S = 0.25
+# Health/readiness polling granularity. Kept fine (0.1 s): coarser
+# intervals quantize startup/recovery measurements and can invert the
+# winner when one engine's faster API return lands early in a poll cycle.
+POLL_INTERVAL_S = 0.1
 
 
 def utcnow() -> str:
@@ -1155,11 +1158,17 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
                 f"{(cp.stderr or cp.stdout)[-300:]}")
         return s, cp.returncode == 0
 
-    def wait_ready(deadline: float = 90.0) -> float | None:
+    def wait_ready(deadline: float = 90.0,
+                   stable: bool = True) -> float | None:
         t0 = time.monotonic()
         ready_at = None
         while time.monotonic() - t0 < deadline:
-            if ready_at is None:
+            if not stable:
+                cp = engine.sh(["exec", name, "pg_isready", "-U", "postgres"],
+                               timeout=15, check=False)
+                if cp.returncode == 0:
+                    return round(time.monotonic() - t0, 3)
+            elif ready_at is None:
                 cp = engine.sh(["exec", name, "pg_isready", "-U", "postgres"],
                                timeout=15, check=False)
                 if cp.returncode == 0:
@@ -1169,6 +1178,8 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
                 # init server, which then shuts down for the final
                 # postmaster — the orbstack W3 flake. Require a real
                 # query to keep succeeding for ~1.2 s before ready.
+                # First boot only: a restart has an initialized PGDATA
+                # and no temp-server phase, so plain isready is exact.
                 q = engine.sh(
                     ["exec", name, "psql", "-U", "postgres", "-d",
                      "postgres", "-tAc", "SELECT 1"],
@@ -1177,7 +1188,10 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
                     ready_at = None
                 elif time.monotonic() - ready_at > 1.2:
                     return round(ready_at - t0, 3)
-            time.sleep(0.4)
+            # Fine poll: restart_s is dominated by this interval otherwise
+            # (0.5 s ticks once made ctrs's *faster* restart look 2.5x
+            # slower — the API returns early, then waits for the next tick).
+            time.sleep(0.15)
         return None
 
     try:
@@ -1229,7 +1243,8 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
 
         tp = time.monotonic()
         rst = engine.sh(["restart", name], timeout=120, check=False)
-        ready2 = wait_ready() if rst.returncode == 0 else None
+        ready2 = (wait_ready(stable=False)
+                  if rst.returncode == 0 else None)
         rec["metrics"]["restart_s"] = round(time.monotonic() - tp, 3)
         checks["restart_ready"] = ready2 is not None
 
