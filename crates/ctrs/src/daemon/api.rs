@@ -73,9 +73,11 @@ pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
     Ok(())
 }
 
-/// Requests whose bodies can be any size: archives and image tarballs.
+/// Requests whose bodies can be any size: archives, image tarballs and
+/// `docker import` rootfs streams.
 fn streams_body(method: &str, path: &str) -> bool {
-    matches!((method, path), ("PUT", p) if p.starts_with("/containers/") && p.ends_with("/archive")) || (method == "POST" && (path == "/images/load" || path == "/build"))
+    matches!((method, path), ("PUT", p) if p.starts_with("/containers/") && p.ends_with("/archive"))
+        || (method == "POST" && (path == "/images/load" || path == "/build" || path == "/images/create"))
 }
 
 pub(super) enum Next {
@@ -179,7 +181,14 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
         ("GET", "/ctrs/builder") => return reply(w, Ok(super::builder::settings_report(engine)), 200),
         ("POST", "/ctrs/builder") => return reply(w, super::builder::set_settings(req).map(|()| super::builder::settings_report(engine)), 200),
         ("GET", "/images/json") => return reply(w, images(req, engine), 200),
-        ("POST", "/images/create") => return pull(req, engine, w),
+        ("POST", "/images/create") => {
+            // `docker import` posts the rootfs tar here with `fromSrc`;
+            // everything else is a registry pull.
+            if req.query("fromSrc").is_some() {
+                return import_image(req, engine, w, r);
+            }
+            return pull(req, engine, w);
+        }
         ("POST", "/images/load") => return image_load(req, engine, w, r),
         ("GET", "/images/get") => {
             let names: Vec<String> = req.queries("names").map(str::to_owned).collect();
@@ -548,6 +557,69 @@ fn image_load(req: &Request, engine: &Engine, w: &mut UnixStream, r: &mut dyn ht
         Err(e) => error(w, Error::BadRequest(e.to_string()))?,
     }
     // A failed load may leave part of the body unread.
+    Ok(Next::Close)
+}
+
+/// `docker import`: a rootfs tar becomes one layer of a new image. The
+/// tar streams straight into the store; its digest is the diff id.
+fn import_image(req: &Request, engine: &Engine, w: &mut UnixStream, r: &mut dyn http::DynBufRead) -> io::Result<Next> {
+    let result = (|| -> Result<String, Error> {
+        let mut ingest = engine.store.ingest()?;
+        let copied = io::copy(&mut http::Body::new(req, r), &mut ingest).map_err(Error::Io)?;
+        if copied == 0 {
+            return Err(Error::BadRequest("import requires a tar archive on stdin".into()));
+        }
+        let (digest, size) = ingest.finish().map_err(Error::Io)?;
+        let now = time::rfc3339(std::time::SystemTime::now());
+        let mut cfg = json!({
+            "architecture": req.query("architecture").filter(|a| !a.is_empty()).unwrap_or_else(|| go_arch()),
+            "os": req.query("os").filter(|o| !o.is_empty()).unwrap_or("linux"),
+            "created": now,
+            "config": {},
+            "rootfs": {"type": "layers", "diff_ids": [digest.clone()]},
+            "history": [{"created": now, "created_by": "Imported from -"}],
+        });
+        for change in req.queries("changes") {
+            for line in change.lines().filter(|l| !l.trim().is_empty()) {
+                super::ops::apply_change(&mut cfg, line)?;
+            }
+        }
+        let bytes = serde_json::to_vec(&cfg).map_err(|e| Error::Io(io::Error::other(e)))?;
+        let mut cw = engine.store.ingest()?;
+        io::Write::write_all(&mut cw, &bytes).map_err(Error::Io)?;
+        let (config_digest, _) = cw.finish().map_err(Error::Io)?;
+        let layers = vec![ctrs_image::Layer { digest, size, media_type: "application/vnd.oci.image.layer.v1.tar".into() }];
+        let repo = req.query("repo").unwrap_or_default();
+        let name = if repo.is_empty() {
+            config_digest.clone()
+        } else {
+            // The CLI folds `name:tag` into `repo`; a separate `tag`
+            // only joins a bare repository name.
+            let tag = req.query("tag").filter(|t| !t.is_empty());
+            let full = match tag {
+                Some(t) if !repo.contains(':') => format!("{repo}:{t}"),
+                _ => repo.to_owned(),
+            };
+            Reference::parse(&full).map(|r| r.short()).map_err(|e| Error::BadRequest(format!("invalid reference format: {e}")))?
+        };
+        let image = ctrs_image::archive::from_config(name.clone(), &config_digest, &cfg, layers).map_err(Error::Io)?;
+        engine.store.put_image(image).map_err(Error::Io)?;
+        engine.emit_image("import", &config_digest, &name);
+        Ok(config_digest)
+    })();
+    match result {
+        Ok(id) => {
+            http::begin_stream(w, 200, "application/json")?;
+            http::chunk(w, format!("{}\n", json!({"status": "Importing layer"})).as_bytes())?;
+            http::chunk(w, format!("{}\n", json!({"aux": {"ID": id}})).as_bytes())?;
+            http::end(w)?;
+        }
+        Err(e) => {
+            // A failed import may leave part of the body unread.
+            let _ = error(w, e);
+            return Ok(Next::Close);
+        }
+    }
     Ok(Next::Close)
 }
 
