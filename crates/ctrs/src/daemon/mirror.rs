@@ -9,9 +9,11 @@
 //! images through it. Manifests are made from the store's records (layers,
 //! config), the same bytes for the same image every time.
 
+use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, OnceLock, Weak};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -25,6 +27,37 @@ use super::engine::Engine;
 const PORT: u16 = 47_391;
 
 static LISTENING: OnceLock<Option<u16>> = OnceLock::new();
+
+/// Push state, all keyed off the secret path token's builds: manifest
+/// digest → manifest bytes (so a pushed index can resolve its children),
+/// image name → the manifest digest it was recorded from, repo → the
+/// image names pushes produced, `repo:ref` → the manifest digest an
+/// index's tag selected, and upload uuid → its temp file.
+static PUSH_MANIFESTS: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+static PUSH_IMAGE_MANIFEST: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PUSH_IMAGES: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+static PUSH_INDEX_PICK: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PUSH_REFS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PUSH_UPLOADS: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+
+fn manifests() -> &'static Mutex<HashMap<String, Vec<u8>>> {
+    PUSH_MANIFESTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn image_manifests() -> &'static Mutex<HashMap<String, String>> {
+    PUSH_IMAGE_MANIFEST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn push_images() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    PUSH_IMAGES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn index_picks() -> &'static Mutex<HashMap<String, String>> {
+    PUSH_INDEX_PICK.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn refs() -> &'static Mutex<HashMap<String, String>> {
+    PUSH_REFS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn uploads() -> &'static Mutex<HashMap<String, PathBuf>> {
+    PUSH_UPLOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// The mirror's secret path segment, kept in the state directory so it
 /// survives restarts (the builder's config keeps naming it).
@@ -80,6 +113,35 @@ pub fn start(engine: &Arc<Engine>) {
         crate::diag::info!("image mirror for builds", port = port);
         Some(port)
     });
+    // Upload temp files cannot outlive the process that owned them.
+    sweep_uploads(engine, None);
+}
+
+/// Removes `tmp/upload.*` files: all of them at start (the upload table
+/// is in-memory, so none can still be live), or only ones older than
+/// `max_age` that no upload owns, on the next upload request.
+fn sweep_uploads(engine: &Engine, max_age: Option<Duration>) {
+    let live = uploads().lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::SystemTime::now();
+    let Ok(rd) = std::fs::read_dir(engine.store.root().join("tmp")) else { return };
+    for e in rd.flatten() {
+        let is_upload = e.file_name().to_str().is_some_and(|n| n.starts_with("upload."));
+        if !is_upload || live.values().any(|p| *p == e.path()) {
+            continue;
+        }
+        if let Some(max) = max_age {
+            let fresh = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|d| d <= max);
+            if fresh {
+                continue;
+            }
+        }
+        let _ = std::fs::remove_file(e.path());
+    }
 }
 
 /// buildkitd.toml lines: this mirror for every registry ctrs has images
@@ -133,6 +195,39 @@ fn mirror_host(_networks: &super::network::Networks) -> String {
     super::ports::HOST_ADDR.into()
 }
 
+/// The port the mirror listens on, once started.
+pub fn port() -> Option<u16> {
+    LISTENING.get().copied().flatten()
+}
+
+/// A unique build repo for one `docker build`: pushes land under
+/// `/v2/<token>/push/<repo>/…` and are retagged when the build ends.
+/// `None` when the mirror isn't listening (the caller falls back to
+/// streaming the image archive).
+pub fn push_repo() -> Option<String> {
+    port().map(|_| format!("b{}", super::engine::random_hex(4)))
+}
+
+/// The full image reference buildkit pushes to for `repo`: the token
+/// leads the repo path so requests land under `/v2/<token>/push/…`.
+pub fn push_ref(engine: &Engine, repo: &str) -> Option<String> {
+    Some(format!("{}:{}/{}/push/{}", host_addr(engine), port()?, token(), repo))
+}
+
+/// Forgets everything pushes to `repo` recorded; returns the image
+/// names that were selected (to tag) and the ones that were not (to
+/// remove).
+pub fn take_pushed(repo: &str) -> (Vec<String>, Vec<String>) {
+    let names = push_images().lock().unwrap_or_else(|e| e.into_inner()).remove(repo).unwrap_or_default();
+    let pick = index_picks().lock().unwrap_or_else(|e| e.into_inner()).remove(&format!("{repo}:latest"));
+    let mut manifests = image_manifests().lock().unwrap_or_else(|e| e.into_inner());
+    let (keep, drop): (Vec<String>, Vec<String>) = names.into_iter().partition(|n| pick.is_none() || manifests.get(n) == pick.as_ref());
+    for n in &drop {
+        manifests.remove(n);
+    }
+    (keep, drop)
+}
+
 /// Where a build reaches this computer: the address `--add-host
 /// x:host-gateway` gets, the one the mirror is reached at. On a Linux host
 /// (and Windows' engine in WSL2) that's the default bridge's gateway, as
@@ -175,19 +270,35 @@ fn serve(listener: TcpListener, engine: Weak<Engine>) {
 
 /// One request, then the connection closes.
 fn answer(conn: TcpStream, engine: &Engine) -> io::Result<()> {
-    let mut r = BufReader::new((&conn).take(16 << 10));
+    // Bodies (blob uploads) are unbounded, so the reader is not capped;
+// the header block is bounded by count instead.
+    let mut r = BufReader::with_capacity(64 << 10, &conn);
     let mut line = String::new();
     r.read_line(&mut line)?;
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or_default().to_owned(), parts.next().unwrap_or_default().to_owned());
+    let mut headers = Vec::new();
     loop {
         let mut h = String::new();
         if r.read_line(&mut h)? == 0 || h.trim().is_empty() {
             break;
         }
+        if headers.len() > 100 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many headers"));
+        }
+        if let Some((k, v)) = h.split_once(':') {
+            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_owned()));
+        }
     }
+    let header = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
     let mut w = &conn;
     let head = |w: &mut &TcpStream, status: &str, extra: &str, len: u64| write!(w, "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n{extra}\r\n");
+    // `/v2/<token>/push/<repo>/…`: a build's image push. Blobs are
+    // content-addressed, so a HEAD that finds one ends its upload.
+    if let Some(push) = parse_push(target.split('?').next().unwrap_or_default(), &token()) {
+        let query = target.split_once('?').map(|(_, q)| q).unwrap_or_default();
+        return push_answer(&mut r, engine, &method, push, query, header("content-length").and_then(|v| v.parse().ok()), header("transfer-encoding").is_some_and(|v| v.contains("chunked")), &mut w);
+    }
     if method != "GET" && method != "HEAD" {
         return head(&mut w, "405 Method Not Allowed", "", 0);
     }
@@ -209,6 +320,314 @@ fn answer(conn: TcpStream, engine: &Engine) -> io::Result<()> {
         None => head(&mut w, "404 Not Found", "", 0)?,
     }
     w.flush()
+}
+
+/// A push path: `/v2/<token>/push/<repo>/blobs/<digest>`,
+/// `…/blobs/uploads[/<uuid>]`, or `…/manifests/<ref>`.
+#[derive(Debug, PartialEq, Eq)]
+enum Push {
+    Blob(String, String),
+    UploadNew(String),
+    Upload(String, String),
+    Manifest(String, String),
+}
+
+fn parse_push(path: &str, token: &str) -> Option<Push> {
+    let rest = path.strip_prefix("/v2/")?.strip_prefix(token)?.strip_prefix("/push/")?;
+    if let Some(repo) = rest.strip_suffix("/blobs/uploads/").or_else(|| rest.strip_suffix("/blobs/uploads")) {
+        return Some(Push::UploadNew(repo.to_owned()));
+    }
+    if let Some((repo, uuid)) = rest.split_once("/blobs/uploads/")
+        && !uuid.is_empty()
+        && !uuid.contains('/')
+    {
+        return Some(Push::Upload(repo.to_owned(), uuid.to_owned()));
+    }
+    if let Some((repo, digest)) = rest.rsplit_once("/blobs/")
+        && !repo.is_empty()
+        && !digest.is_empty()
+        && !digest.contains('/')
+    {
+        return Some(Push::Blob(repo.to_owned(), digest.to_owned()));
+    }
+    if let Some((repo, reference)) = rest.rsplit_once("/manifests/")
+        && !repo.is_empty()
+        && !reference.is_empty()
+        && !reference.contains('/')
+    {
+        return Some(Push::Manifest(repo.to_owned(), reference.to_owned()));
+    }
+    None
+}
+
+const MAX_MANIFEST: u64 = 8 << 20;
+
+/// The body as a reader of exactly its bytes (content-length or
+/// chunked), for `r` positioned just past the headers.
+enum Body<'a, 'b> {
+    Len { r: &'a mut BufReader<&'b TcpStream>, left: u64 },
+    Chunked { r: &'a mut BufReader<&'b TcpStream>, line: String, left: u64 },
+    Empty,
+}
+
+impl Read for Body<'_, '_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Body::Len { r, left } => {
+                if *left == 0 {
+                    return Ok(0);
+                }
+                let want = (*left).min(buf.len() as u64) as usize;
+                let n = r.read(&mut buf[..want])?;
+                *left -= n as u64;
+                Ok(n)
+            }
+            Body::Chunked { r, line, left } => {
+                if *left == 0 {
+                    // Next chunk header.
+                    line.clear();
+                    if r.read_line(line)? == 0 {
+                        return Ok(0);
+                    }
+                    let size = usize::from_str_radix(line.trim().split(';').next().unwrap_or(""), 16).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))? as u64;
+                    if size == 0 {
+                        // Trailer headers, then the empty line.
+                        loop {
+                            line.clear();
+                            if r.read_line(line)? == 0 || line.trim().is_empty() {
+                                return Ok(0);
+                            }
+                        }
+                    }
+                    *left = size;
+                }
+                let want = (*left).min(buf.len() as u64) as usize;
+                let n = r.read(&mut buf[..want])?;
+                *left -= n as u64;
+                if *left == 0 {
+                    // The CRLF after each chunk's data.
+                    let mut crlf = [0u8; 2];
+                    r.read_exact(&mut crlf)?;
+                }
+                Ok(n)
+            }
+            Body::Empty => Ok(0),
+        }
+    }
+}
+
+fn body<'a, 'b>(r: &'a mut BufReader<&'b TcpStream>, len: Option<u64>, chunked: bool) -> Body<'a, 'b> {
+    if chunked {
+        Body::Chunked { r, line: String::new(), left: 0 }
+    } else if let Some(n) = len.filter(|n| *n > 0) {
+        Body::Len { r, left: n }
+    } else {
+        Body::Empty
+    }
+}
+
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|p| {
+        let (k, v) = p.split_once('=')?;
+        if k != key {
+            return None;
+        }
+        // `sha256:` arrives as `sha256%3A`; blob digests need the colon back.
+        let bytes = v.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
+                    out.push(b);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8(out).ok()
+    })
+}
+
+/// `/v2/<token>/push/…` requests: the OCI distribution push protocol,
+/// writing blobs into the store under their digest and recording
+/// manifests as images the build's caller retags.
+fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, push: Push, query: &str, len: Option<u64>, chunked: bool, w: &mut &TcpStream) -> io::Result<()> {
+    let head = |w: &mut &TcpStream, status: &str, extra: &str, len: u64| write!(w, "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n{extra}\r\n");
+    match push {
+        Push::Blob(_repo, digest) => {
+            if method == "HEAD" || method == "GET" {
+                // Content-addressed: presence is the whole answer, whoever
+                // pushed it first. Only size is unknown, so any file counts.
+                let exists = engine.store.blob_path(&digest).is_ok_and(|p| p.is_file());
+                if exists {
+                    let size = engine.store.blob_path(&digest).ok().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len()).unwrap_or(0);
+                    head(w, "200 OK", &format!("Content-Type: application/octet-stream\r\nDocker-Content-Digest: {digest}\r\n"), size)?;
+                    if method == "GET" {
+                        if let Ok(path) = engine.store.blob_path(&digest) {
+                            io::copy(&mut std::fs::File::open(path)?, w)?;
+                        }
+                    }
+                } else {
+                    head(w, "404 Not Found", "", 0)?;
+                }
+            } else {
+                head(w, "405 Method Not Allowed", "", 0)?;
+            }
+        }
+        Push::UploadNew(repo) => {
+            if method != "POST" {
+                return head(w, "405 Method Not Allowed", "", 0);
+            }
+            // Monolithic POST (?digest= with the blob as the body) or a
+            // mount request (?mount=, which we never satisfy: 202 starts
+            // a normal upload either way).
+            if let Some(digest) = query_param(query, "digest") {
+                let mut ingest = engine.store.blob_writer(&digest)?;
+                io::copy(&mut body(r, len, chunked), &mut ingest)?;
+                let written = ingest.finish()?;
+                head(w, "201 Created", &format!("Location: /v2/x/blobs/{digest}\r\nDocker-Content-Digest: {digest}\r\n"), 0)?;
+                let _ = written;
+                let _ = repo;
+                return w.flush();
+            }
+            // A dropped connection leaks its upload file; ten idle minutes
+            // is far past any live PATCH, so sweep those before adding one.
+            sweep_uploads(engine, Some(Duration::from_secs(600)));
+            let uuid = super::engine::random_hex(8);
+            let path = engine.store.root().join("tmp").join(format!("upload.{uuid}"));
+            std::fs::File::create(&path)?;
+            uploads().lock().unwrap_or_else(|e| e.into_inner()).insert(uuid.clone(), path);
+            let loc = format!("/v2/{}/push/{repo}/blobs/uploads/{uuid}", token());
+            head(w, "202 Accepted", &format!("Location: {loc}\r\nDocker-Upload-UUID: {uuid}\r\nRange: 0-0\r\n"), 0)?;
+        }
+        Push::Upload(repo, uuid) => {
+            let path = uploads().lock().unwrap_or_else(|e| e.into_inner()).get(&uuid).cloned();
+            let Some(path) = path else {
+                return head(w, "404 Not Found", "", 0);
+            };
+            match method {
+                "PATCH" => {
+                    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+                    io::copy(&mut body(r, len, chunked), &mut f)?;
+                    let size = f.metadata()?.len();
+                    head(w, "202 Accepted", &format!("Location: /v2/{}/push/{repo}/blobs/uploads/{uuid}\r\nDocker-Upload-UUID: {uuid}\r\nRange: 0-{size}\r\n", token()), 0)?;
+                }
+                "PUT" => {
+                    let Some(digest) = query_param(query, "digest") else {
+                        return head(w, "400 Bad Request", "", 0);
+                    };
+                    {
+                        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+                        io::copy(&mut body(r, len, chunked), &mut f)?;
+                    }
+                    let mut ingest = engine.store.blob_writer(&digest)?;
+                    io::copy(&mut std::fs::File::open(&path)?, &mut ingest)?;
+                    ingest.finish()?;
+                    uploads().lock().unwrap_or_else(|e| e.into_inner()).remove(&uuid);
+                    let _ = std::fs::remove_file(&path);
+                    head(w, "201 Created", &format!("Location: /v2/x/blobs/{digest}\r\nDocker-Content-Digest: {digest}\r\n"), 0)?;
+                }
+                _ => return head(w, "405 Method Not Allowed", "", 0),
+            }
+        }
+        Push::Manifest(repo, reference) => match method {
+            "GET" | "HEAD" => {
+                // Serve what this build pushed: ref → manifest digest →
+                // bytes. Anything else is not there.
+                let digest = manifests_ref(&repo, &reference);
+                let bytes = digest.and_then(|d| manifests().lock().unwrap_or_else(|e| e.into_inner()).get(&d).cloned());
+                match bytes {
+                    Some(b) => {
+                        let d = ctrs_image::store::sha256_digest(&b);
+                        head(w, "200 OK", &format!("Content-Type: application/vnd.oci.image.manifest.v1+json\r\nDocker-Content-Digest: {d}\r\n"), b.len() as u64)?;
+                        if method == "GET" {
+                            w.write_all(&b)?;
+                        }
+                    }
+                    None => head(w, "404 Not Found", "", 0)?,
+                }
+            }
+            "PUT" => {
+                let mut bytes = Vec::new();
+                body(r, len, chunked).take(MAX_MANIFEST).read_to_end(&mut bytes)?;
+                record_manifest(engine, &repo, &reference, &bytes)?;
+                let digest = ctrs_image::store::sha256_digest(&bytes);
+                manifests_ref_insert(&repo, &reference, &digest);
+                head(w, "201 Created", &format!("Docker-Content-Digest: {digest}\r\n"), 0)?;
+            }
+            _ => return head(w, "405 Method Not Allowed", "", 0),
+        },
+    }
+    w.flush()
+}
+
+/// `repo:ref` → the digest of the manifest last PUT under it.
+fn manifests_ref(repo: &str, reference: &str) -> Option<String> {
+    if reference.starts_with("sha256:") {
+        return Some(reference.to_owned());
+    }
+    refs().lock().unwrap_or_else(|e| e.into_inner()).get(&format!("{repo}:{reference}")).cloned()
+}
+
+fn manifests_ref_insert(repo: &str, reference: &str, digest: &str) {
+    refs().lock().unwrap_or_else(|e| e.into_inner()).insert(format!("{repo}:{reference}"), digest.to_owned());
+}
+
+/// A pushed manifest: an image index resolves to its selected platform
+/// manifest; an image manifest becomes an image record named after the
+/// push repo and ref (the build retags it when it ends).
+fn record_manifest(engine: &Engine, repo: &str, reference: &str, bytes: &[u8]) -> io::Result<()> {
+    let v: Value = serde_json::from_slice(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("manifest: {e}")))?;
+    let digest = ctrs_image::store::sha256_digest(bytes);
+    manifests().lock().unwrap_or_else(|e| e.into_inner()).insert(digest.clone(), bytes.to_vec());
+    if let Some(entries) = v["manifests"].as_array() {
+        // An index (or manifest list): pick the entry for this host's
+        // platform, skipping attestation manifests, and remember the
+        // choice for `repo:ref`.
+        let host = ctrs_image::Platform::host_linux();
+        let pick = entries
+            .iter()
+            .filter(|m| m["annotations"]["vnd.docker.reference.type"].as_str() != Some("attestation-manifest"))
+            .find(|m| {
+                let p = &m["platform"];
+                p["os"].as_str() == Some(host.os.as_str()) && p["architecture"].as_str() == Some(host.architecture.as_str())
+            })
+            .or_else(|| entries.iter().find(|m| m["annotations"]["vnd.docker.reference.type"].as_str() != Some("attestation-manifest")));
+        if let Some(d) = pick.and_then(|m| m["digest"].as_str()) {
+            index_picks().lock().unwrap_or_else(|e| e.into_inner()).insert(format!("{repo}:{reference}"), d.to_owned());
+        }
+        return Ok(());
+    }
+    // An image manifest: config + layers, already pushed as blobs.
+    let config_digest = v["config"]["digest"].as_str().unwrap_or_default().to_owned();
+    let config_bytes = engine.store.read_config(&config_digest)?;
+    let config: Value = serde_json::from_slice(&config_bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("image config: {e}")))?;
+    let mut layers = Vec::new();
+    for l in v["layers"].as_array().into_iter().flatten() {
+        layers.push(ctrs_image::Layer {
+            digest: l["digest"].as_str().unwrap_or_default().to_owned(),
+            size: l["size"].as_u64().unwrap_or(0),
+            media_type: l["mediaType"].as_str().unwrap_or_default().to_owned(),
+        });
+    }
+    // Attestation manifests carry no layers; they are not images.
+    if layers.is_empty() {
+        return Ok(());
+    }
+    // Digest refs name the image `m<hex>`; tag refs keep the tag.
+    let name = if reference.starts_with("sha256:") {
+        format!("{repo}:m{}", digest.get(7..23).unwrap_or(&digest))
+    } else {
+        format!("{repo}:{reference}")
+    };
+    let image = ctrs_image::archive::from_config(name.clone(), &config_digest, &config, layers)?;
+    engine.store.put_image(image)?;
+    image_manifests().lock().unwrap_or_else(|e| e.into_inner()).insert(name.clone(), digest);
+    push_images().lock().unwrap_or_else(|e| e.into_inner()).entry(repo.to_owned()).or_default().push(name);
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -274,6 +693,25 @@ mod tests {
         assert_eq!(parse("/v2/wrong/docker.io/library/a/manifests/x", "tok"), None);
         assert_eq!(parse("/v2/tok/docker.io/manifests/x", "tok"), None);
         assert_eq!(parse("/v2/", "tok"), None);
+    }
+
+    #[test]
+    fn parses_push_paths() {
+        assert_eq!(parse_push("/v2/tok/push/b1/blobs/uploads", "tok"), Some(Push::UploadNew("b1".into())));
+        assert_eq!(parse_push("/v2/tok/push/b1/blobs/uploads/", "tok"), Some(Push::UploadNew("b1".into())));
+        assert_eq!(parse_push("/v2/tok/push/b1/blobs/uploads/abc", "tok"), Some(Push::Upload("b1".into(), "abc".into())));
+        assert_eq!(parse_push("/v2/tok/push/b1/blobs/sha256:ff", "tok"), Some(Push::Blob("b1".into(), "sha256:ff".into())));
+        assert_eq!(parse_push("/v2/tok/push/b1/manifests/latest", "tok"), Some(Push::Manifest("b1".into(), "latest".into())));
+        assert_eq!(parse_push("/v2/tok/push/b1/manifests/sha256:aa", "tok"), Some(Push::Manifest("b1".into(), "sha256:aa".into())));
+        assert_eq!(parse_push("/v2/wrong/push/b1/manifests/x", "tok"), None);
+        assert_eq!(parse_push("/v2/tok/docker.io/library/a/manifests/x", "tok"), None);
+    }
+
+    #[test]
+    fn query_params_are_percent_decoded() {
+        assert_eq!(query_param("digest=sha256%3Aab%2Fcd&mount=x", "digest").as_deref(), Some("sha256:ab/cd"));
+        assert_eq!(query_param("mount=sha256%3Aaa", "digest"), None);
+        assert_eq!(query_param("digest=plain", "digest").as_deref(), Some("plain"));
     }
 
     #[test]

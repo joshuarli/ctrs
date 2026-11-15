@@ -1068,7 +1068,10 @@ impl Options {
     }
 
     /// `buildctl build …` for a context unpacked at `dir/context`.
-    fn argv(&self, dir: &str) -> Vec<String> {
+    /// `push` is the registry ref the image exporter pushes to instead
+    /// of streaming an archive (the mirror ingests it blob-by-blob, so
+    /// unchanged base layers never cross the link again).
+    fn argv(&self, dir: &str, push: Option<&str>) -> Vec<String> {
         let mut a: Vec<String> = ["buildctl", "build", "--progress", "plain", "--frontend", "dockerfile.v0"].map(str::to_owned).to_vec();
         let mut opt = |s: String| {
             a.push("--opt".into());
@@ -1122,10 +1125,16 @@ impl Options {
         for c in &self.cache_from {
             a.extend(["--import-cache".into(), format!("type=registry,ref={c}")]);
         }
-        // An image archive on stdout, which the daemon loads into ctrs's
-        // store; the names are quoted, the CSV way, since there may be several.
+        // The image goes to the mirror's push endpoint when it listens
+        // (blob-deduped ingest); otherwise an archive on stdout, which
+        // the daemon loads into ctrs's store. Names are quoted, the CSV
+        // way, since there may be several.
         a.push("--output".into());
-        a.push(if self.tags.is_empty() { "type=docker,dest=-".into() } else { format!("type=docker,\"name={}\",dest=-", self.tags.join(",")) });
+        a.push(match push {
+            Some(r) => format!("type=image,\"name={r}\",push=true"),
+            None if self.tags.is_empty() => "type=docker,dest=-".into(),
+            None => format!("type=docker,\"name={}\",dest=-", self.tags.join(",")),
+        });
         a
     }
 }
@@ -1297,7 +1306,10 @@ fn run(req: &Request, engine: &Engine, o: &mut Options, r: &mut dyn http::DynBuf
         if o.remote.is_none() {
             send_context(engine, &id, &dir, req, r, o)?;
         }
-        buildctl(engine, &id, &dir, o, env, out, probe)
+        // Push through the mirror when it listens: unchanged base
+        // layers are already in the store, so only new blobs cross.
+        let push = super::mirror::push_repo().and_then(|repo| super::mirror::push_ref(engine, &repo).map(|r| (repo, r)));
+        buildctl(engine, &id, &dir, o, env, out, probe, push.as_ref())
     })();
     let _ = engine.exec_capture(&id, &["rm", "-rf", &dir]);
     built
@@ -1333,12 +1345,12 @@ fn send_context(engine: &Engine, id: &str, dir: &str, req: &Request, r: &mut dyn
 
 /// Runs the build: its progress (stderr) to the client as it comes, the
 /// image archive (stdout) into ctrs's store as it comes.
-fn buildctl(engine: &Engine, id: &str, dir: &str, o: &Options, env: Vec<String>, out: &mut Out<'_>, probe: &UnixStream) -> Result<Vec<ctrs_image::Image>, String> {
-    let argv = o.argv(dir);
+fn buildctl(engine: &Engine, id: &str, dir: &str, o: &Options, env: Vec<String>, out: &mut Out<'_>, probe: &UnixStream, push: Option<&(String, String)>) -> Result<Vec<ctrs_image::Image>, String> {
+    let argv = o.argv(dir, push.map(|(_, r)| r.as_str()));
     if !o.build_id.is_empty() {
         CANCELLABLE.lock().unwrap_or_else(|e| e.into_inner()).push((o.build_id.clone(), id.to_owned(), dir.to_owned()));
     }
-    let built = buildctl_run(engine, id, dir, o, argv, env, out, probe);
+    let built = buildctl_run(engine, id, dir, o, argv, env, out, probe, push.map(|(repo, _)| repo.as_str()));
     CANCELLABLE.lock().unwrap_or_else(|e| e.into_inner()).retain(|(_, _, d)| d != dir);
     built
 }
@@ -1354,15 +1366,22 @@ pub fn cancel(req: &Request, engine: &Engine) -> Result<Value, Error> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn buildctl_run(engine: &Engine, id: &str, dir: &str, o: &Options, argv: Vec<String>, env: Vec<String>, out: &mut Out<'_>, probe: &UnixStream) -> Result<Vec<ctrs_image::Image>, String> {
+fn buildctl_run(engine: &Engine, id: &str, dir: &str, o: &Options, argv: Vec<String>, env: Vec<String>, out: &mut Out<'_>, probe: &UnixStream, push_repo: Option<&str>) -> Result<Vec<ctrs_image::Image>, String> {
     let exec = engine.exec_create(id, internal_exec(&argv, false, env)).map_err(|e| format!("{e:?}"))?;
     let (_, rx) = engine.exec_start(&exec).map_err(|e| format!("{e:?}"))?;
     let mut cancelled = false;
     let mut tail: Vec<String> = Vec::new();
     let loaded = std::thread::scope(|s| {
         let (tx, lrx) = mpsc::sync_channel::<Vec<u8>>(64);
-        let loader = s.spawn(move || ctrs_image::archive::load(&engine.store, ChanReader { rx: lrx, buf: Vec::new(), at: 0 }));
-        let mut tx = Some(tx);
+        // A push build sends no archive: stdout is empty and the mirror
+        // already recorded the image, so there is nothing to load.
+        let loader = if push_repo.is_some() {
+            drop(lrx);
+            None
+        } else {
+            Some(s.spawn(move || ctrs_image::archive::load(&engine.store, ChanReader { rx: lrx, buf: Vec::new(), at: 0 })))
+        };
+        let mut tx = loader.as_ref().map(|_| tx);
         let mut partial = Vec::new();
         loop {
             match rx.recv_timeout(Duration::from_secs(1)) {
@@ -1404,7 +1423,10 @@ fn buildctl_run(engine: &Engine, id: &str, dir: &str, o: &Options, argv: Vec<Str
             tail.push(line);
         }
         drop(tx);
-        loader.join().unwrap_or_else(|_| Err(io::Error::other("the image loader panicked")))
+        match loader {
+            Some(l) => l.join().unwrap_or_else(|_| Err(io::Error::other("the image loader panicked"))),
+            None => Ok(Vec::new()),
+        }
     });
     let code = engine.with_exec(&exec, |e| e.exit_code.unwrap_or(-1)).unwrap_or(-1);
     engine.forget_exec(&exec);
@@ -1414,10 +1436,39 @@ fn buildctl_run(engine: &Engine, id: &str, dir: &str, o: &Options, argv: Vec<Str
     if code != 0 {
         return Err(failure(&tail, code));
     }
+    if let Some(repo) = push_repo {
+        return retag_pushed(engine, o, repo);
+    }
     match loaded {
         Ok(images) if !images.is_empty() => Ok(images),
         Ok(_) => Err("BuildKit sent no image".into()),
         Err(e) => Err(format!("loading the built image into ctrs: {e}")),
+    }
+}
+
+/// A push build's images sit in the store under the mirror's temp repo
+/// names; give them the user's tags (or the config id, untagged) and
+/// drop the temp records and unselected platform/attestation images.
+fn retag_pushed(engine: &Engine, o: &Options, repo: &str) -> Result<Vec<ctrs_image::Image>, String> {
+    let (keep, drop) = super::mirror::take_pushed(repo);
+    for name in &drop {
+        let _ = engine.store.remove_image(name);
+    }
+    let mut out = Vec::new();
+    for name in keep {
+        let Some(image) = engine.store.find(&name).map_err(|e| e.to_string())? else { continue };
+        let tags: Vec<String> = if o.tags.is_empty() { vec![image.config_digest.clone()] } else { o.tags.clone() };
+        for tag in tags {
+            let tagged = image.tagged(tag);
+            engine.store.put_image(tagged.clone()).map_err(|e| e.to_string())?;
+            out.push(tagged);
+        }
+        engine.store.remove_image(&name).map_err(|e| e.to_string())?;
+    }
+    if out.is_empty() {
+        Err("BuildKit pushed no image".into())
+    } else {
+        Ok(out)
     }
 }
 
@@ -1688,7 +1739,7 @@ mod tests {
         assert!(o.no_cache && o.pull && o.quiet);
         assert_eq!(o.platform, "linux/amd64");
         assert_eq!(o.extra_hosts, ["db=10.0.0.2".to_owned(), format!("host.docker.internal={}", super::super::ports::HOST_ADDR)]);
-        let a = o.argv("/tmp/ctrs-build/x");
+        let a = o.argv("/tmp/ctrs-build/x", None);
         let has = |pair: &[&str]| a.windows(pair.len()).any(|w| w == pair);
         assert!(has(&["--opt", "filename=Dockerfile.dev"]));
         assert!(has(&["--local", "context=/tmp/ctrs-build/x/context", "--local", "dockerfile=/tmp/ctrs-build/x/context/docker"]));
@@ -1714,14 +1765,14 @@ mod tests {
         assert!(Options::parse(&req(&[("platform", "linux//arm64")])).is_err());
         let o = Options::parse(&req(&[])).unwrap();
         assert_eq!(o.dockerfile, "Dockerfile");
-        let a = o.argv("/d");
+        let a = o.argv("/d", None);
         assert!(a.windows(2).any(|w| w == ["--local", "dockerfile=/d/context"]));
         assert_eq!(a.last().unwrap(), "type=docker,dest=-");
         assert!(Options::parse(&req(&[("t", "Bad:Tag!")])).is_err());
         assert!(Options::parse(&req(&[("dockerfile", "../Dockerfile")])).is_err());
         assert!(Options::parse(&req(&[("networkmode", "mynet")])).is_err());
         assert!(Options::parse(&req(&[("version", "2")])).is_err());
-        let remote = Options::parse(&req(&[("remote", "https://github.com/o/r.git#main")])).unwrap().argv("/d");
+        let remote = Options::parse(&req(&[("remote", "https://github.com/o/r.git#main")])).unwrap().argv("/d", None);
         assert!(remote.windows(2).any(|w| w == ["--opt", "context=https://github.com/o/r.git#main"]));
         assert!(!remote.iter().any(|x| x == "--local"));
     }
