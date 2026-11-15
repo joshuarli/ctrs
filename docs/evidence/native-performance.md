@@ -473,6 +473,25 @@ as the campaign's one structural feature gap: `docker`-driver
 builds exist and work, they just cost ~0.3–1.3 s more per build,
 scaling with image size.
 
+**Exact buildx selection mechanism (2026-11-15, buildx v0.22.0
+source):** the implicit `default` builder resolves its driver per
+endpoint via `driver.GetDefaultFactory`, lowest `Priority` wins.
+The `docker` driver's `Priority` returns 10 only if
+`Client.DialHijack("/grpc", "h2c")` succeeds, else 99
+(`driver/docker/factory.go`); docker-container is the fallback.
+The docker driver then talks BuildKit directly — `Dial` hijacks
+`/grpc` (h2c control API) and sessions hijack `/session`
+(`driver/docker/driver.go`); it never uses `POST /build` at all.
+ctrs serves neither route, so the probe fails and every `docker
+buildx build` lands on docker-container regardless of engine.
+Falsified sub-hypothesis: `/_ping` `Builder-Version` is not the
+gate — flipping ctrs's header 1→2 left the driver choice
+unchanged (verified live). Closing the cell therefore requires
+implementing `/grpc` + `/session` *and* a moby-worker that writes
+the image store in-engine — i.e. embedded BuildKit, not a proxy
+(a standalone buildkitd still cannot satisfy `--load`'s
+in-store semantics and would add a hop).
+
 **Mirror push export for `POST /build` (2026-11-15, `e41c3bf`):**
 the classic builder API now exports `type=image` to the host mirror
 (`/v2/<token>/push/<repo>/…`, OCI push protocol) instead of an
