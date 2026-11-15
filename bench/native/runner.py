@@ -68,6 +68,13 @@ W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
 W6_IMAGE = "gcc:14.2.0-bookworm"
 W6_DIR = FIXTURES / "w6"
+# Attribution control (campaign Phase B.2): a docker-container BuildKit
+# builder usable on *both* engines, so W6/W7 can separate engine runtime
+# from builder topology. The image is ctrs's pinned buildkit digest so
+# both sides run the same BuildKit version.
+DC_BUILDER = "np-dc"
+DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
+                    "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis:7-alpine"
 W4_JOBS = 200
 # One worker container: pop jobs until the list is empty, store
@@ -846,7 +853,32 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
             rec["resources"]["trace"] = str(trace.relative_to(WORK))
 
 
-def trial_w7(ctx, engine: Engine, state: str) -> dict:
+def ensure_dc_builder(engine: Engine) -> None:
+    """Create the shared docker-container BuildKit builder on this engine
+    if absent (untimed setup). Both engines get the same pinned BuildKit
+    image so `--driver dc` isolates builder topology from engine runtime."""
+    cp = engine.sh(["buildx", "inspect", DC_BUILDER], timeout=30,
+                   check=False)
+    if cp.returncode == 0:
+        return
+    engine.sh(
+        ["buildx", "create", "--name", DC_BUILDER,
+         "--driver", "docker-container",
+         "--driver-opt", f"image={DC_BUILDER_IMAGE}", "--bootstrap"],
+        timeout=600)
+
+
+def build_args(driver: str, extra: list[str]) -> list[str]:
+    """`docker buildx build --load` argv; `driver="dc"` pins the shared
+    docker-container builder on both engines."""
+    args = ["buildx", "build", "--load", *extra]
+    if driver == "dc":
+        args += ["--builder", DC_BUILDER]
+    return args
+
+
+def trial_w7(ctx, engine: Engine, state: str,
+             driver: str = "default") -> dict:
     """W7: native image build — empty/warm/incremental build-cache states
     on a multi-stage offline Dockerfile, then a run-time correctness
     probe. The build cache is pruned before the empty build; warm
@@ -859,6 +891,9 @@ def trial_w7(ctx, engine: Engine, state: str) -> dict:
     checks = rec["correctness"]["checks"]
     try:
         engine.ensure_up()
+        if driver == "dc":
+            ensure_dc_builder(engine)
+        rec["metrics"]["builder_driver"] = driver
         # Assemble the build context in the trial dir so the incremental
         # stamp never dirties the fixture tree.
         ctx_dir = trial_dir / "ctx"
@@ -873,13 +908,16 @@ def trial_w7(ctx, engine: Engine, state: str) -> dict:
         def build(context: Path, timeout: float = 900) -> tuple[float, bool]:
             tp = time.monotonic()
             cp = engine.sh(
-                ["build", "--load", "-q", "-t", tag,
-                 "-f", str(context / "Dockerfile"), str(context)],
+                build_args(driver, ["-q", "-t", tag,
+                                    "-f", str(context / "Dockerfile"),
+                                    str(context)]),
                 timeout=timeout, check=False)
             return round(time.monotonic() - tp, 3), cp.returncode == 0
 
-        cp = engine.sh(["buildx", "prune", "-af"], timeout=300,
-                       check=False)
+        prune = ["buildx", "prune", "-af"]
+        if driver == "dc":
+            prune += ["--builder", DC_BUILDER]
+        cp = engine.sh(prune, timeout=300, check=False)
         rec["metrics"]["prune_ok"] = cp.returncode == 0
 
         s, ok = build(build_ctx("incremental-0"))
@@ -912,7 +950,8 @@ def trial_w7(ctx, engine: Engine, state: str) -> dict:
         return rec
 
 
-def trial_w6(ctx, engine: Engine, state: str) -> dict:
+def trial_w6(ctx, engine: Engine, state: str,
+             driver: str = "default") -> dict:
     """W6: compiled-app CI — one timed `docker build` of vendored zlib
     1.3.1 (configure -> make -j -> make check) on gcc:14.2.0-bookworm,
     then a run probe that sha256s the produced libz.a. The base image is
@@ -924,6 +963,9 @@ def trial_w6(ctx, engine: Engine, state: str) -> dict:
     checks = rec["correctness"]["checks"]
     try:
         engine.ensure_up()
+        if driver == "dc":
+            ensure_dc_builder(engine)
+        rec["metrics"]["builder_driver"] = driver
         cp = engine.sh(["image", "inspect", W6_IMAGE], timeout=30,
                        check=False)
         if cp.returncode != 0:
@@ -938,8 +980,9 @@ def trial_w6(ctx, engine: Engine, state: str) -> dict:
         (ctx_dir / "stamp.txt").write_text(f"{ctx.run_id}\n")
         tp = time.monotonic()
         build = engine.sh(
-            ["build", "--load", "-q", "-t", tag,
-             "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir)],
+            build_args(driver, ["-q", "-t", tag,
+                                "-f", str(ctx_dir / "Dockerfile"),
+                                str(ctx_dir)]),
             timeout=1800, check=False)
         rec["metrics"]["build_s"] = round(time.monotonic() - tp, 3)
         checks["build"] = build.returncode == 0
@@ -1627,13 +1670,15 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         elif case_id == "W8":
             rec = trial_w8(ctx, engine, state, **kw)
         elif case_id == "W7":
-            rec = trial_w7(ctx, engine, state)
+            rec = trial_w7(ctx, engine, state,
+                           driver=kw.get("driver", "default"))
         elif case_id == "W9":
             rec = trial_w9(ctx, engine, state)
         elif case_id == "W4":
             rec = trial_w4(ctx, engine, state)
         elif case_id == "W6":
-            rec = trial_w6(ctx, engine, state)
+            rec = trial_w6(ctx, engine, state,
+                           driver=kw.get("driver", "default"))
         elif case_id == "W3":
             rec = trial_w3(ctx, engine, state)
         elif case_id == "W5":
@@ -1793,6 +1838,8 @@ def cmd_run(args) -> int:
     if args.case in ("W2", "W8", "W10", "W11"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
+    if args.case in ("W6", "W7"):
+        kw = {"driver": getattr(args, "driver", "default")}
     if args.case == "W8" and getattr(args, "under_load", False):
         kw["under_load"] = True
     rec = run_one(ctx, args.engine, args.case, args.state,
@@ -1822,6 +1869,8 @@ def cmd_baseline(args) -> int:
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
                           "seed": args.seed + pair * 10 + idx}
+                if args.case in ("W6", "W7"):
+                    kw = {"driver": getattr(args, "driver", "default")}
                 if args.case == "W8" and getattr(args, "under_load", False):
                     kw["under_load"] = True
                 rec = run_one(ctx, eng, args.case, args.state,
@@ -1951,6 +2000,11 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true",
                    help="W8: serve W2-style load while images pull")
+    p.add_argument("--driver", default="default",
+                   choices=["default", "dc"],
+                   help="W6/W7: dc pins the shared docker-container "
+                        "BuildKit builder on both engines (attribution "
+                        "control for builder topology)")
 
     p = sub.add_parser("baseline")
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
@@ -1966,6 +2020,10 @@ def main() -> int:
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--under-load", action="store_true",
                    help="W8: serve W2-style load while images pull")
+    p.add_argument("--driver", default="default",
+                   choices=["default", "dc"],
+                   help="W6/W7: dc pins the shared docker-container "
+                        "BuildKit builder on both engines")
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
