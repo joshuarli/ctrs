@@ -381,6 +381,12 @@ impl VmLink {
         r
     }
 
+    /// An exec's `Exited` arrived on its dedicated output connection: its
+    /// stdin window closes exactly as the control link's `Exited` does.
+    pub fn close_window(&self, id: &str) {
+        self.windows.close(id);
+    }
+
     /// Sends stdin for a process. Blocks while the guest already holds
     /// `INPUT_WINDOW` bytes it has not consumed, so the pressure reaches the
     /// client (its write blocks) instead of the agent dropping input.

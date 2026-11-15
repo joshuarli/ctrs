@@ -165,6 +165,12 @@ pub enum Msg<'a> {
 /// vsock port of the guest's copy service: one connection per copy.
 pub const COPY_PORT: u32 = 1028;
 
+/// vsock port the host listens on for per-exec output connections: the
+/// guest dials it as each exec starts, introduces itself with
+/// `u32 BE len | id`, then carries that exec's `Output` and `Exited`
+/// frames so bulk streams bypass the multiplexed control connection.
+pub const EXEC_PORT: u32 = 1031;
+
 /// vsock port of the host's DNS relay (VM only). The agent sends a lookup
 /// the VM's gateway resolver didn't answer as `u16 len | query`, as DNS over
 /// TCP frames it, and gets `u16 len | reply` back: one lookup per connection.

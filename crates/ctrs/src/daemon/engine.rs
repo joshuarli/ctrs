@@ -648,6 +648,10 @@ impl Engine {
         if cfg!(target_os = "macos") {
             vm.listen(super::ports::ENGINE_API_PORT, Box::new(super::ports::serve_engine_api))?;
         }
+        // Per-exec output connections: the guest dials back as each exec
+        // starts so bulk streams bypass the multiplexed control link.
+        let me = self.me.get().cloned().unwrap_or_default();
+        vm.listen(ctrs_proto::EXEC_PORT, Box::new(move |s| super::ports::serve_exec(s, me.clone())))?;
         // Container lookups the VM's gateway resolver fails, asked of the
         // Mac's own (VM only: a Linux host's agent asks the host's itself).
         if cfg!(target_os = "macos") {
@@ -1021,7 +1025,7 @@ impl Engine {
         }
     }
 
-    fn on_event(&self, ev: Event<'_>) {
+    pub(crate) fn on_event(&self, ev: Event<'_>) {
         match ev {
             Event::Output { id, stream, data } => {
                 let mut st = self.lock();

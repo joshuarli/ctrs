@@ -1109,6 +1109,56 @@ pub fn serve_engine_api(stream: ctrs_vmm::VsockStream) {
     });
 }
 
+/// One exec's dedicated output connection, dialed by the guest as the exec
+/// starts (`ctrs_proto::EXEC_PORT`). The first frame is `u32 BE len | id`;
+/// after that the connection carries only that exec's `Output` and
+/// `Exited` frames, in order, so bulk streams bypass the multiplexed
+/// control connection. Anything else on it is ignored.
+pub fn serve_exec(stream: ctrs_vmm::VsockStream, me: std::sync::Weak<super::engine::Engine>) {
+    let _ = std::thread::Builder::new().name("ctrs-exec".into()).spawn(move || {
+        let _ = exec_link(stream, me);
+    });
+}
+
+fn exec_link(stream: ctrs_vmm::VsockStream, me: std::sync::Weak<super::engine::Engine>) -> io::Result<()> {
+    use super::vmlink::Event;
+    let mut conn = std::fs::File::from(stream.fd.try_clone()?);
+    let mut len = [0u8; 4];
+    conn.read_exact(&mut len)?;
+    let n = u32::from_be_bytes(len) as usize;
+    if n > 4096 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "exec id too long"));
+    }
+    let mut id = vec![0u8; n];
+    conn.read_exact(&mut id)?;
+    if String::from_utf8(id).is_err() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "exec id is not utf-8"));
+    }
+    let mut frame = Vec::with_capacity(64 * 1024);
+    loop {
+        frame.resize(4, 0);
+        if conn.read_exact(&mut frame[..4]).is_err() {
+            return Ok(());
+        }
+        let Ok(len) = ctrs_proto::frame_len(frame[..4].try_into().expect("4 bytes")) else {
+            return Ok(());
+        };
+        frame.resize(len.max(ctrs_proto::HEADER), 0);
+        conn.read_exact(&mut frame[4..])?;
+        let Some(engine) = me.upgrade() else { return Ok(()) };
+        match ctrs_proto::decode(&frame) {
+            Ok(ctrs_proto::Msg::Output { id, stream, data }) => engine.on_event(Event::Output { id, stream, data }),
+            Ok(ctrs_proto::Msg::Exited(e)) => {
+                if let Ok(vm) = engine.vm() {
+                    vm.close_window(e.id);
+                }
+                engine.on_event(Event::Exited { id: e.id, code: e.code, oom: e.oom_killed })
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The TCP ports in a container's `/proc/net/tcp` and `tcp6` lines that are
 /// listening: those a published port reaches, then those it does not. The
 /// relay dials the container's IPv4 address, so a socket bound to loopback

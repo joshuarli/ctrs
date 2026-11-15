@@ -32,6 +32,80 @@ struct Proc {
     /// held the pty open, as while systemd reopens /dev/console. Kept, and
     /// looked at again shortly, rather than taken for the end of output.
     tty_hup: Option<std::time::Instant>,
+    /// This exec's dedicated output connection to the host, when it
+    /// dialed back at start. Its `Output` and `Exited` frames bypass the
+    /// multiplexed control connection, which is the bulk-stream ceiling.
+    bulk: Option<BulkConn>,
+}
+
+/// A per-exec vsock connection carrying this process's `Output` and
+/// `Exited` frames. Writes are nonblocking with a bounded pending buffer;
+/// POLLOUT drains it. `closing` means the exit report is already queued,
+/// so the process stays until the last byte is on the wire.
+struct BulkConn {
+    fd: OwnedFd,
+    pending: Vec<u8>,
+    pos: usize,
+    closing: bool,
+}
+
+/// Output queued for a bulk connection beyond this stops the process's
+/// pipes being read, the same backpressure the control connection gets
+/// from a full socket buffer.
+const BULK_HIGH: usize = 8 << 20;
+
+impl BulkConn {
+    fn drained(&self) -> bool {
+        self.pos == self.pending.len()
+    }
+}
+
+/// Sends what it can of `pending` without blocking.
+fn bulk_flush(b: &mut BulkConn) -> io::Result<()> {
+    while b.pos < b.pending.len() {
+        // SAFETY: `send` on a descriptor and buffer we own.
+        let n = unsafe {
+            libc::send(
+                b.fd.as_raw_fd(),
+                b.pending[b.pos..].as_ptr().cast(),
+                b.pending.len() - b.pos,
+                libc::MSG_DONTWAIT,
+            )
+        };
+        if n > 0 {
+            b.pos += n as usize;
+        } else if n == 0 {
+            break;
+        } else {
+            let e = io::Error::last_os_error();
+            if e.raw_os_error() == Some(libc::EAGAIN) {
+                break;
+            }
+            return Err(e);
+        }
+    }
+    if b.drained() {
+        b.pending.clear();
+        b.pos = 0;
+    }
+    Ok(())
+}
+
+/// Dials the host's exec port and introduces this process. The first
+/// frame is `u32 BE len | id`, then `Output`/`Exited` frames follow in
+/// order. `None` on any failure: the process simply keeps reporting on
+/// the control connection.
+fn bulk_connect(id: &str) -> Option<BulkConn> {
+    let fd = super::transport::dial_within(ctrs_proto::EXEC_PORT, std::time::Duration::from_millis(500)).ok()?;
+    let mut hs = Vec::with_capacity(4 + id.len());
+    hs.extend_from_slice(&(id.len() as u32).to_be_bytes());
+    hs.extend_from_slice(id.as_bytes());
+    // The fresh connection is still blocking; the handshake is tiny and
+    // the host reads it at once. Nonblocking starts with the data path.
+    let mut file = File::from(fd.try_clone().ok()?);
+    file.write_all(&hs).ok()?;
+    sys::set_nonblocking(fd.as_raw_fd()).ok()?;
+    Some(BulkConn { fd, pending: Vec::new(), pos: 0, closing: false })
 }
 
 /// How long a hung-up terminal waits before it's polled again.
@@ -288,11 +362,19 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 hung = true;
                 continue;
             }
+            // A backed-up bulk connection stops this process's pipes being
+            // read until it drains, like a full control-connection buffer.
+            let bulk_full = p.bulk.as_ref().is_some_and(|b| b.pending.len() - b.pos > BULK_HIGH);
             for fd in [&p.run.stdout, &p.run.stderr].into_iter().flatten() {
-                fds.push(libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 });
+                fds.push(libc::pollfd { fd: fd.as_raw_fd(), events: if bulk_full { 0 } else { libc::POLLIN }, revents: 0 });
             }
             if let (Some(fd), false) = (&p.run.stdin, p.input.is_empty()) {
                 fds.push(libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLOUT, revents: 0 });
+            }
+            if let Some(b) = &p.bulk
+                && b.pos < b.pending.len()
+            {
+                fds.push(libc::pollfd { fd: b.fd.as_raw_fd(), events: libc::POLLOUT, revents: 0 });
             }
         }
         // SAFETY: `fds` is a valid array of pollfd of the given length.
@@ -463,6 +545,19 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 dns.on_readable(pfd.fd, upstream);
                 continue;
             }
+            // A bulk connection's POLLOUT: drain its pending output. A dead
+            // connection drops the process back to the control connection
+            // for whatever has not been written yet.
+            if let Some(pid) = procs.iter().find_map(|(pid, p)| {
+                p.bulk.as_ref().filter(|b| b.fd.as_raw_fd() == pfd.fd).map(|_| *pid)
+            }) {
+                let p = procs.get_mut(&pid).expect("found above");
+                let failed = p.bulk.as_mut().is_some_and(|b| bulk_flush(b).is_err());
+                if failed {
+                    p.bulk = None;
+                }
+                continue;
+            }
             // Only process stdin is polled for writing beyond this point.
             if pfd.events & libc::POLLOUT != 0 {
                 flush_input(&mut procs, pfd.fd, &mut conn, &mut out)?;
@@ -487,7 +582,14 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 p.tty_hup = None;
                 out.clear();
                 Msg::Output { id: &p.run.id, stream, data: &chunk[..got as usize] }.encode(&mut out);
-                conn.write_all(&out)?;
+                if let Some(b) = p.bulk.as_mut() {
+                    b.pending.extend_from_slice(&out);
+                    if bulk_flush(b).is_err() {
+                        p.bulk = None;
+                    }
+                } else {
+                    conn.write_all(&out)?;
+                }
             }
             if got == 0 || (got < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EAGAIN)) {
                 if got < 0 && p.run.tty && p.exited.is_none() && io::Error::last_os_error().raw_os_error() == Some(libc::EIO) {
@@ -513,19 +615,52 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
 
         // Report processes that have exited and whose output is fully read,
         // then tear containers down after the host already has its answer.
-        let done: Vec<libc::pid_t> = procs
-            .iter()
-            .filter(|(_, p)| p.exited.is_some() && p.run.stdout.is_none() && p.run.stderr.is_none())
-            .map(|(pid, _)| *pid)
-            .collect();
-        for pid in done {
-            let p = procs.remove(&pid).expect("listed above");
-            let (code, reaped_ns) = p.exited.expect("filtered on exited");
-            out.clear();
-            let oom_killed = container::oom_killed(&p.run);
-            Msg::Exited(Exited { id: &p.run.id, code, setup_ns: p.cloned_ns - p.received_ns, run_ns: reaped_ns - p.cloned_ns, oom_killed })
+        // A process on a bulk connection gets its exit report queued there
+        // first, so it stays until the last frame is written; the report
+        // then arrives after its output, as it does on the control conn.
+        let mut done: Vec<(libc::pid_t, bool)> = Vec::new();
+        for (pid, p) in procs.iter_mut() {
+            if p.exited.is_none() || p.run.stdout.is_some() || p.run.stderr.is_some() {
+                continue;
+            }
+            let Some(b) = p.bulk.as_mut() else {
+                done.push((*pid, false));
+                continue;
+            };
+            if !b.closing {
+                let (code, reaped_ns) = p.exited.expect("checked above");
+                out.clear();
+                Msg::Exited(Exited {
+                    id: &p.run.id,
+                    code,
+                    setup_ns: p.cloned_ns - p.received_ns,
+                    run_ns: reaped_ns - p.cloned_ns,
+                    oom_killed: container::oom_killed(&p.run),
+                })
                 .encode(&mut out);
-            conn.write_all(&out)?;
+                b.pending.extend_from_slice(&out);
+                b.closing = true;
+                if bulk_flush(b).is_err() {
+                    p.bulk = None;
+                    done.push((*pid, false));
+                    continue;
+                }
+            }
+            if b.drained() {
+                p.bulk = None;
+                done.push((*pid, true));
+            }
+        }
+        for (pid, via_bulk) in done {
+            let p = procs.remove(&pid).expect("listed above");
+            if !via_bulk {
+                let (code, reaped_ns) = p.exited.expect("filtered on exited");
+                out.clear();
+                let oom_killed = container::oom_killed(&p.run);
+                Msg::Exited(Exited { id: &p.run.id, code, setup_ns: p.cloned_ns - p.received_ns, run_ns: reaped_ns - p.cloned_ns, oom_killed })
+                    .encode(&mut out);
+                conn.write_all(&out)?;
+            }
             for (bridge, ip) in &p.run.dns_entries {
                 dns.unregister(bridge, *ip);
             }
@@ -628,7 +763,10 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                             Ok(run) => {
                                 let cloned_ns = sys::boottime_ns();
                                 Msg::Started { id: &run.id, pid: run.pid as u32 }.encode(&mut out);
-                                procs.insert(run.pid, new_proc(run, received_ns, cloned_ns));
+                                let pid = run.pid;
+                                let mut p = new_proc(run, received_ns, cloned_ns);
+                                p.bulk = bulk_connect(&p.run.id);
+                                procs.insert(pid, p);
                             }
                             Err(e) => Msg::Error(&format!("exec in {}: {e}", spec.container_id)).encode(&mut out),
                         },
@@ -913,7 +1051,7 @@ fn extra_veth(id: &str, n: u32) -> String {
 
 
 fn new_proc(run: Process, received_ns: u64, cloned_ns: u64) -> Proc {
-    Proc { run, received_ns, cloned_ns, exited: None, input: VecDeque::new(), close_stdin_when_drained: false, tty_hup: None }
+    Proc { run, received_ns, cloned_ns, exited: None, input: VecDeque::new(), close_stdin_when_drained: false, tty_hup: None, bulk: None }
 }
 
 /// Writes as much pending input as the process will take without blocking,
