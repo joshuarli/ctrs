@@ -258,6 +258,55 @@ with W9's container-start/churn advantage. OrbStack's 16-worker cell is
 ~8x its own 4-worker time, i.e. its per-container start cost dominates
 at high fan-out.
 
+### Resource parity fix (methodology, 2026-11-14)
+
+`docker info` exposed a major allocation asymmetry: the ctrs bench VM
+defaulted to **2 vCPUs / ~8 GiB** while OrbStack's VM had **17 vCPUs /
+~43 GiB**. Every CPU-bound cell measured so far compared engines *and*
+allocations. The runner now queries OrbStack's `docker info`
+(NCPU/MemTotal) and spawns the ctrs bench daemon with matching
+`CTRS_CPUS`/`CTRS_MEMORY_MIB` (ambient env still wins), and records
+`resources.engine {ncpu, mem_total_bytes}` on every trial. **All
+pre-parity baseline numbers below are superseded** and must be re-run;
+ctrs's recorded wins were achieved *despite* the handicap, so they are
+likely conservative, but no claim stands until re-measured.
+
+### W6 compiled-app CI baseline (warm, 5 pairs, resource-matched)
+
+Timed `docker build` of vendored zlib 1.3.1 (configure -> make -j ->
+make check) on gcc:14.2.0-bookworm; per-trial stamp busts the layer
+cache so every build is a real compile. Identical `libz.a` sha256 on
+both engines (deterministic build verified).
+
+| engine | build_s (5 pairs) | median |
+| --- | --- | --- |
+| ctrs (17 vCPU) | 4.04, 2.10, 2.19, 2.10, 2.09 | 2.10 |
+| orbstack (17 vCPU) | 1.49, 0.45, 0.61, 0.52, 0.49 | 0.52 |
+
+**Loss on the default path — but the cause is builder topology, not
+engine runtime.** Phase timing on ctrs: compile+check 0.6 s, then
+`exporting to docker image format` -> `sending tarball` **1.7 s** ->
+`importing to docker` 0.0 s. The docker-container buildx driver
+streams the full image tarball from the CLI through the daemon's
+`/images/load`; OrbStack's default `docker` driver keeps buildkit and
+the image store inside its VM and skips that client round-trip.
+
+Matched-driver A/B (same zlib context, unique stamps):
+
+| builder | engine | wall |
+| --- | --- | --- |
+| docker (native) | orbstack | ~0.5 s |
+| docker-container | orbstack (`npw6-dc`) | 3.35-4.28 s |
+| docker-container | ctrs (default) | 2.10-3.11 s |
+
+On identical builder topology **ctrs beats orbstack** (~2.6 s vs
+~3.9 s median). Plain `docker run` compile of the same zlib tree is
+identical on both (~350 ms make), confirming guest CPU parity. The
+product gap is real though: ctrs has no `docker`-driver build, so
+`docker build` users pay a ~1.5-2 s client-side export per build on
+large bases. Candidate future work: embedded buildkit or a
+layer-dedup import path; recorded as a known structural difference.
+
 ### Engine ecosystem footprint (approximate, `ps` RSS sum)
 
 | engine | W1 peak_total_rss median | W2 peak_total_rss median | W2 cpu_seconds median |
@@ -283,7 +332,8 @@ claim. ctrs total includes the VZ guest inside the `ctrs` process.
 | W5 | implemented, 5-pair pilot collected (below) |
 | W10 | implemented, pilot collected (below) |
 | W4 | implemented, 5-pair baseline collected (below) |
-| W6, W11 | declared in `bench/native/cases.toml`, not yet implemented |
+| W6 | implemented, 5-pair baseline collected (below) |
+| W11 | declared in `bench/native/cases.toml`, not yet implemented |
 | Linux lane | blocked: no bare-metal Linux host (`needs native host`) |
 | Docker Desktop | excluded per amended campaign target |
 

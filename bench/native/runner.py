@@ -55,7 +55,8 @@ MATCH_PATTERNS = {
     "orbstack": r"orbstack|orb-|virtualization",
 }
 
-SERVICE_IMAGES = ["postgres:17-alpine", "redis:7-alpine", "python:3.13-slim"]
+SERVICE_IMAGES = ["postgres:17-alpine", "redis:7-alpine", "python:3.13-slim",
+                  "gcc:14.2.0-bookworm"]
 W1_DIR = FIXTURES / "w1"
 API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
@@ -65,6 +66,8 @@ W7_DIR = FIXTURES / "w7"
 W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
 W5_DIR = FIXTURES / "w5"
+W6_IMAGE = "gcc:14.2.0-bookworm"
+W6_DIR = FIXTURES / "w6"
 W4_IMAGE = "redis:7-alpine"
 W4_JOBS = 200
 # One worker container: pop jobs until the list is empty, store
@@ -163,6 +166,31 @@ def load_cases() -> dict:
         return tomllib.load(f)
 
 
+_ORB_RESOURCES: tuple[int, int] | None = None
+
+
+def orbstack_resources() -> tuple[int, int] | None:
+    """(vCPUs, memory MiB) OrbStack gives its VM, for resource-matched
+    ctrs benchmarking. `docker info` NCPU/MemTotal reflect the VM's
+    allocation; cached for the process."""
+    global _ORB_RESOURCES
+    if _ORB_RESOURCES is not None:
+        return _ORB_RESOURCES
+    try:
+        env = os.environ.copy()
+        env["DOCKER_HOST"] = f"unix://{ORBSTACK_SOCK}"
+        env.pop("DOCKER_CONTEXT", None)
+        cp = subprocess.run(
+            [DOCKER, "info", "--format", "{{.NCPU}} {{.MemTotal}}"],
+            env=env, capture_output=True, text=True, timeout=20)
+        ncpu_s, mem_s = cp.stdout.split()
+        ncpu, mem_b = int(ncpu_s), int(mem_s)
+        _ORB_RESOURCES = (ncpu, mem_b >> 20)
+    except Exception:
+        _ORB_RESOURCES = None
+    return _ORB_RESOURCES
+
+
 class Engine:
     """One competitor engine: socket, env, and (for ctrs) daemon lifecycle."""
 
@@ -235,9 +263,26 @@ class Engine:
                 pass
         if self.proc is not None:
             self.stop()
+        # An orphaned daemon from an earlier runner invocation may still
+        # hold this engine dir; if its socket answers, adopt it rather
+        # than spawning into the data-root lock.
+        try:
+            self.sh(["version"], timeout=10)
+            return
+        except Exception:
+            pass
         env = os.environ.copy()
         env["CTRS_DATA_DIR"] = str(self.dir / "data")
         env["CTRS_SOCKET"] = str(self.dir / "run" / "docker.sock")
+        # Resource parity: ctrs defaults to 2 vCPUs / 8 GiB while
+        # OrbStack allocates ~all host cores. Give the bench VM the same
+        # vCPU count and memory ceiling OrbStack reports so CPU-bound
+        # cells compare engines, not allocations. Explicit ambient
+        # CTRS_CPUS/CTRS_MEMORY_MIB still win.
+        res = orbstack_resources()
+        if res is not None:
+            env.setdefault("CTRS_CPUS", str(res[0]))
+            env.setdefault("CTRS_MEMORY_MIB", str(res[1]))
         log = open(self.dir / "daemon.log", "ab")
         deadline = time.monotonic() + timeout
         # A previous daemon can still hold the data-root lock while its VM
@@ -867,6 +912,56 @@ def trial_w7(ctx, engine: Engine, state: str) -> dict:
         return rec
 
 
+def trial_w6(ctx, engine: Engine, state: str) -> dict:
+    """W6: compiled-app CI — one timed `docker build` of vendored zlib
+    1.3.1 (configure -> make -j -> make check) on gcc:14.2.0-bookworm,
+    then a run probe that sha256s the produced libz.a. The base image is
+    pulled untimed in setup if absent (prepare also pulls it)."""
+    case_id = "W6"
+    trial_dir = ctx.trial_dir(engine.name, case_id, state)
+    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    tag = f"npw6/zlib:{ctx.run_id[-6:]}"
+    checks = rec["correctness"]["checks"]
+    try:
+        engine.ensure_up()
+        cp = engine.sh(["image", "inspect", W6_IMAGE], timeout=30,
+                       check=False)
+        if cp.returncode != 0:
+            engine.sh(["pull", W6_IMAGE], timeout=900)
+        # Per-trial context: stamp.txt busts the layer cache so every
+        # timed build is a real compile, not a cache hit.
+        ctx_dir = trial_dir / "ctx"
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(W6_DIR / "Dockerfile", ctx_dir / "Dockerfile")
+        shutil.copy(W6_DIR / "zlib-1.3.1.tar.gz",
+                    ctx_dir / "zlib-1.3.1.tar.gz")
+        (ctx_dir / "stamp.txt").write_text(f"{ctx.run_id}\n")
+        tp = time.monotonic()
+        build = engine.sh(
+            ["build", "--load", "-q", "-t", tag,
+             "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir)],
+            timeout=1800, check=False)
+        rec["metrics"]["build_s"] = round(time.monotonic() - tp, 3)
+        checks["build"] = build.returncode == 0
+        if build.returncode != 0:
+            rec["validation_errors"].append(
+                f"build rc={build.returncode}: "
+                f"{(build.stderr or build.stdout)[-400:]}")
+        probe = engine.sh(
+            ["run", "--rm", tag, "sha256sum", "/src/libz.a"],
+            timeout=120, check=False)
+        sha = probe.stdout.split()[0] if probe.returncode == 0 else ""
+        rec["metrics"]["artifact_sha256"] = sha
+        checks["artifact"] = (probe.returncode == 0
+                              and len(sha) == 64)
+        rec["correctness"]["ok"] = all(checks.values())
+        return rec
+    except Exception as exc:
+        rec["correctness"]["ok"] = False
+        rec["validation_errors"].append(f"exception: {exc}")
+        return rec
+
+
 def trial_w9(ctx, engine: Engine, state: str,
              jobs: tuple = (1, 4, 8, 16)) -> dict:
     """W9: parallel container churn — J concurrent `docker run` jobs, each
@@ -1364,6 +1459,20 @@ def safe_version(engine: Engine) -> str:
         return "unreachable"
 
 
+def safe_engine_info(engine: Engine) -> dict | None:
+    """`docker info` NCPU/MemTotal for the engine's VM/host allocation —
+    recorded per trial so resource asymmetries are visible in results."""
+    try:
+        cp = engine.sh(["info", "--format", "{{.NCPU}} {{.MemTotal}}"],
+                       timeout=20, check=False)
+        if cp.returncode != 0:
+            return None
+        ncpu_s, mem_s = cp.stdout.split()
+        return {"ncpu": int(ncpu_s), "mem_total_bytes": int(mem_s)}
+    except Exception:
+        return None
+
+
 def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
@@ -1397,6 +1506,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec = trial_w9(ctx, engine, state)
         elif case_id == "W4":
             rec = trial_w4(ctx, engine, state)
+        elif case_id == "W6":
+            rec = trial_w6(ctx, engine, state)
         elif case_id == "W3":
             rec = trial_w3(ctx, engine, state)
         elif case_id == "W5":
@@ -1407,6 +1518,9 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             raise ValueError(f"case {case_id} not implemented")
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
+        info = safe_engine_info(engine)
+        if info is not None:
+            rec["resources"]["engine"] = info
         ctx.write(rec)
         return rec
     finally:
@@ -1698,7 +1812,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -1711,7 +1825,7 @@ def main() -> int:
                    help="W8: serve W2-style load while images pull")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--pairs", type=int, default=3)
@@ -1727,7 +1841,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W7", "W8", "W9", "W10"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)
