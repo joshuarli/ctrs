@@ -1964,6 +1964,11 @@ def cmd_report(args) -> int:
         return 1
     groups: dict[tuple, list[dict]] = {}
     for r in records:
+        # The dc-driver attribution runs share case IDs with the default
+        # driver; keep them out of the headline ratios.
+        if r.get("case") in ("W6", "W7") and \
+                r.get("metrics", {}).get("builder_driver") == "dc":
+            continue
         groups.setdefault((r["case"], r["state"]), []).append(r)
 
     print("# Native performance report (generated)\n")
@@ -1996,20 +2001,49 @@ def cmd_report(args) -> int:
             if r.get("pair_id") is None:
                 continue
             by_pair.setdefault(r["pair_id"], {})[r["engine"]] = r
-        for metric in ("wall_seconds", "p95_ms", "rps"):
+        for metric in case_metrics(case):
             ratios = []
             for pair, d in sorted(by_pair.items()):
                 if "ctrs" in d and "orbstack" in d:
                     a = d["ctrs"]["metrics"].get(metric)
                     b = d["orbstack"]["metrics"].get(metric)
                     if a and b:
-                        ratios.append(a / b if metric != "rps" else b / a)
+                        ratios.append(
+                            b / a if metric in HIGHER_BETTER else a / b)
             if ratios:
                 lo, hi = bootstrap_ci(ratios)
                 med = sorted(ratios)[len(ratios) // 2]
                 print(f"- {case}/{state} {metric}: median={med:.3f} "
                       f"CI95=[{lo:.3f},{hi:.3f}] n={len(ratios)}")
     return 0
+
+
+# Headline metric per case for the paired-ratio report, in scorecard
+# order; `wall_seconds`, latency and rps are added for every case.
+# Metrics where a bigger number is better are listed in HIGHER_BETTER.
+CASE_HEADLINE = {
+    "W1": ["time_to_health_s", "time_to_roundtrip_s"],
+    "W2": ["rps", "p95_ms", "p99_ms"],
+    "W3": ["tx_tps", "up_s", "restart_s"],
+    "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
+    "W5": ["bind_median_s", "volume_median_s"],
+    "W6": ["build_s"],
+    "W7": ["build_empty_s", "build_warm_s", "build_incr_s"],
+    "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms"],
+    "W9": ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"],
+    "W10": ["recovery_s", "load_rps"],
+    "W11": ["rps_mean", "requests", "errors"],
+}
+HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "rps_mean", "requests"}
+
+
+def case_metrics(case: str) -> list[str]:
+    seen = []
+    for m in ["wall_seconds", "p95_ms", "p99_ms", "rps",
+              *CASE_HEADLINE.get(case, [])]:
+        if m not in seen:
+            seen.append(m)
+    return seen
 
 
 def main() -> int:
