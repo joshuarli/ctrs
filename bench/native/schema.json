@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "native-perf trial record",
+  "type": "object",
+  "required": ["schema", "trial_id", "run_id", "case", "engine", "state",
+               "host_id", "arch", "git_sha", "started_utc", "metrics",
+               "correctness", "resources", "validation_errors"],
+  "properties": {
+    "schema": {"const": 1},
+    "trial_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "case": {"type": "string", "pattern": "^W([1-9]|10|11)$"},
+    "engine": {"enum": ["ctrs", "orbstack"]},
+    "engine_server_version": {"type": "string"},
+    "state": {"enum": ["cold", "warm", "project-cold"]},
+    "pair_id": {"type": ["integer", "null"]},
+    "order_index": {"type": ["integer", "null"]},
+    "host_id": {"type": "string"},
+    "arch": {"type": "string"},
+    "git_sha": {"type": "string"},
+    "started_utc": {"type": "string"},
+    "finished_utc": {"type": "string"},
+    "metrics": {"type": "object"},
+    "correctness": {
+      "type": "object",
+      "required": ["ok", "checks"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "checks": {"type": "object"}
+      }
+    },
+    "resources": {"type": "object"},
+    "validation_errors": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

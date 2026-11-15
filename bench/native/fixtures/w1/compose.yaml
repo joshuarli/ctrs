@@ -1,0 +1,48 @@
+# W1 fixture stack: API + Postgres + Redis, named volume, private
+# network, published port. All names are project-scoped by compose.
+# NP_API_PORT and NP_API_TAG are supplied by the runner environment.
+services:
+  api:
+    image: np-fixture-api:${NP_API_TAG:-latest}
+    build: ./api
+    environment:
+      DATABASE_URL: postgres://app:app@db:5432/app
+      REDIS_URL: redis://cache:6379/0
+      SEED_ROWS: "500"
+    ports:
+      - "127.0.0.1:${NP_API_PORT}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    networks:
+      - appnet
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - appnet
+
+  cache:
+    image: redis:7-alpine
+    networks:
+      - appnet
+
+volumes:
+  dbdata: {}
+
+networks:
+  appnet: {}

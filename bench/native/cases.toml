@@ -1,0 +1,94 @@
+# Frozen workload scorecard for the native-performance campaign.
+# IDs match docs/campaign-native-performance.md. `status`:
+#   implemented = fixture + runner path exist and have produced trials
+#   pending     = declared, not yet implemented
+#   blocked     = cannot run on this host (record reason in evidence doc)
+
+schema_version = 1
+
+[meta]
+campaign = "native-performance"
+created = "2026-11-14"
+competitors = ["orbstack"]          # macOS lane; Docker Desktop excluded
+native_linux_competitor = "docker-ce"  # needs a bare-metal Linux host (unavailable)
+strict_win_pct = 5.0
+noninferiority_pct = 3.0
+bootstrap_iters = 2000
+bootstrap_confidence = 0.95
+
+[[case]]
+id = "W1"
+family = "web-stack-bring-up"
+title = "compose up: API + Postgres + Redis -> verified health + DB/cache roundtrip + persistence across db restart"
+fixture = "fixtures/w1"
+status = "implemented"
+metrics = ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s",
+           "peak_total_rss_kb", "cpu_seconds_est"]
+states = ["warm"]                    # cold implemented for ctrs only (engine-cold); orbstack cold unsupported on shared daemon
+correctness = ["health", "roundtrip_db_and_cache", "persist_after_db_restart"]
+
+[[case]]
+id = "W2"
+family = "api-service-under-load"
+title = "sustained mixed read/write JSON load vs seeded Postgres+Redis stack via published port"
+fixture = "fixtures/w1 + fixtures/w2/load.py"
+status = "implemented"
+metrics = ["wall_seconds", "rps", "p50_ms", "p95_ms", "p99_ms", "errors",
+           "peak_total_rss_kb", "cpu_seconds_est"]
+states = ["warm"]
+params = { concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
+correctness = ["http_errors_zero", "item_count_equals_seed_plus_writes"]
+
+[[case]]
+id = "W3"
+family = "persistent-transactional"
+status = "pending"
+note = "real migrations + pg transaction mix + checkpoint + restart verification"
+
+[[case]]
+id = "W4"
+family = "worker-queue"
+status = "pending"
+note = "API ingest -> queue -> 1/4/16 workers -> checksummed outputs"
+
+[[case]]
+id = "W5"
+family = "monorepo-edit-test-loop"
+status = "pending"
+note = "bind-mount real TS/pnpm repo; host bind vs named volume kept separate"
+
+[[case]]
+id = "W6"
+family = "compiled-app-ci"
+status = "pending"
+note = "real repo checkout -> deps -> compile -> tests -> artifact SHA"
+
+[[case]]
+id = "W7"
+family = "native-image-build"
+status = "pending"
+note = "multi-stage Dockerfiles, empty/warm/incremental cache states; matched-BuildKit control lane"
+
+[[case]]
+id = "W8"
+family = "real-image-deployment"
+status = "pending"
+note = "pinned portfolio from a controlled local OCI registry; digest verification"
+
+[[case]]
+id = "W9"
+family = "parallel-ci-churn"
+status = "pending"
+note = "1/4/8/16 parallel jobs with temp networks, writable layers, logs, artifacts"
+
+[[case]]
+id = "W10"
+family = "failure-recovery"
+status = "pending"
+note = "kill/restart engine/agent/container mid-workload; lost-data and stuck-resource checks"
+
+[[case]]
+id = "W11"
+family = "soak"
+status = "pending"
+note = "12-24h mixed load; daemon-death and growth gates"

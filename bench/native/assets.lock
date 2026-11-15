@@ -1,0 +1,44 @@
+# Asset and version lock for the native-performance campaign.
+# Filled at baseline freeze; `prepare` records observed image IDs/digests
+# under .work/native-perf/results/prep-*/prepare.json.
+
+[freeze]
+date = "2026-11-14"
+status = "pilot — not yet frozen; versions below are observed, not yet locked"
+
+[host]
+model = "MacBook Pro (Apple Silicon)"
+arch = "arm64"
+kernel = "Darwin 27.2.0"
+mem_bytes = 51539607552
+cpus = 18
+macos = "27.2 (26B123)"
+
+[tools]
+python = "3.14"
+docker_cli = "29.9.3"
+docker_compose = "v2.29.7"
+
+[engines.ctrs]
+binary = "target/release/ctrs (cargo xtask host, ad-hoc signed + virtualization entitlement)"
+api_version = "1.47"
+vm = "Virtualization.framework, guest kernel 6.18.58, allnoconfig"
+
+[engines.orbstack]
+version = "2.2.5"
+commit = "bf842321f95fc3ca7cda3227bf0cd41cb188c471"
+server_api = "29.8.2"
+socket = "unix://$HOME/.orbstack/run/docker.sock"
+
+[images]
+# Third-party images pulled by digest where the registry provides one;
+# tags recorded here are the exact references used by fixtures.
+postgres = "postgres:17-alpine"
+redis = "redis:7-alpine"
+api_base = "python:3.13-slim"
+fixture_api = "np-fixture-api:<content-hash tag; see runner.py api_tag()>"
+
+[fixture_pins]
+w1_app_requirements = "bench/native/fixtures/w1/api/requirements.txt"
+w1_seed = "bench/native/fixtures/w1/seed.sql (500 deterministic rows)"
+w2_load = "bench/native/fixtures/w2/load.py (stdlib, seeded RNG)"
