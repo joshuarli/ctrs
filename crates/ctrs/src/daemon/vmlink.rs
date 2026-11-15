@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -141,6 +142,16 @@ impl VmLink {
     /// Starts the reader thread. `on_event` runs on that thread, so it must
     /// not block for long: it holds up every reply behind it.
     pub fn new(vm: Vm, conn: File, on_event: impl Fn(Event<'_>) + Send + 'static) -> io::Result<VmLink> {
+        // Bulk guest→host streams (exec output, cp out) are bounded by the
+        // socket buffers on both ends; give them room before the reader
+        // starts draining.
+        for opt in [libc::SO_RCVBUF, libc::SO_SNDBUF] {
+            let size: libc::c_int = 4 << 20;
+            // SAFETY: `conn` is a live socket; setsockopt on it is harmless.
+            unsafe {
+                libc::setsockopt(conn.as_raw_fd(), libc::SOL_SOCKET, opt, (&size as *const libc::c_int).cast(), size_of::<libc::c_int>() as libc::socklen_t);
+            }
+        }
         let pending: Arc<Mutex<VecDeque<SyncSender<Reply>>>> = Arc::new(Mutex::new(VecDeque::new()));
         let mut reader = conn.try_clone()?;
         let queue = pending.clone();

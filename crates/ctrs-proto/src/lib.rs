@@ -25,8 +25,9 @@ pub const MAX_FRAME: usize = 1 << 20;
 /// Bytes before the payload: length plus kind.
 pub const HEADER: usize = 6;
 
-/// Largest `Output` chunk; keeps frames well under `MAX_FRAME`.
-pub const MAX_OUTPUT_CHUNK: usize = 64 * 1024;
+/// Largest `Output` chunk; keeps frames under `MAX_FRAME` while making a
+/// bulk stream cost one frame per few hundred KiB, not per 64 KiB.
+pub const MAX_OUTPUT_CHUNK: usize = 512 * 1024;
 /// Stdin bytes the host may have sent a process beyond what the guest has
 /// reported consumed (`InputConsumed`). The guest buffers at most this much
 /// for a process that is not reading; the host blocks the client instead.

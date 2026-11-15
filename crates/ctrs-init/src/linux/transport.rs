@@ -76,6 +76,12 @@ pub fn dial(port: u32) -> io::Result<OwnedFd> {
         }
         let fd = sys::check(libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) as _, "vsock socket")?;
         let sock = OwnedFd::from_raw_fd(fd as RawFd);
+        // Bulk guest→host streams (exec output, cp out) are bounded by the
+        // socket buffers on both ends; give them room up front.
+        let size: libc::c_int = 4 << 20;
+        for opt in [libc::SO_RCVBUF, libc::SO_SNDBUF] {
+            libc::setsockopt(sock.as_raw_fd(), libc::SOL_SOCKET, opt, (&size as *const libc::c_int).cast(), std::mem::size_of::<libc::c_int>() as libc::socklen_t);
+        }
         let mut addr: libc::sockaddr_vm = std::mem::zeroed();
         addr.svm_family = libc::AF_VSOCK as libc::sa_family_t;
         addr.svm_cid = VMADDR_CID_HOST;

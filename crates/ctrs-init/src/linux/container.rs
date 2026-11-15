@@ -187,8 +187,12 @@ fn stdio(p: &Prepared) -> io::Result<(ParentStdio, ChildStdio)> {
     }
     let (out_r, out_w) = sys::pipe()?;
     let (err_r, err_w) = sys::pipe()?;
+    // The agent drains these: bigger pipes mean fewer wakeups per byte.
+    sys::grow_pipe(out_w.as_raw_fd(), 1 << 20);
+    sys::grow_pipe(err_w.as_raw_fd(), 1 << 20);
     let (in_w, in_r) = if p.stdin {
         let (r, w) = sys::pipe()?;
+        sys::grow_pipe(w.as_raw_fd(), 1 << 20);
         sys::set_nonblocking(w.as_raw_fd())?;
         (Some(w), Some(r))
     } else {

@@ -210,6 +210,18 @@ pub fn setns(fd: RawFd, nstype: libc::c_int) -> io::Result<()> {
     check(unsafe { libc::setns(fd, nstype) } as _, "setns").map(drop)
 }
 
+/// Grows a pipe toward `want` bytes of capacity (the kernel caps at
+/// `/proc/sys/fs/pipe-max-size`, usually 1 MiB). Bulk stdio streams —
+/// `docker exec` output, `docker cp` — move in fewer, larger reads when
+/// the pipe can hold more than the default 64 KiB. Failure is fine: the
+/// pipe just stays small.
+pub fn grow_pipe(fd: RawFd, want: libc::c_int) {
+    // SAFETY: plain fcntl on a descriptor we own; the result is advisory.
+    unsafe {
+        libc::fcntl(fd, libc::F_SETPIPE_SZ, want);
+    }
+}
+
 pub fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: plain fcntl calls on a descriptor we own.
     unsafe {
