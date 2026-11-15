@@ -1,6 +1,6 @@
 # Campaign: native-workload benchmarking and unattended performance hillclimb
 
-**Status:** executable steering specification, not a benchmark result. **Date:** 2026-11-14. **Target:** \`ctrs\` versus stock Docker Engine on native Linux, and Docker Desktop on native-architecture macOS. **Execution:** unattended, evidence-gated, one writer. **Scope exclusion:** absolutely no CPU emulation or cross-architecture builds.
+**Status:** executable steering specification, not a benchmark result. **Date:** 2026-11-14. **Target:** `ctrs` versus stock Docker Engine on native Linux, and Docker Desktop on native-architecture macOS. **Execution:** unattended, evidence-gated, one writer. **Scope exclusion:** absolutely no CPU emulation or cross-architecture builds.
 
 ## Mission and honest victory condition
 
@@ -21,23 +21,23 @@ Make ctrs **faster, more resource-efficient, and at least as correct and reliabl
 4. Performance **and** completion/restart/cancellation/error behavior under realistic concurrency.
 
 **Absolutely out of scope**
-- QEMU, FEX, Rosetta, binfmt_misc handlers, BuildKit cross-platform workers, multi-platform manifests *as a build target*, \`--platform\` targeting a foreign ISA, and any AMD64↔ARM64 performance comparisons. The presence of old emulation tests in this repo is irrelevant to this campaign: **do not execute, tune, or extend them**.
+- QEMU, FEX, Rosetta, binfmt_misc handlers, BuildKit cross-platform workers, multi-platform manifests *as a build target*, `--platform` targeting a foreign ISA, and any AMD64↔ARM64 performance comparisons. The presence of old emulation tests in this repo is irrelevant to this campaign: **do not execute, tune, or extend them**.
 - Windows, WSL, Docker Desktop on Linux, nested benchmark engines in a privileged Docker container, Colima, and per-task microVM exploration.
-- Microbenchmark *scores*: \`alpine true\` loops, \`/_ping\`, naked API CRUD, \`dd /dev/zero\`, \`iperf3\`, synthetic syscall counts, zero-byte image/layer benchmarks, and hand-crafted "hello world" HTTP echo servers. Old \`bench/suite.sh\`, \`bench/api.sh\`, \`bench/compare.sh\`, \`scripts/perf.py\` and \`bench/arm64-build.sh\` are **not** this campaign's scoreboard. Internal profiling may isolate a suspect code path after an application-level loss has been demonstrated, but only the application result justifies promotion.
+- Microbenchmark *scores*: `alpine true` loops, `/_ping`, naked API CRUD, `dd /dev/zero`, `iperf3`, synthetic syscall counts, zero-byte image/layer benchmarks, and hand-crafted "hello world" HTTP echo servers. Old `bench/suite.sh`, `bench/api.sh`, `bench/compare.sh`, `scripts/perf.py` and `bench/arm64-build.sh` are **not** this campaign's scoreboard. Internal profiling may isolate a suspect code path after an application-level loss has been demonstrated, but only the application result justifies promotion.
 - GPU, Kubernetes, Swarm, remote TCP API, and unsupported Docker capabilities whose implementation would overwhelm the scoped optimization campaign.
 
-Reject a workload at preflight if the image's actual architecture does not match the physical host, the guest uses an emulator, or the test is being run through a nested engine. Record \`uname -m\`, \`docker image inspect\` architecture, ctrs-selected OCI platform, and Docker's selected platform. No "fall back and keep timing."
+Reject a workload at preflight if the image's actual architecture does not match the physical host, the guest uses an emulator, or the test is being run through a nested engine. Record `uname -m`, `docker image inspect` architecture, ctrs-selected OCI platform, and Docker's selected platform. No "fall back and keep timing."
 
 ## Why a new suite is necessary
 
 Read before acting:
-- \`docs/architecture.md\`, \`docs/development.md\`, \`docs/security.md\`, \`docs/evidence/closeout.md\`, \`docs/evidence/net.md\`, \`docs/decisions.md\`, \`tests/e2e.sh\`, \`conformance/failure.sh\`, and \`bench/ubuntu-2026-10-26.md\`.
+- `docs/architecture.md`, `docs/development.md`, `docs/security.md`, `docs/evidence/closeout.md`, `docs/evidence/net.md`, `docs/decisions.md`, `tests/e2e.sh`, `conformance/failure.sh`, and `bench/ubuntu-2026-10-26.md`.
 - The old Ubuntu comparison is **WSL 2**, not a native-host proof. Its strong lifecycle and file-I/O results are hypotheses, not the new baseline. The old report also records published-port losses versus Docker and an initially invalid stdin test; do not extrapolate its rankings.
 - Linux host compilation exists, but the prior campaign explicitly parked native Linux **runtime qualification** (N-1). This is a **phase-zero blocker for Linux claims**, not permission to substitute WSL.
-- The macOS closeout reported **nine unexplained silent daemon deaths**; \`conformance/watch.sh\` is the evidence surface. A crash in a long-running workload is an immediate failed gate, irrespective of speed.
-- \`docs/evidence/net.md\` shows that macOS published ports sometimes use the slower **vsock relay** due to local-network privacy/routing; test the actual transport and permission state. Never bypass OS privacy controls to win a benchmark.
-- \`crates/ctrs/src/daemon/builder.rs\` currently pins managed BuildKit **v0.35.0**; Docker Engine 29.9.3 bundled BuildKit **v0.34.2** (as of this document). Do not attribute a newer BuildKit's independent speed to ctrs's runtime. Use both a stock/default user-experience comparison and a controlled, matched-BuildKit comparison.
-- \`crates/ctrs/src/daemon/http.rs\` is thread-per-connection; \`ports.rs\` has relay/NAT routing and explicit connection/rate limits; \`ctrs-image\` manages the registry/blob store; \`ctrs-init\` owns container lifecycle, mounts, and cgroups. These are **profiling candidates**, not authorized optimizations without workload evidence.
+- The macOS closeout reported **nine unexplained silent daemon deaths**; `conformance/watch.sh` is the evidence surface. A crash in a long-running workload is an immediate failed gate, irrespective of speed.
+- `docs/evidence/net.md` shows that macOS published ports sometimes use the slower **vsock relay** due to local-network privacy/routing; test the actual transport and permission state. Never bypass OS privacy controls to win a benchmark.
+- `crates/ctrs/src/daemon/builder.rs` currently pins managed BuildKit **v0.35.0**; Docker Engine 29.9.3 bundled BuildKit **v0.34.2** (as of this document). Do not attribute a newer BuildKit's independent speed to ctrs's runtime. Use both a stock/default user-experience comparison and a controlled, matched-BuildKit comparison.
+- `crates/ctrs/src/daemon/http.rs` is thread-per-connection; `ports.rs` has relay/NAT routing and explicit connection/rate limits; `ctrs-image` manages the registry/blob store; `ctrs-init` owns container lifecycle, mounts, and cgroups. These are **profiling candidates**, not authorized optimizations without workload evidence.
 - Previous Mac evidence recorded substantial memory in the Virtualization.framework helper beyond daemon RSS. Count the *whole* engine footprint, including helpers, guest, managed builder, and any always-on services; do the corresponding accounting for Docker/Desktop/containerd.
 
 Use the latest stable official Docker package **at baseline freeze**; 29.9.3 is the current Engine 29 release on 2026-11-14, not a permanently pinned "latest." Capture exact Engine, CLI, Compose, buildx, BuildKit, containerd, runc, Desktop/VMM versions, kernel, distribution, host CPU/RAM, filesystem, storage device, and ctrs commit. A new Docker release after freeze starts a **new** comparison campaign, never silently changes the control.
@@ -46,29 +46,29 @@ References: https://docs.docker.com/engine/release-notes/29/ ; https://docs.dock
 
 ## Deliverable: one lean, reproducible native benchmark harness
 
-Create \`bench/native/\`, not another metrics framework. Prefer **Python 3 standard library + POSIX-ish shell + existing Docker CLI/Compose/buildx**, pinned for reproducibility; use no dashboard service, required external SaaS, Python dependency bundle, or new Rust rendering engine. A small native load driver from an existing well-maintained tool is acceptable if **pinned by digest/version** and used identically for both engines. End-to-end correctness assertions live with the workload, not in the report formatter.
+Create `bench/native/`, not another metrics framework. Prefer **Python 3 standard library + POSIX-ish shell + existing Docker CLI/Compose/buildx**, pinned for reproducibility; use no dashboard service, required external SaaS, Python dependency bundle, or new Rust rendering engine. A small native load driver from an existing well-maintained tool is acceptable if **pinned by digest/version** and used identically for both engines. End-to-end correctness assertions live with the workload, not in the report formatter.
 
 Suggested file contract (implement and update it if evidence demands a simpler shape):
 
 | Path | Responsibility |
 | --- | --- |
-| \`bench/native/README.md\` | Requirements, host isolation, invocation, cleanup, limitations |
-| \`bench/native/cases.toml\` | Immutable scenario IDs; input digests, workloads, load/concurrency, metrics, thresholds |
-| \`bench/native/assets.lock\` | Exact source commits, image digests, seed dataset checksums, tool versions |
-| \`bench/native/runner.py\` | \`preflight\`, \`baseline\`, \`compare\`, \`holdout\`, \`report\`; stdlib and subprocesses |
-| \`bench/native/fixtures/\` | Reproducible application stacks and ground-truth assertions |
-| \`bench/native/collect.py\` | Cross-platform sampling with explicit missing/unsupported fields |
-| \`bench/native/schema.json\` | Versioned, validated, machine-readable result schema |
-| \`docs/evidence/native-performance.md\` | Human-readable maintained scorecard, methodology, full losing cells |
+| `bench/native/README.md` | Requirements, host isolation, invocation, cleanup, limitations |
+| `bench/native/cases.toml` | Immutable scenario IDs; input digests, workloads, load/concurrency, metrics, thresholds |
+| `bench/native/assets.lock` | Exact source commits, image digests, seed dataset checksums, tool versions |
+| `bench/native/runner.py` | `preflight`, `baseline`, `compare`, `holdout`, `report`; stdlib and subprocesses |
+| `bench/native/fixtures/` | Reproducible application stacks and ground-truth assertions |
+| `bench/native/collect.py` | Cross-platform sampling with explicit missing/unsupported fields |
+| `bench/native/schema.json` | Versioned, validated, machine-readable result schema |
+| `docs/evidence/native-performance.md` | Human-readable maintained scorecard, methodology, full losing cells |
 
-Keep all sampled traces, flamegraphs, full logs, data roots and large JSONL results under \`.work/native-perf/\` (gitignored). Commit **only** the source, lockfiles, compact summaries, source/host revision IDs, trial counts, confidence intervals, failed experiments, and checksums sufficient to audit a run. Do not publish untrusted workload secrets.
+Keep all sampled traces, flamegraphs, full logs, data roots and large JSONL results under `.work/native-perf/` (gitignored). Commit **only** the source, lockfiles, compact summaries, source/host revision IDs, trial counts, confidence intervals, failed experiments, and checksums sufficient to audit a run. Do not publish untrusted workload secrets.
 
 ### Host and competitor contract
 
 - Use one host per native-ISA/platform lane; never compare absolute times from different machines. Two engines do **not** run workload trials simultaneously. Balance order across paired trials: ABBA/BAAB or a seeded randomized balanced crossover; record the seed and wall-clock order.
-- Use the **same** Docker CLI/Compose/buildx versions, application image digests, native platform, CPU and memory budgets, storage class/filesystem, bind source and destination, DNS upstream, port exposure, and load-generator settings. The \`ctrs\` wrapper itself invokes Docker's CLI; do not time it against a different Docker binary.
-- Use dedicated, uniquely named ports, networks, volumes, socket paths, and state directories. Never call \`docker system prune\` on the user's existing daemon, alter the active Docker context, replace \`/var/run/docker.sock\`, or reuse production data. Never disable firewalls, EDR, privacy prompts, TLS verification, or seccomp for convenience.
-- On Linux benchmark ctrs **natively** (not as a child of Docker); benchmark official \`dockerd\` in the same privilege mode. No benchmark-side containerization of either engine. The registry server/load generator can be independent but must be held identical and accounted for separately.
+- Use the **same** Docker CLI/Compose/buildx versions, application image digests, native platform, CPU and memory budgets, storage class/filesystem, bind source and destination, DNS upstream, port exposure, and load-generator settings. The `ctrs` wrapper itself invokes Docker's CLI; do not time it against a different Docker binary.
+- Use dedicated, uniquely named ports, networks, volumes, socket paths, and state directories. Never call `docker system prune` on the user's existing daemon, alter the active Docker context, replace `/var/run/docker.sock`, or reuse production data. Never disable firewalls, EDR, privacy prompts, TLS verification, or seccomp for convenience.
+- On Linux benchmark ctrs **natively** (not as a child of Docker); benchmark official `dockerd` in the same privilege mode. No benchmark-side containerization of either engine. The registry server/load generator can be independent but must be held identical and accounted for separately.
 - On Mac pin the VMM backend and resource allocation and use identical native ARM64 images; disclose Apple VZ versus Docker VMM differences. When the Docker VMM beta cannot run a fixture correctly, report that exact failure and compare the working stable VZ lane; never count an incompatible Docker failure as a speed win.
 - Run Docker's **normal installed configuration** against ctrs's normal configuration as the primary user-visible lane. A second **matched-resource/matched-BuildKit** lane separates engine effects from optional feature defaults. Neither lane may replace the other; pin kernel, builder, drivers, cache semantics and persistent-state choices in the report.
 - Do not put shared application caches outside the timed boundary for one engine only. Freeze and declare cold/warm state *per engine*. Engine-cold (empty image/BuildKit store) is not necessarily OS page-cache-cold; label it honestly. For cached builds, assert reuse of identical layers and outputs. Use independent local registry mirrors to remove WAN noise; report WAN observations separately as descriptive, never promotion evidence.
@@ -80,13 +80,13 @@ Implement **at least** the following workload families before tuning. These are 
 
 | ID | Real user-visible transaction | Scored output and integrity check |
 | --- | --- | --- |
-| **W1: web stack bring-up** | \`docker compose up\` for a nontrivial API + Postgres + Redis (or cache) using named volumes, env, private network, published port and real readiness logic | Time from command to successful app HTTP health + successful DB/cache roundtrip; startup failures; persisted records after restart |
+| **W1: web stack bring-up** | `docker compose up` for a nontrivial API + Postgres + Redis (or cache) using named volumes, env, private network, published port and real readiness logic | Time from command to successful app HTTP health + successful DB/cache roundtrip; startup failures; persisted records after restart |
 | **W2: API service under load** | Sustained mixed read/write authenticated JSON API traffic against seeded DB state; realistic response sizes/concurrency; host→published-port and container→container paths | Correct responses/state, completed requests/s, p50/p95/p99 end-user latency, errors/timeouts, host CPU-s and total memory |
 | **W3: persistent transactional workload** | Real migrations + seeded Postgres tables + read/write transaction mix + checkpoint + restart + verification | End-to-end completion, p95 transactions, WAL/fsync durability, no lost/duplicated rows, disk growth and write amplification |
 | **W4: worker queue** | API ingests actual tasks, cache/queue distributes them to 1/4/16 workers, workers produce checksummed outputs and retries | Time to complete a fixed batch, duplicates/loss, queue lag p95/p99, CPU time/RAM and graceful shutdown |
 | **W5: monorepo edit→test loop** | Bind-mount a real TypeScript/pnpm or similar application repo; install dependencies, edit a file, rebuild affected code, run tests and watch/reload | Human-action→correct rebuilt/tested result, missed file changes, workspace integrity; host bind and named-volume cases separate |
 | **W6: compiled application CI** | Real Rust (and, when practical, Python) repository checkout→dependency install→compile→unit/integration test→package; run image and verify artifact | Cold and warm CI wall time, successful tests, artifact SHA, CPU-s, disk amplification, peak/steady memory |
-| **W7: native container image build** | Real multi-stage Dockerfiles for at least two languages using \`docker buildx build\`; test empty cache, warmed cache, and one-file incremental change; load/run final image | Build→usable artifact time, OCI identity/output semantics, cache-hit correctness and BuildKit lifetime costs |
+| **W7: native container image build** | Real multi-stage Dockerfiles for at least two languages using `docker buildx build`; test empty cache, warmed cache, and one-file incremental change; load/run final image | Build→usable artifact time, OCI identity/output semantics, cache-hit correctness and BuildKit lifetime costs |
 | **W8: real image deployment** | Fetch and verify a pinned portfolio of realistic multi-layer app/DB images from a controlled local OCI registry, create networks/volumes and deploy | Empty-store→healthy time, digest verification, failed/cancelled pulls, reused layers, allocated bytes; fixed registry throughput |
 | **W9: parallel CI and churn** | Parallel real build/test jobs (1/4/8/16 as host capacity allows), each with temporary networks, writable layers, mounts, logs and artifact export | Completed valid jobs/min, p95 job finish, container/FD/cgroup leaks, errors, cleanup latency and storage reclaimed |
 | **W10: failure + recovery** | Kill/restart engine/agent/container during real web/DB/queue work, restart host service, repeat, check recovered writes and healthy responses | Recovery time, lost data, stuck resources, duplicate executions, retries and sustained p99 after recovery |
@@ -131,7 +131,7 @@ Avoid sequential peeking: tune with a designated development set and keep a froz
 
 **G0 — host, isolation, environment.** Verify physical/native architecture; no emulator; suitable host load; qualified native Linux root/control paths; locked Docker versions and VMM settings; dedicated sockets/state directories; no shared customer volumes; stable local registry. The preflight must *fail closed*. On an unavailable bare-metal Linux machine, continue coding the harness and Mac lane, then mark Linux **needs native host**. Never substitute WSL or a privileged container and call it qualified.
 
-**G1 — parity and data correctness.** \`cargo check --workspace\`, \`cargo test --workspace\`, \`conformance/smoke.sh\`, \`conformance/run.sh\`, \`tests/e2e.sh\`, \`conformance/failure.sh\`, \`conformance/isolation.sh\`, native \`tests/linux-host.sh\` where applicable, and focused IPv6/security tests on the host that supports them. Do not treat a "plan runner" printing steps as a successful executed suite. Native host and macOS proof are independent. Do not weaken a parity assertion because Docker passed and ctrs failed.
+**G1 — parity and data correctness.** `cargo check --workspace`, `cargo test --workspace`, `conformance/smoke.sh`, `conformance/run.sh`, `tests/e2e.sh`, `conformance/failure.sh`, `conformance/isolation.sh`, native `tests/linux-host.sh` where applicable, and focused IPv6/security tests on the host that supports them. Do not treat a "plan runner" printing steps as a successful executed suite. Native host and macOS proof are independent. Do not weaken a parity assertion because Docker passed and ctrs failed.
 
 **G2 — long-run reliability.** Real workload W10/W11, not ping, must survive planned daemon restarts, SIGTERM, container crashes, builder cancellation, host disk-pressure recovery (in isolated scratch), and concurrency; zero unexplained daemon deaths for qualified runs. The nine historical unexplained macOS deaths remain an explicit risk until a reproducible closeout verifies they are gone, not merely unobserved for one minute.
 
@@ -148,13 +148,13 @@ Avoid sequential peeking: tune with a designated development set and keep a froz
 3. Select **pinned real applications** for W1–W11, construct fixtures, seed data and an independent local OCI registry. Implement the clean root/socket isolation, native architecture guard, exact-output assertions, dual competitor configuration, snapshot/cleanup and raw JSONL reporter.
 4. Run the preflight and a **no-op control** (same engine/config against itself in balanced order) to establish harness noise. The no-op control is a methodology validation, not a performance workload/score. Refuse to score unstable host conditions.
 
-**Deliverable:** benchmark harness, frozen lockfiles, \`README\`, native preflight transcript, valid/blocked lane register.
+**Deliverable:** benchmark harness, frozen lockfiles, `README`, native preflight transcript, valid/blocked lane register.
 
 ### Phase B: an honest Docker baseline
 
 1. Run the whole W1–W10 matrix on current ctrs and the **best eligible stock Docker** configuration, plus two Docker Desktop backends on Mac when supported. Capture the actual native ISA and all config versions.
 2. Repeat selected build workloads using identical pinned BuildKit image/driver on both engines as an **attribution control**. Report the stock/default experience separately; account for ctrs's managed builder idle/startup lifecycle. Do not blame or credit the container engine for BuildKit's own algorithm without isolation.
-3. Run W11 once at an appropriate duration on both engines. Finalize which cells are slow, which fail correctness, which leak, and which are unqualified. Put the full baseline matrix under \`docs/evidence/native-performance.md\`.
+3. Run W11 once at an appropriate duration on both engines. Finalize which cells are slow, which fail correctness, which leak, and which are unqualified. Put the full baseline matrix under `docs/evidence/native-performance.md`.
 
 **Deliverable:** baseline plus Pareto frontier of credible bottlenecks, not a cherry-picked speed leaderboard.
 
@@ -163,19 +163,19 @@ Avoid sequential peeking: tune with a designated development set and keep a froz
 Select the **highest-impact losing real-workload cell**: severity × frequency × ability to improve without weakening a hard gate. For each iteration:
 
 1. Reproduce the loss in the actual fixture and rule out load-generator saturation, cache/dataset drift, platform mismatch, version drift and known macOS network-permission effects.
-2. Profile the *real workload while it runs*: Linux \`perf\`/eBPF or equivalent sampling; macOS Instruments/host memory tools and guest traces where supported; filesystem and network counters. Profiling is diagnostic; **no substitute microbenchmark scoreboard**.
+2. Profile the *real workload while it runs*: Linux `perf`/eBPF or equivalent sampling; macOS Instruments/host memory tools and guest traces where supported; filesystem and network counters. Profiling is diagnostic; **no substitute microbenchmark scoreboard**.
 3. Form exactly one falsifiable bottleneck hypothesis and choose the **smallest** code change (one subsystem). Write its expected observable W-ID/metric improvement and suspected side effects into the experiment log.
 4. Experiment in an isolated worktree, using a reproducible release build and dedicated engine data root. Execute the affected workload against **both ctrs-before and ctrs-after** on the same host; compare to the already pinned Docker reference. Then run correctness, targeted regressions, and the complete promoted scorecard as required by the statistical policy.
-5. If green and materially better, commit to \`main\` (Conventional Commit) and record the before/after matrix and experiment ID. If it fails, **revert the experiment**, record the failure and proceed to the next hypothesis. Do not pile failed speculative "optimizations" into main.
+5. If green and materially better, commit to `main` (Conventional Commit) and record the before/after matrix and experiment ID. If it fails, **revert the experiment**, record the failure and proceed to the next hypothesis. Do not pile failed speculative "optimizations" into main.
 6. After each accepted slice, rebaseline ctrs HEAD and choose the next worst credible cell. Do not switch the Docker control mid-loop. A gate-fixing correctness or security patch may land without a performance win if it causes no material performance regression and has a reproduced test.
 
 **Hypothesis queue, not permission to rewrite prematurely:**
-- **Mac app-facing networking:** \`daemon/ports.rs\`, guest relay, actual VZ NAT availability, long-tail connections and backpressure; preserve per-peer/session DoS bounds and OS permission semantics.
+- **Mac app-facing networking:** `daemon/ports.rs`, guest relay, actual VZ NAT availability, long-tail connections and backpressure; preserve per-peer/session DoS bounds and OS permission semantics.
 - **Linux published ports and DNS:** loopback proxy versus kernel forwarding, connection setup under W2/W9, guest/host DNS relays, networking state cleanup; preserve firewall ownership/isolation.
 - **Dev-loop bind mounts:** VZ virtiofs path, metadata round trips, layer/overlay lookup, file-watch correctness under W5; never "optimize" by stale-caching edits.
 - **BuildKit lifecycle:** builder first-start, image import/export, cache reuse, context transfer, idle lifetime, OCI layer storage; distinguish external BuildKit work from ctrs work in W6/W7.
 - **Image distribution/unpack:** registry client, dedup, compression/checksum paths, tar extraction, host↔guest stream, fsync batching where safe; preserve digest verification/durable writes in W8.
-- **Parallelism/control plane:** thread-per-connection \`daemon/http.rs\`, locks, per-container state serialization, guest \`poll()\` scheduling, cgroup/exec supervision under W9 and W11. Prefer bounded concurrency proven by the workload; no cargo-cult async runtime.
+- **Parallelism/control plane:** thread-per-connection `daemon/http.rs`, locks, per-container state serialization, guest `poll()` scheduling, cgroup/exec supervision under W9 and W11. Prefer bounded concurrency proven by the workload; no cargo-cult async runtime.
 - **Memory and cold/wake:** VZ helper/guest balloon, idle image/builder caches, resident layers and orphan helpers; optimize **total physical footprint**, not just daemon RSS.
 - **Real recovery:** eliminate lost/stdin/log/port operations, unexpected XPC/daemon deaths, stale resources and stuck creates from W10/W11 before performance work resumes.
 
@@ -187,18 +187,18 @@ Keep footprint/complexity small. Prefer deleting unnecessary copies, redundant r
 - Validate app outputs, transaction logs, file-watch behavior, persistent volumes and service restart semantics. Soak W11. Repeat on each available qualified native host. A Mac-only success does not close Linux.
 - Write a **loss-first** report: host + versions, exact fixtures, commands, matrix of strict wins/ties/losses/unsupported, weighted aggregate, tail latencies, CPU-s, total physical memory, disk, reliability, BuildKit-controlled findings, applied commits, rejected experiments, and unresolved blocking features. Make the row labels and denominators explicit.
 - Stop when all applicable cases achieve **measured strict dominance** and G0–G4 pass, **or** when no credible improvement remains after three failed/neutral hypotheses per remaining bottleneck, 30 total candidate changes, a hard environment blocker, or a correctness/security/reliability gate that cannot be resolved in scope. **Stop means report honestly**, not quietly declare victory.
-- No tags, releases, remote pushes of user data, mass \`prune\`, Docker daemon reconfiguration outside isolated scratch, workstation sleep, or production host changes. Respect pre-existing Docker resources and user projects. Unattended permission applies to *in-repo code/bench source and verified commits*, not destructive host actions.
+- No tags, releases, remote pushes of user data, mass `prune`, Docker daemon reconfiguration outside isolated scratch, workstation sleep, or production host changes. Respect pre-existing Docker resources and user projects. Unattended permission applies to *in-repo code/bench source and verified commits*, not destructive host actions.
 
 ## Steering prompt for the execution agent
 
-> You are the sole performance engineer for \`joshuarli/ctrs\`. Read \`AGENTS.md\` and this entire campaign, especially native architecture exclusion, benchmark fairness, hard gates and the no-microbenchmark rule. Build a lean, fully reproducible benchmark suite for real native-host Docker workloads. Qualify Linux natively when a real native Linux host is available; on Apple Silicon use only native ARM64 containers inside the existing hardware-virtualized Linux guest. Compare against pinned, current Docker Engine CE on Linux and current Docker Desktop stable Apple VZ and, when eligible, Docker VMM on Mac. Never use FEX, QEMU, Rosetta, binfmt or cross-architecture builds. Run the full app/CI/Compose/database/queue/bind-mount/image/failure matrix with correctness hashes and full engine-ecosystem resource accounting. Publish every loss and limitation, including Docker wins. Profile actual losing workloads, hypothesize narrowly, optimize one subsystem, repeat valid paired A/B runs, and land only genuinely beneficial, fully tested slices on main. Keep iterating unattended until strict workload dominance or an explicit stop condition; leave a rigorous handoff, not invented benchmark results. You must not use \`alpine true\`, empty HTTP, \`dd\`, \`iperf\`, \`/_ping\`, or other microbenchmarks as the optimization score. If hardware, OS permissions or a Docker backend are unavailable, deliver the executable harness and mark the affected lane blocked; never substitute an emulator or claim a win.
+> You are the sole performance engineer for `joshuarli/ctrs`. Read `AGENTS.md` and this entire campaign, especially native architecture exclusion, benchmark fairness, hard gates and the no-microbenchmark rule. Build a lean, fully reproducible benchmark suite for real native-host Docker workloads. Qualify Linux natively when a real native Linux host is available; on Apple Silicon use only native ARM64 containers inside the existing hardware-virtualized Linux guest. Compare against pinned, current Docker Engine CE on Linux and current Docker Desktop stable Apple VZ and, when eligible, Docker VMM on Mac. Never use FEX, QEMU, Rosetta, binfmt or cross-architecture builds. Run the full app/CI/Compose/database/queue/bind-mount/image/failure matrix with correctness hashes and full engine-ecosystem resource accounting. Publish every loss and limitation, including Docker wins. Profile actual losing workloads, hypothesize narrowly, optimize one subsystem, repeat valid paired A/B runs, and land only genuinely beneficial, fully tested slices on main. Keep iterating unattended until strict workload dominance or an explicit stop condition; leave a rigorous handoff, not invented benchmark results. You must not use `alpine true`, empty HTTP, `dd`, `iperf`, `/_ping`, or other microbenchmarks as the optimization score. If hardware, OS permissions or a Docker backend are unavailable, deliver the executable harness and mark the affected lane blocked; never substitute an emulator or claim a win.
 
 ## Initial acceptance checklist (for the first executor session)
 
 - [ ] Read current repository and prior evidence; identify Linux runtime and Mac daemon-death blockers.
 - [ ] Create pinned, real application fixtures with deterministic correctness assertions for W1–W11.
 - [ ] Implement fail-closed native-ISA and privileged-nested-engine rejection, isolated cleanup, and competitor/version lock.
-- [ ] Get a clean \`cargo test --workspace\` plus each executable applicable parity suite; distinguish a plan from an actual run.
+- [ ] Get a clean `cargo test --workspace` plus each executable applicable parity suite; distinguish a plan from an actual run.
 - [ ] Produce a real Docker-versus-ctrs baseline **on whichever native hosts are truly available**, with valid trials and all losing/unsupported cells.
 - [ ] Execute a full, evidence-based optimization/promotion iteration only after baseline validity.
 - [ ] Commit compact results and update the loss-first scorecard; make unavailable lanes explicit.
