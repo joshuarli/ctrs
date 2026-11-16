@@ -15,6 +15,7 @@ Requires Python >= 3.11 (tomllib). See README.md.
 from __future__ import annotations
 
 import argparse
+import ownership
 import base64
 import concurrent.futures
 import hashlib
@@ -669,8 +670,16 @@ def http_json(url: str, timeout: float = 5.0):
 
 def start_sampler(engine: Engine, trial_dir: Path):
     trace = trial_dir / "resources.jsonl"
+    identity_path = trial_dir / "ownership.json"
+    try:
+        identity = ownership.discover(engine.name,
+                                      Path(engine.socket.removeprefix("unix://")), engine.dir)
+    except Exception as exc:
+        identity = {"required_processes": [], "error": str(exc)}
+    identity_path.write_text(json.dumps(identity, indent=2) + "\n")
     proc = subprocess.Popen(
         [sys.executable, str(COLLECT), "--match", MATCH_PATTERNS[engine.name],
+         "--ownership", str(identity_path),
          "--interval", "0.2", "--out", str(trace)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc, trace
@@ -679,7 +688,7 @@ def start_sampler(engine: Engine, trial_dir: Path):
 def stop_sampler(proc: subprocess.Popen) -> None:
     proc.send_signal(signal.SIGTERM)
     try:
-        proc.wait(timeout=10)
+        proc.wait(timeout=35)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=5)
@@ -712,6 +721,7 @@ def summarize_trace(trace: Path) -> dict:
     for rec in records:
         procs = rec.get("procs", [])
         peak_rss = max(peak_rss, sum(p.get("rss_kb", 0) for p in procs))
+        errors.extend(rec.get("ownership_errors", []))
         if rec.get("error"):
             errors.append(rec["error"])
             cpu_complete = False
@@ -2316,8 +2326,10 @@ class RunContext:
             key: value for key, value in manifest.items() if key.endswith("sha256")}
         self.provenance.update({
             "runner_sha256": sha256_file(Path(__file__)),
-            "ctrs_binary_sha256": sha256_file(CTRS_BIN),
-            **guest_provenance(),
+            "build_outputs": {"ctrs_binary_sha256": sha256_file(CTRS_BIN),
+                              **guest_provenance()},
+            "sampler_sha256": sha256_file(COLLECT),
+            "ownership_collector_sha256": sha256_file(BENCH / "ownership.py"),
             "worktree_dirty": bool(subprocess.run(
                 ["git", "status", "--porcelain", "--untracked-files=normal"],
                 cwd=REPO, capture_output=True, text=True).stdout.strip()),

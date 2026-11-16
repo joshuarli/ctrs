@@ -8,24 +8,35 @@ Historical checkpoints and superseded claims are in
 
 ## Current slice and exact continuation
 
-Bounded collector/scoring repair is in progress. First slice removes category
-fallback and partial-total qualification, separates footprint subprocesses
-from CPU ticks, exposes missing data/errors/timing and records sampler hash.
-52 offline regression tests pass. Preflight passed with no warnings.
-Resource scoring deliberately remains unmeasured for name-discovered processes.
-No clean calibration or overhead comparison yet. Preserve default build-driver
-implementation and W6/W7 pilot wins; reconfirm on the eventual frozen candidate.
+Bounded collector/scoring repair is in progress. Strict fields reject category
+fallback and incomplete counters. Process attribution now uses the exact open
+Unix socket and dedicated ctrs VM data disk, plus PID/start identity. Open
+executable and guest asset inode/mtime checks prevent hashing replaced files
+as running artifacts. Build-output hashes are separately labeled. 56 offline
+regression tests pass. OrbStack 4-second collection pilot produced 20 CPU ticks,
+complete required-process counters, one complete phys_footprint sample and no
+errors. This is collection validation, not scored performance or overhead proof.
+Raw pilot: `.work/native-perf/results/strict-ownership-pilot/`.
 
-Next executable action: inspect daemon 7487 and VM helper 7488 (verify current
-PID/start identity before use) and the warm socket under
-`.work/native-perf/engines/ctrs-warm`; establish ownership without adopting all
-VirtualMachine processes. Inspect executable/boot metadata paths in runner.py
-and daemon startup. Bind actual running executable and booted guest hashes to
-that identity; add explicit required-process coverage. Do not hash current
-build outputs as proof of an adopted daemon. Then run a short unscored Mac
-collector pilot and sampler-on/off calibration with pre/post perf-gate-ready.
-Run `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s bench/native -p
- 'test_*.py'` after edits (join the wrapped command).
+Next executable action: safely restart only daemon 7487 after revalidating its
+socket/start identity. Its VM helper 7488 holds the dedicated campaign disk;
+open guest Image was modified after VM start, so boot identity is unverified.
+Current owned engine inventory: registry `3fe7a64ed767` (npw8-reg-ctrs) and
+builder `1408fcf96f83` (dev.ctrs.builder=1); no diagnostic load found. Preserve
+all disks/volumes. Relaunch with existing dedicated data/state/socket paths,
+CTRS_CPUS=17 and CTRS_MEMORY_MIB=45091; rerun ownership.discover. Then finish
+explicit workload CPU boundaries and asynchronous terminal footprint records,
+run short ctrs pilot, and sampler-on/off comparison after worker completion and
+pre/post perf-gate-ready. No scored W2 until this calibration is sound.
+
+Independent W4 fixture worker owns `.work/wt/np-w4` on `campaign/np-w4`, base
+0f5724f. Bridge session `usrw_6b9afa4c-6459-4baa-b303-25dc5df1b657`;
+watch exec session 17037. It may only edit fixtures/w4/ and test_w4.py, with
+offline checks, no engine/build/measurement actions. Inspect status and review
+before integrating. Integration worktree is the repo root on main.
+
+Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
+bench/native -p 'test_*.py'` (join the wrapped command).
 
 ## Ordered queue
 

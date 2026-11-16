@@ -90,16 +90,33 @@ def parse_cputime(text: str) -> float | None:
         return None
 
 
+def validate_processes(required, processes):
+    observed = {p["pid"]: p for p in processes}
+    errors = []
+    for pid, expected in required.items():
+        actual = observed.get(pid)
+        if actual is None:
+            errors.append(f"missing required process {pid}")
+        elif any(actual.get(k) != expected.get(k) for k in ("comm", "start_identity")):
+            errors.append(f"process identity changed: {pid}")
+    if not required:
+        errors.append("no verified ownership manifest")
+    return errors
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--match", required=True, help="regex on process comm")
     ap.add_argument("--interval", type=float, default=0.25)
     ap.add_argument("--footprint-interval", type=float, default=1.0,
                     help="seconds between footprint samples; 0 disables")
+    ap.add_argument("--ownership", help="verified process identity manifest")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     rx = re.compile(args.match, re.IGNORECASE)
+    ownership = json.loads(Path(args.ownership).read_text()) if args.ownership else {}
+    required = {p["pid"]: p for p in ownership.get("required_processes", [])}
     stop = False
     next_fp = 0.0
 
@@ -135,7 +152,7 @@ def main():
                         continue
                     cputime_s = parse_cputime(parts[3])
                     comm = parts[9].strip()
-                    if rx.search(comm):
+                    if (pid in required if args.ownership else rx.search(comm)):
                         procs.append({"pid": pid, "comm": comm,
                                       "pcpu": pcpu, "rss_kb": rss,
                                       "cputime_s": cputime_s,
@@ -145,6 +162,7 @@ def main():
                 sample_error = str(exc)
             else:
                 sample_error = None
+            ownership_errors = validate_processes(required, procs)
             footprint = None
             if pending_fp is not None and pending_fp.done():
                 footprint = pending_fp.result()
@@ -159,8 +177,10 @@ def main():
                 "cpu_sample_ended_monotonic": time.monotonic(),
                 "sampler_version": SAMPLER_VERSION,
                 "sampler_sha256": sampler_sha256,
-                "ownership_verified": False,
-                "ownership_method": "comm discovery only",
+                "ownership_verified": bool(required) and not ownership_errors,
+                "ownership_errors": ownership_errors,
+                "required_processes": list(required.values()),
+                "ownership_method": ownership.get("method", "comm discovery only"),
                 "footprint": footprint,
                 "loadavg": list(os.getloadavg()),
                 "procs": procs,

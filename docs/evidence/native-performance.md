@@ -2012,3 +2012,21 @@ Validation: 52 offline tests passed (`python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'`); preflight passed, report
 `.work/native-perf/results/preflight-20261115T215924.json`. No performance
 claim, sampler overhead comparison, or clean scored pilot has been made.
+
+## Ownership and adopted-artifact validation (2026-11-15 resume)
+
+Open Unix socket identifies daemon; open dedicated engine data.img identifies
+ctrs VM helper, excluding other VirtualMachine processes. Required processes
+carry PID, ps lstart, executable path/inode/hash; collector verifies comm/start
+each tick. Kernel/initramfs open inode and mtime must predate process start.
+The existing ctrs VM fails this check: Image mtime 1794806815 is later than
+7488's start (2026-11-15 21:24:06 local). This proves provenance uncertainty,
+not that bytes necessarily differ. Current guest/out hashes cannot identify
+this boot. Restarting the owned VM is the next calibration prerequisite.
+
+OrbStack collection-only pilot `.work/native-perf/results/strict-ownership-pilot`
+identified socket owner 1396 plus application 1299; 20 CPU ticks, one complete
+phys_footprint sample, no collection errors. Not a timing, overhead, or engine
+comparison; worker activity was permitted because this was functional validation.
+56 offline tests pass, including unrelated VM exclusion and stale artifact/PID
+rejection. Explicit phase boundary accounting and overhead calibration remain.
