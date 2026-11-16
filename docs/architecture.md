@@ -59,7 +59,7 @@ Every process the engine or its CLI spawns, and what to make of it. Test-only sp
 | `builds.rs` (`ctrs build-with ctrs` / first `docker build`) | `docker buildx` | BuildKit builder provisioning for `docker build`: `buildx version → inspect → rm --keep-state → create`. The builder is addressed by **endpoint** (`unix://<socket>`), never a docker context; ctrs never creates one | intended delegation, user- or first-build-triggered; no context created (CTRS-10) |
 | `service.rs` | `ps` | `ctrs engine status` RSS/uptime readout | OS helper |
 | `service.rs` | the `ctrs` binary itself | `ctrs engine start` spawns `ctrs daemon` in its own process group | self; not a delegation |
-| `guest.rs` | `/usr/bin/tar` | unpacks the packed 64 GiB `data.img.tgz` template (holes preserved as sparse) | OS helper; fails loudly if missing |
+| `guest.rs` | `/usr/bin/tar` | unpacks the packed 1 TiB `data.img.tgz` template (holes preserved as sparse) | OS helper; fails loudly if missing |
 | `ports.rs` | `/usr/sbin/lsof` | names the non-ctrs process holding a published port, in the "already allocated" error message | macOS integration; absence just drops the detail |
 | `ports.rs` | `/bin/launchctl` | `getenv SSH_AUTH_SOCK` when the daemon wasn't started from a shell that has it | macOS integration; `SSH_AUTH_SOCK` env takes precedence |
 | `proxy.rs` | `/usr/sbin/scutil --proxy` | macOS proxy settings for registry pulls | macOS integration; absence = no proxy |

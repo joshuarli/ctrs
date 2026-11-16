@@ -36,6 +36,6 @@ else
   cargo xtask disk
   cp -c guest/out/data.img "$cache/data-$disk_key.img" 2>/dev/null || cp guest/out/data.img "$cache/data-$disk_key.img"
 fi
-# An APFS clone: instant, and the sparse 64 GiB stays a few MB.
+# An APFS clone: instant, and the sparse 1 TiB stays a few MB.
 rm -f guest/out/data.img
 cp -c "$cache/data-$disk_key.img" guest/out/data.img 2>/dev/null || cp "$cache/data-$disk_key.img" guest/out/data.img

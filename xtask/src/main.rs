@@ -218,7 +218,7 @@ fn kernel(root: &Path, arch: Arch) -> io::Result<()> {
     ]))
 }
 
-/// A sparse 64 GiB ext4 image with lazily initialised inode tables: it uses a
+/// A sparse 1 TiB ext4 image with lazily initialised inode tables: it uses a
 /// few MB on the Mac until data is written. Each install copies it (an APFS
 /// clone, so instant) into its data directory on first boot.
 /// The same ext4 image serves both architectures.
@@ -233,7 +233,7 @@ fn disk(root: &Path) -> io::Result<()> {
         "sh",
         "-c",
         "set -e; apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs >/dev/null; \
-         rm -f /out/data.img; truncate -s 64G /out/data.img; \
+         rm -f /out/data.img; truncate -s 1T /out/data.img; \
          mkfs.ext4 -q -F -m 0 -L ctrs-data -E lazy_itable_init=1,lazy_journal_init=1 /out/data.img",
     ]))?;
     let meta = fs::metadata(out.join("data.img"))?;

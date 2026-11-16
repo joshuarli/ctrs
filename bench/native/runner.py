@@ -268,7 +268,7 @@ def sha256_file(path: Path) -> str | None:
 
 def guest_provenance() -> dict:
     """Hashes of the guest kernel/initramfs/data disk — the guest-side
-    identity behind `ctrs_binary_sha256`. data.img is a 64 GiB sparse
+    identity behind `ctrs_binary_sha256`. data.img is a 1 TiB sparse
     file (~27 s to hash), so results are cached by stat signature and
     only rehashed when the asset is rebuilt."""
     assets = {"guest_kernel_sha256": "Image",

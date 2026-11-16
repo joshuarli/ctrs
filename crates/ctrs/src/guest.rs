@@ -208,7 +208,7 @@ fn data_disk(guest_dir: &std::path::Path) -> io::Result<PathBuf> {
             std::fs::copy(&template, &tmp)
                 .map_err(|e| io::Error::new(e.kind(), format!("copy data disk template {}: {e}", template.display())))?;
         } else {
-            // The distribution may pack the 64 GiB template as a sparse tarball;
+            // The distribution may pack the 1 TiB template as a sparse tarball;
             // tar recreates its holes, so it stays small on disk.
             let packed = guest_dir.join("data.img.tgz");
             let unpack = vm.join("unpack");
