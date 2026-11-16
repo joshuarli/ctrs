@@ -9,7 +9,54 @@ queue or turn-by-turn status diary.
 
 ## Resume here
 
-**Current task:** NP-04 — default-driver build→load→first-use path.
+**Current task:** NP-05 qualification sweep — all W1–W10 cells measured;
+closing the loss ledger and resource-accounting debts.
+
+**Queue COMPLETE (2026-11-16):** every workload has a paired run on
+`--driver default`. Wins: W1 all cells strict-win; W3, W4, W5, W9 all
+timing cells strict-win (RSS mostly non-inferior); W6 rust+zlib
+strict-win (20/20 clean); W7 all six timing cells strict-win (clean
+run `base-20261115T163439-18ee`); W8 pull wall + all six under-load
+cells strict-win (`base-20261115T185555-a692`). **Losses to fix:**
+W2 `cpu_seconds_est` 1.187 [1.139,1.221] (~20% more guest CPU under
+sustained API load; hypothesis: vsock port relay vs OrbStack vmnet —
+test `CTRS_VMNET=1`); W10 recovery 1.125 [1.102,1.161] and cpu
+1.218 (app-container kill/restart, documented as not engine-level).
+Non-inferior (not strict-win) RSS cells on W3/W5/W9/W10 and W2 —
+decide whether the contract's ≤1.03 bound accepts non-inferior.
+
+**ENOSPC root cause + fix (2026-11-16, `457767e`):** the W7 resource
+rerun `base-20261115T190637-f182` went 8/10 valid — pair 3 died on
+`no space left on device` in buildkit's content ingest, pair 7 on a
+cargo exit 101 cascade. Guest rootfs was 99% full: the data disk was
+a fixed **64 GiB** ext4 template while OrbStack's is uncapped
+(`machine.docker.disk_bytes: 0`, ~170 GiB used). Uncached W6/W7
+builds legitimately accumulate tens of GiB that both engines retain.
+Fix: `xtask disk` now makes a **1 TiB sparse** ext4 (host cost only
+for written blocks, same model as OrbStack). Template rebuilt;
+`ctrs-warm` engine migrated (all containers removed, `data.img`
+replaced by APFS clone — 320 images retained via host blob store,
+layers re-materialize on demand). Daemon running with runner-matched
+env (`CTRS_MEMORY_MIB=45091`, `CTRS_CPUS=17`), guest df now
+1006.9G. NOTE: `guest_data_sha256` provenance changes from this
+asset forward; prior runs keep their recorded hash.
+
+**In flight:** W7 resource re-qualification on the 1 TiB disk —
+`baseline --case W7 --a ctrs --b orbstack --pairs 10 --driver default`,
+log `.work/native-perf/logs/np05-w7-resource-1t-20261115T193710.log`.
+Warm daemon is live and will be adopted by the runner.
+
+**Next executable action:** when the W7 run finishes, run
+`python3.14 bench/native/runner.py report --match 'base-*'` and
+verify 10/10 valid + all resource cells measured; record in
+`docs/evidence/native-performance.md`. Then: (1) W2 CPU investigation
+— restart warm daemon with `CTRS_VMNET=1`, rerun a W2 pair set,
+compare `cpu_seconds_est`; (2) W11 12 h x2 reliability legs (needs a
+long detached window — launch via nohup, not session-bound); (3)
+physical-memory (footprint/vmmap) and allocated-storage accounting;
+(4) decide non-inferior-vs-strict-win acceptance for RSS cells.
+
+**Historical task detail (NP-04, complete):**
 **E2E-verified and committed `3b5f5ba` (2026-11-15):**
 `docker buildx build --builder default --load` on the warm ctrs
 socket now uses the **docker driver** end-to-end — h2c `/grpc`
@@ -171,11 +218,9 @@ NEXT INVESTIGATION: after queue, rerun a W2 trial with
 closes the gap, weigh the bulk-pull stall trade-off (maybe
 hybrid: vmnet for interactive ports, vsock budget for bulk).
 
-**Next executable action:** monitor
-`.work/native-perf/logs/queue-qualify-20261115T181026.log`
-(W3 running; then W4,W9,W10,W6,W7 resource runs). Spot-check
-each `base-*` report. Then W11 12 h x2, then W2-CPU investigation
-+ physical-memory/storage accounting depth.
+**Superseded next action (queue finished 2026-11-16):** the
+`queue-qualify`/`queue-followup` logs are complete; see "Resume here"
+for the current action.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
