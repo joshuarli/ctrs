@@ -50,8 +50,9 @@ def validate_result(body, cases):
         raise ValueError(f'unexpected W9 job result: {body!r}')
 
 
-def cleanup(engine, name, owner):
-    inspected = engine.sh(['inspect', name], timeout=30, check=False)
+def cleanup(engine, name, owner, *, command=None):
+    command = engine.sh if command is None else command
+    inspected = command(['inspect', name], timeout=30, check=False)
     if inspected.returncode:
         if 'no such object' in inspected.stderr.lower() or 'no such container' in inspected.stderr.lower():
             return
@@ -59,7 +60,7 @@ def cleanup(engine, name, owner):
     info = json.loads(inspected.stdout)
     if len(info) != 1 or info[0]['Config']['Labels'].get('dev.ctrs.campaign.run') != owner:
         raise RuntimeError('container cleanup ownership mismatch')
-    engine.sh(['rm', '-f', name], timeout=30)
+    command(['rm', '-f', name], timeout=30)
 
 
 def validate_image_ref(image_digest_ref):
@@ -68,7 +69,7 @@ def validate_image_ref(image_digest_ref):
         raise ValueError('W9 requires the pinned Marked image digest reference')
 
 
-def run_condition(engine, image_digest_ref, project_prefix, concurrency):
+def run_condition(engine, image_digest_ref, project_prefix, concurrency, *, cleanup_command=None):
     validate_image_ref(image_digest_ref)
     if not re.fullmatch(r'np-[a-z0-9][a-z0-9-]{0,39}', project_prefix):
         raise ValueError('invalid campaign-owned project prefix')
@@ -95,7 +96,7 @@ def run_condition(engine, image_digest_ref, project_prefix, concurrency):
         except Exception as exc:
             result['error'] = f'{type(exc).__name__}: {exc}'
             try:
-                cleanup(engine, name, owner)
+                cleanup(engine, name, owner, command=cleanup_command)
             except Exception as cleanup_exc:
                 result['cleanup_error'] = f'{type(cleanup_exc).__name__}: {cleanup_exc}'
         return result

@@ -56,6 +56,14 @@ budget, with individual process-list calls bounded at two seconds. Incomplete
 cleanup remains explicit and prevents acceptance. Descendants that leave the
 owned group can escape this boundary; benchmark commands must not do that.
 
+Callers needing fixture teardown may explicitly set
+`--interrupt-grace-seconds` in 0..900 (default 0.5). On interruption only, the
+supervisor grants that grace, capped at the remaining hard deadline, before
+KILL and the five-second group/wait budget. Deadline expiry retains the default
+short grace. The additive `interrupt_grace_seconds` specification field is
+optional for existing v1 jobs. Remote engine fixtures are the child's cleanup
+responsibility; `cleanup_complete` describes only local process-group cleanup.
+
 Forced supervisor death, host power loss, interpreter failure or filesystem errors
 can prevent terminal recording. No launchd service, restart loop or recovery
 adoption is installed. Signal the supervisor only after independently checking

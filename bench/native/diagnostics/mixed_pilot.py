@@ -25,23 +25,26 @@ def main():
     modes.add_argument('--cycles', type=int, choices=(1, 2, 3))
     modes.add_argument('--work-deadline-epoch', type=float)
     parser.add_argument('--drain-deadline-epoch', type=float)
+    parser.add_argument('--cleanup-deadline-epoch', type=float)
+    parser.add_argument('--expected-boot-assets', type=json.loads)
     parser.add_argument('--qualification', action='store_true')
     parser.add_argument('--engines', default='ctrs,orbstack')
     args = parser.parse_args()
     if args.qualification:
         parser.error('qualification refused: frozen candidate, assets, workload, final matrix and readiness evidence schema/proof are missing; 12-hour qualification is not authorized')
     if args.work_deadline_epoch is not None:
-        if args.drain_deadline_epoch is None or not time.time() < args.work_deadline_epoch < args.drain_deadline_epoch:
+        if args.drain_deadline_epoch is None or args.cleanup_deadline_epoch is None or not time.time() < args.work_deadline_epoch < args.drain_deadline_epoch < args.cleanup_deadline_epoch:
             parser.error('duration requires future work and later drain deadlines')
         if ',' in args.engines:
             parser.error('duration requires exactly one engine')
         work_deadline = time.monotonic() + args.work_deadline_epoch - time.time()
         drain_deadline = time.monotonic() + args.drain_deadline_epoch - time.time()
+        cleanup_deadline = time.monotonic() + args.cleanup_deadline_epoch - time.time()
     else:
-        if args.drain_deadline_epoch is not None:
+        if args.drain_deadline_epoch is not None or args.cleanup_deadline_epoch is not None:
             parser.error('drain deadline requires duration mode')
         args.cycles = args.cycles or 2
-        work_deadline = drain_deadline = None
+        work_deadline = drain_deadline = cleanup_deadline = None
     engines = args.engines.split(',')
     if len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
         parser.error('require distinct supported engines')
@@ -100,7 +103,8 @@ def main():
                     if cp.returncode:
                         raise RuntimeError('pinned image preparation failed: ' + image)
                 mixed_cycle.save(before / 'refs.json', refs)
-                rec = mixed_cycle.run(engine, ctx, refs, args.cycles, work_deadline=work_deadline, drain_deadline=drain_deadline)
+                rec = mixed_cycle.run(engine, ctx, refs, args.cycles, work_deadline=work_deadline,
+                    drain_deadline=drain_deadline, cleanup_deadline=cleanup_deadline, expected_boot_assets=args.expected_boot_assets)
                 ctx.write(rec)
                 print(name, 'exact mixed cycles', len(rec['cycles']), flush=True)
             finally:
