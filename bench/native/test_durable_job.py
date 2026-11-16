@@ -97,11 +97,12 @@ class DurableJobTest(unittest.TestCase):
 
     def test_interrupt_grace_allows_child_cleanup_beyond_default(self):
         marker = self.root / 'cleaned'
-        program = ("import signal,time,pathlib;"
+        program = ("import signal,time,pathlib,subprocess,sys;"
+                   "helper=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
                    "signal.signal(signal.SIGTERM,lambda *a: (_ for _ in ()).throw(SystemExit(143)));"
                    "print('ready',flush=True);\n"
                    "try: time.sleep(30)\n"
-                   "finally:\n time.sleep(.8)\n pathlib.Path(" + repr(str(marker)) + ").write_text('cleaned')\n")
+                   "finally:\n time.sleep(.8)\n assert helper.poll() is None, 'owned service died before cleanup'\n helper.terminate()\n helper.wait(timeout=2)\n pathlib.Path(" + repr(str(marker)) + ").write_text('cleaned')\n")
         launched = self.start(program, seconds=15, grace=2)
         self.assertEqual(launched.returncode, 0, launched.stderr)
         running = self.read_when_present('running.json')

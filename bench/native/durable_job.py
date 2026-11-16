@@ -151,7 +151,10 @@ def supervise(job):
         until = time.monotonic() + grace_seconds + 5
         try:
             if terminate:
-                kill_owned_group(child, signal.SIGTERM, until)
+                if result['state'] == 'interrupted' and spec.get('interrupt_grace_seconds', .5) > .5:
+                    child.send_signal(signal.SIGTERM)
+                else:
+                    kill_owned_group(child, signal.SIGTERM, until)
                 grace = time.monotonic() + grace_seconds
                 while not child_done(child.pid) and time.monotonic() < grace:
                     time.sleep(.02)

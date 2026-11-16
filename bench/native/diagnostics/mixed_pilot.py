@@ -92,7 +92,7 @@ def main():
         refs['worker'] = f'127.0.0.1:{server.server_port}/{pin["repository"]}@{pin["manifest"]}'
         mixed_cycle.validate_refs(refs)
         for name in engines:
-            engine = runner.Engine(name, run_id)
+            engine = runner.Engine(name, run_id, fresh_dir=root / 'ctrs-engine') if name == 'ctrs' and work_deadline is not None else runner.Engine(name, run_id)
             before = root / (name + '-host'); before.mkdir()
             host_snapshot(before, 'before')
             try:

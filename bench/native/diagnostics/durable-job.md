@@ -63,6 +63,9 @@ KILL and the five-second group/wait budget. Deadline expiry retains the default
 short grace. The additive `interrupt_grace_seconds` specification field is
 optional for existing v1 jobs. Remote engine fixtures are the child's cleanup
 responsibility; `cleanup_complete` describes only local process-group cleanup.
+An explicitly extended grace sends TERM to the child leader first, keeping its
+owned service descendants available for teardown. Group KILL follows child exit
+or grace expiry. The default grace and deadline path still signal the group.
 
 Forced supervisor death, host power loss, interpreter failure or filesystem errors
 can prevent terminal recording. No launchd service, restart loop or recovery
