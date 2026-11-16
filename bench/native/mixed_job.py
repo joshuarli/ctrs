@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import secrets
 import sys
 import tempfile
 import time
@@ -75,6 +76,10 @@ def main():
             '--ctrs-binary', str(args.ctrs_binary.resolve()), '--engines', args.engine,
             '--work-deadline-epoch', str(work), '--drain-deadline-epoch', str(drain), '--cleanup-deadline-epoch', str(hard - 5)]
     if boot_assets:
+        engine_root = args.job.parent.resolve() / ('mx-' + secrets.token_hex(6))
+        if len(os.fsencode(str(engine_root / 'run/docker.sock'))) >= 104:
+            parser.error('job parent path leaves no room for an isolated macOS Unix socket')
+        argv += ['--ctrs-root', str(engine_root)]
         argv += ['--expected-boot-assets', json.dumps({path: {'inode': entry['identity'][1], 'size': entry['identity'][2], 'sha256': entry['sha256']}
                                                     for path, entry in boot_assets.items()})]
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8') as receipt_file:
