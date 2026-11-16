@@ -1438,3 +1438,28 @@ cputime deltas):
 
 Strict-win tally for the ≥2-of-W1/W2/W5/W8 requirement: W1 + W5
 already qualify; W8 in flight showing ~8x wall lead.
+
+## Queue results continued (2026-11-16)
+
+- W3 `base-20261115T182240-4990`: 10/10 valid, all timing/cpu
+  strict-win (tx_tps 0.269, up 0.525, migrate 0.415, checkpoint
+  0.402, cpu 0.317); RSS non-inferior.
+- W4 `base-20261115T182349-ba18`: 10/10 valid, all strict-win
+  (workers_1/4/16 = 0.538/0.184/0.076, RSS 0.883, cpu 0.149).
+- W9 `base-20261115T182453-3c7a`: 10/10 valid, all strict-win
+  (jobs_1/4/8/16 = 0.678/0.499/0.442/0.314, cpu 0.581); RSS
+  non-inferior.
+- W10 `base-20261115T182626-dce5`: 10/10 valid but TWO losing
+  cells: recovery_s 1.125 [1.102,1.161] (ctrs ~0.345s vs
+  orbstack ~0.31s — consistent ~40ms gap, likely first-connect
+  port-forward latency on the vsock path) and cpu_seconds_est
+  1.218 [1.203,1.268] — same sustained-load guest-CPU gap as W2.
+  RSS strict-win 0.880.
+- W8 `base-20261115T182133-1eca`: pull_wall 0.140 strict,
+  cpu 0.047 strict, RSS non-inferior; load_rps/p95/p99
+  unmeasured (needs --under-load, queued in follow-up).
+
+Losing-cell ledger: W2 cpu 1.187, W10 recovery 1.125 + cpu 1.218.
+Both plausibly share the vsock-relay/guest-agent networking
+overhead; CTRS_VMNET=1 A/B after the queue is the discriminating
+experiment.
