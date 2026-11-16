@@ -30,6 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -223,11 +224,22 @@ impl Win {
         Win { m: Mutex::new((65535, 65535, HashMap::new())), cv: Condvar::new() }
     }
 
-    /// The peer's SETTINGS_INITIAL_WINDOW_SIZE sizes new streams.
+    /// The peer's SETTINGS_INITIAL_WINDOW_SIZE resizes flow windows.
+    /// Per RFC 7540 §6.9.2 an existing stream's window shifts by the
+    /// difference — resetting it to the new default would over- or
+    /// under-count bytes already sent and can produce a FLOW_CONTROL
+    /// reset from the peer (grpc-go BDP updates make this reachable
+    /// mid-stream).
     fn settings(&self, initial: u32) {
         let mut w = self.m.lock().unwrap_or_else(|e| e.into_inner());
-        w.1 = initial as u64;
-        w.2.clear();
+        let new = initial as u64;
+        let delta = new as i64 - w.1 as i64;
+        if delta != 0 {
+            for v in w.2.values_mut() {
+                *v = (*v as i64 + delta).max(0) as u64;
+            }
+        }
+        w.1 = new;
         self.cv.notify_all();
     }
 
@@ -252,6 +264,26 @@ impl Win {
                 return;
             }
             w = self.cv.wait(w).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// `wait` that also returns false when `dead` is set — a peer that
+    /// ended its side never sends another WINDOW_UPDATE, so an
+    /// unconditional wait could park the sender forever.
+    fn wait_dead(&self, sid: u32, len: usize, dead: &AtomicBool) -> bool {
+        let need = len as u64;
+        let mut w = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if dead.load(Ordering::Relaxed) {
+                return false;
+            }
+            let dflt = w.1;
+            let sw = *w.2.entry(sid).or_insert(dflt);
+            if w.0 >= need && sw >= need {
+                return true;
+            }
+            let (g, _t) = self.cv.wait_timeout(w, Duration::from_millis(250)).unwrap_or_else(|e| e.into_inner());
+            w = g;
         }
     }
 
@@ -1166,6 +1198,11 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
     // forensics when buildkitd resets the stream.
     let sent_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let send_bytes_ctr = sent_bytes.clone();
+    // Set when the builder ends its side (trailers/END_STREAM): the
+    // sender must stop — DATA after the peer's final frame is what
+    // trips buildkitd's flow-control reset.
+    let peer_done = Arc::new(AtomicBool::new(false));
+    let sender_done = peer_done.clone();
 
     // Sender: client bytes → BytesMessage → grpc DATA on stream 1.
     let send_ep = be_ep.clone();
@@ -1177,7 +1214,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
             let mut rd = FrameReader::new(cli_rd_sock, early);
             let mut buf = vec![0u8; 32 * 1024];
             loop {
-                if send_dead.load(Ordering::Relaxed) {
+                if send_dead.load(Ordering::Relaxed) || sender_done.load(Ordering::Relaxed) {
                     return Ok(());
                 }
                 // FrameReader's fill would parse h2; the session leg is
@@ -1208,8 +1245,16 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                 let msg = grpc_frame(&bytes_message(&buf[..n]));
                 let mut off = 0;
                 while off < msg.len() {
+                    if sender_done.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
                     let n2 = (msg.len() - off).min(OUT_FRAME);
-                    send_win.wait(1, n2);
+                    if !send_win.wait_dead(1, n2, &sender_done) {
+                        return Ok(());
+                    }
+                    if sender_done.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
                     crate::diag::debug!("session DATA", len = n2, off = off, msg_len = msg.len());
                     send_ep.frame(F_DATA, 0, 1, &msg[off..off + n2])?;
                     send_win.take(1, n2);
@@ -1290,10 +1335,14 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                     }
                 }
                 if f.flags & FL_END_STREAM != 0 {
+                    peer_done.store(true, Ordering::Relaxed);
                     break Ok(());
                 }
             }
-            F_HEADERS if f.sid == 1 && f.flags & FL_END_STREAM != 0 => break Ok(()),
+            F_HEADERS if f.sid == 1 && f.flags & FL_END_STREAM != 0 => {
+                peer_done.store(true, Ordering::Relaxed);
+                break Ok(());
+            }
             F_RST if f.sid == 1 => {
                 let code = if f.payload.len() >= 4 {
                     u32::from_be_bytes([f.payload[0], f.payload[1], f.payload[2], f.payload[3]])
@@ -1307,7 +1356,8 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                     sent = sent_bytes.load(Ordering::Relaxed),
                     conn_win = snap.0,
                     stream_win = snap.1,
-                    default_win = snap.2
+                    default_win = snap.2,
+                    peer_done = peer_done.load(Ordering::Relaxed)
                 );
                 break Err(io_err(&format!("builder reset the session (code {code})")));
             }
@@ -1315,6 +1365,9 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
             _ => {}
         }
     };
+    // Every exit path stops the sender: peer_done releases a sender
+    // parked in wait_dead, dead covers the rest.
+    peer_done.store(true, Ordering::Relaxed);
     dead.store(true, Ordering::Relaxed);
     be_ep.shutdown();
     let _ = sender.join();
