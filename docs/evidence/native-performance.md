@@ -1355,3 +1355,27 @@ BLOB_UNKNOWN`. (2) `/session` RST_STREAM code 3 (FLOW_CONTROL_ERROR)
 from buildkitd ~100ms into a solve, ~1/300+ builds, not reproduced
 since instrumentation landed; per-frame session rx logging, RST/GOAWAY
 error codes, and window-overdraw warnings are in the tree to catch it.
+
+## NP-04 clean final baselines (2026-11-16)
+
+`np04-final-w6w7-20261115T160823.log`, debug OFF, sequential W6 20-pair
+then W7 10-pair `--driver default`:
+
+- W6 `base-20261115T160823-a303` (commit `f8ce6ac`): 18/20 valid pairs;
+  pairs 6 and 16 ctrs failed `zlib build rc=1: failed to solve:
+  Canceled: context canceled` — the `/session` RST code-3 flake, twice
+  in one run (00:15:56Z, 00:29:23Z per daemon WARN log). Ratios on valid
+  pairs would be strict-win (rust 0.924 [0.911, 0.947], zlib 0.545
+  [0.516, 0.597]) but correctness failures disqualify the run; a clean
+  20-pair rerun is required.
+- W7 `base-20261115T163439-18ee` (commit `bde4681`): **10/10 valid
+  pairs, zero failures.** All six metrics strict-win: hyperfine
+  uncached 0.890 [0.827, 0.909], warm 0.399 [0.361, 0.458], incr
+  0.438 [0.405, 0.464]; httpie uncached 0.785 [0.737, 0.792], warm
+  0.414 [0.392, 0.449], incr 0.457 [0.438, 0.542]. Resource cells
+  (peak_total_rss_kb, cpu_seconds_est) still unmeasured.
+
+Forensic upgrade deployed after the run: cumulative session sent-byte
+counter + conn/stream/default window snapshot logged on RST — pending
+reproduction under `CTRS_LOG=debug` (`np04-w6-debug-hunt-*.log`, W6
+20-pair rerun in flight).
