@@ -1463,3 +1463,19 @@ Losing-cell ledger: W2 cpu 1.187, W10 recovery 1.125 + cpu 1.218.
 Both plausibly share the vsock-relay/guest-agent networking
 overhead; CTRS_VMNET=1 A/B after the queue is the discriminating
 experiment.
+
+## W8 under-load + W6/W7 resource runs (2026-11-16)
+
+- W8 `base-20261115T185555-a692` (--under-load): 10/10 valid, ALL
+  strict-win — pull 0.119, load_rps 0.789, p95 0.640, p99 0.482,
+  RSS 0.642, cpu 0.682. W8 fully qualified.
+- W6 `base-20261115T183448-224d` (resource run): 10/10 valid —
+  zlib 0.541 strict, cpu 0.914 strict; rust 0.953 non-inferior,
+  RSS non-inferior. Timing already proven by the 20-pair
+  `base-20261115T173857-2d73`.
+- W7 `base-20261115T184735-18b8` (resource run): 9/10 valid —
+  pair-1 ctrs httpie uncached build failed; daemon WARN shows
+  `builder retag failed: BuildKit pushed no image` (a symptom —
+  retag errors are warn-only; the solve itself failed and W7 did
+  not capture stderr). W7 build stderr capture added; rerun in
+  flight. Timing already proven by `base-20261115T163439-18ee`.
