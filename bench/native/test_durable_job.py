@@ -7,6 +7,9 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+
+import durable_job
 
 SCRIPT = Path(__file__).with_name('durable_job.py').resolve()
 PYTHON = str(Path(sys.executable).resolve())
@@ -92,6 +95,17 @@ class DurableJobTest(unittest.TestCase):
         self.assertNotEqual(launched.returncode, 0)
         self.assertFalse(self.job.exists())
 
+    def test_sparse_input_is_verified_by_detached_supervisor(self):
+        with self.input.open('r+b') as file:
+            file.truncate(1 << 40)
+        receipts = [durable_job.receipt(PYTHON), durable_job.receipt(self.input, sparse=True)]
+        self.receipts.write_text(json.dumps(receipts))
+        launched = self.start("print('sparse frozen')")
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        status = self.read_when_present('status.json')
+        self.assertEqual((status['state'], status['exit_code']), ('exited', 0))
+        self.assertTrue(status['cleanup_complete'])
+
     def test_duplicate_supervisor_cannot_publish_a_terminal_record(self):
         gate = self.root / 'gate'
         os.mkfifo(gate)
@@ -143,3 +157,46 @@ class DurableJobTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SparseReceipts(unittest.TestCase):
+    def test_holes_mutation_and_ordinary_receipt_contract(self):
+        with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as tmp:
+            path = Path(tmp) / 'sparse'
+            with path.open('wb') as file:
+                file.truncate(1 << 40)
+                file.seek((1 << 40) - 4096)
+                file.write(b'x' * 4096)
+            read_bytes = [0]
+            original = os.read
+            def count_read(fd, size):
+                result = original(fd, size)
+                read_bytes[0] += len(result)
+                return result
+            with patch.object(durable_job.os, 'read', side_effect=count_read):
+                frozen = durable_job.receipt(path, sparse=True)
+            self.assertEqual(frozen['hash_method'], 'sparse-extent-v1')
+            self.assertLess(read_bytes[0], 1024 * 1024)
+            durable_job.check_receipt(frozen)
+            with path.open('r+b') as file:
+                file.seek(1024 * 1024)
+                file.write(b'changed hole')
+            changed = durable_job.receipt(path, sparse=True)
+            self.assertNotEqual(changed['sha256'], frozen['sha256'])
+            with self.assertRaisesRegex(ValueError, 'input changed'):
+                durable_job.check_receipt(frozen)
+            path.write_text('regular')
+            ordinary = durable_job.receipt(path)
+            self.assertEqual(set(ordinary), {'path', 'identity', 'sha256'})
+            durable_job.check_receipt(ordinary)
+            with self.assertRaisesRegex(ValueError, 'unsupported input hash method'):
+                durable_job.check_receipt({**ordinary, 'hash_method': 'unknown'})
+
+    def test_sparse_query_errors_are_not_treated_as_holes(self):
+        import errno
+        with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as tmp:
+            path = Path(tmp) / 'input'
+            path.write_text('data')
+            with patch.object(durable_job.os, 'lseek', side_effect=OSError(errno.EIO, 'input error')):
+                with self.assertRaises(OSError):
+                    durable_job.receipt(path, sparse=True)

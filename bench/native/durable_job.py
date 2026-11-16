@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Detached, at-most-once supervisor for a single finite local command."""
 import argparse
+import errno
 import hashlib
 import json
 import math
@@ -14,18 +15,57 @@ import time
 import uuid
 
 
-def receipt(path):
+def sparse_digest(file, size):
+    digest = hashlib.sha256(b'sparse-extent-v1')
+    digest.update(size.to_bytes(8, 'little'))
+    offset = 0
+    while offset < size:
+        try:
+            begin = os.lseek(file.fileno(), offset, os.SEEK_DATA)
+        except OSError as exc:
+            if exc.errno == errno.ENXIO:
+                break
+            raise
+        end = os.lseek(file.fileno(), begin, os.SEEK_HOLE)
+        if not offset <= begin < end <= size:
+            raise ValueError('invalid sparse extent boundaries')
+        inner = hashlib.sha256()
+        remaining = end - begin
+        os.lseek(file.fileno(), begin, os.SEEK_SET)
+        while remaining:
+            chunk = os.read(file.fileno(), min(remaining, 1024 * 1024))
+            if not chunk:
+                raise ValueError('input truncated while hashing sparse extent')
+            inner.update(chunk)
+            remaining -= len(chunk)
+        digest.update(begin.to_bytes(8, 'little'))
+        digest.update((end - begin).to_bytes(8, 'little'))
+        digest.update(inner.digest())
+        offset = end
+    return digest.hexdigest()
+
+
+def receipt(path, *, sparse=False):
     path = Path(path).resolve(strict=True)
     with path.open('rb') as f:
         before = os.fstat(f.fileno())
         if not stat.S_ISREG(before.st_mode):
             raise ValueError(f'not a regular file: {path}')
-        digest = hashlib.file_digest(f, 'sha256').hexdigest()
+        digest = sparse_digest(f, before.st_size) if sparse else hashlib.file_digest(f, 'sha256').hexdigest()
         after = os.fstat(f.fileno())
     identity = lambda s: [s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
     if identity(before) != identity(after) or identity(after) != identity(path.stat()):
         raise ValueError(f'input changed while hashing: {path}')
-    return {'path': str(path), 'identity': identity(after), 'sha256': digest}
+    return {'path': str(path), 'identity': identity(after), 'sha256': digest,
+            **({'hash_method': 'sparse-extent-v1'} if sparse else {})}
+
+
+def check_receipt(expected):
+    method = expected.get('hash_method')
+    if method not in (None, 'sparse-extent-v1'):
+        raise ValueError('unsupported input hash method')
+    if receipt(expected['path'], sparse=method == 'sparse-extent-v1') != expected:
+        raise ValueError(f"input changed: {expected['path']}")
 
 
 def sync_directory(path):
@@ -131,8 +171,7 @@ def supervise(job):
             raise ValueError('unsupported durable job specification version')
         result['supervisor'] = process_identity(os.getpid())
         for expected in spec['inputs']:
-            if receipt(expected['path']) != expected:
-                raise ValueError(f"input changed: {expected['path']}")
+            check_receipt(expected)
         if signal_seen[0] is not None:
             result.update(state='interrupted', signal=signal_seen[0])
         elif time.time() >= spec['deadline_epoch'] or time.monotonic() >= spec['deadline_monotonic']:
@@ -199,8 +238,7 @@ def launch(job, deadline, inputs, argv):
     if str(Path(argv[0]).resolve(strict=True)) not in [entry['path'] for entry in expected]:
         raise ValueError('input receipt must include the executable')
     for entry in expected:
-        if receipt(entry['path']) != entry:
-            raise ValueError(f"input changed: {entry['path']}")
+        check_receipt(entry)
     common = Path(subprocess.check_output(['git', 'rev-parse', '--git-common-dir'], text=True).strip()).resolve()
     work = (common.parent / '.work').resolve(strict=True)
     job = Path(job).absolute()
@@ -234,6 +272,7 @@ def main():
     subs = parser.add_subparsers(dest='action', required=True)
     freeze = subs.add_parser('receipt')
     freeze.add_argument('paths', nargs='+')
+    freeze.add_argument('--sparse', action='store_true')
     start = subs.add_parser('launch')
     start.add_argument('--job', required=True)
     start.add_argument('--deadline-epoch', type=float, required=True)
@@ -243,7 +282,7 @@ def main():
     worker.add_argument('job', type=Path)
     args = parser.parse_args()
     if args.action == 'receipt':
-        print(json.dumps([receipt(path) for path in args.paths], sort_keys=True))
+        print(json.dumps([receipt(path, sparse=args.sparse) for path in args.paths], sort_keys=True))
     elif args.action == 'launch':
         argv = args.argv[1:] if args.argv[:1] == ['--'] else args.argv
         launch(args.job, args.deadline_epoch, args.inputs, argv)

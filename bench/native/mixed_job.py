@@ -44,12 +44,13 @@ def main():
     paths += [Path(found) for name in ('ps', 'lsof', 'pmset', 'footprint', 'perf-gate-ready')
               if (found := shutil.which(name))]
     paths += list(HERE.glob('*.py')) + list((HERE / 'diagnostics').glob('*.py'))
-    paths += [p for p in (HERE / 'fixtures').rglob('*') if p.is_file()]
-    paths += [HERE / 'cases.toml']
+    paths += [p for p in (HERE / 'fixtures').rglob('*') if p.is_file() and '__pycache__' not in p.parts]
+    paths += [HERE / name for name in ('cases.toml', 'assets.lock', 'schema.json')]
     for layout in (args.portfolio_layout, args.worker_layout):
         if not layout.is_dir():
             parser.error(f'layout missing: {layout}')
         paths += [p for p in layout.rglob('*') if p.is_file()]
+    template = None
     if args.engine == 'ctrs':
         binary = args.ctrs_binary.resolve(strict=True)
         repo = next((p for p in binary.parents if (p / 'Cargo.lock').is_file() and (p / 'guest').is_dir()), REPO)
@@ -61,7 +62,8 @@ def main():
         if not template.is_file():
             template = guest / 'data.img.tgz'
         paths.append(template)
-    receipts = [durable_job.receipt(p) for p in sorted({p.resolve(strict=True) for p in paths})]
+    receipts = [durable_job.receipt(p, sparse=template is not None and p == template.resolve() and p.suffix != '.tgz')
+                for p in sorted({p.resolve(strict=True) for p in paths})]
     now = time.time()
     work = now + args.duration
     drain = work + DRAIN_SECONDS

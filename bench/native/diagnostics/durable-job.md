@@ -22,6 +22,16 @@ path is canonicalized; other inputs must stay immutable. Checking does not lock
 files or eliminate a check-to-exec race. The command inherits the launcher's
 environment and saved working directory. No shell is invoked.
 
+`receipt --sparse` explicitly selects `hash_method: sparse-extent-v1`. It hashes
+the logical length and each allocated extent's offset, length and SHA-256,
+skipping holes through SEEK_DATA/SEEK_HOLE. Only ENXIO means the remaining
+range is a hole; other query errors fail. Extent layout changes conservatively
+invalidate the receipt, even if logical contents match. The launcher and
+supervisor verify the selected method and file identity. Ordinary receipts
+retain their existing shape and full SHA-256; older supervisors reject sparse
+receipts. Unknown hash methods fail. This avoids reading the 1 TiB template's
+holes during W11 preparation without substituting a metadata-only identity.
+
 The job directory must be new, inside an existing directory under the shared
 repository `.work`. It is created exclusively with mode 0700. `spec.json` records
 job ID, argv, inputs, launch clocks and fixed wall/monotonic deadlines. An exclusive

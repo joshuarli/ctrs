@@ -48,8 +48,9 @@ its parent must already exist. The launcher records receipts for the sources,
 fixture files, layouts, interpreter, Docker, Compose plugin, candidate and,
 for ctrs, the selected guest assets. Supply any additional host executables or
 assets with `--input`; the operator must ensure the specified Compose plugin is
-actually selected. The supervisor rechecks receipts before execution. Sparse
-guest templates are hashed in full and may take substantial time.
+actually selected. The supervisor rechecks receipts before execution. The raw
+guest template uses an explicit sparse-extent content receipt; ordinary files
+and packed templates use full SHA-256. Generated Python caches are excluded.
 
 The finite work deadline stops admission of new cycles; an admitted cycle has
 up to 900 seconds to drain. Another 900 seconds precedes the supervisor's hard
