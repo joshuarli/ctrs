@@ -59,7 +59,7 @@ def main():
     mixed_cycle.save(root / 'plan.json', {'fixture_version': mixed_cycle.VERSION, 'cycles': args.cycles,
         'operations_per_cycle': mixed_cycle.OPERATIONS, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'short functional diagnostic; no frozen candidate, exclusivity or growth verdict',
-        'comparison_label': 'disclosed resource-matched default build driver', 'manifests': portfolio.manifests,
+        'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted', 'manifests': portfolio.manifests,
         'resources': {'ctrs_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_memory_mib': os.environ.get('CTRS_MEMORY_MIB')}})
     print('RESULTS', root, flush=True)
     server = registry_portfolio.serve(portfolio, 0)

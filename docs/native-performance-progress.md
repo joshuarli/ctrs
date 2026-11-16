@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main b1ffb55 plus
+No new product performance win is qualified. Current source main c74b1a1 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -76,19 +76,33 @@ feasibility probes. Workspace guest initrd is 71934e6d...; explicit signed host
 Main target/release remains older. No shared daemon restarted. Cached+Fsync audit
 and full-disk recovery remain open; free-space preflight is not reserved capacity.
 
-Next executable source task: add a low-overhead W2 tagged syscall/wake counter
-pilot beside `diagnostics/scheduler_pilot.py`. Reuse pinned tools and thread-tag
-bootstrap, enforce pinned common service refs, exact 5k fixed work/data, narrow
-tracepoint filters, trace loss checks and profiler-off/on raw controls. First
-inspect tracepoint/filter capability; preserve missing counters as unknown. Do
-not make a kernel/backend change from counts alone. Run a short functional pilot
-under current foreign load; defer aligned 50k efficiency confirmation until host
-exclusivity. Boundary plan `.work/tmp/w2-scheduler-trace-plan.md` and last scheduler
-proof 015213 remain valid inputs. No measured Mac job is active.
+W2 matched stock-kernel counters are implemented in `diagnostics/syscall_pilot.py`.
+`w2-count-065245-1ece` passes fresh 5k profiler-off/on controls on both engines;
+`065510-8fb0` repeats at verified 17 CPUs and <0.1% MemTotal difference. All required
+50 thread/event cells and exact data pass. SIGTERM fault `065808-e7a1` preserves
+-15 and removes owned probes/project. All 131 Python tests pass. Short quantized
+busy-host controls leave the declared 5% observer budget inconclusive. Details and
+command: `bench/native/diagnostics/w2-counters.md`. No scored win.
+
+The predicted >=20% futex/wake-frequency reduction from increasing ctrs 2→17 CPUs
+did not occur. Do not select that remedy. At matched capacity, ctrs has 44.1926
+futex calls/18.5824 API-generated wakes per successful op; OrbStack 21.3548/12.1268.
+These are instrumented diagnostic counts under foreign load, not causal CPU cost.
+ctrs API migrates only 3 times versus OrbStack 7,458; endpoint CPUs do not establish
+residency. Keep the next boundary in the actual API's worker/GIL/futex operations.
+
+Next executable action: extend the bounded counter diagnostic to distinguish
+futex WAIT/WAKE commands and EAGAIN/zero-return outcomes. First validate ARM64
+probe argument/return decoding against identical known-count C calls on both
+engines. Reuse the pinned compiler/tools, unique group, per-thread attachment and
+cleanup; keep missing events unknown. Then use exact W2, raw off/on controls and
+actual CPU placement. No kernel/backend optimization until cost/request explains
+a material measured deficit. Exclusive aligned 50k profile/observer confirmation
+is still deferred by hot Niceforge jobs. No measured Mac job is active.
 
 ## Ready queue
 
-1. W2 tagged syscall/wake counter pilot and raw profiler-off/on control above.
+1. W2 futex command/return diagnostic and known-count validation above.
    Representative fixture upgrades no longer block this investigation.
 2. W2: low-overhead tagged wake/futex/network syscall counts with profiler-on/off
    controls, then aligned 50k application profiling in a genuinely exclusive host

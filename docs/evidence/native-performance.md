@@ -2899,3 +2899,104 @@ sleeping verifier on both engines. Three focused mock lifecycle checks plus two
 real HTTP-client/cumulative-state/pin checks pass; all 128 Python harness tests
 pass. No shared daemon was restarted or user workload removed. The finite 12-hour
 supervisor, resource-growth qualification and frozen-candidate gates remain open.
+
+## W2 counter capability and raw observer controls
+
+Stock ctrs .config has HAVE_SYSCALL_TRACEPOINTS but not FTRACE_SYSCALLS;
+`w2-counter-cap-20261116T064115` records an empty syscall event directory versus
+OrbStack's populated directory. `w2-stat-probe-064302` correctly fails unknown
+syscall event before collecting. A matched stock-kernel alternative uses owned
+ARM64 syscall-entry kprobes on BOTH engines and per-API-thread perf stat counters.
+No kernel/product affinity policy is changed. Probes use a fresh unique group,
+regular write-only tracefs opens without O_TRUNC/O_APPEND, one definition per
+write and nonreserved event names. Failed creation/parser attempts are preserved;
+064726 succeeds on both with five required API threads and 50 complete counters.
+Original helper/commands/logs/results are retained. No broad scheduler trace or
+unrelated task is included; sched_waking is in the API waker's execution context.
+
+`w2-count-20261116T065245-1ece` runs fresh exact 5k work with profiler off and on
+on each engine. A live guest boundary helper avoids Docker-exec launch latency
+at the end; workload boundaries are inside the disclosed helper counter window.
+All four trials pass exact 3,469 reads/1,531 persisted writes, stable API task and
+engine identity, complete native host/application CPU and no cleanup errors.
+Both on trials contain all 50 per-thread/event cells at 100% counter coverage.
+Raw application user/system CPU, tick quantization, perf task-clock and event
+counts remain separate. Missing cells invalidate every total and normalized metric.
+No event sample buffer is used, so there is no sampled-trace-loss interpretation.
+Per-success normalization divides each raw total by that trial's validated work.
+
+These initial runs explicitly gave ctrs 2 vCPUs/4GiB while OrbStack retained its
+shared allocation. They are functional diagnostics, NOT resource-matched or
+installed-default comparisons. Raw API affinity masks expose this difference.
+The W11 short pilot used the same explicit ctrs budget; its original plan's
+resource-matched label was incorrect. Its result remains a correctness proof,
+with timing invalid and no ratio/leadership accepted. Source labels are corrected;
+original raw plans remain with this erratum. Foreign Niceforge work continues.
+Profiler overhead is inconclusive: short fixed engine-block order, busy host and
+CPU quantization cannot substantiate the predeclared 5% CPU/wall confirmation
+budget. No published median-ratio multiplication or corrected efficiency claim.
+
+Next discriminating diagnostic, declared before running: give ctrs the runner's
+actual OrbStack-matched capacity (unset explicit CTRS_CPUS/CTRS_MEMORY_MIB), verify
+online CPUs, per-task affinity and MemTotal on both. Keep binary/guest/bootstrap,
+fixed work and event source unchanged. Hypothesis: the 2-vCPU condition contributes
+to higher futex/wake frequency; predicted >=20% reduction in ctrs futex calls and
+API-generated wakes per successful operation at matched capacity. Failure/neutral
+counts reject that frequency explanation for this contrast. Foreign host load
+still prevents causal performance acceptance; repeat controls and aligned 50k
+profiles exclusively before attributing a CPU deficit or selecting an optimization.
+
+Matched-capacity functional `w2-count-20261116T065510-8fb0` verifies 17 online CPUs
+on each engine and MemTotal 45,235,568 versus 45,193,872KiB (<0.1% difference),
+with complete per-task affinity. Exact 5k work and all 50 counters pass both.
+The predeclared frequency-reduction prediction is NOT supported: ctrs futex calls
+increase from 32.2194/op in the explicit 2-vCPU pilot to 44.1926/op; API-generated
+wakes increase 16.5542→18.5824/op. Reject increasing vCPUs as the proposed simple
+frequency remedy; foreign load prevents a clean causal performance verdict.
+
+In the matched-capacity counter trace, OrbStack has 21.3548 futex calls and
+12.1268 generated wakes/op. ctrs has only 3 API CPU migrations versus OrbStack's
+7,458 over the same 5k operations. Raw task snapshots show ctrs workers spread
+across CPUs and OrbStack initially colocated; endpoint CPUs are not a residency
+profile. These facts direct the next profiling boundary toward GIL/worker futex
+operations and scheduling policy. They do not demonstrate an intrinsic VZ wake
+ceiling, nor establish the per-call CPU cost needed to explain the old deficit.
+No busy-spin or product scheduling change is selected.
+
+`w2-count-20261116T065808-e7a1` injects SIGTERM during the profiled OrbStack API
+phase. The original -15 exit is preserved, owned probes are verified absent,
+owned project cleanup completes and cleanup_errors is empty. No shared daemon
+or unrelated probe definition is removed. Three focused parser regressions use
+real per-thread perf JSON and reject missing threads/events, duplicates, NaN,
+not-counted values and partial scheduling. Current source documents the unmeasured
+observer verdict and units. Full exclusive observer/50k confirmation stays open.
+
+## Persistent synchronization audit boundary
+
+Read-only scout a1e6ea52 completed, no edits or demonstrated bug. Parent verified
+crates/ctrs-vmm/src/apple.rs still selects Cached+Fsync; PID1 mounts ext4 without
+changing the default data mode; growth uses syncfs; layer publication syncs its
+filesystem before rename, then marker and directory. Host image-store publication
+uses sync_all. These are specific synchronization paths, not proof that every
+application write is durable or that drive caches are forced to permanent media.
+
+The preserved official SDK header describes Fsync as best effort and Full as
+permanent synchronization when the guest flushes. Parent additionally checked the
+installed objc2-virtualization 0.3.2 generated binding: Full exists with value 1,
+using the SAME macOS-12 initializer already called. No new dependency/API/minimum
+OS is required to test it. The guest kernel block-flush path and opaque VZ host
+implementation still need observed boundary evidence. OrbStack's policy is unknown.
+Growth's host F_FULLFSYNC orders file capacity only; it does not strengthen all
+ordinary guest writes or host metadata publications.
+
+The audit's suggested repeat of an orderly restart is insufficient; those proofs
+already pass. Next controlled candidate is Cached+Full only, on disposable owned
+state with unchanged guest. Predicted benefit is the SDK's stronger synchronized-
+storage contract, not speed. Before selecting it: verify actual guest flush work,
+exact committed-prefix/named-volume state across an owned VM interruption, and
+paired W3 commit/p95 plus affected W2 write efficiency, allocation/idle constraints.
+Use existing 3%/absolute resource tolerances and compare timing against noise in an
+exclusive window. A loss requires accounting/optimization, not weakening durability
+to obtain a win. Host power-loss and full-disk guarantees remain unqualified; an
+owned VM interruption does not simulate power loss. Authoritative host metadata
+and guest volume data must remain separate parts of the promised failure model.
