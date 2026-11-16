@@ -38,3 +38,25 @@ recorded overlap does not imply uniform load throughout a cycle. The pilot does
 not close the 12-hour reliability, resource-growth or performance gates. A frozen
 candidate, durable finite supervisor and full resource acceptance remain required.
 Legacy request-window/churn records are separate and cannot be pooled with v2.
+
+A single-engine, unqualified duration diagnostic can be launched with
+`python3.14 bench/native/mixed_job.py --job /absolute/path/under/.work/job
+--duration 120 --engine ctrs --portfolio-layout /absolute/layout
+--worker-layout /absolute/worker-layout --ctrs-binary /absolute/ctrs
+--compose-plugin /absolute/docker-compose`. The job directory must be new and
+its parent must already exist. The launcher records receipts for the sources,
+fixture files, layouts, interpreter, Docker, Compose plugin, candidate and,
+for ctrs, the selected guest assets. Supply any additional host executables or
+assets with `--input`; the operator must ensure the specified Compose plugin is
+actually selected. The supervisor rechecks receipts before execution. Sparse
+guest templates are hashed in full and may take substantial time.
+
+The finite work deadline stops admission of new cycles; an admitted cycle has
+up to 900 seconds to drain. Another 900 seconds precedes the supervisor's hard
+deadline for cleanup. A failed or unfinished cycle is a failed diagnostic, and
+the supervisor's terminal status and cleanup result must be inspected. The
+work interval includes setup; too short an interval can admit no cycles and
+fails. The duration is limited to one hour and remains unqualified. Both entry
+points refuse `--qualification`: a frozen candidate, assets, workload, final
+matrix and a readiness evidence schema and proof are not available. The full
+12-hour legs are not authorized by this diagnostic.
