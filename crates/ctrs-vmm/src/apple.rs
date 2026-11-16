@@ -411,13 +411,13 @@ fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Resul
 
         if let Some(disk) = &cfg.disk {
             let disk_url = url(disk)?;
-            // Fsync does not guarantee that the drive's internal cache reaches permanent storage.
+            // Guest flushes require the SDK's permanent-storage synchronization contract.
             let attachment = VZDiskImageStorageDeviceAttachment::initWithURL_readOnly_cachingMode_synchronizationMode_error(
                 VZDiskImageStorageDeviceAttachment::alloc(),
                 &disk_url,
                 false,
                 VZDiskImageCachingMode::Cached,
-                VZDiskImageSynchronizationMode::Fsync,
+                VZDiskImageSynchronizationMode::Full,
             )
             .map_err(|e| io::Error::other(format!("data disk: {}", describe(&e))))?;
             let block = VZVirtioBlockDeviceConfiguration::initWithAttachment(
