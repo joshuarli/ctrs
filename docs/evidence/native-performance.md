@@ -1412,3 +1412,29 @@ W6+W7 default-driver timing cells are now qualified:
 Resource cells (peak_total_rss_kb, cpu_seconds_est) remain
 unmeasured in every run — a harness gap to close before the full
 contract can be scored.
+
+## Qualified-baseline queue — first results (2026-11-16)
+
+`queue-qualify-20261115T181026.log`, all `--pairs 10 --driver
+default`, warm state, resource sampling ON (new attribution +
+cputime deltas):
+
+- W1 `base-20261115T181027-6546`: 10/10 valid. wall 0.580
+  [0.577,0.843], time_to_health 0.551, time_to_roundtrip 0.551 —
+  all strict-win; RSS 0.580 strict, cpu 0.197 strict.
+- W2 `base-20261115T181216-0169`: 10/10 valid. rps 0.896 strict,
+  p95 0.849 strict, p99 0.763 strict, RSS 0.921 strict; p50 0.913
+  non-inferior; **cpu_seconds_est 1.187 [1.139,1.221] LOSS** —
+  ctrs burns ~20% more CPU-seconds under API load (pairs 2–10
+  consistent ~1.15–1.25; pair-1 orbstack 163.8s outlier is
+  first-trial warmup, median-robust). Per-proc breakdown: ~96% of
+  the delta is inside the guest (Virtualization.XPC ~33–35 CPU-s
+  vs OrbStack Helper ~30–33 per 20s trial); daemon ~1.4s.
+  Real data-path efficiency gap to investigate (virtio-net/vsock
+  forwarding vs orbstack's path, or guest agent overhead).
+- W5 `base-20261115T182037-0086`: 10/10 valid. bind 0.231 strict,
+  volume 0.176 strict, cpu 0.092 strict; RSS 1.010 [1.005,1.022]
+  non-inferior (upper ≤1.03 → meets bound).
+
+Strict-win tally for the ≥2-of-W1/W2/W5/W8 requirement: W1 + W5
+already qualify; W8 in flight showing ~8x wall lead.
