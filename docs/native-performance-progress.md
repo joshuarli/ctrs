@@ -67,23 +67,29 @@ root-cause verdict. Strace perturbs futex traffic severely; do not use its sysca
 time as on-CPU cost or its count as an uninstrumented request count.
 CTRS task schedstat absent; unknown wait, not zero. Status/stat snapshots retained.
 
-RUNNING: actual API placement batch exec 65599, script
-`.work/tmp/w2-api-placement.py`, root
-`.work/native-perf/results/w2-placement-20261115T225641`. Five pairs, 10k fixed
-operations, balanced natural/same-CPU/split-main-worker conditions. Source/app
-inputs fixed, explicit TID/start/affinity/observed CPU checks, perf migrations and
-context-switch counts retained. Same diagnostic permissions on both engines;
-not acceptance scoring. Poll exact handle, do not restart. Prior placement
-225536 failed while stopping perf-stat's sleep child; it is invalid. The corrected
-stat attaches to TIDs without a child and stops on INT; early pairs complete.
+COMPLETED placement batch `w2-placement-20261115T225641` (exec 65599 terminal):
+5 pairs/condition, exact 10k operations. Median paired system-CPU excess natural
+55us/request, all threads CPU0 6us, main0/workers1 2us. Same-CPU prediction held;
+distinct-CPU >=25us prediction rejected. Both pinned cases zero migrations.
+Natural ctrs 2–50 migrations vs OrbStack 12.5k–15.3k; actual thread packing differs.
+This is diagnostic evidence, not a default-product optimization/score.
 
-Next executable action: finish placement batch, analyze BOTH preregistered
-predictions (same-CPU reduces gap >=50%; distinct CPUs retain >=25us excess).
-Do not assume the second prediction holds. Then identical pinned-binary futex
-tests on same CPU and explicit distinct CPU pairs, with observed placement and
-migration counts; preserve CPU-count/load/power/thermal disclosures. Isolated
-sched trace still needed because ctrs schedstat is absent. No VZ/kernel candidate
-before distinguishing scheduling policy, topology and remote wake cost.
+COMPLETED pinned binary control `wake-pinned-20261115T230431` (exec 74687 terminal):
+identical source/static binary, CLOCK_MONOTONIC_RAW, 80k handoffs/run, 5 pairs for
+0/0, 0/1, 0/8, 8/16. Both ~0.4us same CPU, ~6us distinct, exact work, verified
+affinity and zero migrations. Pre/post host gates pass. Old unpinned 18x contrast
+is not reproduced under matched placement; no demonstrated VZ latency ceiling.
+Guest topology captured; stock ctrs SCHED_MC is off and cache topology differs.
+
+Next executable action: build a bounded SCHED_MC-only guest candidate AND same-
+toolchain baseline in isolated assets/worktree, using existing ctrs-kbuild cache
+only after verifying no other builder uses it. Never overwrite guest/out while
+running. Select via CTRS_GUEST_DIR; keep host binary/default driver fixed. Full
+hypothesis, predicted application gain and predeclared idle/wake/memory/storage/
+next-use guards are in latest evidence section. Evaluate affected fixed-work W2
+first, then idle/resources and necessary W6 parallel-build regressions if credible.
+Scheduler wake/run tracing and vCPU/load controls remain, especially if candidate
+fails. No all-workload sweep; no speculative VMM backend work.
 
 W8 prepare state-preserving update is repaired with four focused tests: selected
 engine section merges atomically, other valid section remains untouched, malformed
@@ -104,6 +110,14 @@ This establishes functional v2 coverage, not frozen acceptance/performance wins;
 fixture size and all per-cell budgets still require freeze/qualification.
 Old hash-only W4 results are incompatible diagnostics. Retire worker tree
 `.work/wt/np-w4` only after useful final source is safely committed/integrated.
+
+W5 v2 source lane: `.work/wt/np-w5`, branch campaign/np-w5, base 565c3e2.
+Bridge worker `usrw_6f9b0a5e-9e1f-4616-a10d-8c05803d73c3`, watch exec 33323.
+Owns fixtures/w5-v2/ and test_w5.py. Must choose pinned real TS/JS application,
+deps/tool/image locks and persistent watch/rebuild/test with semantic assertion.
+No Docker/engine/build actions until coordinator clearance (source/offline only);
+parent integrates and reviews. Keep available source work independent of measured
+Mac runs. W4 tree retained for remaining freeze work, not silently retired.
 
 Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'` (join the wrapped command).

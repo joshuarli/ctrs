@@ -2232,3 +2232,81 @@ malformed input, failed replacement with scratch cleanup, and symlink protection
 This removes the manual restore requirement for valid other-engine state.
 It does not fix W8's per-engine proxy portfolio, retained content or registry
 independence; those remain unqualified and need the planned v2 fixture.
+
+## Actual API placement controls change the wake-path interpretation
+
+`w2-placement-20261115T225641`: five balanced pairs/condition, 10k fixed
+requests, concurrency 4, same diagnostic permissions, verified unchanged TIDs/
+start identity, affinity masks and observed CPU. perf counts migrations and
+context switches for explicit API TIDs. Hardware/power/thermal/load saved.
+These are instrumented application controls, not default-product scored runs.
+
+| Placement | ctrs system us/request median (range) | OrbStack median (range) | Median paired excess |
+| --- | --- | --- | --- |
+| Natural | 109 (94–115) | 51 (47–57) | 55 us |
+| All API threads CPU 0 | 49 (46–53) | 42 (40–46) | 6 us |
+| Main CPU 0, workers CPU 1 | 70 (62–82) | 68 (64–72) | 2 us |
+
+Preregistered same-CPU >=50% gap reduction is supported. The prediction that
+explicit distinct CPUs retain >=25us excess is REJECTED (paired excess -5..18us).
+Both pinned conditions have zero measured migrations. Natural ctrs 2–50
+migrations/trial versus OrbStack 12,532–15,346; one representative end snapshot
+has ctrs threads on CPUs 3/9/7/8/6 and all OrbStack threads on CPU 0. Snapshots
+are not continuous occupancy proof; migration counters are measured separately.
+This favors scheduler placement/packing as the next boundary, not a universal
+slow cross-vCPU wake mechanism. No product affinity policy is accepted.
+Earlier placement attempt 225536 timed out stopping perf stat with a sleep child;
+invalid and retained. Corrected stat attaches to TIDs without a child.
+
+## Explicit pinned futex control, identical binary
+
+`wake-pinned-20261115T230431`, five alternating pairs per placement, 40k turns
+per thread /80k verified handoffs. Static binary SHA256
+40b6b7d7518c5d4b4928b1d546c41acfe4fe35f45d8cafffef22978a59abd0e5,
+source `bench/native/diagnostics/futex_handoff.c`, CLOCK_MONOTONIC_RAW on both.
+Each worker verifies exact one-CPU affinity and records actual CPU on each turn,
+completed work, waits/wakes, migrations and switches. All 40 runs complete exact
+work, correct affinity and zero migrations. Both guests report 17 online CPUs.
+Pre gate cleared after unrelated host activity; post perf-gate-ready -1 passed.
+Host load, power, thermal and input/image identities saved with raw records.
+
+| CPU pair | ctrs median us (range) | OrbStack median us (range) |
+| --- | --- | --- |
+| 0/0 | 0.431 (0.427–0.482) | 0.404 (0.400–0.430) |
+| 0/1 | 5.970 (4.391–7.832) | 6.072 (6.020–6.201) |
+| 0/8 | 5.958 (5.829–7.916) | 6.287 (6.103–8.357) |
+| 8/16 | 5.963 (4.643–8.209) | 6.131 (5.673–8.380) |
+
+The old unpinned 7.3 vs 0.4us contrast does NOT establish equivalent placement
+or a VZ wake limitation. These pinned controls do not reproduce that contrast.
+They are diagnostics, not accepted optimizations or idle-efficiency wins.
+Additional disclosed vCPU-count/load controls and isolated scheduler wake/run
+traces remain; never restart/reconfigure shared OrbStack to obtain them.
+
+## Bounded next hypothesis: enable LLC-aware scheduler domains
+
+Read-only topology captures in `.work/native-perf/results/wake-topology/`:
+ctrs reports cache sharing 0–16 for L1/L2 with missing geometry; OrbStack reports
+per-CPU L1, L2 CPUs 0–5 for CPU0 and L3 0–16. These are guest-reported topology,
+not proof of physical host mapping or exact VM mechanism. Stock ctrs .config
+has SCHED_MC/SCHED_CLUSTER/SCHED_SMT disabled. OrbStack config is unavailable.
+
+Hypothesis: missing SCHED_MC prevents useful LLC-aware wake affinity and helps
+spread the five API threads instead of packing cooperating work. Candidate is
+ONLY CONFIG_SCHED_MC=y on the same 6.18.58 source, same stock HZ/PREEMPT/LSE.
+Build baseline and candidate with identical toolchain in isolated output dirs;
+never overwrite live guest assets. CTRS_GUEST_DIR supports selecting them.
+
+Preregister before selection: exact W2 rows and zero errors; fixed-work API
+CPU/success improves >=10%, host engine CPU/success >=5%; W2 wall and tails
+regress <=3%. Idle CPU regression <=0.01 core absolute and wake regression
+<=5/s or 3% (larger tolerance) over paired 30s idle intervals. Steady/peak physical
+footprint regression <=16MiB or 3% (larger tolerance). Five post-warmup owned
+cycles must not add >16MiB allocated-host-disk growth versus baseline after
+owned cleanup; final absolute growth/reclaim gates remain required separately.
+Preserve next-use latency (<=3% or 10ms absolute). A credible W2 result requires
+W6 parallel-build regression checks before integration. No CPU busy-spin policy,
+manual application pinning or VMM replacement is an accepted optimization.
+Unknown/deferred resource or durability cells block qualification, not building
+this bounded candidate. Reject/park if application benefit is neutral or required
+guards fail; no full W1–W10 sweep after this single config experiment.
