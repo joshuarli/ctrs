@@ -45,9 +45,21 @@ and the reason. Reporter preserves correctness counts and excludes all ratios.
 Application system CPU difference remains a profiling hypothesis, not a confirmed
 clean five-pair measurement. Run exec 98317 is terminal. No measured jobs active.
 
-Next executable action: prepare actual API profiling. Inspect perf/strace access,
-API task schedstat, guest boot ID/uname and isolated tracefs instances in owned
-containers; never replace a shared guest tracer. Profile same fixed 50k mixed
+Profiling tools are prepared on OrbStack as `np-w2-profiler:diagnostic`, image
+config sha256:e1f2c2f7fc6230ef2d12f02d503a1b4d503a9f287cd681b0fb0cc50f41e56a3e.
+Raw image metadata and OrbStack capability check:
+`.work/native-perf/results/w2-profile-tools/`. Same diagnostic image has strace
+6.13+ds-1, linux-perf 6.12.117-1 and procps 2:4.0.4-9. Software task-clock,
+context-switch and migration counters work; tracefs has sched events and instance
+support. Temporary tracefs mount was inside a removed owned container; no guest
+tracing state was modified. Guest boot ID/uname are recorded. No tool build job
+remains (exec 13438 terminal).
+
+Next executable action: export this ONE profiler image, load the same archive
+into the owned ctrs engine and verify common image ID. Set up owned W2 stacks,
+attach perf/strace to API PID namespace (never unrelated processes), collect
+API task schedstat before/after plus isolated per-PID scheduling trace. Never
+replace a shared guest tracer. Profile same fixed 50k mixed
 work, concurrency 4, seed 7; distinguish syscall elapsed time from CPU and
 runqueue wait. Require an explained cost >=25% of confirmed per-request excess
 before a candidate. Scratch plan: `.work/tmp/w2-profile-plan.md`. Clean confirmation
@@ -57,8 +69,9 @@ revalidate the final behavior in the next pilot. Do not wait for other fixtures.
 
 Independent W4 replacement worker owns `.work/wt/np-w4` on `campaign/np-w4`.
 Prototype preserved on that branch at 7c92827, not integrated as coverage.
-Active bridge session `usrw_25f95b47-0f9b-4e7f-b5b1-197a268f51cd`, watch exec
-55436; it replaces synthetic hashing with full HTTP-ingested event batches,
+Completed bridge session `usrw_25f95b47-0f9b-4e7f-b5b1-197a268f51cd`, watch exec
+55436; parent review/integration pending. Four offline tests passed after 22:28.
+It replaces synthetic hashing with full HTTP-ingested event batches,
 JSON validation/aggregation and exact filesystem gzip/summary artifacts. No
 engine/build/measurement work. Tests delayed until after 22:28 local to avoid
 confirmation contention. Parent reviews and runs proof before main integration.

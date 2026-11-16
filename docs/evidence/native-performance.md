@@ -2144,3 +2144,19 @@ five pairs. Do not use its apparent latency, throughput, memory or CPU ratios as
 wins/losses. API system CPU was ~5.1–5.3 s vs ~2.4–2.6 s for equal work, a profile
 lead only because host exclusivity was not proven. Clean confirmation remains
 pending; the unrelated service is preserved. No repeated sweep is warranted.
+
+## Application profiling tool capability check
+
+Prepared one disposable diagnostic image `np-w2-profiler:diagnostic` on OrbStack,
+from python:3.13-slim digest e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90;
+installed only diagnostic strace/linux-perf/procps (no product dependency added).
+Image config e1f2c2f7fc6230ef2d12f02d503a1b4d503a9f287cd681b0fb0cc50f41e56a3e;
+manifest list d3ea812e9f38129a33a0e2a67afecdaabbccd00555457639415f423c62945357.
+Actual package versions: strace 6.13+ds-1, linux-perf 6.12.117-1, procps 2:4.0.4-9.
+Raw metadata and capability output in `.work/native-perf/results/w2-profile-tools`.
+Software task-clock/context-switch/migration counters work in an owned diagnostic
+container, and a container-local tracefs mount exposes sched events/instances.
+No tracing switches or other guest tracer were changed. OrbStack kernel
+7.2.12-orbstack-00394-gbecdd6130068, boot ID 7fdc0939-a83c-4954-ba60-507f1d67d717.
+These are capabilities, not an API profile. Export/load the identical profiler
+image to ctrs before causal comparison. Profiles do not enter timing scores.
