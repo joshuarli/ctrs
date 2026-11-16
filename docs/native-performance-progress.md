@@ -1,6 +1,6 @@
 # macOS performance campaign: progress and continuation
 
-**ACTIVE — measurements need qualification; OrbStack leadership unproven.**
+**PAUSED 2026-11-16 — campaign winddown; see Resume here for handoff.**
 Owner steering: 2026-11-15. Contract:
 [`campaign-native-performance.md`](campaign-native-performance.md).
 Maintain this file in place as the single queue/checkpoint. Append compact
@@ -9,89 +9,50 @@ queue or turn-by-turn status diary.
 
 ## Resume here
 
-**Current task:** NP-05 qualification sweep — all W1–W10 cells measured;
-closing the loss ledger and resource-accounting debts.
+**Status:** paused 2026-11-16 (campaign winddown). Resume prompt:
+"resume the campaign docs/native-performance-progress.md".
+First command: `python3.14 bench/native/runner.py preflight`.
 
-**Queue COMPLETE (2026-11-16):** every workload has a paired run on
-`--driver default`. Wins: W1 all cells strict-win; W3, W4, W5, W9 all
-timing cells strict-win (RSS mostly non-inferior); W6 rust+zlib
-strict-win (20/20 clean); W7 all six timing cells strict-win (clean
-run `base-20261115T163439-18ee`); W8 pull wall + all six under-load
-cells strict-win (`base-20261115T185555-a692`). **Losses to fix:**
-W2 `cpu_seconds_est` 1.187 [1.139,1.221] (~20% more guest CPU under
-sustained API load; hypothesis: vsock port relay vs OrbStack vmnet —
-test `CTRS_VMNET=1`); W10 recovery 1.125 [1.102,1.161] and cpu
-1.218 (app-container kill/restart, documented as not engine-level).
-Non-inferior (not strict-win) RSS cells on W3/W5/W9/W10 and W2 —
-decide whether the contract's ≤1.03 bound accepts non-inferior.
+Last accepted revision: `3503831` on `main`, tree clean. Guest
+assets rebuilt to stock kernel config (PREEMPT_VOLUNTARY/HZ_250/
+no LSE — the HZ_1000+PREEMPT+LSE candidate was built, measured
+6.7us vs 7.3us futex ping-pong, and reverted as insufficient).
+Warm ctrs engine left running at
+`.work/native-perf/engines/ctrs-warm` (CTRS_CPUS=17,
+CTRS_MEMORY_MIB=45091, vsock); if absent, relaunch
+`target/release/ctrs daemon` with CTRS_DATA_DIR/CTRS_STATE_DIR/
+CTRS_SOCKET under that dir (see `daemon-manual.log` there).
 
-**ENOSPC root cause + fix (2026-11-16, `457767e`):** the W7 resource
-rerun `base-20261115T190637-f182` went 8/10 valid — pair 3 died on
-`no space left on device` in buildkit's content ingest, pair 7 on a
-cargo exit 101 cascade. Guest rootfs was 99% full: the data disk was
-a fixed **64 GiB** ext4 template while OrbStack's is uncapped
-(`machine.docker.disk_bytes: 0`, ~170 GiB used). Uncached W6/W7
-builds legitimately accumulate tens of GiB that both engines retain.
-Fix: `xtask disk` now makes a **1 TiB sparse** ext4 (host cost only
-for written blocks, same model as OrbStack). Template rebuilt;
-`ctrs-warm` engine migrated (all containers removed, `data.img`
-replaced by APFS clone — 320 images retained via host blob store,
-layers re-materialize on demand). Daemon running with runner-matched
-env (`CTRS_MEMORY_MIB=45091`, `CTRS_CPUS=17`), guest df now
-1006.9G. NOTE: `guest_data_sha256` provenance changes from this
-asset forward; prior runs keep their recorded hash.
+Qualified (`--driver default`, warm, 10 pairs): W1/W3/W4/W5/W6/
+W7/W9 timing strict-win; W7 resources `base-20261115T193710-0d96`
+all-eight strict-win; W8 under-load `base-20261115T185555-a692`
+strict-win. Full detail: `docs/evidence/native-performance.md`.
 
-**In flight:** full W1–W10 re-qualification sweep with the new
-`peak_phys_footprint_bytes` resource cell —
-`.work/native-perf/queue-footprint.sh` → log
-`.work/native-perf/logs/queue-footprint-20261115T202223.log`.
-Order W1,W3,W4,W5,W9,W10,W7,W8,W2,W6 then W8 `--under-load`,
-10 pairs each, `--driver default`, warm daemon on vsock
-(`CTRS_VMNET` experiment finished — rejected, see below).
-ETA several hours. Prior runs remain valid for timing cells but
-lack the footprint cell; this sweep is the resource-qualified set.
+Blocking debts before meet/exceed OrbStack:
+1. `peak_phys_footprint_bytes` parser fixed `3503831` — every
+   earlier value is the wrong (category-total) field; full
+   W1–W10 footprint re-run required.
+2. W8 ctrs registry volume lost in 1 TiB migration — run
+   `runner.py prepare --engines ctrs`, then restore the orbstack
+   section of `.work/native-perf/w8-portfolio.json` (prepare
+   rewrites the whole file). Then rerun W8 + W8 `--under-load`.
+3. W2 `cpu_seconds_est` loss: cross-vCPU futex wake ~7us vs
+   ~0.4us orbstack; same-CPU equal; guest kernel config
+   exonerated. Next: host-side vCPU wake path — ctrs uses the
+   Virtualization.VirtualMachine XPC service, orbstack's VM lives
+   in "OrbStack Helper". W10 cpu/recovery likely shares it.
+4. W7/W9 cpu losses on latest sweep (1.42/1.49) may be
+   diagnostic-container contention — re-measure on a clean host.
+5. Unimplemented: idle CPU/footprint + growth budgets; W11 12h x2.
+   Allocated storage: per-trial `/system/df` snapshot + W3
+   `pgdata_allocated_bytes` landed `6dbe2b8` (needs rerun).
 
-**Sweep findings so far (2026-11-16 ~05:00 UTC):** W1,W3,W4,W5,W9,
-W10,W7 all completed rc=0; W2 running pair ~7/10. **W8 ctrs 0/10 —
-not an engine regression:** the 1 TiB disk migration discarded the
-named volume `npw8-reg-data-ctrs`, so `ensure_registry` recreated it
-empty at 04:48 and every fixture pull 404'd (`manifest unknown`).
-OrbStack-side W8 unaffected (OrbStack volume persisted). Remedy after
-the sweep: `runner.py prepare --engines ctrs` to rebuild+push the
-portfolio, then re-run W8 and W8 `--under-load` (the sweep's W8ul
-leg will fail the same way — expected, rerun covers it). Note the
-footprint sweep's W8 run id `base-20261115T204801-f1f1` is invalid
-for scoring. `peak_phys_footprint_bytes` is already in
-`RESOURCE_METRICS` (reporting.py) so it scores on every case and
-missing samples fail closed as `unmeasured`; cases.toml metric
-lists updated to declare it. Also: an earlier diagnostic futex
-pingpong container (`gcc:14.2.0-bookworm`, ~1 spinning vCPU) ran on
-the ctrs engine 04:25–04:50 overlapping W3–W8 trials — wall-time
-cells unaffected in expectation (16/17 vCPUs free, CPU metric only
-counts matched engine pids) but noted for provenance.
+Parked branches: none campaign-owned.
+`chore/ctrs-proto-target-gate` and `repomod/fix/*` predate the
+campaign — leave untouched (stale worktree already pruned).
 
-**W2 CPU investigation — narrowed, not solved (2026-11-16):**
-- `CTRS_VMNET=1` W2 run `base-20261115T195437-467a` (10/10): cpu
-  1.281 — WORSE than vsock 1.187. vmnet rejected; stays opt-in.
-- Exonerated: seccomp (~2%), bridge-nf-call-iptables (0%),
-  conntrack/netfilter on inter-container traffic (count ~44 under
-  load; real kernel bridge), TCP sysctls, CPU mitigations.
-- Controlled cgroup cpu.stat (20 s load): ctrs api 19.95 CPU-s
-  (sys 31%) vs orbstack 13.59 (sys 17%) at equal rps — the gap is
-  INSIDE the api container's own syscall/softirq path, ~130us/req.
-- strace -c histogram: sendto/recvfrom/epoll counts identical;
-  **futex calls 2.2x higher on ctrs (377K vs 171K)** — scheduler/
-  wakeup-path suspicion in the 6.18.58 guest kernel vs OrbStack's
-  7.2.12-orbstack. Next: guest-kernel config diff (HZ/PREEMPT/
-  futex) or in-guest futex microbenchmark; W10 cpu/recovery
-  losses likely share this root cause.
-
-**Next executable action:** monitor
-`.work/native-perf/logs/queue-footprint-20261115T202223.log`;
-spot-check each `base-*` report for 10/10 valid + footprint cell
-measured. Then: (1) futex/kernel investigation above; (2) W10
-re-measure on the footprint sweep; (3) allocated-storage cells +
-idle/growth budgets; (4) W11 12 h x2 once the candidate freezes.
+Next slice: W8 prepare+rerun → full footprint sweep → W2
+host-path investigation → W11 legs.
 
 **Historical task detail (NP-04, complete):**
 **E2E-verified and committed `3b5f5ba` (2026-11-15):**
