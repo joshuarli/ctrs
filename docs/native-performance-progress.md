@@ -142,13 +142,26 @@ completeness), then W6,W7 10-pair resource re-qualification — all
 periodically. Warm daemon: clean (no CTRS_LOG), fixed binary
 `67ff261`+.
 
-**Next executable action:** monitor queue log; as each `base-*`
-run id prints, spot-check `runner.py report --match <id>` for
-valid-pair counts and assessments. After queue: W11 12 h
-qualification on both engines (the session fix removed the known
-flake; watch daemon-manual.log for residual `session stream
-reset`), then resource-accounting depth (physical memory, CPU
-ownership, allocated storage) and any losing-cell fixes.
+**Resource attribution fixed (2026-11-16):** the orbstack match
+pattern's bare `virtualization` token double-counted the ctrs VM
+(XPC service) into orbstack trials; ctrs now matches
+`com.apple.Virtualization.VirtualMachine` explicitly and orbstack
+keeps only its own names. `collect.py` records cumulative CPU time
+per pid; `summarize_trace` prefers exact cputime deltas (pcpu
+fallback). Verified live: ctrs trial samples daemon+VM, orbstack
+pattern excludes the XPC. Still owed for full resource gates:
+validated physical-memory method (footprint/vmmap), idle/growth
+budgets, allocated-storage cells.
+
+**Next executable action:** monitor
+`.work/native-perf/logs/queue-qualify-20261115T181026.log` — W1
+finishing ~pair 9/10 all-OK (ctrs ~3.65s vs orbstack ~6.3s wall,
+strong early signal). As each `base-*` id prints, spot-check
+`runner.py report --match <id>`. After queue: W11 12 h
+qualification on both engines (session fix removed the known
+flake; watch daemon-manual.log for residual resets), then
+physical-memory/storage accounting depth and any losing-cell
+fixes.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
