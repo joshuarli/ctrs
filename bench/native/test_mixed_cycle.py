@@ -140,6 +140,17 @@ class DurationAdmission(unittest.TestCase):
 
 
 class DurationLoadBound(unittest.TestCase):
+    def test_joined_worker_cleanup_errors_remain_in_parent_evidence(self):
+        from concurrent.futures import Future
+        queue, build = Future(), Future()
+        queue.set_result({'correctness': {'ok': False}, 'validation_errors': ['cleanup error: owned network remains']})
+        build.set_exception(mixed_cycle.ci_jobs.ConditionFailed([
+            {'job': 3, 'error': 'work deadline', 'cleanup_error': 'owned container remains'}]))
+        errors = mixed_cycle.worker_failures({'queue': queue, 'build': build})
+        self.assertEqual(len(errors), 2)
+        self.assertIn('owned network remains', errors[0])
+        self.assertIn('owned container remains', errors[1])
+
     def test_unresponsive_http_load_child_is_stopped_at_drain(self):
         import socket
         import subprocess
