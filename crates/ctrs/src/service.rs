@@ -138,12 +138,17 @@ fn wait_socket_dead(secs: u64) -> bool {
     false
 }
 
-fn status(args: &[String]) -> io::Result<()> {
+fn status_json(args: &[String]) -> io::Result<bool> {
     let json = args.iter().any(|a| a == "--json");
     let unexpected: Vec<&String> = args.iter().filter(|a| a.as_str() != "--json").collect();
     if !unexpected.is_empty() {
         return Err(io::Error::other(format!("ctrs engine status: unexpected arguments: {}", unexpected.iter().map(|a| a.as_str()).collect::<Vec<_>>().join(" "))));
     }
+    Ok(json)
+}
+
+fn status(args: &[String]) -> io::Result<()> {
+    let json = status_json(args)?;
     match engine_running() {
         Some((pid, started)) => {
             let rss_kb = Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()
@@ -255,29 +260,26 @@ fn stop() -> io::Result<()> {
     }
 }
 
-pub fn run(args: &[String]) -> io::Result<()> {
-    let reject = |rest: &[String]| -> io::Result<()> {
-        if rest.is_empty() {
-            return Ok(());
-        }
-        Err(io::Error::other(format!("ctrs engine: unexpected arguments: {}", rest.join(" "))))
-    };
+fn validate(args: &[String]) -> io::Result<()> {
     match args.first().map(String::as_str) {
-        Some("start") => {
-            reject(&args[1..])?;
-            start()
-        }
-        Some("stop") => {
-            reject(&args[1..])?;
-            stop()
-        }
-        Some("status") => status(&args[1..]),
-        Some("restart") => {
-            reject(&args[1..])?;
-            stop()?;
-            start()
-        }
+        Some("start" | "stop" | "restart") if args.len() == 1 => Ok(()),
+        Some("start" | "stop" | "restart") => Err(io::Error::other(format!("ctrs engine: unexpected arguments: {}", args[1..].join(" ")))),
+        Some("status") => status_json(&args[1..]).map(drop),
         _ => Err(io::Error::other(USAGE)),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn validate_args(args: &[String]) -> io::Result<()> { validate(args) }
+
+pub fn run(args: &[String]) -> io::Result<()> {
+    validate(args)?;
+    match args[0].as_str() {
+        "start" => start(),
+        "stop" => stop(),
+        "status" => status(&args[1..]),
+        "restart" => { stop()?; start() }
+        _ => unreachable!(),
     }
 }
 

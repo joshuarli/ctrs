@@ -25,6 +25,8 @@ mod guest;
 mod service;
 #[cfg(unix)]
 mod docker;
+#[cfg(unix)]
+mod help;
 
 const USAGE: &str = "\
 usage: ctrs COMMAND          docker's commands, on ctrs: ctrs run, ps, exec,
@@ -47,8 +49,10 @@ Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/inst
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() || matches!(args.as_slice(), [arg] if arg == "-h" || arg == "--help") {
-        println!("{USAGE}\n\n{FOOTER}");
+    #[cfg(unix)]
+    if let Some(text) = help::requested(&args) {
+        print!("{text}");
+        if args.is_empty() || args.len() == 1 { println!("\n{FOOTER}"); }
         return ExitCode::SUCCESS;
     }
     // Block the VM-crash test signal before any thread is spawned (diag::init
