@@ -1479,3 +1479,22 @@ experiment.
   retag errors are warn-only; the solve itself failed and W7 did
   not capture stderr). W7 build stderr capture added; rerun in
   flight. Timing already proven by `base-20261115T163439-18ee`.
+
+## W7 resource re-qualification on the 1 TiB disk (2026-11-16)
+
+- Guest data disk grew 64 GiB → 1 TiB sparse (`457767e`) after the
+  `base-20261115T190637-f182` rerun exposed ENOSPC: pair 3 died on
+  `no space left on device` in buildkit's content ingest, pair 7 on
+  a cargo exit-101 cascade. OrbStack's disk is uncapped
+  (`machine.docker.disk_bytes: 0`, ~170 GiB in use); the fixed 64 GiB
+  template was a structural deficit, not a workload artifact.
+  `ctrs-warm` migrated in place: containers removed, `data.img`
+  replaced by APFS clone of the new template, 320 images retained
+  via the host blob store. `guest_data_sha256` provenance changes
+  from this asset forward (now extent-hashed, `9da0d10`).
+- W7 `base-20261115T193710-0d96`: **10/10 valid, all eight cells
+  strict-win** — hyperfine 0.891/0.448/0.436, httpie
+  0.775/0.410/0.485, RSS 0.727 [0.601,0.846], cpu 0.569
+  [0.513,0.613]. Source `457767e`. This supersedes the 9/10
+  `base-20261115T184735-18b8` attempt for resource qualification;
+  timing stands on `base-20261115T163439-18ee`.
