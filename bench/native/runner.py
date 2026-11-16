@@ -30,6 +30,7 @@ import shlex
 import shutil
 import signal
 import statistics
+import tempfile
 import socket
 import subprocess
 import sys
@@ -2601,6 +2602,29 @@ def cmd_preflight(args) -> int:
     return 1 if failures else 0
 
 
+def save_w8_portfolio(updates):
+    if PORTFOLIO_FILE.is_symlink():
+        raise ValueError("W8 portfolio must be an owned regular file")
+    try:
+        existing = json.loads(PORTFOLIO_FILE.read_text())
+    except FileNotFoundError:
+        existing = {}
+    if not isinstance(existing, dict):
+        raise ValueError("W8 portfolio must contain engine sections")
+    existing.update(updates)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=PORTFOLIO_FILE.parent,
+                                         prefix=".w8-portfolio-", delete=False) as out:
+            temporary = Path(out.name)
+            json.dump(existing, out, indent=2)
+            out.write("\n")
+        os.replace(temporary, PORTFOLIO_FILE)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def cmd_prepare(args) -> int:
     """Untimed setup: pull service images and build the fixture API image
     on each selected engine."""
@@ -2676,7 +2700,7 @@ def cmd_prepare(args) -> int:
             engine.stop()
     out = ctx.results_dir / "prepare.json"
     out.write_text(json.dumps(summary, indent=2) + "\n")
-    PORTFOLIO_FILE.write_text(json.dumps(portfolio, indent=2) + "\n")
+    save_w8_portfolio(portfolio)
     print(f"wrote {out} and {PORTFOLIO_FILE}")
     return 0
 

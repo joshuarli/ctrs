@@ -67,13 +67,29 @@ root-cause verdict. Strace perturbs futex traffic severely; do not use its sysca
 time as on-CPU cost or its count as an uninstrumented request count.
 CTRS task schedstat absent; unknown wait, not zero. Status/stat snapshots retained.
 
-Next executable action: actual API placement controls (all threads same guest CPU vs main/worker
-threads explicitly on distinct CPUs) with affinity/start/TID checks and migrations.
-Collect isolated sched trace for wake-to-run/runqueue intervals because ctrs lacks
-schedstat; never replace shared tracing. Then identical pinned-binary futex tests,
-with CPU-count/load/power/thermal disclosure, only as diagnostics. Use this to
-separate guest CPU work, spin/wait and host VM scheduling before choosing a
-supported VZ or guest change. Clean scored confirmation still needs host window.
+RUNNING: actual API placement batch exec 65599, script
+`.work/tmp/w2-api-placement.py`, root
+`.work/native-perf/results/w2-placement-20261115T225641`. Five pairs, 10k fixed
+operations, balanced natural/same-CPU/split-main-worker conditions. Source/app
+inputs fixed, explicit TID/start/affinity/observed CPU checks, perf migrations and
+context-switch counts retained. Same diagnostic permissions on both engines;
+not acceptance scoring. Poll exact handle, do not restart. Prior placement
+225536 failed while stopping perf-stat's sleep child; it is invalid. The corrected
+stat attaches to TIDs without a child and stops on INT; early pairs complete.
+
+Next executable action: finish placement batch, analyze BOTH preregistered
+predictions (same-CPU reduces gap >=50%; distinct CPUs retain >=25us excess).
+Do not assume the second prediction holds. Then identical pinned-binary futex
+tests on same CPU and explicit distinct CPU pairs, with observed placement and
+migration counts; preserve CPU-count/load/power/thermal disclosures. Isolated
+sched trace still needed because ctrs schedstat is absent. No VZ/kernel candidate
+before distinguishing scheduling policy, topology and remote wake cost.
+
+W8 prepare state-preserving update is repaired with four focused tests: selected
+engine section merges atomically, other valid section remains untouched, malformed
+metadata/failed replace/symlink cases preserve data. No manual JSON restoration
+is needed for valid state. Independent identical multilayer portfolio remains
+pending; do not call old W8 pilots acceptance coverage.
 
 W4 v2 replacement is integrated and verified: 72 tests pass. Real-engine
 correctness pilots passed all 1/4/16-worker conditions: OrbStack

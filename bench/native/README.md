@@ -128,7 +128,9 @@ and must not be compared against later runs.
   layers, pushes them to `127.0.0.1:<port>/npw8/*` on a per-engine
   registry container (`npw8-reg-<engine>`, named volume
   `npw8-reg-data-<engine>`, `--restart unless-stopped`), and records
-  digests in `.work/native-perf/w8-portfolio.json`. Trials `rmi` the
+  digests in `.work/native-perf/w8-portfolio.json`. Preparing one engine
+  atomically updates its section while preserving the other engine’s state;
+  malformed existing metadata fails explicitly. Trials `rmi` the
   refs, pull each by digest (digest string must appear in pull output),
   and run the image's own smoke command. `--under-load` serves the W1
   stack + W2 load driver while pulls run (the EXP-1 responsiveness

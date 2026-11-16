@@ -2220,3 +2220,15 @@ These are correctness pilots, not timing/CPU/memory wins. v1 results remain
 historical diagnostics; v2 fixture sizes, budgets and candidate image lock must
 be frozen before performance acceptance. Persistent power-loss durability is
 not claimed for disposable workflow artifacts.
+
+## W8 preparation state-preservation repair
+
+Preparing a selected engine now merges its completed portfolio section into the
+existing per-engine record instead of replacing the whole JSON file. Writes use
+a temporary file in the same owned directory and atomic replacement; malformed
+existing metadata fails without discarding it, and symlink destinations fail.
+Four focused filesystem regressions pass: other-engine section preservation,
+malformed input, failed replacement with scratch cleanup, and symlink protection.
+This removes the manual restore requirement for valid other-engine state.
+It does not fix W8's per-engine proxy portfolio, retained content or registry
+independence; those remain unqualified and need the planned v2 fixture.
