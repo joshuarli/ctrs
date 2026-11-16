@@ -2,14 +2,21 @@
 
 ## Status
 
-**WINDING DOWN — owner request, 2026-11-16.** Start no new campaign work.
-All worker lanes are terminal. No native benchmark or campaign engine is live.
-Storage source 538e2c3 has 165 passing tests and native relation-ENOSPC proofs,
-but two independent review findings remain. Park it before pausing.
-W8 source bc6625f is committed on campaign/np-w8-content, not parent-reviewed
-or integrated. Preserve its branch and exact continuation.
-The [contract](campaign-native-performance.md) remains the resume contract.
-This file owns continuation; history lives in [evidence](evidence/native-performance.md).
+**PAUSED 2026-11-16 — owner requested winddown. Campaign not complete.**
+On an authorized resume, first run `codex-campaign-closeout.py cancel`.
+Read the [contract](campaign-native-performance.md), then inspect
+`git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
+Last accepted code is 1a48731. Main code matches the tested 2d11c40 baseline;
+its 162-test evidence remains valid. No new source slice was accepted during winddown.
+Storage source 538e2c3 is parked on `campaign/np-storage-space`, absent from main.
+Fix its active allocation guard and cleanup receipt failure path before retrying.
+W8 bc6625f is parked on `campaign/np-w8-content`: five source tests pass,
+but parent review, real artifact and native absence proofs remain unrun.
+Other parked branches, retained trees and consumers are recorded in the
+[retained-work inventory](native-performance-retained.md).
+All lanes are terminal. No campaign engine, benchmark or cron job is running.
+Winddown commits are local. No winddown changes were pushed.
+Resume the full measurement and qualification goal after these review fixes.
 
 ## Accepted and verified
 
@@ -193,9 +200,19 @@ closure, PG WAL recovery, unchanged volume metadata and no cleanup errors.
 No host power-loss claim. Actual allocation is recorded; reclaim/growth unqualified.
 Source/plan/raw results: `.work/tmp/sync-proof-ed045113/`; driver
 `.work/tmp/full-flush-pilot.py`. Do not repeat orderly restart as durability proof.
-Next storage task: owned allocation/reclaim and full-disk recovery, then paired
-W3/W2/resource confirmation of Full in an exclusive window. Keep host metadata
-sync_all separate from the guest data-disk contract; OrbStack policy is unknown.
+Unaccepted relation-ENOSPC experiment 538e2c3 is parked after owner winddown.
+`space-32241aef` passes both binaries: actual relation SQLSTATE 53100, exact
+100-record prefix, 10 new commits, unchanged filesystem/volume identity and owned
+cleanup. Its supervisor job `.work/tmp/space-source-20261116T0935` exits 0.
+The zero allocation delta is an endpoint observation, not a peak bound. Review
+34112a16 found that the growth check occurs only after reservation and that a
+cleanup snapshot write can skip shutdown/result persistence. Both fixes remain
+open; the source was reverted from main and preserved on `campaign/np-storage-space`.
+The [inventory](native-performance-retained.md) records raw paths and failed or
+narrower prior cases. No root-reserve exhaustion, host-full storage, exclusive
+reclaim or power-loss claim. After review fixes, continue allocation/reclaim and
+paired W3/W2/resource confirmation of Full in an exclusive window. Keep host
+metadata sync_all separate from guest data-disk policy; OrbStack policy is unknown.
 No measured Mac job is active.
 
 ## Ready queue
@@ -212,8 +229,10 @@ No measured Mac job is active.
 3. Interleave resource cycles, freeze inputs and collect declared five-cycle/
    30s minima with exclusive host use. Command and budgets:
    `bench/native/diagnostics/resources.md`. Unknown cache/allocation stays unknown.
-4. W8 content-absent/retained design, portable artifact reproduction and scored
-   phase integration. No proxy history pooled with common portfolio.
+4. W8 content-unique preparation is parked at bc6625f on campaign/np-w8-content.
+   Parent-review its three-file diff and five-test proof before integrating that
+   commit. Real portfolio reproduction, native content absence and scored phase
+   integration remain open. No history is pooled with the common portfolio.
 5. Existing-disk expansion is proved/integrated. Audit Cached+Fsync, guest flush,
    Full synchronization and
    promised failure guarantees. Normal restart/upgrade proof is not power-loss
