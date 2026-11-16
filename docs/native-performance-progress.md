@@ -106,14 +106,21 @@ is 1.9458 versus 0.5596/op. CPU/observer timing remains unqualified. Definitions
 filters and ordering have one owner, `counter_specs.py`; do not pool v1/v2.
 Failed 072115 cleanup is preserved, with its return-prefix parser cause fixed.
 
-Next executable W2 action: add a separate low-rate per-API-thread on-CPU profile
-mode to the existing bounded pilot. Preserve raw off/on controls, exact input/
-data checks, loss checks and task identity. Estimate cost/op only from that
-profile's own CPU/sample records. Require >=25% of the contemporaneous exclusive
-CPU-per-success gap for a material mechanism, with 5% observer confirmation and
-off-CPU wait separate. Current sync handlers share one psycopg connection; trace
-their worker/GIL/connection lock boundary. No fixture or kernel policy change.
-Exclusive 50k confirmation remains deferred by unrelated hot Niceforge work.
+W2 separate on-CPU mode now passes native fixed-period pilot
+`w2-cpu-20261116T082957-1e4f`: exact 5k off/on operations per engine, all five API
+threads sampled, 93/55 samples, raw/decoded counts agree, no loss/throttle records
+or cleanup errors. Adaptive-frequency feasibility `082819-3763` stays separate.
+SIGTERM `083059-fc2b` preserves -15 and clean owned teardown. Native stacks include
+unresolved frames; worker samples are sparse. No overhead or causal-cost verdict.
+Commands and limitations: `bench/native/diagnostics/w2-counters.md`. Raw plan SHA
+f325adb9220a5f9dac011e71f53c1874f36669586b51f5ce7f630eb2cb99fe07.
+Next W2 action: independent tool review, then predeclared exclusive interleaved
+50k off/on controls. Estimate cost/op only from that profile's own CPU/sample
+records; require >=25% of the contemporaneous CPU-per-success gap for a material
+mechanism and <=5% CPU/wall observer overhead. Keep off-CPU wait separate. Current
+sync handlers share one psycopg connection; trace worker/GIL/connection locks.
+No runtime/fixture/kernel policy change. Recheck actual host load before timing;
+previous Niceforge contamination does not establish current exclusivity.
 
 Durable supervisor 4a4ad92 is integrated after worker 48734034, parent fixes and
 independent review 527b2395. Eight real child lifecycle/ownership cases pass;
@@ -139,7 +146,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. W2 low-rate on-CPU application profile and observer controls above.
+1. W2 on-CPU tool review, larger application profile and observer controls above.
    Representative fixture upgrades no longer block this investigation.
 2. W11: integrate persistent mixed cycles with finite work/cleanup deadlines and
    frozen-readiness guard using the accepted supervisor. No 12h launch yet.

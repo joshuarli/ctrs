@@ -15,6 +15,7 @@ import counter_specs
 import diagnostic_signals
 import ownership
 import perf_counts
+import cpu_profile
 import runner
 import sched_trace
 from resource_pilot import host_snapshot
@@ -41,7 +42,7 @@ def frame(proc, event):
     return result
 
 
-def trial(engine, refs, archive, root, mode, operations, run):
+def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters'):
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -55,7 +56,8 @@ def trial(engine, refs, archive, root, mode, operations, run):
                          env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
     api = None
     phase = profiler = profiler_log = phase_log = None
-    result = {'fixture_version': counter_specs.VERSION, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': []}
+    version = cpu_profile.VERSION if profile_kind == 'cpu' else counter_specs.VERSION
+    result = {'fixture_version': version, 'profile_kind': profile_kind, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': []}
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -110,15 +112,21 @@ def trial(engine, refs, archive, root, mode, operations, run):
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
         if mode == 'on':
-            helper('probes')
-            args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
-                    '--delay=-1', '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/stat.json']
-            spec = counter_specs.selectors(tag)
-            save(directory / 'selectors.json', spec)
-            for selector in spec:
-                args += ['-e', selector['event']]
-                if selector['filter']:
-                    args += ['--filter', selector['filter']]
+            if profile_kind == 'cpu':
+                args = ['/tmp/np-tools/usr/bin/perf', 'record', '--no-inherit', '-t', ','.join(tasks),
+                        '-e', 'cpu-clock', '-c', str(cpu_profile.PERIOD_NS), '--call-graph', 'dwarf,16384',
+                        '--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
+                        '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/cpu.data']
+            else:
+                helper('probes')
+                args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
+                        '--delay=-1', '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/stat.json']
+                spec = counter_specs.selectors(tag)
+                save(directory / 'selectors.json', spec)
+                for selector in spec:
+                    args += ['-e', selector['event']]
+                    if selector['filter']:
+                        args += ['--filter', selector['filter']]
             profiler_log = (directory / 'profiler.log').open('wb')
             profiler = subprocess.Popen([runner.DOCKER, 'exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
                 'launch', tag, *args], env=engine.env(), stdout=profiler_log, stderr=subprocess.STDOUT)
@@ -154,16 +162,38 @@ def trial(engine, refs, archive, root, mode, operations, run):
             result['profiler_exit'] = code
             if code not in (0, 130):
                 raise RuntimeError('profiler exit failed')
-            engine.sh(['cp', api + ':/tmp/np-count/stat.json', str(directory / 'stat.json')])
-            counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
-            save(directory / 'counts.json', counts)
-            if counts['status'] != 'ok':
-                raise ValueError('event counter coverage invalid: ' + repr(counts['errors']))
-            profile = json.loads(helper('probe-profile').stdout)
-            if profile['status'] != 'ok':
-                raise ValueError('probe miss coverage invalid')
-            result['probe_profile'] = profile
-            result['counts'] = counts
+            if profile_kind == 'cpu':
+                engine.sh(['cp', api + ':/tmp/np-count/cpu.data', str(directory / 'cpu.data')])
+                script = engine.sh(['exec', '--privileged', api, 'env', 'LD_LIBRARY_PATH=/tmp/np-tools/lib/aarch64-linux-gnu',
+                    '/tmp/np-tools/usr/bin/perf', 'script', '--ns', '--show-lost-events',
+                    '-F', 'comm,pid,tid,cpu,time,event,ip,sym,dso', '-i', '/tmp/np-count/cpu.data'], timeout=60)
+                (directory / 'cpu.txt').write_text(script.stdout)
+                (directory / 'cpu-script.stderr').write_text(script.stderr)
+                raw = engine.sh(['exec', '--privileged', api, 'env', 'LD_LIBRARY_PATH=/tmp/np-tools/lib/aarch64-linux-gnu',
+                    '/tmp/np-tools/usr/bin/perf', 'script', '-D', '-i', '/tmp/np-count/cpu.data'], timeout=60)
+                (directory / 'cpu-raw-events.txt').write_text(raw.stdout)
+                (directory / 'cpu-raw-events.stderr').write_text(raw.stderr)
+                if not raw.stdout:
+                    raise ValueError('missing raw CPU event audit')
+                profiler_log.flush()
+                profile = cpu_profile.analyze(script.stdout, tag=tag, tasks_before=before['tasks'], tasks_after=after['tasks'],
+                    application_cpu=delta, successful_operations=operations,
+                    diagnostics=(directory / 'profiler.log').read_text() + script.stderr + raw.stderr, raw_events=raw.stdout)
+                save(directory / 'cpu-profile.json', profile)
+                if profile['status'] != 'ok':
+                    raise ValueError('CPU profile coverage invalid: ' + repr(profile['errors']))
+                result['cpu_profile'] = profile
+            else:
+                engine.sh(['cp', api + ':/tmp/np-count/stat.json', str(directory / 'stat.json')])
+                counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
+                save(directory / 'counts.json', counts)
+                if counts['status'] != 'ok':
+                    raise ValueError('event counter coverage invalid: ' + repr(counts['errors']))
+                profile = json.loads(helper('probe-profile').stdout)
+                if profile['status'] != 'ok':
+                    raise ValueError('probe miss coverage invalid')
+                result['probe_profile'] = profile
+                result['counts'] = counts
         db = compose(['ps', '-q', 'db']).stdout.strip()
         rows = json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c',
             'SELECT json_agg(json_build_array(name,payload)) FROM items']).stdout)
@@ -191,7 +221,7 @@ def trial(engine, refs, archive, root, mode, operations, run):
                 if proc is not None and proc.poll() is None:
                     proc.kill(); proc.wait(timeout=5)
         try:
-            if api and mode == 'on':
+            if api and mode == 'on' and profile_kind == 'counters':
                 helper('cleanup')
         except Exception as exc:
             result['cleanup_errors'].append('probes: ' + repr(exc))
@@ -217,6 +247,7 @@ def main():
     parser.add_argument('--ctrs-binary', type=Path, required=True)
     parser.add_argument('--operations', type=int, default=5000)
     parser.add_argument('--engines', default='ctrs,orbstack')
+    parser.add_argument('--profile-kind', choices=('counters', 'cpu'), default='counters')
     args = parser.parse_args()
     engines = args.engines.split(',')
     if not 1 <= args.operations <= 100000 or len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
@@ -233,19 +264,22 @@ def main():
             parser.error('service reference differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
-    run = 'w2-count-' + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
+    run = ('w2-cpu-' if args.profile_kind == 'cpu' else 'w2-count-') + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
-    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
+    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    save(root / 'plan.json', {'fixture_version': counter_specs.VERSION, 'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
+    save(root / 'plan.json', {'fixture_version': cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION,
+        'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind == 'cpu' else None,
+        'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'functional counter pilot; foreign host load and unfrozen candidate',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted',
         'ctrs_requested_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_requested_memory_mib': os.environ.get('CTRS_MEMORY_MIB'),
         'observer_confirmation_budget': {'application_cpu_relative': .05, 'workload_wall_relative': .05,
             'required': 'exclusive host; interleaved confirmations; CPU difference above counter quantization'},
-        'scope': 'matched stock ARM64 syscall-entry kprobes on both engines; per-API-thread attachment; no sampled trace buffer/loss; missing counts invalidate'})
+        'scope': 'separate per-API-thread cpu-clock sampling with native DWARF stacks; no syscall probes; zero loss required' if args.profile_kind == 'cpu' else
+                 'matched stock ARM64 syscall-entry kprobes on both engines; per-API-thread attachment; no sampled trace buffer/loss; missing counts invalidate'})
     print('RESULTS', root, flush=True)
     for name in engines:
         directory = root / name; directory.mkdir()
@@ -253,7 +287,7 @@ def main():
         host_snapshot(directory, 'before')
         try:
             engine.ensure_up()
-            records = [trial(engine, refs, archive, directory, mode, args.operations, run) for mode in ('off', 'on')]
+            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind) for mode in ('off', 'on')]
             save(directory / 'observer-raw-control.json', {'off': records[0], 'on': records[1], 'overhead_verdict': 'inconclusive',
                 'reason': 'short engine-block order and host exclusivity not certified; raw records only, no median-ratio correction'})
         finally:

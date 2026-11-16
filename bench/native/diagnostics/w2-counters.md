@@ -109,3 +109,27 @@ Counter callbacks can perturb scheduling. A profiler-on trial with a larger CPU
 budget or more futex calls cannot be treated as ordinary product performance.
 Validate overhead and use a separate low-rate on-CPU profile before attributing
 the frequency difference to a material share of the real CPU deficit.
+
+## Sample on-CPU work separately
+
+Add `--profile-kind cpu` to the bounded command above. This uses `cpu-clock`
+with a fixed 20,408,163ns CPU period (nominal 49Hz), native DWARF stacks and
+explicit API TIDs without inheritance. It installs no syscall probes. The same
+live enable/disable boundaries, profiler-off control, pinned inputs, exact data
+verification and owned cleanup apply. `cpu.data`, decoded `cpu.txt`, raw event
+dump and stderr remain in each on trial. Loss/throttle records, raw/decoded
+sample-count disagreement, unexpected tasks and changed identities invalidate
+analysis. `cpu_profile.py` retains unresolved frames and unsampled threads.
+
+Per-thread leaf-cost estimates use only that profile's thread CPU and sample
+fractions divided by its successful operations. Inclusive stacks overlap and
+cannot be summed. These are native stacks, not Python source stacks; tick
+quantization and sparse samples limit attribution. The 5k functional pilot
+`w2-cpu-20261116T082957-1e4f` passes both engines, with 93/55 samples and no raw
+loss/throttle records. Every thread is sampled, but some have only two samples.
+Adaptive-frequency feasibility run `082819-3763` is kept separately; do not pool.
+SIGTERM `083059-fc2b` preserves coordinator exit -15 and clean owned teardown.
+Neither pilot establishes observer overhead or a material mechanism. Before
+selecting a change, require exclusive interleaved 50k controls within the 5%
+CPU/wall observer budget and own-sample attribution of at least 25% of the
+contemporaneous CPU-per-success gap. Off-CPU waits remain a separate measurement.
