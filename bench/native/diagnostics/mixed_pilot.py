@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--drain-deadline-epoch', type=float)
     parser.add_argument('--cleanup-deadline-epoch', type=float)
     parser.add_argument('--expected-boot-assets', type=json.loads)
+    parser.add_argument('--ctrs-root', type=Path)
     parser.add_argument('--qualification', action='store_true')
     parser.add_argument('--engines', default='ctrs,orbstack')
     args = parser.parse_args()
@@ -37,6 +38,8 @@ def main():
             parser.error('duration requires future work and later drain deadlines')
         if ',' in args.engines:
             parser.error('duration requires exactly one engine')
+        if args.engines == 'ctrs' and args.ctrs_root is None:
+            parser.error('ctrs duration requires a new isolated root')
         work_deadline = time.monotonic() + args.work_deadline_epoch - time.time()
         drain_deadline = time.monotonic() + args.drain_deadline_epoch - time.time()
         cleanup_deadline = time.monotonic() + args.cleanup_deadline_epoch - time.time()
@@ -92,7 +95,7 @@ def main():
         refs['worker'] = f'127.0.0.1:{server.server_port}/{pin["repository"]}@{pin["manifest"]}'
         mixed_cycle.validate_refs(refs)
         for name in engines:
-            engine = runner.Engine(name, run_id, fresh_dir=root / 'ctrs-engine') if name == 'ctrs' and work_deadline is not None else runner.Engine(name, run_id)
+            engine = runner.Engine(name, run_id, fresh_dir=args.ctrs_root) if name == 'ctrs' and work_deadline is not None else runner.Engine(name, run_id)
             before = root / (name + '-host'); before.mkdir()
             host_snapshot(before, 'before')
             try:
