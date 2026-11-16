@@ -18,6 +18,8 @@ mod sys;
 mod transport;
 mod usage;
 mod volmount;
+#[path = "../../../../guest/ext4.rs"]
+mod ext4;
 
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -28,7 +30,6 @@ use ctrs_proto::{HOST_PORT, Hello, Msg, PROTOCOL};
 
 use sys::{boottime_ns, check, mount};
 
-/// Where images and containers live: the data disk if attached, else tmpfs.
 const DATA: &str = "/var/lib/ctrs";
 
 pub fn main() {
@@ -338,6 +339,7 @@ fn data_dirs() -> io::Result<container::Paths> {
     // noinit_itable: the disk is made with lazy inode tables; zeroing them in
     // the background would only write gigabytes of zeros to the host.
     mount(c"/dev/vda", c"/var/lib/ctrs", c"ext4", libc::MS_NOATIME, Some(c"noinit_itable"))?;
+    grow_data_filesystem()?;
     // The Mac's filesystem over virtiofs, for bind mounts.
     sys::mkdir(c"/mnt", 0o755);
     sys::mkdir(c"/mnt/mac", 0o755);
@@ -370,6 +372,34 @@ fn data_dirs() -> io::Result<container::Paths> {
     // Overlay lower dirs are given relative to the layer store.
     std::env::set_current_dir(&paths.layers)?;
     Ok(paths)
+}
+
+fn grow_data_filesystem() -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let mut disk = File::open("/dev/vda")?;
+    let geometry = ext4::geometry(&mut disk)?;
+    let mut device_bytes = 0u64;
+    // SAFETY: BLKGETSIZE64 writes one u64 through the valid pointer for this open block device.
+    check(unsafe { libc::ioctl(disk.as_raw_fd(), libc::_IOR::<usize>(0x12, 114), &mut device_bytes) } as _, "data disk capacity")?;
+    let blocks = device_bytes / geometry.block_bytes;
+    let target = blocks * geometry.block_bytes;
+    if target < geometry.filesystem_bytes {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "data disk is shorter than its ext4 filesystem"));
+    }
+    if target == geometry.filesystem_bytes {
+        return Ok(());
+    }
+    let root = File::open(DATA)?;
+    // SAFETY: EXT4_IOC_RESIZE_FS takes a pointer to one u64 block count for this mounted filesystem.
+    check(unsafe { libc::ioctl(root.as_raw_fd(), libc::_IOW::<u64>(b'f' as u32, 16), &blocks) } as _, "resize data filesystem")?;
+    // SAFETY: root owns a live descriptor for the data filesystem.
+    check(unsafe { libc::syncfs(root.as_raw_fd()) } as _, "sync resized data filesystem")?;
+    let grown = ext4::geometry(&mut disk)?;
+    if grown.block_bytes != geometry.block_bytes || grown.filesystem_bytes != target {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "resized data filesystem geometry differs from its device"));
+    }
+    eprintln!("ctrs-init: expanded data filesystem from {} to {target} bytes", geometry.filesystem_bytes);
+    Ok(())
 }
 
 /// x86-64 Linux binaries through Rosetta, when the Mac shares it: amd64

@@ -20,10 +20,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--candidate-guest-dir', type=Path, required=True)
 parser.add_argument('--baseline-guest-dir', type=Path, default=runner.REPO / 'guest/out')
 parser.add_argument('--proof-binary', type=Path, required=True)
+parser.add_argument('--ctrs-binary', type=Path, default=runner.CTRS_BIN)
 args = parser.parse_args()
 if sys.platform != 'darwin' or os.uname().machine != 'arm64':
     parser.error('requires native ARM64 macOS')
 runner.DOCKER = runner.find_docker()
+runner.CTRS_BIN = args.ctrs_binary.resolve()
 binary = args.proof_binary.resolve()
 with os.fdopen(os.open(binary, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), 'rb') as source:
     before = os.fstat(source.fileno())
@@ -108,8 +110,11 @@ try:
         result = run_proof(engine, directory, 'reject', 'write', 1)
         assert result.returncode != 0, 'invalid data disk accepted a successful write'
         assert '"ok":true' not in result.stdout
-        console = (directory / 'data/vm-console.log').read_text(errors='replace')
-        assert 'mount /var/lib/ctrs' in console and 'keeping images in memory' not in console
+        console_path = directory / 'data/vm-console.log'
+        console = console_path.read_text(errors='replace') if console_path.exists() else ''
+        rejected = console + result.stderr
+        assert ('mount /var/lib/ctrs' in rejected or ('data disk' in rejected and 'ext4' in rejected))
+        assert 'keeping images in memory' not in rejected
         engine.sh(['version'])
     finally:
         engine.stop()

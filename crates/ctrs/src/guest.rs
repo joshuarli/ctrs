@@ -6,11 +6,20 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::AsFd;
+#[cfg(target_os = "macos")]
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use ctrs_proto::{HEADER, Hello, Msg};
 use ctrs_vmm::{Config, Event, Vm};
+
+#[cfg(target_os = "macos")]
+#[path = "../../../guest/disk_capacity.rs"]
+mod disk_capacity;
+#[cfg(target_os = "macos")]
+#[path = "../../../guest/ext4.rs"]
+mod ext4;
 
 #[derive(Debug, Default)]
 pub struct BootOptions {
@@ -223,7 +232,51 @@ fn data_disk(guest_dir: &std::path::Path) -> io::Result<PathBuf> {
         }
         std::fs::rename(tmp, &disk)?;
     }
+    expand_data_disk(&disk, disk_capacity::MINIMUM_BYTES)
+        .map_err(|e| io::Error::new(e.kind(), format!("validate or expand data disk {}: {e}", disk.display())))?;
     Ok(disk)
+}
+
+#[cfg(target_os = "macos")]
+fn expand_data_disk(path: &std::path::Path, minimum_bytes: u64) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new().read(true).write(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() % 512 != 0 || minimum_bytes % 512 != 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "data disk must be a sector-aligned regular file"));
+    }
+    let geometry = ext4::geometry(&mut file)?;
+    if geometry.filesystem_bytes > metadata.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "data disk is shorter than its ext4 filesystem"));
+    }
+    let target = metadata.len().max(minimum_bytes);
+    let grow_filesystem = geometry.filesystem_bytes < target / geometry.block_bytes * geometry.block_bytes;
+    if grow_filesystem {
+        let mut space = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: space is writable; fstatvfs initializes it on success for this valid descriptor.
+        if unsafe { libc::fstatvfs(file.as_raw_fd(), space.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fstatvfs returned success.
+        let space = unsafe { space.assume_init() };
+        let available = (space.f_bavail as u64).checked_mul(space.f_frsize as u64)
+            .filter(|_| space.f_frsize > 0)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "host free space is unavailable"))?;
+        if available < 1 << 30 {
+            return Err(io::Error::new(io::ErrorKind::StorageFull, "at least 1 GiB of free host space is required before expanding the data filesystem"));
+        }
+    }
+    if target > metadata.len() {
+        file.set_len(target)?;
+    }
+    if grow_filesystem {
+        // The larger backing length must survive power loss before guest resize can commit a larger filesystem.
+        // SAFETY: file owns a valid descriptor; F_FULLFSYNC takes no third argument.
+        if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_FULLFSYNC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -279,3 +332,70 @@ fn missing_kernel(kernel: &std::path::Path, exe: Option<&std::path::Path>) -> io
     io::Error::new(io::ErrorKind::NotFound, msg)
 }
 
+
+#[cfg(all(test, target_os = "macos"))]
+mod disk_expansion_tests {
+    use super::*;
+    use std::io::Cursor;
+    use std::os::unix::fs::MetadataExt;
+
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!("ctrs-disk-grow-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    fn disk(path: &std::path::Path, declared_bytes: u64) -> Vec<u8> {
+        let mut bytes = vec![0u8; 16 * 1024];
+        bytes[1024 + 0x38..1024 + 0x3a].copy_from_slice(&0xef53u16.to_le_bytes());
+        bytes[1024 + 4..1024 + 8].copy_from_slice(&((declared_bytes / 4096) as u32).to_le_bytes());
+        bytes[1024 + 0x18..1024 + 0x1c].copy_from_slice(&2u32.to_le_bytes());
+        bytes[4096..4104].copy_from_slice(b"userdata");
+        std::fs::write(path, &bytes).unwrap();
+        bytes
+    }
+    #[test]
+    fn disk_growth_preserves_bytes_inode_and_larger_capacity() {
+        let scratch = Scratch::new();
+        let path = scratch.0.join("data.img");
+        let before = disk(&path, 16 * 1024);
+        let inode = std::fs::metadata(&path).unwrap().ino();
+        expand_data_disk(&path, 32 * 1024).unwrap();
+        let grown = std::fs::read(&path).unwrap();
+        assert_eq!(&grown[..before.len()], before);
+        assert!(grown[before.len()..].iter().all(|b| *b == 0));
+        assert_eq!(grown.len(), 32 * 1024);
+        assert_eq!(std::fs::metadata(&path).unwrap().ino(), inode);
+        assert_eq!(ext4::geometry(&mut Cursor::new(grown)).unwrap().filesystem_bytes, 16 * 1024);
+        expand_data_disk(&path, 8 * 1024).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 32 * 1024);
+    }
+    #[test]
+    fn unknown_or_truncated_media_is_not_extended() {
+        let scratch = Scratch::new();
+        let path = scratch.0.join("data.img");
+        for declared in [32 * 1024, 0] {
+            let mut before = disk(&path, declared);
+            if declared == 0 { before[1024 + 0x38] = 0; std::fs::write(&path, &before).unwrap(); }
+            assert!(expand_data_disk(&path, 64 * 1024).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+        assert!(expand_data_disk(std::path::Path::new("/dev/null"), 64 * 1024).is_err());
+    }
+    #[test]
+    fn disk_growth_does_not_follow_a_symlink() {
+        let scratch = Scratch::new();
+        let path = scratch.0.join("data.img");
+        let before = disk(&path, 16 * 1024);
+        let link = scratch.0.join("link");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(expand_data_disk(&link, 32 * 1024).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+}
