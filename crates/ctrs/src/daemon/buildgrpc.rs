@@ -279,6 +279,12 @@ impl Win {
     fn close(&self, sid: u32) {
         self.m.lock().unwrap_or_else(|e| e.into_inner()).2.remove(&sid);
     }
+
+    /// (conn window, this stream's remaining window, default stream window).
+    fn snapshot(&self, sid: u32) -> (u64, u64, u64) {
+        let w = self.m.lock().unwrap_or_else(|e| e.into_inner());
+        (w.0, w.2.get(&sid).copied().unwrap_or(w.1), w.1)
+    }
 }
 
 /// One side of an h2 hop: the socket (as a File, writable through a
@@ -1156,6 +1162,11 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
     // Open the Control.Session stream (client-initiated stream 1).
     be_ep.frame(F_HEADERS, FL_END_HEADERS, 1, &session_headers(req))?;
 
+    // Cumulative DATA payload bytes we put on stream 1, for flow-window
+    // forensics when buildkitd resets the stream.
+    let sent_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let send_bytes_ctr = sent_bytes.clone();
+
     // Sender: client bytes → BytesMessage → grpc DATA on stream 1.
     let send_ep = be_ep.clone();
     let send_win = be_send.clone();
@@ -1202,6 +1213,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                     crate::diag::debug!("session DATA", len = n2, off = off, msg_len = msg.len());
                     send_ep.frame(F_DATA, 0, 1, &msg[off..off + n2])?;
                     send_win.take(1, n2);
+                    send_bytes_ctr.fetch_add(n2 as u64, Ordering::Relaxed);
                     off += n2;
                 }
             }
@@ -1288,6 +1300,15 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                 } else {
                     u32::MAX
                 };
+                let snap = be_send.snapshot(1);
+                crate::diag::warn!(
+                    "session stream reset",
+                    code = code,
+                    sent = sent_bytes.load(Ordering::Relaxed),
+                    conn_win = snap.0,
+                    stream_win = snap.1,
+                    default_win = snap.2
+                );
                 break Err(io_err(&format!("builder reset the session (code {code})")));
             }
             F_GOAWAY => break Err(io_err("builder sent GOAWAY")),
