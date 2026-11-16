@@ -33,6 +33,8 @@ launchd example: [docs/development.md](docs/development.md) and
 
 ## Help
 
+Run `ctrs --help` for the command overview.
+
 Bug reports and questions: <https://github.com/joshuarli/ctrs/issues>.
 Developer docs are indexed in [AGENTS.md](AGENTS.md).
 
