@@ -1169,7 +1169,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                 return ctx_dir
 
             def build(context: Path, uncached: bool = False,
-                      timeout: float = 1800) -> tuple[float, bool]:
+                      timeout: float = 1800) -> tuple[float, bool, str]:
                 tp = time.monotonic()
                 cp = engine.sh(
                     build_args(engine, driver,
@@ -1178,21 +1178,28 @@ def trial_w7(ctx, engine: Engine, state: str,
                                   str(context / "Dockerfile"),
                                   str(context)]),
                     timeout=timeout, check=False)
-                return round(time.monotonic() - tp, 3), cp.returncode == 0
+                err = (cp.stderr or cp.stdout or "").strip()[-400:]
+                return round(time.monotonic() - tp, 3), cp.returncode == 0, err
 
-            s, ok = build(build_ctx("incremental-0"), uncached=True)
+            s, ok, err = build(build_ctx("incremental-0"), uncached=True)
             rec["metrics"][f"{name}_uncached_s"] = s
             checks[f"{name}_uncached"] = ok
             if not ok:
                 rec["validation_errors"].append(
-                    f"{name} uncached build failed")
+                    f"{name} uncached build failed: {err}")
                 continue
-            s, ok = build(build_ctx("incremental-0"))
+            s, ok, err = build(build_ctx("incremental-0"))
             rec["metrics"][f"{name}_warm_s"] = s
             checks[f"{name}_warm"] = ok
-            s, ok = build(build_ctx("incremental-1"))
+            if not ok:
+                rec["validation_errors"].append(
+                    f"{name} warm build failed: {err}")
+            s, ok, err = build(build_ctx("incremental-1"))
             rec["metrics"][f"{name}_incr_s"] = s
             checks[f"{name}_incr"] = ok
+            if not ok:
+                rec["validation_errors"].append(
+                    f"{name} incr build failed: {err}")
 
             ver = engine.sh(["run", "--rm", tag, *spec["probe"]],
                             timeout=60, check=False)
