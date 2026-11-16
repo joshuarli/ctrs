@@ -2310,3 +2310,16 @@ manual application pinning or VMM replacement is an accepted optimization.
 Unknown/deferred resource or durability cells block qualification, not building
 this bounded candidate. Reject/park if application benefit is neutral or required
 guards fail; no full W1–W10 sweep after this single config experiment.
+
+## SCHED_MC baseline/candidate build admitted
+
+Only CONFIG_SCHED_MC=y differs in `.work/wt/np-sched-mc/guest/kernel/ctrs.config`.
+Original stock HZ/PREEMPT/LSE retained. Durable Docker job np-sched-mc-build,
+a42e49d9c721d47ddb18341acef6fd47fc9c17ef851e211d635e31578dc032bc,
+2026-11-16T07:17:11Z +900s fixed timeout. It installs compiler tools once, cleans
+baseline objects, builds baseline then candidate in the same container, verifies
+compiler hash unchanged and writes both output hashes and exit status. The copied
+build procedure removes only repeated apt installation; original source remains
+untouched. Existing ctrs-kbuild cache was verified unused by any other container.
+All output is isolated under the worktree's .work/kernel-mc; live guest/out and
+host binary are untouched. No application benefit/acceptance claim until measured.
