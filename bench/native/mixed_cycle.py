@@ -6,6 +6,9 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import signal
+import sys
+import subprocess
 import threading
 import time
 from urllib.parse import urlsplit
@@ -76,10 +79,26 @@ def load_cycle(base, cycle, directory):
     return writes
 
 
-def run(engine, ctx, refs, cycles):
+def bounded_load_cycle(base, cycle, directory, drain_deadline):
+    """Keep an unresponsive HTTP peer from retaining load threads past drain."""
+    remaining = min(75, drain_deadline - time.monotonic())
+    if remaining <= 0:
+        raise TimeoutError('mixed load drain deadline expired')
+    program = ("import sys;from pathlib import Path;"
+               "sys.path.insert(0,sys.argv[1]);import mixed_cycle;"
+               "mixed_cycle.load_cycle(sys.argv[2],int(sys.argv[3]),Path(sys.argv[4]))")
+    subprocess.run([sys.executable, '-c', program, str(Path(__file__).resolve().parent),
+                    base, str(cycle), str(directory)], timeout=remaining, check=True)
+    return json.loads((directory / 'acknowledged-writes.json').read_text())
+
+
+def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None):
     validate_refs(refs)
-    if type(cycles) is not int or not 1 <= cycles <= 3:
-        raise ValueError('short mixed pilot requires 1..3 cycles')
+    if work_deadline is None:
+        if type(cycles) is not int or not 1 <= cycles <= 3:
+            raise ValueError('short mixed pilot requires 1..3 cycles')
+    elif cycles is not None or drain_deadline is None or drain_deadline <= work_deadline:
+        raise ValueError('duration mode requires separate work and drain deadlines')
     directory = ctx.results_dir / engine.name
     directory.mkdir()
     rec = ctx.new_record(engine, 'W11', 'mixed-v2', directory)
@@ -100,6 +119,21 @@ def run(engine, ctx, refs, cycles):
             'SELECT json_agg(json_build_array(name,payload)) FROM items'], timeout=30).stdout)
     sampler = trace = None
     cumulative = []
+    original_sh = engine.sh
+    old_alarm = None
+    command_deadline = [drain_deadline]
+    if work_deadline is not None:
+        old_alarm = signal.getsignal(signal.SIGALRM)
+        def expire(signum, frame):
+            raise TimeoutError('mixed work drain deadline expired')
+        signal.signal(signal.SIGALRM, expire)
+        signal.setitimer(signal.ITIMER_REAL, max(.001, drain_deadline - time.monotonic()))
+        def bounded_sh(args, env_extra=None, timeout=120, check=True):
+            remaining = command_deadline[0] - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('mixed command deadline expired')
+            return original_sh(args, env_extra=env_extra, timeout=min(timeout, remaining), check=check)
+        engine.sh = bounded_sh
     try:
         engine.ensure_up()
         engine.sh(['run', '--rm', '--pull=never', '--name', warmup, '--label', 'dev.ctrs.campaign.run=' + warmup,
@@ -132,7 +166,8 @@ def run(engine, ctx, refs, cycles):
             status, _ = runner.http_json_write(base + '/records', {'key': 'mixed-committed', 'value': 'exact-v2'})
             if status != 200 or not runner.exact_w2_items(rows(ids['db']), []):
                 raise ValueError('initial exact database state failed')
-        for cycle in range(cycles):
+        cycle = 0
+        while cycle < cycles if work_deadline is None else time.monotonic() < work_deadline:
             cycle_dir = directory / f'cycle-{cycle}'
             cycle_dir.mkdir()
             cycle_ctx = runner.RunContext(ctx.run_id + f'-c{cycle}')
@@ -160,13 +195,14 @@ def run(engine, ctx, refs, cycles):
             try:
                 with runner.resource_phase(engine, rec, f'cycle_{cycle}_mixed_work'):
                     futures = {
-                        'api': pool.submit(timed, 'api', lambda: load_cycle(base, cycle, cycle_dir)),
+                        'api': pool.submit(timed, 'api', lambda: load_cycle(base, cycle, cycle_dir) if drain_deadline is None else bounded_load_cycle(base, cycle, cycle_dir, drain_deadline)),
                         'queue': pool.submit(timed, 'queue', queue_work),
                         'build': pool.submit(timed, 'build', build_work)}
                     outcomes, failures = {}, []
                     for name, future in futures.items():
                         try:
-                            outcomes[name] = future.result()
+                            timeout = None if drain_deadline is None else max(0, drain_deadline - time.monotonic())
+                            outcomes[name] = future.result(timeout=timeout)
                         except Exception as exc:
                             failures.append(name + ': ' + repr(exc))
                     if failures:
@@ -175,8 +211,14 @@ def run(engine, ctx, refs, cycles):
                     if not queue_result['correctness']['ok'] or len(jobs) != 16:
                         raise RuntimeError('mixed queue/build work failed')
             finally:
+                # Do not interrupt joining owned workers: their commands and HTTP
+                # child are bounded by the drain deadline and must finish first.
+                if drain_deadline is not None:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
                 pool.shutdown(wait=True, cancel_futures=True)
                 save(cycle_dir / 'intervals.json', intervals)
+                if drain_deadline is not None and sys.exc_info()[0] is None:
+                    signal.setitimer(signal.ITIMER_REAL, max(.001, drain_deadline - time.monotonic()))
             cumulative.extend(api_writes)
             with runner.resource_phase(engine, rec, f'cycle_{cycle}_verify'):
                 actual = rows(ids['db'])
@@ -192,15 +234,26 @@ def run(engine, ctx, refs, cycles):
                 save(cycle_dir / 'running-engine.json', after)
                 if after != identity:
                     raise ValueError('engine identity changed during mixed cycles')
+            current_ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ('api', 'db', 'cache')}
+            if current_ids != ids:
+                raise ValueError('persistent service identities changed')
             rec['cycles'].append({'cycle': cycle, 'successful_operations': OPERATIONS,
                 'acknowledged_writes': len(api_writes), 'cumulative_writes': len(cumulative),
-                'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': len(jobs), 'exact_state': True})
+                'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
+            cycle += 1
+        if not rec['cycles']:
+            raise RuntimeError('work deadline expired before a complete cycle')
         rec['correctness']['ok'] = True
     except BaseException as exc:
         rec['correctness']['ok'] = False
         rec['validation_errors'].append(repr(exc))
         raise
     finally:
+        primary_failure = sys.exc_info()[1]
+        if work_deadline is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_alarm)
+            engine.sh = original_sh
         try:
             with runner.resource_phase(engine, rec, 'cleanup') if sampler is not None else nullcontext():
                 compose(['down', '-v', '--remove-orphans'])
@@ -212,7 +265,8 @@ def run(engine, ctx, refs, cycles):
         except BaseException as exc:
             rec['correctness']['ok'] = False
             rec['validation_errors'].append('cleanup: ' + repr(exc))
-            raise
+            if primary_failure is None:
+                raise
         finally:
             if sampler is not None:
                 runner.stop_sampler(sampler)

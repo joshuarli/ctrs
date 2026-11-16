@@ -21,9 +21,27 @@ def main():
     parser.add_argument('--portfolio-layout', type=Path, required=True)
     parser.add_argument('--worker-layout', type=Path, required=True)
     parser.add_argument('--ctrs-binary', type=Path, required=True)
-    parser.add_argument('--cycles', type=int, choices=(1, 2, 3), default=2)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--cycles', type=int, choices=(1, 2, 3))
+    modes.add_argument('--work-deadline-epoch', type=float)
+    parser.add_argument('--drain-deadline-epoch', type=float)
+    parser.add_argument('--qualification', action='store_true')
     parser.add_argument('--engines', default='ctrs,orbstack')
     args = parser.parse_args()
+    if args.qualification:
+        parser.error('qualification refused: frozen candidate, assets, workload, final matrix and readiness evidence schema/proof are missing; 12-hour qualification is not authorized')
+    if args.work_deadline_epoch is not None:
+        if args.drain_deadline_epoch is None or not time.time() < args.work_deadline_epoch < args.drain_deadline_epoch:
+            parser.error('duration requires future work and later drain deadlines')
+        if ',' in args.engines:
+            parser.error('duration requires exactly one engine')
+        work_deadline = time.monotonic() + args.work_deadline_epoch - time.time()
+        drain_deadline = time.monotonic() + args.drain_deadline_epoch - time.time()
+    else:
+        if args.drain_deadline_epoch is not None:
+            parser.error('drain deadline requires duration mode')
+        args.cycles = args.cycles or 2
+        work_deadline = drain_deadline = None
     engines = args.engines.split(',')
     if len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
         parser.error('require distinct supported engines')
@@ -57,6 +75,7 @@ def main():
         target = sources / f'{index}-{path.name}'; target.write_bytes(path.read_bytes())
         hashes[target.name] = runner.sha256_file(target)
     mixed_cycle.save(root / 'plan.json', {'fixture_version': mixed_cycle.VERSION, 'cycles': args.cycles,
+        'work_deadline_epoch': args.work_deadline_epoch, 'drain_deadline_epoch': args.drain_deadline_epoch,
         'operations_per_cycle': mixed_cycle.OPERATIONS, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'short functional diagnostic; no frozen candidate, exclusivity or growth verdict',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted', 'manifests': portfolio.manifests,
@@ -81,7 +100,7 @@ def main():
                     if cp.returncode:
                         raise RuntimeError('pinned image preparation failed: ' + image)
                 mixed_cycle.save(before / 'refs.json', refs)
-                rec = mixed_cycle.run(engine, ctx, refs, args.cycles)
+                rec = mixed_cycle.run(engine, ctx, refs, args.cycles, work_deadline=work_deadline, drain_deadline=drain_deadline)
                 ctx.write(rec)
                 print(name, 'exact mixed cycles', len(rec['cycles']), flush=True)
             finally:
