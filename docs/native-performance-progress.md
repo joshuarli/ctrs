@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main d3e4384 plus
+No new product performance win is qualified. Current source main 4a4ad92 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -115,27 +115,35 @@ off-CPU wait separate. Current sync handlers share one psycopg connection; trace
 their worker/GIL/connection lock boundary. No fixture or kernel policy change.
 Exclusive 50k confirmation remains deferred by unrelated hot Niceforge work.
 
-Independent source lane: durable finite job supervisor, worker
-usrw_48734034-7dd2-4df7-aae6-2a6a83bc4df9 in `.work/wt/np-durable-job`,
-base d3e4384, watch exec23369. Owns durable_job.py/test and durable-job.md only.
-No engine/12h job; bounded disposable child tests. Do not duplicate or edit it.
+Durable supervisor 4a4ad92 is integrated after worker 48734034, parent fixes and
+independent review 527b2395. Eight real child lifecycle/ownership cases pass;
+all 142 harness tests pass. Source/review trees retained, both lanes terminal.
+Command: `bench/native/diagnostics/durable-job.md`. No engine/12h job launched.
+Next W11 source work is persistent mixed-cycle deadline integration plus frozen-
+readiness guard; do not substitute repeated fresh short pilots for the 12h leg.
 
-Storage candidate `.work/wt/np-full-sync` changes only VZ Cached+Fsync→Cached+Full,
-base d3e4384. Private signed host `.work/tmp/full-sync-target/release/ctrs` SHA
-12d48b6a0b9b63a2411934e22de60b209fac6a8d64fb7128ee750e481d4f0860;
-6,613,856 bytes, equal to baseline. No main/runtime policy change. Next storage
-action: owned guest block-flush observation and committed-prefix/named-volume
-survival across an owned VM interruption, then paired W3/W2/resource validation
-in an exclusive window. SDK contract is stronger; host power-loss remains untested.
+Storage candidate f536b6e in `.work/wt/np-full-sync` changes VZ Cached+Fsync→Full.
+Signed host `.work/tmp/full-sync-target/release/ctrs` SHA
+12d48b6a0b9b63a2411934e22de60b209fac6a8d64fb7128ee750e481d4f0860,
+6,613,856 bytes, equal baseline size. Main/runtime default remains Fsync.
+`sync-proof-ed045113` passes both modes in NEW owned roots: 100 observed guest
+flush requests/100 exact acknowledged records, daemon Popen SIGKILL, helper disk
+closure, PG WAL recovery, unchanged volume metadata and no cleanup errors.
+No host power-loss claim. Actual allocation is recorded; reclaim/growth unqualified.
+Source/plan/raw results: `.work/tmp/sync-proof-ed045113/`; driver
+`.work/tmp/full-flush-pilot.py`. Do not repeat orderly restart as durability proof.
+Next storage task: owned allocation/reclaim and full-disk recovery, then paired
+W3/W2/resource confirmation of Full in an exclusive window. Keep host metadata
+sync_all separate from the guest data-disk contract; OrbStack policy is unknown.
 No measured Mac job is active.
 
 ## Ready queue
 
 1. W2 low-rate on-CPU application profile and observer controls above.
    Representative fixture upgrades no longer block this investigation.
-2. W2: low-overhead tagged wake/futex/network syscall counts with profiler-on/off
-   controls, then aligned 50k application profiling in a genuinely exclusive host
-   window. Existing scheduler command:
+2. W11: integrate persistent mixed cycles with finite work/cleanup deadlines and
+   frozen-readiness guard using the accepted supervisor. No 12h launch yet.
+   Existing W2 scheduler diagnostic remains available:
    `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/scheduler_pilot.py --tools-archive .work/tmp/w2-profile/native-tools.tar.gz`.
    Last proof 015213; input fingerprints 014544 match. No kernel/backend candidate
    from short instrumented counts. Boundary plan `.work/tmp/w2-scheduler-trace-plan.md`.
@@ -154,8 +162,8 @@ No measured Mac job is active.
    Prior confirmation 010356 has a preserved host EADDRNOTAVAIL failure and invalid
    timing; no retry-to-green, no omitted failed pair. New short v2 proof alone does
    not establish every stress condition fixed.
-7. Implement durable finite W11 supervision before qualification. Resolve known
-   correctness failures; freeze candidate and per-cell matrix.
+7. Resolve known correctness failures; freeze candidate and complete the per-cell
+   matrix before qualification.
    Then affected confirmations, full paired qualification, independent batch,
    fresh held-out app and durable finite 12h W11 per engine.
 

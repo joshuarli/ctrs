@@ -3069,3 +3069,65 @@ engine optimization. Next low-rate CPU profile must quantify extra futex/wake/
 locking CPU per successful request from its own phase records. A useful mechanism
 should account for >=25% of the contemporaneous exclusive CPU-per-success gap,
 with off-CPU wait kept separate. Detailed counts alone do not establish that cost.
+
+## Durable finite supervisor, reviewed and integrated
+
+Worker 48734034 returned the isolated supervisor and six real-subprocess tests.
+Parent reproduced a terminal-writer bug in `durable-review-10524`: a second
+_supervise invocation could publish FileExistsError while the original child ran.
+Parent added an exclusive fsynced claim, duplicate gate test, bounded quiescence/
+wait, native-only identity, fixed wall and monotonic deadlines, immutable self/
+interpreter receipts, original-signal re-raise and a normal-leader/orphan-group test.
+Independent scout review 527b2395 completed, no PID/group/writer defect found, one
+supported cleanup-budget overrun. Parent clamps every process-list call and final
+wait to remaining time, then reruns eight real subprocess cases successfully.
+Final integration 4a4ad92 passes all 142 harness tests. No engine or 12h job launched.
+
+The child remains unreaped while its owned process group is signaled (WNOWAIT),
+avoiding PID reuse. No PID is adopted from JSON. Deadline/signal/actual child exit
+remain separate; incomplete cleanup is explicit. Inputs must stay frozen after
+validation; escaped sessions/groups, forced supervisor death, host power loss
+and filesystem failure remain outside the guarantee. Missing result is indeterminate,
+never retry authorization. docs/diagnostics entry: bench/native/diagnostics/durable-job.md.
+Original worker/review trees and parent finding are retained; no duplicate worker.
+
+## Guest flush dispatch and owned abrupt-daemon recovery
+
+Candidate f536b6e in `.work/wt/np-full-sync` changes only Cached+Fsync to Cached+Full
+plus its contract comment. Signed host SHA
+12d48b6a0b9b63a2411934e22de60b209fac6a8d64fb7128ee750e481d4f0860,
+6,613,856 bytes, equal to baseline size. Guest remains 71934e6d... with stock kernel.
+Default main policy remains Fsync; no measured performance selection is made.
+
+`sync-proof-ed045113` uses two new disposable ctrs roots, one per mode, identical
+pinned portfolio and 2CPU/4GiB budget. PostgreSQL fsync/synchronous_commit/
+full_page_writes are on. Device vda advertises write-back caching. A filtered
+block_rq_issue counter restricted to that owned VM's data device observes exactly
+100 flush requests for 100 serial acknowledged record writes in BOTH modes.
+No shared OrbStack VM is traced or interrupted. CPU snapshots have both required
+processes and no errors; physical signals use sampler v3, not category footprint.
+
+After checking exact records, the coordinator kills its own daemon Popen handle
+(exit -9), waits for the disk-owning helper to close the backing file, then starts
+the same mode. PostgreSQL logs explicitly report an interrupted database and
+WAL recovery. All 100 acknowledged key/value records and named-volume metadata
+survive; no cleanup errors. Redis's unmounted cache is declared volatile, not an
+authoritative volume guarantee. Original source, input hashes, device features,
+filter, raw counters, identities, PG logs and allocation snapshots are retained.
+This is abrupt daemon/guest recovery, NOT host power loss or full-disk testing.
+
+The audited [ext4 fsync path](https://github.com/gregkh/linux/blob/v6.18.58/fs/ext4/fsync.c)
+waits for data/journal and issues a block flush when needed. The pinned
+[virtio-blk driver](https://github.com/gregkh/linux/blob/v6.18.58/drivers/block/virtio_blk.c)
+translates a flush request to VIRTIO_BLK_T_FLUSH. Native counts establish the guest
+boundary; the SDK defines the stronger Full host synchronization contract. They
+do not observe permanent-media behavior or establish OrbStack's unknown policy.
+
+Full active-file allocation is 797,769,728→854,233,088→855,539,712 bytes before
+work/after work/after owned cleanup. These are inclusive shared extents, with
+setup/writeback effects and retained image content, not exclusive installation
+bytes. This pilot establishes no reclaim or bounded-growth win. Build-cache size
+stays unknown. Next: predeclared paired W3/W2 and idle/physical/allocation checks
+in an exclusive window, plus separate owned trim/full-disk work. Host metadata
+sync_all and guest volume flush guarantees remain distinct; no blanket power-loss
+promise or storage-superiority claim is closed by this result.

@@ -243,6 +243,12 @@ saved exit status. Preserve exit codes; never pipe launches through
 a healthy soak just to fill turns. Rerun for a demonstrated failure or
 an explicitly new candidate's qualification.
 
+The [finite native supervisor](../bench/native/diagnostics/durable-job.md) now
+provides at-most-once claiming, frozen input receipts, native process identity,
+fixed deadlines and durable terminal status. The caller must enforce the freeze
+gates and run persistent representative cycles; short subprocess tests do not
+qualify W11. Missing status is indeterminate and never authorizes automatic retry.
+
 While W11 owns the Mac, do review, source/fixture work or implementation
 on noncontending resources without changing the job's binary/assets.
 If nothing independent remains, wait for its completion event/deadline
