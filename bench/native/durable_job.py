@@ -61,19 +61,22 @@ def child_done(pid):
     return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
 
 
-def live_group_members(pgid):
-    groups = subprocess.run(['/bin/ps', '-axo', 'pid=,pgid=,state='], capture_output=True, text=True, check=True, timeout=2)
+def live_group_members(pgid, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('process group check exceeded cleanup deadline')
+    groups = subprocess.run(['/bin/ps', '-axo', 'pid=,pgid=,state='], capture_output=True, text=True, check=True, timeout=min(2, remaining))
     return [int(row[0]) for line in groups.stdout.splitlines()
             if len(row := line.split()) == 3 and int(row[1]) == pgid and not row[2].startswith('Z')]
 
 
-def kill_owned_group(child, sig):
+def kill_owned_group(child, sig, deadline):
     try:
         os.killpg(child.pid, sig)
     except ProcessLookupError:
         pass
     except PermissionError:
-        if not child_done(child.pid) or live_group_members(child.pid):
+        if not child_done(child.pid) or live_group_members(child.pid, deadline):
             raise
 
 
@@ -103,12 +106,12 @@ def supervise(job):
         until = time.monotonic() + 5
         try:
             if terminate:
-                kill_owned_group(child, signal.SIGTERM)
+                kill_owned_group(child, signal.SIGTERM, until)
                 grace = time.monotonic() + .5
                 while not child_done(child.pid) and time.monotonic() < grace:
                     time.sleep(.02)
-            kill_owned_group(child, signal.SIGKILL)
-            while live_group_members(child.pid):
+            kill_owned_group(child, signal.SIGKILL, until)
+            while live_group_members(child.pid, until):
                 if time.monotonic() >= until:
                     raise TimeoutError('owned process group remains live after SIGKILL')
                 time.sleep(.02)
@@ -116,7 +119,8 @@ def supervise(job):
             result['cleanup_complete'] = False
             result['cleanup_errors'].append(f'{type(exc).__name__}: {exc}')
         try:
-            code = child.wait(timeout=max(.01, until - time.monotonic()))
+            remaining = max(0, until - time.monotonic())
+            code = child.wait(timeout=remaining)
             result['exit_code'] = code if code >= 0 else None
             result['exit_signal'] = -code if code < 0 else None
         except Exception as exc:
@@ -217,7 +221,7 @@ def launch(job, deadline, inputs, argv):
             'deadline_monotonic': created_monotonic + max(0, deadline - created_epoch),
             'argv': argv, 'cwd': os.getcwd()}
     atomic_json(job / 'spec.json', spec)
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_supervise', str(job)],
+    subprocess.Popen([supervisor_inputs[0]['path'], supervisor_inputs[1]['path'], '_supervise', str(job)],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True, close_fds=True)
     print(spec['job_id'])
