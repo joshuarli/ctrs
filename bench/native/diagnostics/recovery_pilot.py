@@ -1,9 +1,9 @@
 """Bounded diagnostic restart trace, separate from W10 acceptance scoring."""
 import argparse
-import sys,os,json,time,threading,socket,urllib.request,urllib.error
+import sys,os,json,time,threading,socket,math
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import runner,recovery_trace,collect
+import runner,recovery_trace,collect,recovery_client,diagnostic_signals
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--ctrs-binary',type=Path,required=True)
 parser.add_argument('--engines',default='ctrs,orbstack')
@@ -13,13 +13,15 @@ parser.add_argument('--read-interval',type=float,default=.02)
 args=parser.parse_args()
 engines=args.engines.split(',')
 if not engines or len(set(engines))!=len(engines) or any(e not in ('ctrs','orbstack') for e in engines):parser.error('invalid engines')
-if args.pairs<1 or args.read_concurrency<1 or args.read_interval<0:parser.error('invalid work limits')
+if not 1<=args.pairs<=10 or not 1<=args.read_concurrency<=32 or not math.isfinite(args.read_interval) or not 0<=args.read_interval<=1:parser.error('require 1..10 pairs, 1..32 readers and finite interval 0..1s')
+diagnostic_signals.install_cleanup_signals()
 runner.DOCKER=runner.find_docker();runner.CTRS_BIN=args.ctrs_binary.resolve()
 os.environ['CTRS_LOG']='debug'
 run='w10-trace-'+time.strftime('%Y%m%dT%H%M%S');root=runner.RESULTS/run;root.mkdir()
 print('RESULTS',root,flush=True)
 (root/'driver.py').write_bytes(Path(__file__).read_bytes())
-(root/'plan.json').write_text(json.dumps({'kind':'diagnostic; policy identity comes from actual binary hash','read_concurrency':args.read_concurrency,'read_interval_s':args.read_interval,'probe_interval_s':.002,'planned_down_s':.5,'pre_post_s':1,'deadline_s':120,'binary_sha256':runner.sha256_file(runner.CTRS_BIN),'bootstrap_sha256':runner.sha256_file(Path('bench/native/diagnostics/w10_service.py'))},indent=2))
+(root/'recovery_client.py').write_bytes(Path(recovery_client.__file__).read_bytes())
+(root/'plan.json').write_text(json.dumps({'client_version':recovery_client.VERSION,'client_sha256':runner.sha256_file(Path(recovery_client.__file__)),'kind':'diagnostic; policy identity comes from actual binary hash','read_concurrency':args.read_concurrency,'read_interval_s':args.read_interval,'probe_interval_s':.002,'planned_down_s':.5,'pre_post_s':1,'command_timeout_s':120,'recovery_poll_deadline_s':30,'binary_sha256':runner.sha256_file(runner.CTRS_BIN),'bootstrap_sha256':runner.sha256_file(Path('bench/native/diagnostics/w10_service.py'))},indent=2))
 (root/'override.json').write_text(json.dumps({'services':{'api':{'command':['python','-u','/diagnostics/w10_service.py'],'volumes':[str(Path('bench/native/diagnostics/w10_service.py').resolve())+':/diagnostics/w10_service.py:ro']}}}))
 all_results=[]
 for pair in range(1,args.pairs+1):
@@ -27,18 +29,13 @@ for pair in range(1,args.pairs+1):
   e=runner.Engine(ename,run);proj=runner.project_name(run,ename,'W10');d=root/f'{pair:02d}-{ename}';d.mkdir();stop=threading.Event();threads=[];attempts=[];tcp=[];sampler=None;timeline={};logoffset=0;api=None
   port=runner.free_port();base=f'http://127.0.0.1:{port}';env={'NP_API_PORT':str(port),'NP_API_TAG':runner.API_TAG}
   def compose(args):return e.sh(['compose','-f',str(runner.COMPOSE_FILE),'-f',str(root/'override.json'),'-p',proj,*args],env_extra=env,timeout=120)
-  def query(path,kind):
-   begin=time.monotonic_ns();status=None;body=None;error=None;error_errno=None
-   try:
-    with urllib.request.urlopen(base+path,timeout=.2) as response:status=response.status;body=json.load(response)
-   except urllib.error.HTTPError as exc:status=exc.code;error=str(exc)
-   except Exception as exc:
-    error,error_errno=recovery_trace.transport_error(exc)
-   ok=(status==200 and (body=={'ok':True} if kind=='health' else body=={'items':[{'id':i,'name':f'item-{i}'} for i in range(1,26)]}))
-   return dict(kind=kind,started_ns=begin,ended_ns=time.monotonic_ns(),wall_ns=time.time_ns(),status=status,ok=ok,error=error,error_errno=error_errno,body=body if not ok else None)
   def probe(kind):
-   while not stop.is_set():
-    t=time.monotonic();attempts.append(query('/health' if kind=='health' else '/items?limit=25',kind));stop.wait(max(0,(.002 if kind=='health' else args.read_interval)-(time.monotonic()-t)))
+   client=recovery_client.ProbeClient('127.0.0.1',port)
+   try:
+    while not stop.is_set():
+     t=time.monotonic();attempts.append(client.query(kind));stop.wait(max(0,(.002 if kind=='health' else args.read_interval)-(time.monotonic()-t)))
+   finally:
+    client.close()
   def tcp_probe():
    while not stop.is_set():
     a=time.monotonic_ns();error=None;error_errno=None
@@ -110,7 +107,7 @@ for pair in range(1,args.pairs+1):
    (d/'request-validation.json').write_text(json.dumps(failures,indent=2))
    assert failures['host_client_valid'],'host address allocation failed; measurement invalid'
    assert not failures['unexpected_errors'],f"unexpected request errors: {len(failures['unexpected_errors'])}; see request-validation.json"
-   result=dict(engine=ename,correctness=True,timeline=timeline,intervals=recovery_trace.recovery_intervals(timeline),clock_before=recovery_trace.clock_bracket(clock),clock_after=recovery_trace.clock_bracket(guest_after),expected_outage_errors=len(failures['expected_outage_errors']),unexpected_errors=len(failures['unexpected_errors']),read_successes=sum(a['ok'] and a['kind']=='read' for a in attempts),tcp_note='host accept only; not guest readiness')
+   result=dict(engine=ename,measurement_valid=False,measurement_errors=['diagnostic; frozen inputs and exclusivity not certified'],client_version=recovery_client.VERSION,connect_attempts=sum(a['connect_attempts'] for a in attempts),connections_opened=sum(a['connections_opened'] for a in attempts),reused_socket_attempts=sum(a['reused_socket'] for a in attempts),correctness=True,timeline=timeline,intervals=recovery_trace.recovery_intervals(timeline),clock_before=recovery_trace.clock_bracket(clock),clock_after=recovery_trace.clock_bracket(guest_after),expected_outage_errors=len(failures['expected_outage_errors']),unexpected_errors=len(failures['unexpected_errors']),read_successes=sum(a['ok'] and a['kind']=='read' for a in attempts),tcp_note='host accept only; not guest readiness')
    (d/'result.json').write_text(json.dumps(result,indent=2));all_results.append(result);print(json.dumps(result),flush=True)
   finally:
    stop.set()

@@ -2678,3 +2678,30 @@ uses the same work count for warmup and main cycles, rather than next-use count.
 All 110 harness regressions pass, including missing-large-VM short phases,
 unknown coverage propagation, insufficient cycles and unknown cache accounting.
 No qualification or product performance claim follows from these pilots.
+
+## W10 v2 bounded persistent client
+
+The prior fresh-socket stress failure remains invalid and preserved; source-port
+exhaustion was a hypothesis without contemporaneous socket proof. v2 tests that
+measurement mechanism without changing the product: one persistent HTTP connection
+per worker, 200ms timeout, one visible request per call, no implicit retry, close on
+error and reconnect only on the next scheduled attempt. Worker counts/pairs are
+bounded, nonfinite pacing rejected, and cleanup shares the tested signal policy.
+Native errno and connect/open/reuse counts are recorded with every request.
+
+`w10-trace-20261116T041907`, baseline 250ms binary SHA 56c3a6cbb8f66009196d1dcea2f525b9d38973b80a3e934c4e7c03c0fe213862:
+both engines preserve all three exact committed DB/cache values and seeded read
+payloads. No unexpected or EADDRNOTAVAIL errors. ctrs 1095 successful requests,
+1085 reused-socket successes; Orb 1136/1126. Each engine opens just ten successful
+HTTP connections for successful requests: five before restart and five afterward.
+Additional connect/open attempts during the expected outage are retained (404/411
+failed requests), not hidden by retries. All aligned native CPU phases complete.
+
+Timing is invalid: pre-run diagnostics show unrelated Niceforge PID 44556 at 187.9%
+and fz work; no foreign process stopped. Original collected results and explicit
+invalid annotations retained. These are protocol/correctness observations only,
+not a TTL win or proof that the old host failure is resolved under every load.
+The 250ms default and parked 50ms candidate remain unchanged. Real loopback tests
+prove reuse, visible broken-connection failure, next-call reconnect, exact-body
+rejection and native host-address errno without retry. Full harness 112 tests pass.
+See `diagnostics/recovery-client.md`; never pool v1/v2 traces.

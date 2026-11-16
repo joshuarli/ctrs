@@ -105,13 +105,22 @@ Command: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/resource_pil
 Do not compare aged absolute disk sizes or call shared extents exclusive.
 The two completed mount-guard worktrees were retired; variants/review preserved.
 
-Next executable source task while timing is unavailable: version the W10
-client protocol with bounded persistent HTTP connections, preserving every
-failed request without implicit retry. Existing fresh-connection stress failure
-remains invalid; do not pool versions. Verify healthy connection reuse and
-restart recovery/data checks on both engines before another TTL comparison.
-Then continue W2 low-overhead on/off profiling, W8 portfolio, and persistent-disk
-flush-path/Full synchronization/disposable expansion audit.
+W10 client v2 is implemented and baseline-verified on both engines in
+`w10-trace-20261116T041907`. Per-worker persistent HTTP, no hidden retry,
+200ms timeout, bounded workers/pairs, connect/open/reuse counts and native errno.
+Exact committed DB/cache state survives; no unexpected or host-address errors.
+Each engine has ten successful-request connection opens across restart; other
+successful requests reuse sockets. Outage failures remain visible. Timings still
+invalid due unrelated Niceforge/fz jobs. All 112 regressions pass. Product TTL 250ms
+unchanged, 50ms candidate still parked. Read diagnostics/recovery-client.md before
+future trials; do not pool old fresh-connection and v2 records.
+
+Next executable source task while timing is unavailable: finish W8 common
+portfolio production/state/healthy-deployment proof in the existing np-w8-v2
+worktree. Inspect its retained file-backed registry slice before integrating.
+No duplicate worker. Coordinator owns any runtime preparation. W2 low-overhead
+on/off profiling and resource confirmation need an exclusive host window; source
+flush-path/Full synchronization and disposable expansion audit remain ready.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session
