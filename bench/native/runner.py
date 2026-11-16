@@ -54,9 +54,14 @@ ORBSTACK_SOCK = os.environ.get(
     "NP_ORBSTACK_SOCK", os.path.expanduser("~/.orbstack/run/docker.sock")
 )
 
+# Attribution: on this host the ctrs guest VM is the
+# com.apple.Virtualization.VirtualMachine XPC service; OrbStack's VM
+# lives inside "OrbStack Helper". The bare `virtualization` token was
+# removed from the orbstack pattern — it used to double-count the
+# ctrs VM into orbstack trials (both engines' VMs stay warm).
 MATCH_PATTERNS = {
-    "ctrs": r"(^|/)ctrs$|ctrs-init|virtualization",
-    "orbstack": r"orbstack|orb-|virtualization",
+    "ctrs": r"(^|/)ctrs$|ctrs-init|com\.apple\.Virtualization\.VirtualMachine",
+    "orbstack": r"orbstack|orb-",
 }
 
 SERVICE_IMAGES = ["postgres:17-alpine", "redis:7-alpine", "python:3.13-slim",
@@ -573,9 +578,11 @@ def summarize_trace(trace: Path) -> dict:
         return {"samples": 0}
     peak_rss = 0
     cpu_seconds = 0.0
+    cpu_exact = 0.0
     prev_t = None
     samples = 0
-    pids: dict[int, float] = {}
+    prev_cpu: dict[int, float] = {}
+    used_exact = False
     for line in trace.read_text().splitlines():
         try:
             rec = json.loads(line)
@@ -586,16 +593,26 @@ def summarize_trace(trace: Path) -> dict:
         dt = (t - prev_t) if prev_t is not None else 0.0
         prev_t = t
         total_rss = 0
+        cur_cpu: dict[int, float] = {}
         for p in rec.get("procs", []):
             total_rss += p.get("rss_kb", 0)
             cpu_seconds += p.get("pcpu", 0.0) / 100.0 * dt
+            ct = p.get("cputime_s")
+            if ct is not None:
+                cur_cpu[p.get("pid", -1)] = ct
+                prev = prev_cpu.get(p.get("pid", -1))
+                if prev is not None and ct >= prev:
+                    cpu_exact += ct - prev
+                    used_exact = True
+        prev_cpu = cur_cpu
         peak_rss = max(peak_rss, total_rss)
     return {
         "samples": samples,
         "peak_total_rss_kb": peak_rss,
-        "cpu_seconds_est": round(cpu_seconds, 2),
-        "method": "ps pcpu/rss sum over matched comms; shared pages "
-                  "double-counted, compressed memory not visible",
+        "cpu_seconds_est": round(cpu_exact if used_exact else cpu_seconds, 2),
+        "method": "ps rss sum + cumulative cputime deltas over matched "
+                  "comms (pcpu fallback); shared pages double-counted, "
+                  "compressed memory not visible",
     }
 
 

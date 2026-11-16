@@ -19,6 +19,31 @@ import sys
 import time
 
 
+def parse_cputime(text: str) -> float | None:
+    """ps `time` column ([[dd-]hh:]mm:ss[.cc]) -> cumulative CPU seconds."""
+    try:
+        days = 0.0
+        if "-" in text:
+            d, text = text.split("-", 1)
+            days = float(d) * 86400.0
+        parts = [float(x) for x in text.split(":")]
+        secs = 0.0
+        for p in parts:
+            secs = secs * 60.0 + p
+        # mm:ss or hh:mm:ss or dd-hh:mm:ss — the leftmost field is the
+        # largest unit only when there are 3+ colon fields.
+        if len(parts) == 2:
+            secs = parts[0] * 60.0 + parts[1]
+        elif len(parts) == 3:
+            secs = parts[0] * 3600.0 + parts[1] * 60.0 + parts[2]
+        elif len(parts) == 4:
+            secs = (parts[0] * 86400.0 + parts[1] * 3600.0
+                    + parts[2] * 60.0 + parts[3])
+        return days + secs
+    except (ValueError, IndexError):
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--match", required=True, help="regex on process comm")
@@ -41,22 +66,24 @@ def main():
             t0 = time.time()
             try:
                 ps = subprocess.run(
-                    ["ps", "-axo", "pid=,pcpu=,rss=,comm="],
+                    ["ps", "-axo", "pid=,pcpu=,rss=,time=,comm="],
                     capture_output=True, text=True, timeout=5,
                 )
                 procs = []
                 for line in ps.stdout.splitlines():
-                    parts = line.split(None, 3)
-                    if len(parts) < 4:
+                    parts = line.split(None, 4)
+                    if len(parts) < 5:
                         continue
                     try:
                         pid, pcpu, rss = int(parts[0]), float(parts[1]), int(parts[2])
                     except ValueError:
                         continue
-                    comm = parts[3].strip()
+                    cputime_s = parse_cputime(parts[3])
+                    comm = parts[4].strip()
                     if rx.search(comm):
                         procs.append({"pid": pid, "comm": comm,
-                                      "pcpu": pcpu, "rss_kb": rss})
+                                      "pcpu": pcpu, "rss_kb": rss,
+                                      "cputime_s": cputime_s})
             except Exception as exc:
                 procs = []
                 sample_error = str(exc)
