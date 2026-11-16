@@ -17,6 +17,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+#[path = "../../guest/disk_capacity.rs"]
+mod disk_capacity;
+
 /// Which platform a build is for; `--arch` selects it. One flag, one value;
 /// aliases map to one canonical value; unknown or conflicting flags are
 /// refused before anything runs.
@@ -224,6 +227,10 @@ fn kernel(root: &Path, arch: Arch) -> io::Result<()> {
 /// The same ext4 image serves both architectures.
 fn disk(root: &Path) -> io::Result<()> {
     let out = Arch::Arm64.guest_out(root)?;
+    let script = format!(
+        "set -e; apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs >/dev/null; \
+         rm -f /out/data.img; truncate -s {} /out/data.img; \
+         mkfs.ext4 -q -F -m 0 -L ctrs-data -E lazy_itable_init=1,lazy_journal_init=1 /out/data.img", disk_capacity::MINIMUM_BYTES);
     run(Command::new("docker").args([
         "run",
         "--rm",
@@ -232,9 +239,7 @@ fn disk(root: &Path) -> io::Result<()> {
         "debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
         "sh",
         "-c",
-        "set -e; apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs >/dev/null; \
-         rm -f /out/data.img; truncate -s 1T /out/data.img; \
-         mkfs.ext4 -q -F -m 0 -L ctrs-data -E lazy_itable_init=1,lazy_journal_init=1 /out/data.img",
+        &script,
     ]))?;
     let meta = fs::metadata(out.join("data.img"))?;
     println!("{} ({} GiB sparse)", out.join("data.img").display(), meta.len() >> 30);
