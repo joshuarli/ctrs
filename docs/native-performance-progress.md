@@ -78,27 +78,23 @@ distinct causes found so far:
    warnings. `cargo test -p ctrs` green; diagnostics verified live
    (session rx frame/WINDOW_UPDATE/DATA logs confirmed flowing).
 
-**In flight:** instrumented W6 `--driver default` 20-pair baseline
-to hunt cause 2 — log
-`.work/native-perf/logs/np04-debug-w6x20-20261115T153838.log`
-(detached). Warm daemon runs signed `f3adade` binary with
-`CTRS_LOG=debug` (diagnostic only — final qualification runs must
-re-run with debug off). A clean W7 10-pair baseline just completed
-under the same daemon: `base-20261115T152832-d51c`, 10/10 valid —
-usable as evidence but debug-on timings should be re-confirmed
-clean before final scoring.
+**Final clean baselines in flight (2026-11-16):** W6 20-pair then
+W7 10-pair `--driver default`, debug OFF — log
+`.work/native-perf/logs/np04-final-w6w7-20261115T160823.log`
+(detached, sequential `;`). Warm daemon runs signed `f3adade`.
+Prior same-commit debug-on W6 20-pair `base-20261115T153838-7b71`
+was 20/20 valid with strict wins on both cells (rust 0.892, zlib
+0.491); W7 `base-20261115T133627-c5f9` (commit `c9a5852`, clean)
+was 10/10 valid, 5 strict wins + 1 non-inferior.
 
-**Next executable action:** when the instrumented W6 baseline
-finishes, check `.work/native-perf/engines/ctrs-warm/daemon-manual.log`
-for `builder reset the session (code 3)`, `flow window overdraw`,
-or `builder reset grpc stream` warns and correlate with the failing
-trial's session rx frame sequence (last WINDOW_UPDATE/DATA before
-the RST). If no failure recurs, root-cause stays open — rerun
-baselines periodically until caught or accept the flake rate as a
-known defect to fix before the W11 reliability leg. Then: clean
-(debug-off) W6+W7 `--driver default` baselines for final qualified
-numbers, update `docs/evidence/native-performance.md`, checkpoint
-this file.
+**Next executable action:** when the final log finishes, run
+`python3.14 bench/native/runner.py report --match 'base-20261116*'`
+(and the W6 run id it prints), verify 10+/20+ valid pairs and every
+cell's CI, then record final ratios in `docs/evidence/native-performance.md`
+and checkpoint here. If a session code-3 flake fails a pair, rerun
+that case — the instrumentation stays in the tree to catch it.
+After W6+W7 qualify on the default driver, remaining "exceed" work:
+≥2 strict wins among W1/W2/W5/W8 and the W11 12 h reliability leg.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
