@@ -40,19 +40,27 @@ This is the single queue. Historical results and rejected hypotheses live in
 
 ## Active work and exact next action
 
-W10 refusal-cache instrumentation is reviewed and copied to main, uncommitted.
-Two focused cache tests pass, preserving 250ms TTL/capacity behavior. Isolated
-release build `.work/tmp/w10-target/release/ctrs` succeeded (exec83402 terminal).
-Next: ad-hoc sign with `crates/ctrs/ctrs.entitlements`, boot only the owned warm
-ctrs root with CTRS_LOG=debug, then trace restart begin/return, process/readiness,
-published port, first success and cache/refusal/retry events on both engines.
-Do not replace the live default binary or change cache policy before attribution.
+W10 instrumentation preserves 250ms cache TTL and passed focused Rust tests,
+92 Python tests and real traces. Integrated run `w10-trace-20261116T005215`
+completed two alternating pairs, exact committed data, zero unexpected errors,
+clean gates. First trace shows a ~96ms (+/-13ms) listener-to-published-success
+wait largely accounted for by refusal-cache expiry. No comparison win claimed.
+Source command: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/recovery_pilot.py --ctrs-binary .work/tmp/w10-target/release/ctrs --pairs 2`.
+The isolated signed baseline binary hash is in evidence. Default binary unchanged.
+
+Next: test ONLY a 50ms cache TTL in an isolated candidate tree/binary. Evidence
+predeclares predicted >=25ms or 10% recovery gain, three paced and three stress
+baseline/candidate pairs, exact-data/error and CPU guards, then 30s idle guards.
+Reject weak results. No policy change is selected yet. Preserve negative caching.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session
 usrw_33359635-6dd3-4277-b443-f540defbef7c, watch exec7404. It owns only
 fixtures/w8-v2, registry_portfolio.py and its test. No engine/server/build work.
-Inspect terminal status and source once; parent owns integration/runtime proof.
+Worker is terminal incomplete (watch7404). It delivered only layout validation
+and pull-only server scaffolding with three mocked HTTP tests; portfolio/state/
+health integration remains absent. Review before accepting any narrow sub-slice.
+Parent owns integration and runtime proof. No duplicate worker.
 
 Regression: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s bench/native -p 'test_*.py'`.
 W5 source tree `.work/wt/np-w5` and W4/resource trees retain worker provenance.

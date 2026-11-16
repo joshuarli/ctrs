@@ -940,32 +940,94 @@ impl Deframer {
 /// churn against a dead backend costs the guest agent nothing. Entries are
 /// written only by real guest refusals, so a backend that starts listening
 /// is reached again within `REFUSED_TTL`.
-static REFUSED: Mutex<Option<HashMap<([u8; 4], u16), Instant>>> = Mutex::new(None);
+type RefusalTarget = ([u8; 4], u16);
+
+struct RefusalEntry {
+    since: Instant,
+    hits: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RefusalLookup {
+    Missing,
+    Hit { first: bool },
+    Expired { hits: u64, age: Duration },
+}
+
+static REFUSED: Mutex<Option<HashMap<RefusalTarget, RefusalEntry>>> = Mutex::new(None);
 const REFUSED_TTL: Duration = Duration::from_millis(250);
+const REFUSED_LIMIT: usize = 8192;
+
+fn refusal_lookup(map: &mut HashMap<RefusalTarget, RefusalEntry>, target: RefusalTarget, now: Instant) -> RefusalLookup {
+    let Some(entry) = map.get_mut(&target) else { return RefusalLookup::Missing };
+    let age = now.duration_since(entry.since);
+    if age < REFUSED_TTL {
+        let first = entry.hits == 0;
+        entry.hits = entry.hits.saturating_add(1);
+        RefusalLookup::Hit { first }
+    } else {
+        let hits = entry.hits;
+        map.remove(&target);
+        RefusalLookup::Expired { hits, age }
+    }
+}
+
+fn refusal_insert(map: &mut HashMap<RefusalTarget, RefusalEntry>, target: RefusalTarget, mut now: impl FnMut() -> Instant) -> Vec<(RefusalTarget, u64, Duration)> {
+    let mut expired = Vec::new();
+    if map.len() >= REFUSED_LIMIT {
+        map.retain(|&target, entry| {
+            let age = now().duration_since(entry.since);
+            if age >= REFUSED_TTL {
+                expired.push((target, entry.hits, age));
+                false
+            } else {
+                true
+            }
+        });
+        if map.len() >= REFUSED_LIMIT {
+            map.clear();
+        }
+    }
+    map.insert(target, RefusalEntry { since: now(), hits: 0 });
+    expired
+}
+
+fn log_refusal_expired((ip, port): RefusalTarget, hits: u64, age: Duration) {
+    crate::diag::debug!("guest refusal cache expired", ip = std::net::Ipv4Addr::from(ip), port = port, hits = hits, age_ms = age.as_millis());
+}
 
 fn refused_recent(ip: [u8; 4], port: u16) -> bool {
-    let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(map) = g.as_mut() else { return false };
-    match map.get(&(ip, port)) {
-        Some(t) if t.elapsed() < REFUSED_TTL => true,
-        Some(_) => {
-            map.remove(&(ip, port));
+    let result = {
+        let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(map) = g.as_mut() else { return false };
+        if !map.contains_key(&(ip, port)) { return false }
+        refusal_lookup(map, (ip, port), Instant::now())
+    };
+    match result {
+        RefusalLookup::Hit { first } => {
+            if first {
+                crate::diag::debug!("guest refusal cache first hit", ip = std::net::Ipv4Addr::from(ip), port = port);
+            }
+            true
+        }
+        RefusalLookup::Expired { hits, age } => {
+            log_refusal_expired((ip, port), hits, age);
             false
         }
-        None => false,
+        RefusalLookup::Missing => false,
     }
 }
 
 fn note_refused(ip: [u8; 4], port: u16) {
-    let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    let map = g.get_or_insert_with(HashMap::new);
-    if map.len() >= 8192 {
-        map.retain(|_, t| t.elapsed() < REFUSED_TTL);
-        if map.len() >= 8192 {
-            map.clear();
-        }
+    let expired = {
+        let mut g = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+        let map = g.get_or_insert_with(HashMap::new);
+        refusal_insert(map, (ip, port), Instant::now)
+    };
+    crate::diag::debug!("guest refusal cached", ip = std::net::Ipv4Addr::from(ip), port = port);
+    for (target, hits, age) in expired {
+        log_refusal_expired(target, hits, age);
     }
-    map.insert((ip, port), Instant::now());
 }
 
 /// `copy` from a framed relay, up to its end frame (or the stream's end);
@@ -1201,6 +1263,57 @@ mod tests {
     use super::{MAX_PEER_SESSIONS, MAX_REMOTE_SESSIONS, MAX_TCP_SESSIONS, NAT_PORTS, REMOTE_SESSIONS, TCP_SESSIONS, kernel_forwards, kernel_host_ip, listening, nat_port, relays_too, tcp_permit};
     use std::net::IpAddr;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn refusal_cache_ttl_hits_and_real_refusals() {
+        use super::{refusal_insert, refusal_lookup, RefusalLookup, REFUSED_TTL};
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
+
+        let mut map = HashMap::new();
+        let target = ([10, 0, 0, 1], 8080);
+        let start = Instant::now();
+        assert_eq!(REFUSED_TTL, Duration::from_millis(250));
+        assert_eq!(refusal_lookup(&mut map, target, start), RefusalLookup::Missing);
+        assert!(refusal_insert(&mut map, target, || start).is_empty());
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(100)), RefusalLookup::Hit { first: true });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(249)), RefusalLookup::Hit { first: false });
+        assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Expired { hits: 2, age: REFUSED_TTL });
+        assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Missing);
+        assert!(refusal_insert(&mut map, target, || start + REFUSED_TTL).is_empty());
+        assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Hit { first: true });
+        assert!(refusal_insert(&mut map, target, || start + Duration::from_millis(300)).is_empty());
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(549)), RefusalLookup::Hit { first: true });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(550)), RefusalLookup::Expired { hits: 1, age: REFUSED_TTL });
+    }
+
+    #[test]
+    fn refusal_cache_capacity_trims_expired_and_clears_full_fresh_map() {
+        use super::{refusal_insert, refusal_lookup, RefusalLookup, REFUSED_LIMIT, REFUSED_TTL};
+        use std::collections::HashMap;
+        use std::time::Instant;
+
+        let mut map = HashMap::new();
+        let start = Instant::now();
+        let target = |i: usize| ([10, 0, (i >> 8) as u8, i as u8], 8080);
+        for i in 0..REFUSED_LIMIT {
+            refusal_insert(&mut map, target(i), || start);
+        }
+        assert_eq!(refusal_lookup(&mut map, target(0), start), RefusalLookup::Hit { first: true });
+        let expired = refusal_insert(&mut map, target(REFUSED_LIMIT), || start + REFUSED_TTL);
+        assert_eq!(expired.len(), REFUSED_LIMIT);
+        assert!(expired.contains(&(target(0), 1, REFUSED_TTL)));
+        assert!(expired.contains(&(target(1), 0, REFUSED_TTL)));
+        assert_eq!(map.len(), 1);
+        for i in 0..REFUSED_LIMIT - 1 {
+            refusal_insert(&mut map, target(i), || start + REFUSED_TTL);
+        }
+        assert_eq!(map.len(), REFUSED_LIMIT);
+        assert!(refusal_insert(&mut map, target(REFUSED_LIMIT + 1), || start + REFUSED_TTL).is_empty());
+        assert_eq!(map.len(), 1);
+        assert_eq!(refusal_lookup(&mut map, target(0), start + REFUSED_TTL), RefusalLookup::Missing);
+        assert_eq!(refusal_lookup(&mut map, target(REFUSED_LIMIT + 1), start + REFUSED_TTL), RefusalLookup::Hit { first: true });
+    }
 
     /// A clash names the other program holding the port, never ctrs itself.
     #[test]

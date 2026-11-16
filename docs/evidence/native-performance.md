@@ -2380,3 +2380,57 @@ host editor equivalence, event state and cleanup continuation after an ownership
 failure. The integrated harness suite had 88 passing tests before the additional
 cleanup regression. A container cleanup failure cannot skip owned volume cleanup.
 W10 tracing remains a separate uncommitted product slice; no cache TTL change.
+
+## Independent W10 recovery trace: readiness and cache expiry
+
+A bounded diagnostic entrypoint records Python entry, application dependency
+readiness and uvicorn listener start on both engines. Host traces retain kill
+and start command begin/return, every health/read attempt, host TCP acceptance,
+first correct health response, actual process/image/binary identity and exact
+committed records. Clock mapping uses the narrowest of five host/guest exec
+round trips and exposes uncertainty. TCP acceptance is explicitly not guest
+readiness. Full results are retained without the old 200-error truncation.
+`command_and_ready_s` waits for both command completion and first success.
+No command/startup cost is subtracted from the end-to-end metric.
+
+First trace `w10-trace-20261116T004943`: ctrs start command 20.3ms, Python entry
+~17.1ms, dependency-ready ~181.8ms and listener ~183.1ms after command begin,
+with +/-12.6ms guest-clock uncertainty. First published health success 279.1ms.
+The host refusal cache inserted at 08:49:48.925Z, first hit at .928, expired at
+08:49:49.178Z (252ms old, 149 suppressed hits), followed by health success.
+The estimated ready-to-success gap is ~96ms, bounded roughly 83–109ms by clock
+uncertainty. Cache expiry explains most of that gap; this does not assume W2's
+cause. OrbStack's command ~106ms, listener ~274ms (+/-18.9ms), first success
+294ms. One diagnostic pair is not a performance win or reproduction of every
+historical 40ms loss. Unrelated Niceforge activity was visible at launch, though
+perf-gate-ready returned 0. Treat the first trace as causal sequence evidence.
+
+Integrated diagnostic command:
+`TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/recovery_pilot.py --ctrs-binary .work/tmp/w10-target/release/ctrs --pairs 2`.
+Run `w10-trace-20261116T005215` completed both alternating pairs, exit 0 and clean
+pre/post gates. All four trials retain exactly three committed key/value rows,
+Redis matches and exact seeded read outputs, no unexpected errors. ctrs command
+to first success 278.1/276.6ms, OrbStack 295.3/284.4ms. Diagnostic fixture uses
+recorded installed service images, not final frozen acceptance assets. No score
+or default-product win follows. The trace itself is versioned by saved driver,
+bootstrap and running binary hashes. The signed instrumentation binary SHA256
+56c3a6cbb8f66009196d1dcea2f525b9d38973b80a3e934c4e7c03c0fe213862.
+
+Cache debug hooks preserve 250ms TTL/capacity and only log real refusals, first
+hits and aggregated expiry counts outside the mutex. Two focused Rust cache
+regressions and the existing marker test pass. Three pure trace interpretation
+tests pass; full native harness suite 92 tests passes. The actual API trace is
+read traffic plus precommitted writes, not complete W10 database/queue recovery
+acceptance. Default assets, shared OrbStack and user workloads remain intact.
+
+Next bounded hypothesis, declared before candidate selection: a 50ms refusal
+TTL should remove at least 25ms or 10% of end-to-end ctrs recovery in the traced
+condition while retaining suppression of dead-backend relay churn. Compare
+three alternating baseline/candidate pairs at paced reads and three at eight
+unpaced readers. Keep exact data and zero unexpected errors. Reject if healthy
+CPU/success or p95 regresses beyond 3% or 5ms (larger absolute allowance for
+latency), fixed-window outage CPU rises by >max(20%,0.05 CPU-s), or recovery
+fails to show the predicted application benefit. Separately verify 30s idle
+CPU/wakes/physical footprint: <=0.01 core, <=max(5 wakes/s,3%), <=max(16MiB,3%)
+regression. These are pilot rejection guards, not full qualification. If weak,
+keep 250ms; do not remove negative caching or keep CPUs busy to win latency.
