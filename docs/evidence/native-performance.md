@@ -1336,3 +1336,22 @@ valid pairs to establish a win, so W6 is being rerun
 Invalidated: `base-20261115T125538-2dc3` W7 trials (mirror retag bug,
 fixed in `10cfff4`); its W6 trials remain valid but are superseded by
 the same-commit rerun.
+
+## NP-04 follow-up — 20-pair W6 and flake hunt (2026-11-15/16)
+
+`base-20261115T153838-7b71` (W6, `--driver default`, 20 pairs, commit
+`f3adade`, CTRS_LOG=debug diagnostic run): **20/20 valid pairs, all
+correctness green.** build_rust_s 0.892 [0.865, 0.916] strict-win;
+build_zlib_s 0.491 [0.460, 0.559] strict-win. Debug-on timings —
+clean confirmation run in flight.
+
+Intermittent-failure investigation: two distinct causes isolated.
+(1) Mirror manifest PUT EOF'd the conn when a manifest referenced
+blobs still committing from a concurrent push (buildkitd dedups blob
+uploads across simultaneous solves) — buildkitd logged `Put
+.../manifests/sha256:...: EOF` after ~15 retries then failed the
+solve. Fixed in `f3adade`: 20s presence wait + proper `400
+BLOB_UNKNOWN`. (2) `/session` RST_STREAM code 3 (FLOW_CONTROL_ERROR)
+from buildkitd ~100ms into a solve, ~1/300+ builds, not reproduced
+since instrumentation landed; per-frame session rx logging, RST/GOAWAY
+error codes, and window-overdraw warnings are in the tree to catch it.
