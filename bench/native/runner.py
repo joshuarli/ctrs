@@ -561,6 +561,13 @@ def stop_sampler(proc: subprocess.Popen) -> None:
         proc.wait(timeout=5)
 
 
+def _trace_ref(trace: Path) -> str:
+    try:
+        return str(trace.relative_to(WORK))
+    except ValueError:
+        return str(trace)
+
+
 def summarize_trace(trace: Path) -> dict:
     if not trace.exists():
         return {"samples": 0}
@@ -697,7 +704,7 @@ def trial_w1(ctx, engine: Engine, state: str) -> dict:
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
@@ -777,7 +784,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def registry_name(engine_name: str) -> str:
@@ -1034,7 +1041,7 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def ensure_dc_builder(engine: Engine) -> None:
@@ -1112,6 +1119,7 @@ def trial_w7(ctx, engine: Engine, state: str,
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
+    sampler = trace = None
     try:
         engine.ensure_up()
         if driver == "dc":
@@ -1125,6 +1133,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                                check=False)
                 if cp.returncode != 0:
                     engine.sh(["pull", image], timeout=900)
+        sampler, trace = start_sampler(engine, trial_dir)
 
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
         rec["notes"].append("--no-cache bypasses layer reuse; "
@@ -1182,6 +1191,12 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
+    finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def trial_w6(ctx, engine: Engine, state: str,
@@ -1199,6 +1214,7 @@ def trial_w6(ctx, engine: Engine, state: str,
     tag_zlib = f"npw6/zlib:{ctx.run_id[-6:]}"
     tag_rust = f"npw6/hyperfine:{ctx.run_id[-6:]}"
     checks = rec["correctness"]["checks"]
+    sampler = trace = None
     try:
         zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
         rust_src = ensure_pinned_source(W6_RUST_SOURCE, W6_DIR)
@@ -1211,6 +1227,7 @@ def trial_w6(ctx, engine: Engine, state: str,
                            check=False)
             if cp.returncode != 0:
                 engine.sh(["pull", image], timeout=900)
+        sampler, trace = start_sampler(engine, trial_dir)
 
         def build_one(name: str, dockerfile: Path,
                       sources: list[tuple[Path, str]],
@@ -1263,6 +1280,12 @@ def trial_w6(ctx, engine: Engine, state: str,
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
+    finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def trial_w9(ctx, engine: Engine, state: str,
@@ -1274,8 +1297,10 @@ def trial_w9(ctx, engine: Engine, state: str,
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
+    sampler = trace = None
     try:
         engine.ensure_up()
+        sampler, trace = start_sampler(engine, trial_dir)
         all_ok = True
         for j in jobs:
             t0 = time.monotonic()
@@ -1302,6 +1327,12 @@ def trial_w9(ctx, engine: Engine, state: str,
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
+    finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def trial_w4(ctx, engine: Engine, state: str,
@@ -1324,6 +1355,7 @@ def trial_w4(ctx, engine: Engine, state: str,
         return engine.sh(["exec", q, "redis-cli", *args],
                          timeout=timeout, check=False)
 
+    sampler = trace = None
     try:
         engine.ensure_up()
         engine.sh(["network", "create", net], timeout=60)
@@ -1338,6 +1370,7 @@ def trial_w4(ctx, engine: Engine, state: str,
             if time.monotonic() > deadline:
                 raise TimeoutError("redis queue did not become ready")
             time.sleep(0.5)
+        sampler, trace = start_sampler(engine, trial_dir)
         all_ok = True
         for w in workers:
             redis("FLUSHALL")
@@ -1386,6 +1419,11 @@ def trial_w4(ctx, engine: Engine, state: str,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
         engine.sh(["rm", "-f", q], check=False, timeout=60)
         engine.sh(["network", "rm", net], check=False, timeout=60)
 
@@ -1401,6 +1439,7 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
     checks = rec["correctness"]["checks"]
     name = f"{proj}-db"
     vol = f"{proj}-pgdata"
+    sampler = trace = None
 
     def psql(sql_file: str, timeout: float = 300) -> tuple[float, bool]:
         tp = time.monotonic()
@@ -1468,6 +1507,7 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         checks["db_ready"] = ready is not None
         if ready is None:
             raise RuntimeError("postgres never became ready")
+        sampler, trace = start_sampler(engine, trial_dir)
 
         mig = trial_dir / "migrate.sql"
         mig.write_text(W3_SQL)
@@ -1525,6 +1565,11 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
         engine.sh(["rm", "-f", name], check=False, timeout=60)
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
 
@@ -1544,6 +1589,7 @@ def trial_w5(ctx, engine: Engine, state: str,
     edited = repo / "edited.txt"
     orig = edited.read_text()
     vol = f"{W5_VOL}-{ctx.run_id[-6:]}"
+    sampler = trace = None
     try:
         engine.ensure_up()
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=30)
@@ -1558,6 +1604,7 @@ def trial_w5(ctx, engine: Engine, state: str,
             rec["validation_errors"].append(
                 f"volume seed rc={cp.returncode}: "
                 f"{(cp.stderr or cp.stdout).strip()[-300:]}")
+        sampler, trace = start_sampler(engine, trial_dir)
 
         bind_times, vol_times = [], []
         for i in range(iters):
@@ -1606,6 +1653,11 @@ def trial_w5(ctx, engine: Engine, state: str,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
+        if sampler is not None:
+            stop_sampler(sampler)
+        rec["resources"].update(summarize_trace(trace) if trace else {})
+        if trace:
+            rec["resources"]["trace"] = _trace_ref(trace)
         edited.write_text(orig)
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
 
@@ -1724,7 +1776,7 @@ def trial_w10(ctx, engine: Engine, state: str,
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
@@ -1876,7 +1928,7 @@ def trial_w11(ctx, engine: Engine, state: str,
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 def _holdout_api(base: str, method: str, path: str, body: dict | None = None,
@@ -2066,7 +2118,7 @@ def trial_holdout(ctx, engine: Engine, state: str,
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = str(trace.relative_to(WORK))
+            rec["resources"]["trace"] = _trace_ref(trace)
 
 
 class RunContext:
