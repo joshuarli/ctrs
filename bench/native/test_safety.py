@@ -447,7 +447,7 @@ class LoadMetricTests(unittest.TestCase):
         spec.loader.exec_module(load)
 
         def worker(wid, base, duration, write_ratio, rng_seed,
-                   latencies, counts, stop, error_log, t_start):
+                   latencies, counts, stop, error_log, t_start, **kwargs):
             counts.update(reads=3, writes=2, errors=5)
             latencies.extend([1.0] * 5)
 

@@ -15,7 +15,7 @@ from pathlib import Path
 MIN_PAIRS = 10
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
-    "W2": ["rps", "p50_ms", "p95_ms", "p99_ms"],
+    "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
     "W3": ["tx_tps", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
     "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
@@ -187,6 +187,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "executed parameters or seeds differ"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
+        if not reason and any(r.get("measurement_valid") is False for r in (*a, *b)):
+            reason = "measurement invalidated: " + "; ".join(
+                r.get("measurement_invalidation", "unspecified") for r in (*a, *b)
+                if r.get("measurement_valid") is False)
         if reason:
             result["rejections"].append({"pair_id": pair_id, "reason": reason})
         else:
@@ -197,6 +201,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
         result["note"] = "Reliability observations only; no request/window/churn speed verdicts."
         return result
     metrics = [*CASE_METRICS.get(identity["case"], []), *RESOURCE_METRICS]
+    if identity["case"] == "W2":
+        metrics.remove("cpu_seconds_est")
     if identity["case"] == "W7" and any("build_empty_s" in r.get("metrics", {}) for r in records):
         metrics.append("build_empty_s")
     hard_failure = any(info["failed"] for info in result["engines"].values())

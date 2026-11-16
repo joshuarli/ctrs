@@ -899,8 +899,16 @@ def trial_w1(ctx, engine: Engine, state: str) -> dict:
             rec["resources"]["trace"] = _trace_ref(trace)
 
 
+def exact_w2_items(actual, writes):
+    expected = sorted([[f"item-{i}", hashlib.md5(str(i).encode()).hexdigest()]
+                       for i in range(1, 501)] +
+                      [[row["name"], row["payload"]] for row in writes])
+    return sorted(actual) == expected
+
+
 def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
-             duration: float, write_ratio: float, seed: int) -> dict:
+             duration: float, write_ratio: float, seed: int,
+             operations: int | None = None) -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
     case_id = "W2"
     proj = project_name(ctx.run_id, engine.name, case_id)
@@ -932,16 +940,31 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                 return rec
             rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
 
+        api_id = engine.compose(proj, ["ps", "-q", "api"], timeout=30).stdout.strip()
+        def application_cpu():
+            cp = engine.sh(["exec", api_id, "cat", "/sys/fs/cgroup/cpu.stat"], timeout=30)
+            return {key: int(value) for key, value in
+                    (line.split() for line in cp.stdout.splitlines())}
+        app_before = application_cpu()
         with resource_phase(engine, rec, "workload"):
             load = subprocess.run(
                 [sys.executable, str(LOAD_PY), "--url", api,
                  "--concurrency", str(concurrency), "--duration", str(duration),
                  "--write-ratio", str(write_ratio), "--seed", str(seed),
-                 "--out", str(load_out)],
+                 "--out", str(load_out)] +
+                (["--operations", str(operations)] if operations is not None else []),
                 capture_output=True, text=True, timeout=duration + 120)
+        app_after = application_cpu()
+        rec["resources"]["application_cpu"] = {"before": app_before, "after": app_after,
+            "delta": {key: app_after[key] - value for key, value in app_before.items()
+                      if key in app_after}, "method": "API cgroup v2 cpu.stat; includes counter-reader exec"}
         if load_out.exists():
             summary = json.loads(load_out.read_text())
             rec["metrics"].update({
+                "fixture_version": "w2-v2-fixed-work",
+                "mode": summary["mode"],
+                "target_operations": operations,
+                "requests_ok": summary["requests_ok"],
                 "wall_seconds": summary["duration_s"],
                 "rps": summary["rps"],
                 "requests": summary["requests"],
@@ -958,15 +981,31 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                 f"load driver produced no summary: {load.stderr[-300:]}")
             return rec
 
+        phase_cpu = rec["resources"]["phases"]["workload"]["cpu_seconds"]
+        rec["metrics"]["workload_cpu_seconds"] = phase_cpu
+        rec["metrics"]["cpu_seconds_per_success"] = (
+            phase_cpu / summary["requests_ok"] if phase_cpu is not None and summary["requests_ok"] else None)
         status, stats = http_json(f"{base}/stats", timeout=10)
         expected_items = 500 + summary["writes_ok"]
         got_items = stats.get("items") if isinstance(stats, dict) else None
-        count_ok = got_items == expected_items
+        count_ok = status == 200 and got_items == expected_items
         rec["correctness"]["checks"]["item_count"] = {
             "expected": expected_items, "got": got_items, "ok": count_ok}
         rec["correctness"]["checks"]["load_errors_zero"] = (
             summary["errors"] == 0)
-        rec["correctness"]["ok"] = bool(count_ok and summary["errors"] == 0)
+        expected_writes = [json.loads(line) for line in
+                           Path(str(load_out) + ".writes.jsonl").read_text().splitlines()]
+        db_id = engine.compose(proj, ["ps", "-q", "db"], timeout=30).stdout.strip()
+        rows = engine.sh(["exec", db_id, "psql", "-U", "app", "-d", "app", "-At", "-c",
+                          "SELECT json_build_array(name,payload)::text FROM items ORDER BY name,payload"], timeout=60)
+        actual = [json.loads(line) for line in rows.stdout.splitlines()]
+        (trial_dir / "persisted-items.json").write_text(json.dumps(actual))
+        exact_ok = exact_w2_items(actual, expected_writes) and len(expected_writes) == summary["writes_ok"]
+        rec["correctness"]["checks"]["exact_persisted_items"] = exact_ok
+        work_ok = operations is None or summary["requests_ok"] == operations
+        rec["correctness"]["checks"]["fixed_work_complete"] = work_ok
+        rec["correctness"]["ok"] = bool(count_ok and exact_ok and work_ok and
+                                              load.returncode == 0 and summary["errors"] == 0)
         return rec
     except Exception as exc:
         rec["correctness"]["ok"] = False
@@ -2646,6 +2685,8 @@ def cmd_run(args) -> int:
     if args.case in ("W2", "W8", "W10", "W11"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
+    if args.case == "W2":
+        kw["operations"] = getattr(args, "operations", None)
     if args.case in ("W6", "W7"):
         kw = {"driver": getattr(args, "driver", "default")}
     if args.case == "W8" and getattr(args, "under_load", False):
@@ -2683,6 +2724,8 @@ def cmd_baseline(args) -> int:
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
                           "seed": args.seed + pair * 10}
+                if args.case == "W2":
+                    kw["operations"] = getattr(args, "operations", None)
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
                 if args.case == "W8" and getattr(args, "under_load", False):
@@ -2793,6 +2836,7 @@ def main() -> int:
                    help="ctrs only: fresh CTRS_DATA_DIR (engine-cold)")
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=20.0)
+    p.add_argument("--operations", type=int, default=None, help="W2 fixed total useful operations; omitted = saturation")
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true",
@@ -2814,6 +2858,7 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=20.0)
+    p.add_argument("--operations", type=int, default=None, help="W2 fixed total useful operations; omitted = saturation")
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--under-load", action="store_true",
                    help="W8: serve W2-style load while images pull")

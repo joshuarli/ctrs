@@ -26,19 +26,43 @@ Native physical footprint agrees with correctly attributed footprint auxiliary
 output. That validation exposed/fixed Shared-with heading PID reassignment.
 No jobs remain from calibration; exec sessions 29272/19202 are terminal.
 
-Next executable action: apply `.work/tmp/upgrade-w2-load.py` and
-`.work/tmp/upgrade-w2-runner.py`, review them, test fixed total operations,
-acknowledged-write manifests, exact persisted row/payload checks and raw paired
-CPU/success reporting. Add behavioral fixed-work tests and version cases.toml.
-Keep saturation separate. Then run short fixed-work pilots and clean API cgroup
-CPU deltas; profile actual application if the deficit persists. No full sweep.
+W2 v2 equal-work implementation is verified: deterministic total operation
+quotas, separate saturation mode, HTTP response validation, acknowledged-write
+manifests, exact persisted names/payloads, workload CPU/success, API cgroup CPU
+deltas, visible fatal worker failures. 67 tests pass. Whole-trial W2 CPU is
+excluded from efficiency scoring; normalized ratios use paired raw records.
 
-Independent W4 fixture worker owns `.work/wt/np-w4` on `campaign/np-w4`, base
-0f5724f. Bridge session `usrw_6b9afa4c-6459-4baa-b303-25dc5df1b657`;
-watch exec session 17037. Worker succeeded with offline checks. Parent review
-found the output is still tiny synthetic hash artifacts; it needs representative
-content processing and durable artifact outputs before acceptance integration.
-Keep this tree parked pending that correction; it is not W4 coverage. Integration worktree is the repo root on main.
+Initial one-pair pilot `base-20261115T221909-0859`: 10,000 successes each,
+6,978 reads/3,022 writes, zero errors, exact persisted state; pre/post host gates
+passed. API user/system CPU ctrs 2.4407/1.1032 s vs OrbStack 2.2599/0.5347 s.
+Diagnostic only, before final response validation; not qualification.
+
+Five-pair `base-20261115T222030-7ef3` completed 50,000 exact operations per trial,
+all ten trials correct, but the post host gate failed on unrelated Niceforge
+runner PID 42860. ALL timing pairs are invalid for scoring. Original collected
+records remain in trials.collected.jsonl; trials.jsonl adds measurement_valid=false
+and the reason. Reporter preserves correctness counts and excludes all ratios.
+Application system CPU difference remains a profiling hypothesis, not a confirmed
+clean five-pair measurement. Run exec 98317 is terminal. No measured jobs active.
+
+Next executable action: prepare actual API profiling. Inspect perf/strace access,
+API task schedstat, guest boot ID/uname and isolated tracefs instances in owned
+containers; never replace a shared guest tracer. Profile same fixed 50k mixed
+work, concurrency 4, seed 7; distinguish syscall elapsed time from CPU and
+runqueue wait. Require an explained cost >=25% of confirmed per-request excess
+before a candidate. Scratch plan: `.work/tmp/w2-profile-plan.md`. Clean confirmation
+must be rescheduled when host allows; no Niceforge/user process may be stopped.
+Final driver includes stricter response/fatal-worker checks added after the batch;
+revalidate the final behavior in the next pilot. Do not wait for other fixtures.
+
+Independent W4 replacement worker owns `.work/wt/np-w4` on `campaign/np-w4`.
+Prototype preserved on that branch at 7c92827, not integrated as coverage.
+Active bridge session `usrw_25f95b47-0f9b-4e7f-b5b1-197a268f51cd`, watch exec
+55436; it replaces synthetic hashing with full HTTP-ingested event batches,
+JSON validation/aggregation and exact filesystem gzip/summary artifacts. No
+engine/build/measurement work. Tests delayed until after 22:28 local to avoid
+confirmation contention. Parent reviews and runs proof before main integration.
+Integration worktree is repo root on main. This is not yet W4 acceptance coverage.
 
 Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'` (join the wrapped command).

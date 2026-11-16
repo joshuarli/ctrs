@@ -14,7 +14,7 @@ created = "2026-11-14"
 competitors = ["orbstack"]          # macOS lane; Docker Desktop excluded
 active_lane = "macos-arm64"
 evidence_status = "pilot"
-measurement_revision = "2026-11-15-native-resource-v3"
+measurement_revision = "2026-11-15-w2-fixed-work-v2"
 strict_win_pct = 5.0
 noninferiority_pct = 3.0
 bootstrap_iters = 2000
@@ -37,11 +37,12 @@ family = "api-service-under-load"
 title = "sustained mixed read/write JSON load vs seeded Postgres+Redis stack via published port"
 fixture = "fixtures/w1 + fixtures/w2/load.py"
 status = "implemented"
-metrics = ["wall_seconds", "rps", "p50_ms", "p95_ms", "p99_ms", "errors",
+fixture_version = "w2-v2-fixed-work"
+metrics = ["cpu_seconds_per_success", "wall_seconds", "rps", "p50_ms", "p95_ms", "p99_ms", "errors",
            "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]
-params = { concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
-correctness = ["http_errors_zero", "item_count_equals_seed_plus_writes"]
+params = { modes = ["fixed-work", "saturation"], operations = 50000, concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
+correctness = ["http_errors_zero", "item_count_equals_seed_plus_writes", "exact_persisted_names_and_payloads", "fixed_work_complete"]
 
 [[case]]
 id = "W3"

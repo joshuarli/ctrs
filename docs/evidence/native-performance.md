@@ -2107,3 +2107,40 @@ Footprint now switch owner. Regression includes actual two-process shared
 heading output. Native sampling does not parse that command output.
 62 tests pass, including CPU timebase vs independent process_time, bad PID,
 missing VM, kernel start identity reuse, category-only output and shared headings.
+
+## Equal-work W2 v2 initial pilot
+
+`base-20261115T221909-0859`, one pair, concurrency 4, 10,000 fixed operations:
+both engines 6,978 successful reads and 3,022 writes; zero failures; every seed
+and acknowledged-write name/payload matches the database exactly. Host workload
+CPU ctrs 6.416796 s (0.0006416796 per success), OrbStack 5.428005 s
+(0.0005428005 per success). API cgroup CPU ctrs user/system 2.440710/1.103210 s,
+OrbStack 2.259942/0.534660 s. Counter-reader exec overhead is disclosed in raw
+records. The system-CPU difference remains a useful profiling lead at equal work;
+this single short pair is not significance or a qualified engine verdict.
+Pre/post host gates passed. Response payload checks were subsequently tightened,
+so the next batch starts fresh with the final v2 behavior. 65 tests now pass.
+Five-pair 50,000-operation confirmation is awaiting an exclusive window; host gate
+found unrelated Niceforge import work. Do not stop that external workload.
+
+## W2 fixed-work implementation and contaminated confirmation
+
+W2 v2 adds fixed total work, deterministic per-worker seeded request sequences,
+validated response payloads, successful read/write/failure counts, acknowledged
+write manifests, exact all-row persisted payload verification and explicit
+workload CPU/success. Saturation remains a separate duration mode. CPU efficiency
+ratios use each raw pair directly; whole-trial CPU is removed from W2 scoring.
+API cgroup cpu.stat is recorded before/after separately from host engine CPU.
+Fatal worker exceptions now fail the driver instead of yielding a partial success.
+67 tests pass, including fixed-work identity, corrupt/duplicate/missing rows,
+normalized reporting and contaminated-measurement rejection.
+
+`base-20261115T222030-7ef3`: all ten trials completed exactly 50,000 successful
+operations, correct names/payloads and zero errors. Post perf-gate-ready -1 failed
+on unrelated Niceforge runner PID 42860; whole batch is INVALID FOR TIMING SCORING.
+Preserve trials.collected.jsonl raw originals; trials.jsonl annotates invalidation
+without changing values. Reporter retains 5/5 correct per engine and rejects all
+five pairs. Do not use its apparent latency, throughput, memory or CPU ratios as
+wins/losses. API system CPU was ~5.1–5.3 s vs ~2.4–2.6 s for equal work, a profile
+lead only because host exclusivity was not proven. Clean confirmation remains
+pending; the unrelated service is preserved. No repeated sweep is warranted.

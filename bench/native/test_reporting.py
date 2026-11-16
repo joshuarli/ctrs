@@ -244,3 +244,25 @@ class ReportingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NormalizedW2Tests(unittest.TestCase):
+    def test_efficiency_uses_raw_normalized_metric_and_omits_total_cpu(self):
+        rows = pair(case="W2", metric="cpu_seconds_per_success", ratio=1.2)
+        rows[0]["resources"]["cpu_seconds_est"] = .1
+        rows[1]["resources"]["cpu_seconds_est"] = 100
+        report = reporting.analyze(rows)
+        metrics = {m["metric"]: m for m in report["cohorts"][0]["metrics"]}
+        self.assertEqual(metrics["cpu_seconds_per_success"]["ratio_median"], 1.2)
+        self.assertNotIn("cpu_seconds_est", metrics)
+
+
+class InvalidMeasurementTests(unittest.TestCase):
+    def test_contaminated_pair_retains_correctness_but_has_no_ratios(self):
+        rows = pair(case="W2", metric="cpu_seconds_per_success")
+        rows[0].update(measurement_valid=False, measurement_invalidation="host busy")
+        cohort = reporting.analyze(rows)["cohorts"][0]
+        self.assertEqual(cohort["valid_pairs"], 0)
+        self.assertEqual(cohort["engines"]["ctrs"]["correct"], 1)
+        self.assertIn("host busy", cohort["rejections"][0]["reason"])
+        self.assertTrue(all(m["ratio_median"] is None for m in cohort["metrics"]))
