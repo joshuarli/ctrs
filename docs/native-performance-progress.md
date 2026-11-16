@@ -90,22 +90,43 @@ pairs 6+16 ctrs failed on the `/session` RST code-3 flake (zlib
 build canceled); ratios on valid pairs strict-win (rust 0.924,
 zlib 0.545) but correctness failures disqualify. Evidence recorded.
 
-**In flight:** W6 20-pair rerun under `CTRS_LOG=debug` with the new
-sent-byte/window-snapshot RST forensics — log
-`.work/native-perf/logs/np04-w6-debug-hunt-20261115T165554.log`.
-Warm daemon restarted with debug + forensic binary (env:
-CTRS_GUEST_RESERVE_MIB=950 CTRS_MEMORY_MIB=45087 CTRS_CPUS=17,
-data/state/socket under `.work/native-perf/engines/ctrs-warm/`).
+**ROOT CAUSE FOUND + FIXED (2026-11-16):** the `/session` RST code-3
+flake was our h2 flow-window accounting, not buildkitd. Forensic run
+caught it live: `session stream reset code=3 sent=785951
+conn_win=69800 stream_win=53317` — windows still positive, i.e. we
+had NOT overdrawn per our own books. Reading grpc-go
+(`internal/transport/http2_server.go:813`, `flowcontrol.go`)
+showed buildkitd's grpc layer resets a stream when its inFlow
+`pendingData+pendingUpdate > limit+delta`, and its limit tracks
+BDP-driven SETTINGS updates. Our `Win::settings()` reset the
+default window AND cleared per-stream state on every
+SETTINGS_INITIAL_WINDOW_SIZE change; per RFC 7540 §6.9.2 an
+existing stream's window must shift by the delta. With BDP growth
+mid-stream we over-counted by bytes already sent → overdraw →
+RST_STREAM code 3. Fixed: `settings()` now applies the delta to
+each tracked stream window. Also fixed a session sender race:
+it now stops once the builder ends its side (`peer_done`), with a
+dead-aware `wait_dead` so a parked sender can't hang; every exit
+path sets both flags before `join()`.
 
-**Next executable action:** when the hunt log finishes, check
-`.work/native-perf/engines/ctrs-warm/daemon-manual.log` for
-`session stream reset` warnings (they now carry sent bytes +
-conn/stream window snapshot). If a pair fails, the snapshot
-distinguishes window oversend (sent ≈ window) from protocol
-violation (sent << window). Fix root cause, `cargo xtask host`,
-restart warm daemon, rerun W6 clean 20-pair (debug OFF) for the
-qualified number. Then: ≥2 strict wins among W1/W2/W5/W8 and the
-W11 12 h reliability leg; resource cells still unmeasured.
+Debug hunt `base-20261115T165554-d81a` (20/20 valid, strict wins)
+was diagnostic-only (CTRS_LOG=debug). Post-fix clean W6 20-pair
+`--driver default` in flight — log
+`.work/native-perf/logs/np04-w6-postfix-20261115T173857.log`,
+daemon clean (no CTRS_LOG) on the fixed binary; RST forensics
+still warn-level. Prior clean W7 `base-20261115T163439-18ee`
+stands: 10/10 valid, all six strict-win.
+
+**Next executable action:** when the postfix log finishes, verify
+20/20 valid pairs and zero `session stream reset` warns in
+`.work/native-perf/engines/ctrs-warm/daemon-manual.log`; report via
+`python3.14 bench/native/runner.py report --match '<run-id>'`.
+If clean, record final W6 numbers in
+`docs/evidence/native-performance.md` — W6+W7 default-driver cells
+then qualified pending resource cells. Then: ≥2 strict wins among
+W1/W2/W5/W8 and the W11 12 h reliability leg; resource cells
+(peak_total_rss_kb, cpu_seconds_est, physical memory, allocated
+storage) still unmeasured.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
