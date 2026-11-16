@@ -83,3 +83,29 @@ Probes are removed before the C process exits. The stop writer may exit 137 when
 PID1 terminates its namespace; its raw status is preserved and the C process must
 still exit 0. Native cleanup confirms owned probes absent. These are expected
 control-process semantics, not recovered application failures.
+
+## Interpret detailed W2 counts
+
+Current instrumentation is `w2-counters-v2-futex-commands`. `counter_specs.py` owns
+probe definitions, opcode filters, return-probe capacity and selector order for
+both the host and mounted guest helper. The C conformance driver uses the same
+facts. Historical v1 parser records remain separate.
+
+V2 requires 18 selectors for every API thread (90 cells with five threads),
+including ordinary WAIT, WAIT_BITSET, WAKE and return classifications. Zero missed
+entry/return probes is required independently of perf counter coverage. Probe
+names contain the run tag, so kernel miss accounting cannot alias another group.
+Unclassified commands or negative returns remain explicit. Each thread can have
+one call crossing a boundary; selector activation skew is a separate limitation.
+These edge effects are not silently replaced with zero.
+
+The output preserves CPU, event counts and operation denominators from each raw
+trial. Counts cannot identify where a return originated: a zero return may be a
+successful wait or a WAKE that found no waiter. Positive returns identify WAKE
+calls that reported waking threads, not the sum of threads woken. EAGAIN indicates
+a changed expected value. It is not a measured spin duration or CPU cost.
+
+Counter callbacks can perturb scheduling. A profiler-on trial with a larger CPU
+budget or more futex calls cannot be treated as ordinary product performance.
+Validate overhead and use a separate low-rate on-CPU profile before attributing
+the frequency difference to a material share of the real CPU deficit.

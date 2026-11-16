@@ -11,6 +11,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import collect
+import counter_specs
 import diagnostic_signals
 import ownership
 import perf_counts
@@ -48,13 +49,13 @@ def trial(engine, refs, archive, root, mode, operations, run):
     override = directory / 'compose.json'
     save(override, {'services': {**{service: {'image': refs[image]} for service, image in (('db', 'postgres'), ('cache', 'redis'))},
          'api': {'image': refs['api'], 'privileged': True, 'command': ['python', '-u', '/diagnostics/w2_scheduler_app.py'],
-                 'environment': {'NP_SCHED_TAG': tag}, 'volumes': [str(path.resolve()) + ':/diagnostics/' + path.name + ':ro' for path in (HELPER, BOOTSTRAP)]}}})
+                 'environment': {'NP_SCHED_TAG': tag}, 'volumes': [str(path.resolve()) + ':/diagnostics/' + path.name + ':ro' for path in (HELPER, BOOTSTRAP, Path(counter_specs.__file__))]}}})
     def compose(args):
         return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
                          env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
     api = None
     phase = profiler = profiler_log = phase_log = None
-    result = {'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': []}
+    result = {'fixture_version': counter_specs.VERSION, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': []}
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -112,8 +113,12 @@ def trial(engine, refs, archive, root, mode, operations, run):
             helper('probes')
             args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
                     '--delay=-1', '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/stat.json']
-            for event in perf_counts.events(tag):
-                args += ['-e', event]
+            spec = counter_specs.selectors(tag)
+            save(directory / 'selectors.json', spec)
+            for selector in spec:
+                args += ['-e', selector['event']]
+                if selector['filter']:
+                    args += ['--filter', selector['filter']]
             profiler_log = (directory / 'profiler.log').open('wb')
             profiler = subprocess.Popen([runner.DOCKER, 'exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
                 'launch', tag, *args], env=engine.env(), stdout=profiler_log, stderr=subprocess.STDOUT)
@@ -150,10 +155,14 @@ def trial(engine, refs, archive, root, mode, operations, run):
             if code not in (0, 130):
                 raise RuntimeError('profiler exit failed')
             engine.sh(['cp', api + ':/tmp/np-count/stat.json', str(directory / 'stat.json')])
-            counts = perf_counts.summarize((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
+            counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
             save(directory / 'counts.json', counts)
             if counts['status'] != 'ok':
                 raise ValueError('event counter coverage invalid: ' + repr(counts['errors']))
+            profile = json.loads(helper('probe-profile').stdout)
+            if profile['status'] != 'ok':
+                raise ValueError('probe miss coverage invalid')
+            result['probe_profile'] = profile
             result['counts'] = counts
         db = compose(['ps', '-q', 'db']).stdout.strip()
         rows = json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c',
@@ -228,9 +237,9 @@ def main():
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
-    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
+    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    save(root / 'plan.json', {'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
+    save(root / 'plan.json', {'fixture_version': counter_specs.VERSION, 'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'functional counter pilot; foreign host load and unfrozen candidate',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted',
         'ctrs_requested_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_requested_memory_mib': os.environ.get('CTRS_MEMORY_MIB'),

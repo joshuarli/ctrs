@@ -9,7 +9,7 @@ import sys
 import tarfile
 import time
 
-SYSCALLS = ('futex', 'read', 'write', 'epoll_pwait', 'recvfrom', 'sendto')
+from counter_specs import probe_definitions, futex_events
 ROOT = Path('/tmp/np-count')
 TRACE = Path('/sys/kernel/tracing')
 
@@ -46,7 +46,7 @@ def main():
     action, tag = sys.argv[1:3]
     if not re.fullmatch(r'np[0-9a-f]{12}', tag):
         raise ValueError('invalid owned trace group')
-    definitions = ['p:' + tag + '/enter_' + name + ' __arm64_sys_' + name for name in SYSCALLS]
+    definitions = probe_definitions(tag)
     if action == 'prepare':
         ROOT.mkdir()
         tarfile.open('/tmp/np-tools.tgz').extractall('/tmp/np-tools', filter='data')
@@ -77,10 +77,16 @@ def main():
             if matches and matches != [definition]:
                 raise RuntimeError('probe definition changed; refuse removal')
             if matches:
-                command('-:' + name[2:])
+                command('-:' + name.split(':', 1)[1])
         if any(':' + tag + '/' in line for line in (TRACE / 'kprobe_events').read_text().splitlines()):
             raise RuntimeError('owned probe remains after cleanup')
         print(json.dumps({'owned_probes_absent': True}), flush=True)
+    elif action == 'probe-profile':
+        names = set(futex_events(tag).values())
+        rows = [line.split() for line in (TRACE / 'kprobe_profile').read_text().splitlines() if line.split()[0] in names]
+        if len(rows) != len(names) or any(len(row) != 3 or int(row[-1]) != 0 for row in rows):
+            raise RuntimeError('missing probe profile or missed kretprobe instances')
+        print(json.dumps({'status': 'ok', 'rows': rows, 'missed': 0}), flush=True)
     elif action == 'launch':
         stat = Path('/proc/self/stat').read_text()
         (ROOT / 'perf-pid.json').write_text(json.dumps({'pid': os.getpid(), 'start': stat[stat.rfind(')')+2:].split()[19]}))

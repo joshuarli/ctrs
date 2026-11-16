@@ -3027,3 +3027,45 @@ namespace exit. Fixed ordering removes probes first, preserves the stop writer's
 ctrs attempt used only an owned VM, which was stopped; no shared OrbStack probe
 was left behind. The decoder is now a repeatable conformance check before W2
 command/return attribution. Application resource/observer acceptance stays open.
+
+## W2 detailed counter v2: measured call classes, cost still unproven
+
+Shared `counter_specs.py` owns ARM64 probe definitions, filters, 4096 return-probe
+instances and selector order for the C conformance driver and W2 host/guest. The
+C check repeats successfully after sharing in `futex-decode-071943-fa04`.
+V2 `w2-count-20261116T072415-7488` passes exact fresh 5k off/on trials on both
+engines, all 90 thread/selector cells, zero missed probes, stable identities and
+owned cleanup. The earlier 072115 trace has valid counters but failed cleanup:
+the v1 delete parser stripped two characters from an r4096 prefix. It is retained
+as failed. Splitting at the colon fixes the actual tracefs delete command. Its
+owned ctrs VM was stopped, clearing the return probe; shared OrbStack was not used
+by that failed attempt. Native SIGTERM regression `w2-count-073005-b45b` passes
+with original -15, no cleanup errors and owned probes absent, including the return
+probe. All 134 Python tests pass, including real v2 ordered-block and partial-cell
+regressions. The parser fixture from failed 072115 is grammar/coverage data only,
+not accepted performance or reliability evidence.
+
+In paired instrumented 072415 raw records, ctrs versus OrbStack counts per exact
+successful operation are: ordinary WAIT 3.065/1.3874, WAIT_BITSET 14.2342/6.8188,
+WAKE 29.9794/12.651, EAGAIN returns 1.9458/0.5596, positive returns 15.3534/7.6466,
+API-generated wakes 19.1938/11.9426. Unclassified commands/negative returns and
+timeouts are measured zero. Entry/return counts differ by four calls at edges,
+consistent with the disclosed in-flight scope; no kretprobe misses occurred.
+Positive returns count calls, not total targets woken. A zero result cannot
+separate successful WAIT from a WAKE with no waiter. Do not infer spin time.
+
+Raw application user/system CPU is 1.19/0.77s versus 1.20/0.44s for those 5k
+operations, with 0.10s tick quantization bound per trial. The raw profiler-off/on
+CPU is 1.78→1.96s and 1.36→1.64s. Host work, fixed order and quantization leave
+observer overhead inconclusive, with material perturbation plausible. No CPU
+win/loss, corrected ratio or clean reproduction is qualified. These quantities
+come directly from paired records, not multiplied published medians.
+
+The actual pinned app uses synchronous FastAPI worker handlers and one shared
+psycopg autocommit connection. Each request checks that connection with SELECT1
+before its useful query. Shared connection/worker/GIL synchronization is a
+concrete application boundary to profile; no fixture change is selected as an
+engine optimization. Next low-rate CPU profile must quantify extra futex/wake/
+locking CPU per successful request from its own phase records. A useful mechanism
+should account for >=25% of the contemporaneous exclusive CPU-per-success gap,
+with off-CPU wait kept separate. Detailed counts alone do not establish that cost.

@@ -10,6 +10,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_jobs
+import counter_specs
 import diagnostic_signals
 import ownership
 import runner
@@ -19,26 +20,15 @@ BINARY_SHA = '42d52c709e8268620cfcb27bd0e890db3b9a81a8bf9506844c9343b94678992a'
 SOURCE_SHA = '1992dab6655a851ba4a8f6a7a312558beda9b9c478f869655b08fd4f5155da8c'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
 SOURCE = Path(__file__).with_name('futex_calls.c')
-SELECTORS = (
-    ('enter_futex', 'all', None),
-    ('enter_futex', 'wait', 'op == 0 || op == 128 || op == 256 || op == 384'),
-    ('enter_futex', 'wake', 'op == 1 || op == 129 || op == 257 || op == 385'),
-    ('enter_futex', 'wait_bitset', 'op == 9 || op == 137 || op == 265 || op == 393'),
-    ('exit_futex', 'returns', None),
-    ('exit_futex', 'eagain', 'result == -11'),
-    ('exit_futex', 'timeout', 'result == -110'),
-    ('exit_futex', 'zero', 'result == 0'),
-    ('exit_futex', 'positive', 'result > 0'),
-)
+SELECTORS = counter_specs.FUTEX_SELECTORS
 
 
 def trial(engine, ref, archive, binary, root, count):
     directory = root / engine.name; directory.mkdir()
     name = root.name + '-' + engine.name
     tag = 'np' + secrets.token_hex(6)
-    event = {kind: tag + '_' + kind for kind in ('enter_futex', 'exit_futex')}
-    definitions = [f'p:{tag}/{event["enter_futex"]} __arm64_sys_futex op=+8(%x0):u32',
-                   f'r4096:{tag}/{event["exit_futex"]} __arm64_sys_futex result=$retval:s64']
+    event = counter_specs.futex_events(tag)
+    definitions = counter_specs.futex_probe_definitions(tag)
     created = []
     phase = profiler = phase_log = profiler_log = None
     result = {'errors': [], 'cleanup_errors': [], 'qualification_eligible': False}
@@ -67,6 +57,7 @@ def trial(engine, ref, archive, binary, root, count):
             raise ValueError('C proof runtime image differs from pin')
         engine.sh(['run', '-d', '--pull=never', '--name', name, '--label', 'dev.ctrs.campaign.run=' + root.name,
             '--privileged', '--network', 'none', '-v', str(HELPER.resolve()) + ':/diagnostics/w2_counter_guest.py:ro',
+            '-v', str(Path(counter_specs.__file__).resolve()) + ':/diagnostics/counter_specs.py:ro',
             '-v', str(binary) + ':/proof:ro', '--entrypoint', '/proof', ref, tag, str(count)])
         executable = sh(['python', '-c', "import pathlib,hashlib;print(hashlib.sha256(pathlib.Path('/proc/1/exe').read_bytes()).hexdigest())"]).stdout.strip()
         if executable != BINARY_SHA:
@@ -197,13 +188,13 @@ def main():
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
     run = 'futex-decode-' + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run; root.mkdir()
-    for path in (Path(__file__), SOURCE, HELPER):
+    for path in (Path(__file__), SOURCE, HELPER, Path(counter_specs.__file__)):
         (root / path.name).write_bytes(path.read_bytes())
     save(root / 'plan.json', {'fixture_version': 'futex-decoder-v1', 'calls_per_kind': 100,
          'source_sha256': SOURCE_SHA, 'binary_sha256': BINARY_SHA, 'tools_sha256': TOOLS_SHA,
          'runtime_ref': ref, 'qualification_eligible': False,
          'method': 'identical ARM64 static C binary; CPU0 affinity; explicit FIFO work boundaries; count correctness only',
-         'return_probe_maxactive': 4096, 'require_missed_probes': 0})
+         'return_probe_maxactive': counter_specs.KRETPROBE_MAXACTIVE, 'require_missed_probes': 0})
     print('RESULTS', root, flush=True)
     for name in ('ctrs', 'orbstack'):
         trial(runner.Engine(name, run), ref, archive, binary, root, 100)

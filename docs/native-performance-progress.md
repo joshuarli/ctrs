@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main ae379b8 plus
+No new product performance win is qualified. Current source main d3e4384 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -98,18 +98,40 @@ Source/binary pins and command: `diagnostics/w2-counters.md`. Perf tracepoint
 aliases and chained mask comparisons are unsupported; verified ordered selectors
 and explicit opcode comparisons work. This is not a latency/CPU verdict.
 
-Next executable action: integrate those checked command/return selectors into
-W2's counter pilot. Put shared probe/event facts in one owner imported by the
-host and mounted guest helper. Version v2 records; preserve v1 history. Require
-zero kretprobe misses, strict per-thread selector blocks, disclosed in-flight
-edge bounds and unchanged exact work/data. Run short raw off/on controls, then
-use actual placement plus counts to explain a material cost per successful
-request. Exclusive aligned 50k profile/observer confirmation is still deferred
-by hot Niceforge jobs. No measured Mac job is active.
+W2 counter v2 now passes `w2-count-20261116T072415-7488` on both engines:
+90 complete cells, exact 5k off/on work, zero missed probes and owned cleanup.
+SIGTERM 073005-b45b preserves -15 and removes return probes. All 134 tests pass.
+Current raw WAIT/WAIT_BITSET/WAKE frequencies are roughly doubled in ctrs; EAGAIN
+is 1.9458 versus 0.5596/op. CPU/observer timing remains unqualified. Definitions,
+filters and ordering have one owner, `counter_specs.py`; do not pool v1/v2.
+Failed 072115 cleanup is preserved, with its return-prefix parser cause fixed.
+
+Next executable W2 action: add a separate low-rate per-API-thread on-CPU profile
+mode to the existing bounded pilot. Preserve raw off/on controls, exact input/
+data checks, loss checks and task identity. Estimate cost/op only from that
+profile's own CPU/sample records. Require >=25% of the contemporaneous exclusive
+CPU-per-success gap for a material mechanism, with 5% observer confirmation and
+off-CPU wait separate. Current sync handlers share one psycopg connection; trace
+their worker/GIL/connection lock boundary. No fixture or kernel policy change.
+Exclusive 50k confirmation remains deferred by unrelated hot Niceforge work.
+
+Independent source lane: durable finite job supervisor, worker
+usrw_48734034-7dd2-4df7-aae6-2a6a83bc4df9 in `.work/wt/np-durable-job`,
+base d3e4384, watch exec23369. Owns durable_job.py/test and durable-job.md only.
+No engine/12h job; bounded disposable child tests. Do not duplicate or edit it.
+
+Storage candidate `.work/wt/np-full-sync` changes only VZ Cached+Fsync→Cached+Full,
+base d3e4384. Private signed host `.work/tmp/full-sync-target/release/ctrs` SHA
+12d48b6a0b9b63a2411934e22de60b209fac6a8d64fb7128ee750e481d4f0860;
+6,613,856 bytes, equal to baseline. No main/runtime policy change. Next storage
+action: owned guest block-flush observation and committed-prefix/named-volume
+survival across an owned VM interruption, then paired W3/W2/resource validation
+in an exclusive window. SDK contract is stronger; host power-loss remains untested.
+No measured Mac job is active.
 
 ## Ready queue
 
-1. W2 futex command/return diagnostic and known-count validation above.
+1. W2 low-rate on-CPU application profile and observer controls above.
    Representative fixture upgrades no longer block this investigation.
 2. W2: low-overhead tagged wake/futex/network syscall counts with profiler-on/off
    controls, then aligned 50k application profiling in a genuinely exclusive host
