@@ -2160,3 +2160,63 @@ No tracing switches or other guest tracer were changed. OrbStack kernel
 7.2.12-orbstack-00394-gbecdd6130068, boot ID 7fdc0939-a83c-4954-ba60-507f1d67d717.
 These are capabilities, not an API profile. Export/load the identical profiler
 image to ctrs before causal comparison. Profiles do not enter timing scores.
+
+## Actual W2 API CPU profiles: material wakeup attribution lead
+
+Rejected attempt `w2-api-profile-20261115T223045`: ctrs PID-sidecar mode did not
+place the profiler in the API PID namespace (no perf samples; strace exited).
+No actual API profile claim from that attempt. In-process tools avoid that
+unsupported behavior and verify uvicorn /proc/1/cmdline before attaching.
+OrbStack default API seccomp blocked perf despite privileged exec; matched
+profiling-only compose explicitly removes that filter and adds tracing caps on
+both engines. This is disclosed instrumentation, not a default-product change.
+
+Matched run `w2-api-inprocess-20261115T223951`, 50k fixed requests per engine:
+Python 3.13.18 and fastapi 0.115.6, uvicorn 0.34.0, psycopg 3.2.3, redis 5.2.1,
+pydantic 2.10.4 identical. Same tool binary bundle SHA256
+475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b;
+API /tmp extraction and exec-only LD_LIBRARY_PATH leave app library paths intact.
+Raw scripts, target identity, runtime versions, load results, task snapshots and
+perf data/report are in the run directory. Profiling is excluded from timing.
+
+ctrs cpu-clock event total ~17.48484831 CPU-s, OrbStack ~12.90909078. Sampled
+self wake_up_q fractions 15.25% vs 3.76%, zero lost perf samples. ctrs stack:
+PyEval_SaveThread / pthread_cond_signal -> futex_wake -> wake_up_q.
+Approximate cost from each same raw profile: 53.3 vs 9.7 us per request; ~43.6 us
+excess accounts for ~48% of the sampled total API CPU difference (~91.5 us/req).
+This is a sample-based attribution estimate from one diagnostic profile/engine,
+not corrected medians, a speedup, independent confirmation or root-cause proof.
+Guest task-clock can reflect virtualization accounting; host scheduling and
+remote wake/spin still need separation. It justifies actual-app affinity controls
+and per-PID wake/run tracing before any VZ/kernel candidate.
+
+CTRS /proc task schedstat absent, so runqueue wait remains unknown. Capture now
+keeps status/stat even when schedstat is missing. OrbStack schedstat is available.
+Strace materially inflates synchronization traffic (millions of futex calls);
+never treat its summary time as the application on-CPU profile. OrbStack strace leg also completed; exec 48890 is terminal.
+
+## W4 v2 event pipeline implemented and exercised
+
+Replaces Redis shell hashing with actual HTTP-ingested event batches, strict
+JSON validation, Redis queue, 1/4/16 separate workers and per-job deterministic
+gzip NDJSON plus aggregate JSON files on named volumes. Each condition has 200
+batches, 64 events each, 400 exact artifacts. Primary interval includes ingest
+and worker startup/drain; ingest/drain and CPU phase boundaries are separate.
+Verification checks every byte, no pending queue items or missing/duplicate/
+extra/corrupt files; duplicate delivery fails exclusive creation. Cleanup verifies
+run ownership labels before removing only that run's containers/volumes/network.
+Base Python and Redis digests pinned; actual app source SHA is checked in the
+running image to reject stale prepared assets. No new application dependencies.
+
+Parent review + 72 tests pass (four W4 data-pipeline tests and cleanup ownership
+regression included). Real engine pilots: OrbStack run-20261115T224539-837d and
+ctrs w4-v2-ctrs-20261115T224709 pass all three worker counts and exact outputs;
+OrbStack final hash-check run-20261115T224839-814a also passes. Common image
+export archive SHA256 a6f9cd32079b7980c268d3ad504174fa8af01654d7442026ae726f8a182809f7;
+config 8f7e834dbb52eaa7ff57b8bc09128c5f9fcb3150862cbfde2c5f4c5d1a483525,
+manifest list e281cf32b7fae8bebd781b8e0d49884719e464db739297b44ad3e0c8ed2789fe.
+Source SHA b4bd15673c035a6d010ae8a3a982ba8b1929903c082d5593e95a79b219fa386a.
+These are correctness pilots, not timing/CPU/memory wins. v1 results remain
+historical diagnostics; v2 fixture sizes, budgets and candidate image lock must
+be frozen before performance acceptance. Persistent power-loss durability is
+not claimed for disposable workflow artifacts.

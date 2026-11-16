@@ -147,8 +147,7 @@ def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
 # both sides run the same BuildKit version.
 DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
-W4_IMAGE = "redis:7-alpine"
-W4_JOBS = 200
+W4_IMAGE = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
 # Holdout: a real third-party app never used for tuning — Gitea +
 # Postgres. REST API seed/read workload plus git smart-HTTP clones over
 # the published port. Executed once per engine at gates via the
@@ -158,15 +157,6 @@ HOLDOUT_COMPOSE = HOLDOUT_DIR / "compose.yaml"
 HOLDOUT_IMAGE = "gitea/gitea:1.24.7"
 HOLDOUT_USER = "npadmin"
 HOLDOUT_PASSWORD = "npadmin-pass-123"
-# One worker container: pop jobs until the list is empty, store
-# md5(payload) under npw4:res:<payload>. `(nil)` ends the loop. $1 is
-# the queue container's DNS name on the trial network.
-W4_WORKER = (
-    "while j=$(redis-cli -h \"$1\" RPOP npw4:jobs | head -1); do "
-    "case \"$j\" in ''|'(nil)') break;; esac; "
-    "h=$(printf %s \"$j\" | md5sum | cut -d' ' -f1); "
-    "redis-cli -h \"$1\" SET \"npw4:res:$j\" \"$h\" >/dev/null; done"
-)
 W5_IMAGE = "python:3.13-slim"
 W5_VOL = "npw5-repo"
 W3_PASSWORD = "npw3pw"
@@ -1580,96 +1570,106 @@ def trial_w9(ctx, engine: Engine, state: str,
 
 
 def trial_w4(ctx, engine: Engine, state: str,
-             workers: tuple = (1, 4, 16)) -> dict:
-    """W4: worker queue — N deterministic jobs pushed onto a Redis list in
-    a dedicated container on a private bridge network; W worker containers
-    drain it with RPOP and store md5(payload) per job. Drain wall time per
-    worker count; afterwards every result key must exist and a
-    deterministic sample must match the runner-computed digest."""
+             workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events") -> dict:
+    """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
-    net = f"npw4-{''.join(c if c.isalnum() else '-' for c in ctx.run_id)}-{engine.name}"
-    q = f"{proj}-q"
-    jobs = [f"job-{i:04d}-npw4" for i in range(W4_JOBS)]
-
-    def redis(*args: str, timeout: float = 60) -> subprocess.CompletedProcess:
-        return engine.sh(["exec", q, "redis-cli", *args],
-                         timeout=timeout, check=False)
-
+    net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
+    image = "np-w4-events:v2"
+    label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
+    owned_containers, owned_volumes = [], []
     try:
         engine.ensure_up()
-        engine.sh(["network", "create", net], timeout=60)
-        engine.sh(["run", "-d", "--name", q, "--network", net,
-                   W4_IMAGE, "redis-server", "--save", "",
-                   "--appendonly", "no"], timeout=120)
+        engine.sh(["image", "inspect", image])
+        engine.sh(["network", "create", "--label", label, net])
+        owned_containers.append(queue)
+        engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
+                   W4_IMAGE, "redis-server", "--save", "", "--appendonly", "no"])
+        owned_containers.append(app)
+        engine.sh(["run", "-d", "--name", app, "--label", label, "--network", net,
+                   image, "serve", "--redis-host", queue])
+        app_hash = engine.sh(["exec", app, "python", "-c",
+            "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/app.py').read_bytes()).hexdigest())"]).stdout.strip()
+        if app_hash != sha256_file(FIXTURES / "w4" / "app.py"):
+            raise ValueError("W4 fixture image does not match current pinned input")
+        rec["metrics"]["fixture_app_sha256"] = app_hash
         deadline = time.monotonic() + 60
         while True:
-            cp = redis("ping", timeout=15)
-            if cp.returncode == 0 and "PONG" in cp.stdout:
+            ready = engine.sh(["exec", app, "python", "-c",
+                "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=2).read()"], check=False)
+            if ready.returncode == 0:
                 break
-            if time.monotonic() > deadline:
-                raise TimeoutError("redis queue did not become ready")
-            time.sleep(0.5)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("W4 Redis-backed ingest readiness")
+            time.sleep(.1)
         sampler, trace = start_sampler(engine, trial_dir)
-        all_ok = True
-        for w in workers:
-            redis("FLUSHALL")
-            cp = redis("RPUSH", "npw4:jobs", *jobs, timeout=120)
-            if cp.returncode != 0:
-                rec["validation_errors"].append(
-                    f"RPUSH rc={cp.returncode}: {(cp.stderr or cp.stdout)[-200:]}")
-                checks[f"workers_{w}"] = False
-                all_ok = False
-                continue
-            t0 = time.monotonic()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=w) as ex:
-                futs = [
-                    ex.submit(engine.sh,
-                              ["run", "--rm", "--network", net,
-                               W4_IMAGE, "sh", "-c", W4_WORKER,
-                               "worker", q],
-                              timeout=300, check=False)
-                    for _ in range(w)
-                ]
-                outs = [f.result() for f in futs]
-            wall = round(time.monotonic() - t0, 3)
-            rec["metrics"][f"workers_{w}_s"] = wall
-
-            nres = redis("--scan", "--pattern", "npw4:res:*")
-            got = len([l for l in nres.stdout.splitlines() if l.strip()])
-            sample = [jobs[i] for i in
-                      range(0, W4_JOBS, max(1, W4_JOBS // 16))][:16]
-            want = {j: hashlib.md5(j.encode()).hexdigest() for j in sample}
-            mget = redis("MGET", *[f"npw4:res:{j}" for j in sample])
-            vals = mget.stdout.splitlines()
-            bad = [j for j, v in zip(sample, vals) if v.strip() != want[j]]
-            ok = (all(cp.returncode == 0 for cp in outs)
-                  and got == W4_JOBS and not bad)
-            checks[f"workers_{w}"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"workers_{w}: rc={[c.returncode for c in outs]} "
-                    f"results={got}/{W4_JOBS} bad_md5={bad[:3]}")
-            all_ok = all_ok and ok
-        rec["metrics"]["jobs"] = W4_JOBS
-        rec["correctness"]["ok"] = all_ok
-        return rec
+        for count in workers:
+            volume = f"{proj}-artifacts-{count}"
+            engine.sh(["volume", "create", "--label", label, volume])
+            owned_volumes.append(volume)
+            engine.sh(["exec", queue, "redis-cli", "FLUSHALL"])
+            with resource_phase(engine, rec, f"workers_{count}"):
+                started = time.monotonic()
+                engine.sh(["exec", app, "python", "/app/app.py", "submit", "--url", "http://127.0.0.1:8080"], timeout=120)
+                ingested = time.monotonic()
+                names = [f"{proj}-worker-{count}-{i}" for i in range(count)]
+                owned_containers.extend(names)
+                def work(name):
+                    return engine.sh(["run", "--name", name, "--label", label, "--network", net,
+                                      "-v", f"{volume}:/output", image, "worker", "--redis-host", queue],
+                                     timeout=180, check=False)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
+                    outcomes = list(pool.map(work, names))
+                completed = time.monotonic()
+            rec["metrics"][f"workers_{count}_s"] = completed - started
+            rec["metrics"][f"ingest_{count}_s"] = ingested - started
+            rec["metrics"][f"drain_{count}_s"] = completed - ingested
+            verify = engine.sh(["run", "--rm", "--label", label, "--network", net,
+                                "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], check=False)
+            checks[f"workers_{count}"] = (all(cp.returncode == 0 for cp in outcomes)
+                                           and verify.returncode == 0 and verify.stdout.strip() == "verified 200")
+            (trial_dir / f"workers-{count}.json").write_text(json.dumps({
+                "workers": [{"exit": cp.returncode, "stderr": cp.stderr} for cp in outcomes],
+                "verification_exit": verify.returncode, "verification": verify.stdout + verify.stderr}))
+        rec["metrics"].update(jobs=200, events=12800, artifacts=400, fixture_version=fixture_version)
+        rec["correctness"]["ok"] = all(checks.get(f"workers_{n}") for n in workers)
     except Exception as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(str(exc))
     finally:
         if sampler is not None:
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
-        engine.sh(["rm", "-f", q], check=False, timeout=60)
-        engine.sh(["network", "rm", net], check=False, timeout=60)
+        def cleanup(kind, name, remove):
+            try:
+                inspected = engine.sh([kind, "inspect", name], check=False)
+                if inspected.returncode:
+                    return
+                data = json.loads(inspected.stdout)[0]
+                labels = data.get("Config", {}).get("Labels", {}) if kind == "container" else data.get("Labels", {})
+                if not labels or labels.get("dev.ctrs.campaign.run") != ctx.run_id:
+                    rec["validation_errors"].append(f"cleanup ownership mismatch: {kind} {name}")
+                    rec["correctness"]["ok"] = False
+                    return
+                removed = engine.sh(remove, check=False)
+                if removed.returncode:
+                    rec["validation_errors"].append(f"cleanup failed: {kind} {name}: {removed.stderr}")
+                    rec["correctness"]["ok"] = False
+            except Exception as exc:
+                rec["validation_errors"].append(f"cleanup error: {kind} {name}: {exc}")
+                rec["correctness"]["ok"] = False
+        for name in owned_containers:
+            cleanup("container", name, ["rm", "-f", name])
+        for volume in owned_volumes:
+            cleanup("volume", volume, ["volume", "rm", volume])
+        cleanup("network", net, ["network", "rm", net])
+    return rec
 
 
 def trial_w3(ctx, engine: Engine, state: str) -> dict:
@@ -2634,6 +2634,9 @@ def cmd_prepare(args) -> int:
             odd = {img: a for img, a in arches.items() if a != "arm64"}
             if odd:
                 print(f"{name}: WARNING non-arm64 images: {odd}")
+
+            engine.sh(["build", "--load", "-t", "np-w4-events:v2",
+                       str(FIXTURES / "w4")], timeout=300)
 
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side

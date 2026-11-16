@@ -45,37 +45,49 @@ and the reason. Reporter preserves correctness counts and excludes all ratios.
 Application system CPU difference remains a profiling hypothesis, not a confirmed
 clean five-pair measurement. Run exec 98317 is terminal. No measured jobs active.
 
-Profiling tools are prepared on OrbStack as `np-w2-profiler:diagnostic`, image
-config sha256:e1f2c2f7fc6230ef2d12f02d503a1b4d503a9f287cd681b0fb0cc50f41e56a3e.
-Raw image metadata and OrbStack capability check:
-`.work/native-perf/results/w2-profile-tools/`. Same diagnostic image has strace
-6.13+ds-1, linux-perf 6.12.117-1 and procps 2:4.0.4-9. Software task-clock,
-context-switch and migration counters work; tracefs has sched events and instance
-support. Temporary tracefs mount was inside a removed owned container; no guest
-tracing state was modified. Guest boot ID/uname are recorded. No tool build job
-remains (exec 13438 terminal).
+Actual API profiles now exist. Diagnostic tools archive
+`.work/tmp/w2-profile/native-tools.tar.gz` sha256
+475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b is copied
+into API /tmp; only profiler exec gets its library path/privileges. Both engines
+use identical binaries and Python/direct application dependency versions.
+Matched diagnostic compose adds seccomp=unconfined and SYS_PTRACE/PERFMON to
+both APIs; normal product defaults are unchanged. No scores use these profiles.
 
-Next executable action: export this ONE profiler image, load the same archive
-into the owned ctrs engine and verify common image ID. Set up owned W2 stacks,
-attach perf/strace to API PID namespace (never unrelated processes), collect
-API task schedstat before/after plus isolated per-PID scheduling trace. Never
-replace a shared guest tracer. Profile same fixed 50k mixed
-work, concurrency 4, seed 7; distinguish syscall elapsed time from CPU and
-runqueue wait. Require an explained cost >=25% of confirmed per-request excess
-before a candidate. Scratch plan: `.work/tmp/w2-profile-plan.md`. Clean confirmation
-must be rescheduled when host allows; no Niceforge/user process may be stopped.
-Final driver includes stricter response/fatal-worker checks added after the batch;
-revalidate the final behavior in the next pilot. Do not wait for other fixtures.
+COMPLETED: exec 48890, `.work/tmp/profile-w2-api.py`, results
+`.work/native-perf/results/w2-api-inprocess-20261115T223951/`. ctrs perf/strace
+and OrbStack perf/strace completed. Retain all exits/data; no profile jobs remain. Perf real target /proc/1/cmdline is verified uvicorn. Earlier
+sidecar-PID and permission attempts are invalid, preserved as evidence.
 
-Independent W4 replacement worker owns `.work/wt/np-w4` on `campaign/np-w4`.
-Prototype preserved on that branch at 7c92827, not integrated as coverage.
-Completed bridge session `usrw_25f95b47-0f9b-4e7f-b5b1-197a268f51cd`, watch exec
-55436; parent review/integration pending. Four offline tests passed after 22:28.
-It replaces synthetic hashing with full HTTP-ingested event batches,
-JSON validation/aggregation and exact filesystem gzip/summary artifacts. No
-engine/build/measurement work. Tests delayed until after 22:28 local to avoid
-confirmation contention. Parent reviews and runs proof before main integration.
-Integration worktree is repo root on main. This is not yet W4 acceptance coverage.
+Matched perf: 50k operations each, cpu-clock ~17.4848/12.9091 CPU-s, self sample
+wake_up_q 15.25% ctrs /3.76% OrbStack, through futex wake and CPython
+PyEval_SaveThread/pthread_cond_signal. Approximate same-profile wake cost
+53.3/9.7 us per request (difference ~43.6 us, ~48% of sampled API CPU gap).
+This is a material mechanism hypothesis, not a measured optimization or VZ/kernel
+root-cause verdict. Strace perturbs futex traffic severely; do not use its syscall
+time as on-CPU cost or its count as an uninstrumented request count.
+CTRS task schedstat absent; unknown wait, not zero. Status/stat snapshots retained.
+
+Next executable action: actual API placement controls (all threads same guest CPU vs main/worker
+threads explicitly on distinct CPUs) with affinity/start/TID checks and migrations.
+Collect isolated sched trace for wake-to-run/runqueue intervals because ctrs lacks
+schedstat; never replace shared tracing. Then identical pinned-binary futex tests,
+with CPU-count/load/power/thermal disclosure, only as diagnostics. Use this to
+separate guest CPU work, spin/wait and host VM scheduling before choosing a
+supported VZ or guest change. Clean scored confirmation still needs host window.
+
+W4 v2 replacement is integrated and verified: 72 tests pass. Real-engine
+correctness pilots passed all 1/4/16-worker conditions: OrbStack
+`run-20261115T224539-837d`, ctrs `w4-v2-ctrs-20261115T224709`; final input-hash
+check also passed OrbStack `run-20261115T224839-814a`. Each condition ingests
+200 batches/12,800 events and verifies 400 exact gzip NDJSON/JSON artifacts,
+empty queue, no duplicates/loss/corruption/extras, and owned cleanup. Same
+exported fixture image on both engines (archive SHA256
+a6f9cd32079b7980c268d3ad504174fa8af01654d7442026ae726f8a182809f7).
+App hash is enforced before work; Python and Redis content digests pinned.
+This establishes functional v2 coverage, not frozen acceptance/performance wins;
+fixture size and all per-cell budgets still require freeze/qualification.
+Old hash-only W4 results are incompatible diagnostics. Retire worker tree
+`.work/wt/np-w4` only after useful final source is safely committed/integrated.
 
 Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'` (join the wrapped command).
