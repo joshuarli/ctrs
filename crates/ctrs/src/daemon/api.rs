@@ -491,6 +491,7 @@ fn images(req: &Request, engine: &Engine) -> Result<Value, Error> {
 
 fn image_inspect(engine: &Engine, name: &str) -> Result<Value, Error> {
     let i = engine.image(name)?.ok_or_else(|| Error::NotFound(format!("No such image: {name}")))?;
+    let rootfs = image_rootfs(&engine.store.read_config(&i.config_digest)?, i.layers.len())?;
     Ok(json!({
         "Id": i.config_digest,
         "RepoTags": [i.name],
@@ -507,8 +508,21 @@ fn image_inspect(engine: &Engine, name: &str) -> Result<Value, Error> {
             "User": i.config.user,
             "Healthcheck": image_healthcheck(engine, &i),
         },
-        "RootFS": {"Type": "layers", "Layers": i.layers.iter().map(|l| &l.digest).collect::<Vec<_>>()},
+        "RootFS": rootfs,
     }))
+}
+
+fn image_rootfs(config: &[u8], layer_count: usize) -> io::Result<Value> {
+    let cfg: Value = serde_json::from_slice(config).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let diff_ids = cfg["rootfs"]["diff_ids"].as_array().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "image config has no rootfs.diff_ids"))?;
+    if cfg["rootfs"]["type"] != "layers" || diff_ids.len() != layer_count {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "image config rootfs differs from recorded layers"));
+    }
+    for id in diff_ids {
+        let digest = id.as_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "image diff ID is not a string"))?;
+        ctrs_image::store::digest_hex(digest)?;
+    }
+    Ok(json!({"Type": "layers", "Layers": diff_ids}))
 }
 
 fn image_remove(engine: &Engine, name: &str) -> Result<Value, Error> {
@@ -2709,6 +2723,18 @@ pub(super) fn parse_signal(raw: &str) -> Result<u32, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_rootfs_reports_uncompressed_diff_ids_and_rejects_missing_identity() {
+        let ids = vec![format!("sha256:{}", "a".repeat(64)), format!("sha256:{}", "b".repeat(64))];
+        let config = json!({"rootfs": {"type": "layers", "diff_ids": ids}});
+        assert_eq!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 2).unwrap(), json!({"Type": "layers", "Layers": ids}));
+        assert!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 1).is_err());
+        for config in [json!({}), json!({"rootfs": {"type": "layers", "diff_ids": [null]}}), json!({"rootfs": {"type": "layers", "diff_ids": ["sha256:short"]}})] {
+            assert!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 1).is_err());
+        }
+        assert_eq!(image_rootfs(br#"{"rootfs":{"type":"layers","diff_ids":[]}}"#, 0).unwrap(), json!({"Type": "layers", "Layers": []}));
+    }
 
 
     #[test]
