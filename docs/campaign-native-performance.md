@@ -220,6 +220,12 @@ predeclares numerical idle, wake, footprint, next-use and allocation budgets.
 Its explicit active-disk scope leaves exclusive allocation and build-cache size
 unknown; short or contaminated pilots cannot close resource acceptance cells.
 
+Existing-disk expansion now has an owned application upgrade/restart proof with
+exact database/cache contents and stable volume/filesystem identity. Its 512MiB
+metadata-allocation budget and 1GiB host-free preflight do not establish reclaim,
+reserved capacity, full-disk recovery or host power-loss durability. Keep those
+acceptance cells open while auditing the unchanged VZ Cached+Fsync path.
+
 Other candidates must follow current profiles: bulk/control interference,
 parallel installs, real host-bind loops, published-port tails, builder
 lifecycle and memory reclaim. Several transport/install optimizations

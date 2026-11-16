@@ -45,6 +45,14 @@ Requirements and notes:
 - To run at login, see `docs/launchd.md` for an optional user agent
   (not a LaunchDaemon; ctrs does not need root).
 
+When upgrading, replace both the host binary and guest assets. Existing ext4
+data disks expand in place to at least 1 TiB on the next VM boot. Expansion
+preserves named volumes and their contents. Allow at least 1 GiB of free host
+space before starting an older installation. Insufficient space prevents
+expansion before the disk changes; free space and retry. The sparse capacity
+does not reserve 1 TiB of host storage. Back up authoritative data before an
+upgrade. Host power-loss and full-disk recovery guarantees remain unqualified.
+
 ## Linux
 
 No systemd requirement. The static binaries are built in a container:

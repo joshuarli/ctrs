@@ -2811,3 +2811,62 @@ Kernel 6.18.58 resize source indicates noinit_itable can force eager inode-table
 zeroing; observe actual WRITE_ZEROES support/allocation before any 1 TiB attempt.
 The SDK still documents Fsync as best effort; Full has stronger permanent-storage
 guarantees. No power-loss or comparative storage claim follows from this probe.
+
+## Existing-disk feasibility and isolated automatic-upgrade candidate
+
+Owned `disk-grow-334f60b7` verifies 1→2GiB with exact fsynced named-volume bytes,
+metadata, raw inode and ext4 UUID preserved across VM restart. Allocation increases
+884,736 bytes, below the predeclared 128MiB budget. Subsequent owned scale probe
+2→64GiB adds 2,359,296 bytes; 64GiB→1TiB adds 29,065,216 bytes, below the declared
+512MiB budget. Stock noinit_itable mount remains; actual VZ device advertises
+write-zeroes/discard support. These measurements establish bounded metadata in
+these disposable runs, not a general reclaim/full-disk guarantee or speed win.
+
+Selected in-place growth preserves inode/UUID and avoids authoritative-data copy.
+Candidate 8b41bc2 is isolated in `.work/wt/np-disk-expand`: shared 1TiB capacity,
+small ext4 geometry reader, regular nonsymlink/alignment/truncation validation,
+>=1GiB actual host-free preflight, monotonic sparse file extension and F_FULLFSYNC
+before guest EXT4_IOC_RESIZE_FS + syncfs. PID1 does not serve the agent until grow
+succeeds. No disk-record/wire change or new production dependency. Preflight is
+not reserved capacity; racing external writes/I/O errors remain possible.
+
+Full candidate `disk-expand-04b85cfe` uses the pinned W8 portfolio and real
+API/PostgreSQL/Redis. Old host cd29f06c... and guest eb0ef326... create a 64GiB
+installation; 5,000 fixed operations (3,469 reads/1,531 writes), exact seed and
+all acknowledged payloads plus committed DB/cache record are checked. New host
+37bec61b... and guest 71934e6d... automatically expand the same disk to 1TiB;
+exact database/cache/sentinel bytes, two named-volume identities, filesystem UUID
+and disk inode survive expansion and another VM restart. Actual host allocation
+increases 33,505,280 bytes. Original run/plan/assets/driver/geometry/ownership and
+results are retained under `.work/tmp/disk-expand-04b85cfe/`. Owned stopped data is
+retained for audit. No user/OrbStack daemon/state was stopped, pruned or mutated.
+
+Candidate invalid-media guard `disk-guard-68029d4e` rejects before write ack,
+preserving malformed disk size/inode/SHA; normal old→new guest and restart exact
+volume proof also pass. Host tests pass: two geometry cases and three native
+extension/path/invalid-media cases; ctrs 182 tests, xtask check and private guest
+build pass. Low-host-space native fault probe and independent review are pending;
+this candidate is not integrated or qualified. VZ Cached+Fsync remains unchanged;
+normal restart/upgrade does not establish host power-loss durability.
+
+W11 worker d503a4bc ended incomplete, with no coordinator/CLI. Partial plumbing,
+pin and mocked test remain unaccepted in its tree. Parent will fix the identified
+W4 verifier-container/cleanup holes and unique cumulative write identities before
+implementing real mixed cycles. No replacement worker bypasses its attempt limit.
+
+Expansion completion: independent scout review 9d1f3dd3 read the full production
+patch, surrounding paths, before copies, tests and native receipt; terminal
+ACCEPTANCE met, no demonstrated defect, no edits or independent execution.
+Parent retains native proof responsibility. Review tree `.work/wt/np-disk-review`.
+Owned APFS probe `disk-space-ff734318` with 535,040,000 bytes free rejects a 1GiB
+legacy ext4 disk before extension: size/inode/full SHA unchanged, then old engine
+reads exact saved volume data and unchanged identity. Sparse APFS image detached,
+only owned state retained. Original `disk-space-0df657d8` attempt used volume-create
+metadata without VM boot, so failed to exercise expansion; original failure and
+corrected source are preserved, not treated as product failure or a pass.
+The corrected probe starts an owned container to force the boot path. No claim
+about exhaustion after the preflight, I/O failure recovery or power loss.
+
+Integrated as 380ca26; native host/guest binaries retain the tested hashes above.
+Workspace guest publication is recorded in the current queue. No shared daemon
+was restarted. No comparative timing claim from these correctness checks.

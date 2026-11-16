@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main be7f41d plus
+No new product performance win is qualified. Current source main 380ca26 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -34,9 +34,10 @@ eventual frozen-candidate confirmation and known correctness debt remain open.
   host-address failures. Timings invalid under foreign work. Never pool v1/v2.
 - Persistent mount guard 3fa2f01 rejects ext4 errors before agent startup instead
   of acknowledging authoritative data on tmpfs. Native invalid-media/normal
-  restart/old→new guest upgrade proofs pass. Actual workspace guest initramfs
-  eb0ef32667a4d0560d23482cab670f0fa7693bbd013b0484d27fb1d349cf42c7
-  is published; kernel unchanged. No daemon restart or Fsync policy change.
+  restart/old→new guest upgrade proofs pass. Preserved mount-guard initramfs
+  eb0ef32667a4d0560d23482cab670f0fa7693bbd013b0484d27fb1d349cf42c7;
+  workspace now uses the reviewed expansion guest 71934e6d... below. Kernel
+  unchanged. No daemon restart or VZ Fsync policy change.
   Preserved variants: `.work/native-perf/guest-variants/{mount-guard,pre-mount-guard}`.
 - RootFS metadata fix cdcbfb4 reports config diff IDs, not compressed blob hashes.
   All 177 ctrs tests and real common-image deployment pass. Signed test binary:
@@ -68,22 +69,35 @@ Next source task: representative W11 mixed cycles using the persistent real
 API/database/cache stack, W4 queue/artifacts, W9 fixed builds, exact cumulative
 persisted state and owned cleanup. First prove short cycles, then implement the
 durable finite 12h runner; do not launch 12h qualification before the full freeze.
-W11 source lane is now active: `.work/wt/np-w11-v2`, base 847b1a7,
-bridge usrw_d503a4bc-a057-421f-91aa-a8ba63937b14, watch exec45590. Owns only
-mixed_cycle.py/tests, fixtures/w11-v2, diagnostics/mixed_pilot.py and the narrow
-trial_w4 image-reference plumbing in runner.py. No engine/network/build work,
-no commits, one attempt. Do not duplicate or edit its files while running.
+W11 source lane is terminal incomplete: `.work/wt/np-w11-v2`, base 847b1a7,
+bridge usrw_d503a4bc-a057-421f-91aa-a8ba63937b14, watch exec45590 ended. Only
+W4 image-reference plumbing, one mocked test and worker-pin.json were returned;
+no mixed coordinator/CLI. Parent completes directly; no duplicate worker/retry.
+First fix W4's untracked verifier container and cleanup's nonzero-inspect ambiguity.
+Cumulative W2 writes need unique cycle identities (seed alone does not namespace
+names), with affected fixture pins/version updated if shared load.py changes.
 W4 common worker export/pin is `.work/native-perf/inputs/w11-worker-v1/`;
 manifest f880c4ff... and archive a6f9cd32... verified against current app bytes.
 
-Parent disk lane `.work/wt/np-disk-expand` is separate. Execute
-`TMPDIR=$PWD/.work/tmp python3.14 .work/tmp/disk-grow-preflight.py` for the bounded
-1GiB→2GiB owned feasibility probe, source/plan recorded in evidence before
-selection. Small allocation budget 128MiB, eventual 64GiB→1TiB metadata budget 512MiB.
-Then choose in-place growth versus shadow migration from actual data/geometry/
-allocation and failure behavior. In parallel audit the flush path on disposable
-owned state. Current source simply reuses any existing data.img and
-mounts ext4; it does not expand an old filesystem to match the 1 TiB template.
+Disk expansion 380ca26 is integrated (reviewed candidate 8b41bc2).
+In-place probes 1→2→64→1024GiB preserve exact bytes, volume metadata, disk inode
+and filesystem identity; final feasibility allocation delta 29,065,216 bytes.
+Actual application upgrade `disk-expand-04b85cfe` passes 5,000 operations and
+exact DB/cache data through automatic 64GiB→1TiB expansion and restart; actual
+allocation increase 33,505,280 bytes (512MiB budget). No power-loss claim.
+Host binary `.work/tmp/disk-expand-target/release/ctrs` SHA 37bec61b...;
+guest variant `.work/native-perf/guest-variants/disk-expand`, initrd 71934e6d....
+Workspace `guest/out/initramfs.cpio` now has that tested initrd. Main
+target/release/ctrs remains older; use the explicit signed expansion host above.
+Owned APFS low-space proof `disk-space-ff734318` passes with 535,040,000 bytes
+free: refusal before disk size/inode/SHA changes; old engine reads exact data.
+Independent scout review usrw_9d1f3dd3-251b-4b98-bc86-8712128068d4 is terminal
+complete, no demonstrated findings, no edits. Parent native proofs above pass.
+Source uses >=1GiB free-space preflight, full-syncs backing capacity, then resizes
+ext4 before agent startup. Preflight is not a reservation/full-disk recovery proof.
+Cached+Fsync durability audit remains open. Next source task is W11 cleanup and
+mixed coordinator above; use unique worker IDs per cycle with the unchanged
+pinned W2 loader to avoid changing W2/W8 inputs. No measured Mac job is active.
 
 W8 runtime command (uses the tested signed metadata-fix binary):
 `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_pilot.py --layout .work/native-perf/inputs/w8-portfolio-v2/layout --ctrs-binary .work/tmp/image-diffids-target/release/ctrs`.
