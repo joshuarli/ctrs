@@ -638,6 +638,8 @@ def summarize_trace(trace: Path) -> dict:
     if not trace.exists():
         return {"samples": 0}
     peak_rss = 0
+    peak_fp = 0
+    fp_samples = 0
     cpu_seconds = 0.0
     cpu_exact = 0.0
     prev_t = None
@@ -654,6 +656,8 @@ def summarize_trace(trace: Path) -> dict:
         dt = (t - prev_t) if prev_t is not None else 0.0
         prev_t = t
         total_rss = 0
+        total_fp = 0
+        fp_seen = False
         cur_cpu: dict[int, float] = {}
         for p in rec.get("procs", []):
             total_rss += p.get("rss_kb", 0)
@@ -665,15 +669,24 @@ def summarize_trace(trace: Path) -> dict:
                 if prev is not None and ct >= prev:
                     cpu_exact += ct - prev
                     used_exact = True
+            fb = p.get("footprint_bytes")
+            if fb is not None:
+                total_fp += fb
+                fp_seen = True
+        if fp_seen:
+            fp_samples += 1
+            peak_fp = max(peak_fp, total_fp)
         prev_cpu = cur_cpu
         peak_rss = max(peak_rss, total_rss)
     return {
         "samples": samples,
         "peak_total_rss_kb": peak_rss,
+        "peak_phys_footprint_bytes": peak_fp if fp_samples else None,
+        "footprint_samples": fp_samples,
         "cpu_seconds_est": round(cpu_exact if used_exact else cpu_seconds, 2),
         "method": "ps rss sum + cumulative cputime deltas over matched "
-                  "comms (pcpu fallback); shared pages double-counted, "
-                  "compressed memory not visible",
+                  "comms (pcpu fallback); footprint = /usr/bin/footprint "
+                  "phys_footprint summed over matched pids",
     }
 
 

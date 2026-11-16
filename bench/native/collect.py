@@ -7,6 +7,11 @@ load average, one JSON object per line to --out. Runs until SIGTERM/SIGINT.
 RSS is per-process resident size in KB as reported by ps; summing matched
 processes double-counts shared pages and misses compressed/swapped memory,
 so consumers must treat totals as approximations (see README).
+
+Every --footprint-interval seconds the matched pids are also measured with
+`/usr/bin/footprint -f bytes` (phys_footprint, the Activity Monitor
+metric): per-process `footprint_bytes` on that tick's records. It is the
+qualified physical-memory signal; RSS stays as a cheap approximation.
 """
 
 import argparse
@@ -17,6 +22,8 @@ import signal
 import subprocess
 import sys
 import time
+
+FP_RE = re.compile(r"\[(\d+)\]:.*?Footprint:\s+(\d+)\s*B")
 
 
 def parse_cputime(text: str) -> float | None:
@@ -48,11 +55,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--match", required=True, help="regex on process comm")
     ap.add_argument("--interval", type=float, default=0.25)
+    ap.add_argument("--footprint-interval", type=float, default=1.0,
+                    help="seconds between footprint samples; 0 disables")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     rx = re.compile(args.match, re.IGNORECASE)
     stop = False
+    next_fp = 0.0
 
     def _term(*_):
         nonlocal stop
@@ -89,6 +99,21 @@ def main():
                 sample_error = str(exc)
             else:
                 sample_error = None
+            if (args.footprint_interval > 0 and procs
+                    and t0 >= next_fp):
+                next_fp = t0 + args.footprint_interval
+                try:
+                    fp = subprocess.run(
+                        ["footprint", "-f", "bytes"]
+                        + [str(p["pid"]) for p in procs],
+                        capture_output=True, text=True, timeout=10)
+                    by_pid = {int(m.group(1)): int(m.group(2))
+                              for m in FP_RE.finditer(fp.stdout)}
+                    for p in procs:
+                        if p["pid"] in by_pid:
+                            p["footprint_bytes"] = by_pid[p["pid"]]
+                except Exception:
+                    pass
             rec = {
                 "t": round(t0, 3),
                 "loadavg": list(os.getloadavg()),

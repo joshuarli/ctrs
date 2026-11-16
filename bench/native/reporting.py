@@ -30,7 +30,8 @@ CASE_METRICS = {
     "W11": [],
 }
 HIGHER_BETTER = {"rps", "tx_tps", "load_rps"}
-RESOURCE_METRICS = ["peak_total_rss_kb", "cpu_seconds_est"]
+RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
+                    "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")
 
 
