@@ -1379,3 +1379,36 @@ Forensic upgrade deployed after the run: cumulative session sent-byte
 counter + conn/stream/default window snapshot logged on RST — pending
 reproduction under `CTRS_LOG=debug` (`np04-w6-debug-hunt-*.log`, W6
 20-pair rerun in flight).
+
+## NP-04 session flake root-caused; clean W6 qualified (2026-11-16)
+
+Root cause of the intermittent `/session` RST_STREAM code-3
+(FLOW_CONTROL_ERROR): our h2 `Win::settings()` reset the default
+stream window and cleared per-stream state on every
+SETTINGS_INITIAL_WINDOW_SIZE change. grpc-go's BDP estimator sends
+those updates mid-stream; per RFC 7540 §6.9.2 each live stream's
+window must shift by the delta, so we over-counted by bytes already
+sent and over-drew — buildkitd's grpc inFlow check
+(`http2_server.go` `s.fc.onData`) answered RST code 3. Caught live
+by the new forensics: `sent=785951 conn_win=69800
+stream_win=53317` — windows positive in our (wrong) books.
+
+Fix (commit `67ff261`): `settings()` applies the delta to each
+tracked stream window; session sender also stops once the builder
+ends its side (`peer_done` + dead-aware `wait_dead`). Same Win is
+used for the buildx-facing direction, which had the identical bug.
+
+Post-fix clean baseline `base-20261115T173857-2d73` (W6,
+`--driver default`, debug OFF, commit `67ff261`): **20/20 valid
+pairs, zero failures, zero session resets.** build_rust_s
+0.9325 [0.9204, 0.9367] strict-win; build_zlib_s 0.5294
+[0.4985, 0.5497] strict-win.
+
+W6+W7 default-driver timing cells are now qualified:
+- W6 `base-20261115T173857-2d73`: rust 0.933, zlib 0.529 — strict.
+- W7 `base-20261115T163439-18ee`: all six metrics strict-win
+  (hyperfine 0.890/0.399/0.438; httpie 0.785/0.414/0.457).
+
+Resource cells (peak_total_rss_kb, cpu_seconds_est) remain
+unmeasured in every run — a harness gap to close before the full
+contract can be scored.
