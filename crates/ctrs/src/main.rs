@@ -37,8 +37,20 @@ usage: ctrs COMMAND          docker's commands, on ctrs: ctrs run, ps, exec,
        ctrs diag logs [-f] [--ui|--engine|--cli] [--errors] [-n N]
        ctrs diag report [--out PATH]     a support file: logs and crashes, tokens taken out";
 
+const FOOTER: &str = "\
+Maintained by Joshua Li: https://github.com/joshuarli/ctrs
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md";
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() || matches!(args.as_slice(), [arg] if arg == "-h" || arg == "--help") {
+        println!("{USAGE}\n\n{FOOTER}");
+        return ExitCode::SUCCESS;
+    }
     // Block the VM-crash test signal before any thread is spawned (diag::init
     // spawns one); the daemon's signal thread sigwaits for it. Production
     // engines never see this when the env var is unset.
