@@ -2633,3 +2633,14 @@ for scheduler and disk diagnostics. Both callers install it once. A controlled
 subprocess regression proves finally cleanup completes before original SIGTERM
 death. All103 native harness tests pass. The guard's source branch is integrated;
 completed worktree build artifacts are preserved before targeted retirement.
+
+## Bounded persistent-mount checkout cleanup
+
+At main1d2f551, the mechanic verified3fa2f01 ancestry, ignored-only state and
+preserved guest/review artifact hashes, then retired only np-persistent-mount
+and np-persistent-mount-review with worktree-retire. Parent independently
+confirmed both paths absent and preserved Image/initramfs/patch SHA matches.
+All other worktrees remain. About46MiB of completed checkout/build cache was
+removed;22MiB candidate,22MiB historical guest and32KiB review evidence remain.
+Bridge session usrw_59a84adb-9320-418b-971e-3e2ca9a23d08 is terminal, acceptance
+met, only this evidence file changed. No runtime or timing work was involved.
