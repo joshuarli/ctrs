@@ -40,7 +40,9 @@ class OwnershipTests(unittest.TestCase):
                  3: [{'fd': '6', 'n': '/unrelated/data.img'}]}
         with patch.object(ownership, 'process_table', return_value=table), \
                 patch.object(ownership, 'open_files', side_effect=files.__getitem__), \
-                patch.object(ownership, 'artifact', return_value={'sha256': 'abc'}):
+                patch.object(ownership, 'artifact', return_value={'sha256': 'abc'}), \
+                patch.object(ownership, 'Counters') as counters:
+            counters.return_value.read.return_value = {'kernel_start_identity': 123}
             result = ownership.discover('ctrs', '/engine/docker.sock', '/engine')
         self.assertEqual([p['pid'] for p in result['required_processes']], [1, 2])
 

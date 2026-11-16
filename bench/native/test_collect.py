@@ -26,6 +26,16 @@ class ResourceTests(unittest.TestCase):
         output = 'daemon [1]: Footprint: 10 B\n    phys_footprint: 100 B\nVM [2]: Footprint: 20 B\n    phys_footprint: 100000 B\n'
         self.assertEqual(collect.parse_footprint(output), {1: 100, 2: 100000})
 
+    def test_real_shared_category_heading_does_not_change_owner(self):
+        output = ("OrbStack Helper [1396]: 64-bit    Footprint: 1014130776 B\n"
+                  "Shared with OrbStack [1299]:\n"
+                  "Auxiliary data:\n    phys_footprint: 15389157464 B\n"
+                  "OrbStack [1299]: 64-bit    Footprint: 72008736 B\n"
+                  "Shared with OrbStack Helper [1396]:\n"
+                  "Auxiliary data:\n    phys_footprint: 72008736 B\n")
+        self.assertEqual(collect.parse_footprint(output),
+                         {1396: 15389157464, 1299: 72008736})
+
     def test_category_only_is_unknown(self):
         self.assertEqual(collect.parse_footprint('VM [2]: Footprint: 20 B\n'), {})
 

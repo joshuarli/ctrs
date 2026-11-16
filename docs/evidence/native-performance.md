@@ -2047,3 +2047,63 @@ workload CPU. Boundary method is ps cumulative CPU, 0.01-s resolution, with
 Pre/post perf-gate-ready passed. No engine ratio or observer-overhead claim.
 Terminal asynchronous footprint samples now survive sampler shutdown without
 altering CPU process coverage. 58 offline tests pass.
+
+## Observer calibration rejects the subprocess sampler
+
+Run `sampler-calibration-20261115T220906`: 5 alternating on/off pairs per engine,
+4-second closed-loop W2, concurrency 4, seed 7. Both modes retain explicit CPU
+boundaries; off mode omits periodic sampling/footprint subprocesses. Each trial
+creates a fresh stack and verifies exact item count. All 20 trials passed
+correctness and pre/post perf-gate-ready. Raw records, plan, power/thermal/load
+and paired computations are saved in that run directory. This diagnoses the
+observer and does not compare engines or establish equal-work efficiency.
+
+| Engine | Throughput on/off median (range) | CPU per success on/off median (range) |
+| --- | --- | --- |
+| ctrs | 1.0440 (1.0153–1.0717) | 0.9618 (0.9255–0.9944) |
+| OrbStack | 0.8383 (0.8010–1.0238) | 1.1168 (0.9695–1.1339) |
+
+Predeclared tolerances: median throughput drop <=3%, CPU/success inflation <=5%.
+OrbStack fails both, rejecting sampler v2 for scored comparison. The ctrs
+increase is also a warning about observer influence, not product progress.
+The mechanism within ps vs footprint is not yet isolated. Native rusage v0
+counters are the bounded next repair: one syscall per process supplies CPU,
+physical footprint, wake counts and high-resolution kernel start identity.
+Local SDK sys/resource.h defines the ABI; conversion uses mach_timebase_info.
+Native self CPU delta agrees with process_time and bad PID errors surface.
+61 offline/native behavioral tests pass. A fresh identical calibration is in
+flight; no acceptance claim yet.
+
+Disk audit finding: crates/ctrs-vmm/src/apple.rs uses Cached+Fsync and still
+claims the disk is wholly resendable. Named volumes invalidate that assumption.
+The installed SDK distinguishes Full (synchronized permanent storage, including
+power loss) from Fsync (best effort, drive cache may remain). Guest flush path,
+actual installation migration and comparable OrbStack guarantees remain unaudited;
+no database or storage superiority claim is supported by restart tests.
+
+## Native sampler v3 short calibration accepted for diagnostic iteration
+
+`sampler-calibration-20261115T221334`: same predeclared five alternating pairs
+per engine, 4-s W2, concurrency 4, seed 7, all 20 correctness and host gates pass.
+
+| Engine | Throughput on/off median (range) | CPU/success on/off median (range) |
+| --- | --- | --- |
+| ctrs | 0.9935 (0.9476–1.1062) | 1.0024 (0.8916–1.0548) |
+| OrbStack | 0.9906 (0.9330–1.1084) | 0.9702 (0.9372–0.9969) |
+
+Both pass the declared median throughput-drop <=3% and CPU/success-inflation
+<=5% limits. Individual short-trial variation remains substantial; do not infer
+zero observer effect or qualified engine ratios. This unblocks fixed-work W2
+investigation. One OrbStack trace's native sample elapsed 45–220 microseconds;
+this includes both required processes and is not an application speed claim.
+
+Out-of-band footprint validation: native-before helper 15,389,157,464 bytes and
+app 72,008,736 bytes exactly matched footprint's corresponding phys_footprint
+auxiliary values. Native-after showed small live changes. Raw command output
+and values saved in footprint-validation.txt/json in the run directory.
+This exposed a second parser bug: Shared-with headings contain PIDs and the
+old parser reassigned the following auxiliary value. Only process headers with
+Footprint now switch owner. Regression includes actual two-process shared
+heading output. Native sampling does not parse that command output.
+62 tests pass, including CPU timebase vs independent process_time, bad PID,
+missing VM, kernel start identity reuse, category-only output and shared headings.

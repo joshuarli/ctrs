@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import time
 
+from macos_counters import Counters
+
 
 def process_table():
     cp = subprocess.run(['ps', '-axo', 'pid=,lstart=,comm='],
@@ -71,8 +73,10 @@ def discover(engine, socket_path, engine_dir):
         for pid, proc in candidates.items():
             roles.setdefault(pid, 'application')
     required = []
+    counters = Counters()
     for pid, role in roles.items():
         proc = dict(table[pid], role=role)
+        proc["kernel_start_identity"] = counters.read(pid)["kernel_start_identity"]
         started = time.mktime(time.strptime(proc['start_identity'], '%a %b %d %H:%M:%S %Y'))
         executable = [f for f in files[pid]
                       if f['fd'] == 'txt' and f.get('n') == proc['comm']]

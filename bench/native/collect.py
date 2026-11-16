@@ -1,23 +1,12 @@
 #!/usr/bin/env python3
-"""Resource sampler for bench/native trials.
+"""Sample verified ARM64 macOS engine processes using native rusage counters.
 
-Samples host process table entries whose comm matches --match, plus host
-load average, one JSON object per line to --out. Runs until SIGTERM/SIGINT.
-
-RSS is per-process resident size in KB as reported by ps; summing matched
-processes double-counts shared pages and misses compressed/swapped memory,
-so consumers must treat totals as approximations (see README).
-
-Every --footprint-interval seconds the matched pids are also measured with
-`/usr/bin/footprint -f bytes`. The qualified physical-memory signal is the
-per-process `phys_footprint:` auxiliary field (Activity Monitor's memory
-metric); the category-table `Footprint:` total is NOT phys_footprint — it
-excludes IOKit/IOSurface and other accounted-elsewhere pages and undercounts
-VM helpers by >10x. Asynchronous footprint records expose required PIDs,
-missing PIDs, timing and errors. RSS stays as a cheap approximation.
+The kernel ri_phys_footprint field is the physical accounting signal; category
+Footprint output never substitutes for it. Required processes carry kernel start
+identity. Missing/changed processes remain errors. CPU boundary calls use the
+same cheap native API without waiting for external footprint commands.
 """
 
-import concurrent.futures
 import hashlib
 from pathlib import Path
 import argparse
@@ -29,9 +18,11 @@ import subprocess
 import sys
 import time
 
-FP_PID_RE = re.compile(r"\[(-?\d+)\]:")
+from macos_counters import Counters
+
+FP_PID_RE = re.compile(r"^.*\[(-?\d+)\]:\s+(?:(?:32|64)-bit\s+)?Footprint:")
 FP_PHYS_RE = re.compile(r"^\s*phys_footprint:\s+(\d+)\s*B")
-SAMPLER_VERSION = "2-strict-phys"
+SAMPLER_VERSION = "3-native-rusage"
 
 
 def parse_footprint(output: str) -> dict[int, int]:
@@ -105,22 +96,25 @@ def validate_processes(required, processes):
 
 
 def cpu_boundary(identity):
-    started = time.monotonic()
     required = {p["pid"]: p for p in identity.get("required_processes", [])}
-    result = {"started_monotonic": started, "method": "ps cumulative CPU; 0.01s resolution",
+    return native_sample(Counters(), required)
+
+
+def native_sample(counters, required):
+    result = {"started_monotonic": time.monotonic(),
+              "method": "proc_pid_rusage V0; Mach timebase conversion",
               "procs": [], "errors": []}
-    try:
-        cp = subprocess.run(["ps", "-axo", "pid=,time=,lstart=,comm="],
-                            capture_output=True, text=True, timeout=5, check=True)
-        for line in cp.stdout.splitlines():
-            parts = line.split(None, 7)
-            if len(parts) == 8 and int(parts[0]) in required:
-                result["procs"].append({"pid": int(parts[0]),
-                    "cputime_s": parse_cputime(parts[1]),
-                    "start_identity": " ".join(parts[2:7]), "comm": parts[7]})
-        result["errors"].extend(validate_processes(required, result["procs"]))
-    except Exception as exc:
-        result["errors"].append(str(exc))
+    if not required:
+        result["errors"].append("no verified ownership manifest")
+    for pid, expected in required.items():
+        try:
+            proc = counters.read(pid)
+            if proc["kernel_start_identity"] != expected.get("kernel_start_identity"):
+                raise ValueError(f"process start identity changed: {pid}")
+            proc.update({k: expected[k] for k in ("comm", "start_identity")})
+            result["procs"].append(proc)
+        except Exception as exc:
+            result["errors"].append(f"required process {pid}: {exc}")
     result["ended_monotonic"] = time.monotonic()
     return result
 
@@ -146,19 +140,17 @@ def cpu_delta(before, after):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--match", required=True, help="regex on process comm")
+    ap.add_argument("--match", help="discovery hint; never establishes ownership")
     ap.add_argument("--interval", type=float, default=0.25)
-    ap.add_argument("--footprint-interval", type=float, default=1.0,
-                    help="seconds between footprint samples; 0 disables")
     ap.add_argument("--ownership", help="verified process identity manifest")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if args.interval <= 0:
+        ap.error("interval must be positive")
 
-    rx = re.compile(args.match, re.IGNORECASE)
     ownership = json.loads(Path(args.ownership).read_text()) if args.ownership else {}
     required = {p["pid"]: p for p in ownership.get("required_processes", [])}
     stop = False
-    next_fp = 0.0
 
     def _term(*_):
         nonlocal stop
@@ -167,75 +159,34 @@ def main():
     signal.signal(signal.SIGTERM, _term)
     signal.signal(signal.SIGINT, _term)
 
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    pending_fp = None
+    counters = Counters()
     sampler_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    counter_sha256 = hashlib.sha256(Path(__file__).with_name("macos_counters.py").read_bytes()).hexdigest()
     with open(args.out, "w") as out:
         while not stop:
-            t0 = time.time()
-            mono = time.monotonic()
-            try:
-                ps = subprocess.run(
-                    ["ps", "-axo", "pid=,pcpu=,rss=,time=,lstart=,comm="],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if ps.returncode:
-                    raise RuntimeError(f"ps exit {ps.returncode}: {ps.stderr}")
-                procs = []
-                for line in ps.stdout.splitlines():
-                    parts = line.split(None, 9)
-                    if len(parts) < 10:
-                        continue
-                    try:
-                        pid, pcpu, rss = int(parts[0]), float(parts[1]), int(parts[2])
-                    except ValueError:
-                        continue
-                    cputime_s = parse_cputime(parts[3])
-                    comm = parts[9].strip()
-                    if (pid in required if args.ownership else rx.search(comm)):
-                        procs.append({"pid": pid, "comm": comm,
-                                      "pcpu": pcpu, "rss_kb": rss,
-                                      "cputime_s": cputime_s,
-                                      "start_identity": " ".join(parts[4:9])})
-            except Exception as exc:
-                procs = []
-                sample_error = str(exc)
-            else:
-                sample_error = None
-            ownership_errors = validate_processes(required, procs)
-            footprint = None
-            if pending_fp is not None and pending_fp.done():
-                footprint = pending_fp.result()
-                pending_fp = None
-            if (args.footprint_interval > 0 and procs and t0 >= next_fp
-                    and pending_fp is None):
-                next_fp = t0 + args.footprint_interval
-                pending_fp = pool.submit(measure_footprint, [p["pid"] for p in procs])
+            tick = time.monotonic()
+            sample = native_sample(counters, required)
+            values = {p["pid"]: p["footprint_bytes"] for p in sample["procs"]}
             rec = {
-                "t": t0,
-                "monotonic": mono,
-                "cpu_sample_ended_monotonic": time.monotonic(),
-                "sampler_version": SAMPLER_VERSION,
-                "sampler_sha256": sampler_sha256,
-                "ownership_verified": bool(required) and not ownership_errors,
-                "ownership_errors": ownership_errors,
+                "t": time.time(), "monotonic": tick,
+                "cpu_sample_ended_monotonic": sample["ended_monotonic"],
+                "sampler_version": SAMPLER_VERSION, "sampler_sha256": sampler_sha256,
+                "counter_module_sha256": counter_sha256,
+                "ownership_verified": bool(required) and not sample["errors"],
+                "ownership_errors": sample["errors"],
                 "required_processes": list(required.values()),
-                "ownership_method": ownership.get("method", "comm discovery only"),
-                "footprint": footprint,
-                "loadavg": list(os.getloadavg()),
-                "procs": procs,
+                "ownership_method": ownership.get("method"),
+                "footprint": {"required_pids": list(required), "values": values,
+                    "method": "rusage_info_v0.ri_phys_footprint",
+                    "started_monotonic": sample["started_monotonic"],
+                    "ended_monotonic": sample["ended_monotonic"],
+                    "missing_pids": sorted(set(required) - values.keys()),
+                    "error": "; ".join(sample["errors"]) or None},
+                "loadavg": list(os.getloadavg()), "procs": sample["procs"],
             }
-            if sample_error:
-                rec["error"] = sample_error
             out.write(json.dumps(rec) + "\n")
             out.flush()
-            time.sleep(max(0.0, args.interval - (time.time() - t0)))
-
-        if pending_fp is not None:
-            out.write(json.dumps({"record_type": "footprint_only",
-                                  "footprint": pending_fp.result()}) + "\n")
-            out.flush()
-    pool.shutdown(wait=True)
+            time.sleep(max(0.0, args.interval - (time.monotonic() - tick)))
 
 
 if __name__ == "__main__":

@@ -130,13 +130,14 @@ meaningful. Count daemon, VM/VZ helper, guest, managed builder and owned
 services. Add startup, idle wake, shutdown and reclaim-to-next-use cells;
 do not trade a smaller idle screenshot for slower next-use.
 
-`collect.py` currently discovers processes by name and records start strings;
-this is not verified ownership. The resumed strict sampler removes category
-Footprint fallback and rejects incomplete counters, and keeps slow footprint
-work off CPU ticks. Resource acceptance remains unqualified until process/start
-ownership, actual running executable/boot identity, phase boundaries and short
-Mac calibration including observer overhead are verified. Historical resource
-wins must not be carried forward.
+`collect.py` uses native proc_pid_rusage CPU, actual ri_phys_footprint and kernel
+start identity with explicit required-process coverage. Socket and dedicated VM
+disk ownership plus unchanged open executable/boot assets identify the running
+engine; build outputs alone do not. The subprocess sampler failed overhead
+calibration and is retired from scored sampling. Native v3 passed short median
+observer budgets on both engines; noisy individual pairs require stronger final
+qualification. Historical resource wins remain superseded. Freeze numerical
+idle/reclamation/storage/growth budgets before candidate selection.
 
 ## Measurement rules
 

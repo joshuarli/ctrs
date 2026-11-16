@@ -8,31 +8,30 @@ Historical checkpoints and superseded claims are in
 
 ## Current slice and exact continuation
 
-Bounded collector/scoring repair is in progress. Strict fields reject category
-fallback and incomplete counters. Socket/dedicated disk ownership and PID/start
-identity are verified. Open executable/guest inode and mtime checks reject
-changed artifacts; build-output hashes are separately labeled. Explicit W2
-setup/workload/cleanup CPU boundaries and terminal footprint preservation are
-implemented. 58 offline tests pass.
+Bounded native-counter repair validated with 62 passing tests and short pilots.
+The sampler uses proc_pid_rusage V0: Mach-converted CPU, actual ri_phys_footprint,
+wake counts and kernel start identity. Socket/dedicated disk ownership and open
+executable/boot-asset identity are verified; missing processes invalidate cells.
+Build-output hashes are separate. W2 setup/workload/cleanup boundaries are saved.
+Only the owned ctrs VM was restarted; 86 volume names survived (contents and
+power-loss durability remain unverified).
 
-Owned ctrs daemon/VM restarted without replacing disk or deleting state; all
-86 volume names survived. This checks identities, not contents/durability.
-Raw restart inventory: `.work/native-perf/results/ownership-restart/`.
-Short W2 collection pilot `run-20261115T220707-31a0` passed: 7,753 successful
-requests, zero errors, exact item count 2,799; 34 CPU ticks, complete footprint,
-no resource errors. CPU phase totals setup/workload/cleanup 0.88/5.55/0.09 s.
-Pre/post perf-gate-ready passed. This is a collection/phase pilot, not an engine
-comparison or overhead acceptance. CPU ps resolution is 0.01 s; per-boundary
-collection takes ~37 ms and is explicitly recorded outside operation wall time.
+Subprocess sampler v2 was rejected by overhead calibration; evidence contains
+the failed batch. Native v3 batch `sampler-calibration-20261115T221334` completed
+5 alternating pairs/engine, 4-s W2, concurrency 4, seed 7, all correctness and
+pre/post host gates passed. Median throughput on/off ctrs 0.9935, OrbStack
+0.9906; CPU/success 1.0024 and 0.9702. Passes predeclared median 3%/5% budgets,
+but individual pairs are noisy; this is short calibration, not qualification.
+Native physical footprint agrees with correctly attributed footprint auxiliary
+output. That validation exposed/fixed Shared-with heading PID reassignment.
+No jobs remain from calibration; exec sessions 29272/19202 are terminal.
 
-Next executable action: sampler-on/off calibration with a prepared W2 stack,
-3 alternating pairs, same duration/concurrency/seed, recording raw successful
-work and CPU phase cost in both modes; predeclare acceptable median throughput
-impact <=3% and CPU/operation inflation <=5%, otherwise reduce observer work.
-Run pre/post perf-gate-ready. Keep reported total sampled CPU separate from
-W2 workload-phase CPU. Then implement fixed-work W2, exact persisted payload
-checks, per-success raw normalization and saturation as a separate mode; obtain
-clean cgroup deltas and causal application profile before selecting candidates.
+Next executable action: apply `.work/tmp/upgrade-w2-load.py` and
+`.work/tmp/upgrade-w2-runner.py`, review them, test fixed total operations,
+acknowledged-write manifests, exact persisted row/payload checks and raw paired
+CPU/success reporting. Add behavioral fixed-work tests and version cases.toml.
+Keep saturation separate. Then run short fixed-work pilots and clean API cgroup
+CPU deltas; profile actual application if the deficit persists. No full sweep.
 
 Independent W4 fixture worker owns `.work/wt/np-w4` on `campaign/np-w4`, base
 0f5724f. Bridge session `usrw_6b9afa4c-6459-4baa-b303-25dc5df1b657`;

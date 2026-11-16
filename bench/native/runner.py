@@ -786,7 +786,7 @@ def summarize_trace(trace: Path) -> dict:
         "cpu_counters_complete": cpu_complete,
         "ownership_verified": ownership,
         "resource_errors": errors,
-        "method": "cumulative process CPU deltas; asynchronous phys_footprint; ownership required",
+        "method": "cumulative process CPU deltas; kernel ri_phys_footprint; ownership required",
         "footprint_field": "phys_footprint",
     }
 
@@ -2362,6 +2362,7 @@ class RunContext:
                               **guest_provenance()},
             "sampler_sha256": sha256_file(COLLECT),
             "ownership_collector_sha256": sha256_file(BENCH / "ownership.py"),
+            "counter_module_sha256": sha256_file(BENCH / "macos_counters.py"),
             "worktree_dirty": bool(subprocess.run(
                 ["git", "status", "--porcelain", "--untracked-files=normal"],
                 cwd=REPO, capture_output=True, text=True).stdout.strip()),
