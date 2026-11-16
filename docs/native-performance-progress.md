@@ -60,12 +60,28 @@ binaries `.work/tmp/w10-{target,candidate-target}/release/ctrs`, hashes/plans
 under `w10-ttl-confirm-20261116T010356`. Revisit only after bounded versioned
 client protocol and an exclusive host window. Preserve 250ms default.
 
-Next executable W2 action: `.work/tmp/w2-scheduler-trace-plan.md` specifies
-per-TID scheduler tracing of actual application work, blocked vs runnable wait,
-wake cost and migrations. Stock config has PERF_EVENTS/FTRACE. Inspect tracefs
-and verified task identity, then implement a narrow loss-aware trace parser and
-actual-API capture. No new timing score on the currently busy host. Independent
-fixture/resource/durability source work remains authorized.
+W2 scheduler adapter/parser now works on both guests: run
+`w2-scheduler-20261116T015213`, exact 2k operations and persisted data, stable
+namespace/global TID joins, complete closed off-CPU cycle coverage. Overlapping
+waking-before-switch-out is handled explicitly. Scheduled/wake elapsed time is
+not mislabeled CPU. Task CPU uses every required thread and actual clock ticks;
+short-run quantization bound is explicit. SIGTERM cleanup proof014803 passes.
+Runtime code/interpreter/libc/package fingerprints match (reconcile014544).
+All timing remains unqualified: busy host and profiler overhead not calibrated.
+
+Next W2 action: low-overhead tagged wake/futex/network syscall counts and
+on/off controls, then 50k aligned actual-API tracing in an exclusive window.
+Executable: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/scheduler_pilot.py --tools-archive .work/tmp/w2-profile/native-tools.tar.gz`.
+Do not choose a kernel/backend candidate from the short traced counts.
+The detailed profiling boundary is `.work/tmp/w2-scheduler-trace-plan.md`.
+
+Ready independent source task while timing is blocked: inspect persistent-disk
+synchronization and mount failure. `crates/ctrs-init/src/linux/mod.rs:data_dirs`
+currently falls back to tmpfs on ANY /dev/vda mount error. The daemon always
+boots with data_disk=true. Establish a disposable owned-state repro before a
+repair; investigate whether any legitimate diskless VM caller remains. Also
+read the local SDK Fsync/Full guarantees before changing storage policy. No
+shared OrbStack restart or user data mutation. No storage claim is qualified.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session

@@ -2509,3 +2509,63 @@ W8 source lane is partial and unaccepted. Parent review replaced whole-portfolio
 RAM retention with verified file-backed streaming, rejects mutations and exposes
 incomplete writes. Four offline/loopback tests pass in `.work/wt/np-w8-v2`.
 No pinned real portfolio, cold-state proof or deployed-health pilot exists yet.
+
+## W2 scheduler capture and namespace-safe interpretation
+
+Capability run `w2-trace-capabilities-20261116T011659` confirms both guests expose
+sched_waking/wakeup/switch/migrate_task. Captured kernels: ctrs 6.18.58 and
+OrbStack 7.2.12-orbstack-00394-gbecdd6130068. No shared daemon reconfiguration.
+A unique application-thread tag and stable task starts scope all filters to the
+actual API. This is not broad matching of unrelated processes. The same pinned
+perf/tools archive is used on both. Its FIFO reply is observed as five bytes
+61636b0a00 (ack, newline, NUL), despite help describing only a newline. The first
+four-byte assertion failed and remains in evidence. Deliberate verified SIGINT
+can return 130; decode and data validation remain mandatory.
+
+`w2-scheduler-20261116T012339`: identical 2,000 fixed operations after read-only
+warmup, exact response and full seeded/acknowledged payload checks on both.
+This was a busy-host grammar/identity diagnostic, not a timing comparison.
+Trace display TIDs are namespaced while payload TIDs use another namespace.
+On OrbStack Docker State.Pid 1657417 differs from trace main TID1681844.
+Do not blindly equate them or infer OrbStack's VM mechanism. Switch-out samples
+join the tagged namespace TID to the payload TID, checked against all stable
+before/after application tasks. Optional independently verified global PIDs can
+corroborate that join. No unsupported equality is silently treated as proven.
+
+A wake can begin before the target switches out. First ctrs example: waking
+4.007152251, switch-out4.007153001, wakeup4.007155751, switch-in4.007156043.
+OrbStack has the same ordering pattern. The parser preserves the overlap,
+separates off-CPU wake time from the full wake transition, and never labels
+transition time or scheduled residency as task CPU. After accounting for observed
+ordering, all closed off-CPU cycles reconcile on both captures. Trace-edge time
+stays unknown, loss/malformed/filter/identity errors invalidate, and incomplete
+interior cycles remain partial. Original raw events/data are retained.
+
+The first capture contains 38,095/19,326 waking events and 0/2,927 migrations
+for ctrs/OrbStack. These are instrumented observations, not an uninstrumented
+frequency or latency verdict. Profiler overhead and host contention are not yet
+controlled. No candidate is chosen from them. Next: low-overhead per-target wake
+and futex/network syscall counts plus profiler on/off controls before a 50k real
+application profile in an exclusive window. Retain user/system counters and
+compare observed cost per successful request, not products of median ratios.
+
+Input reconciliation `w2-input-reconcile-20261116T014544` reads the immutable
+image IDs recorded by that capture. Application/requirements, Python executable,
+libpython and libc hashes, all installed package names/versions, and all Python
+.py/.so* code under /usr/local/lib/python3.13 match across engines. Aggregate
+code SHA256 736464cbf095fd244005e579a0566bf703ad6dd17390b8b401545badd557b564.
+Different image IDs alone do not establish different executed code. This does
+not freeze every service image for final acceptance.
+
+The source adapter `bench/native/diagnostics/scheduler_pilot.py` completed both
+engines in `w2-scheduler-20261116T014408`; final CPU-reader integration completed
+both again in `w2-scheduler-20261116T015213`. Exact data, complete closed-cycle
+coverage, running-engine ownership and phase counters pass. Application CPU
+uses all required stable thread stat counters with actual SC_CLK_TCK=100;
+missing large workers cannot produce a smaller partial sum. The 0.1 CPU-s
+quantization bound at five threads is explicit: these short trials cannot
+qualify a tight CPU ratio. All timings remain unqualified. A SIGTERM cancellation
+pilot `w2-scheduler-20261116T014803` exits by the original signal (-15), records
+no cleanup error, and confirms its project containers/volumes are absent.
+Nine focused parser/CPU regressions pass. No product optimization or VZ limit
+is demonstrated by this slice.
