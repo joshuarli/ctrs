@@ -41,20 +41,38 @@ env (`CTRS_MEMORY_MIB=45091`, `CTRS_CPUS=17`), guest df now
 1006.9G. NOTE: `guest_data_sha256` provenance changes from this
 asset forward; prior runs keep their recorded hash.
 
-**In flight:** W7 resource re-qualification on the 1 TiB disk —
-`baseline --case W7 --a ctrs --b orbstack --pairs 10 --driver default`,
-log `.work/native-perf/logs/np05-w7-resource-1t-20261115T193710.log`.
-Warm daemon is live and will be adopted by the runner.
+**In flight:** full W1–W10 re-qualification sweep with the new
+`peak_phys_footprint_bytes` resource cell —
+`.work/native-perf/queue-footprint.sh` → log
+`.work/native-perf/logs/queue-footprint-20261115T202223.log`.
+Order W1,W3,W4,W5,W9,W10,W7,W8,W2,W6 then W8 `--under-load`,
+10 pairs each, `--driver default`, warm daemon on vsock
+(`CTRS_VMNET` experiment finished — rejected, see below).
+ETA several hours. Prior runs remain valid for timing cells but
+lack the footprint cell; this sweep is the resource-qualified set.
 
-**Next executable action:** when the W7 run finishes, run
-`python3.14 bench/native/runner.py report --match 'base-*'` and
-verify 10/10 valid + all resource cells measured; record in
-`docs/evidence/native-performance.md`. Then: (1) W2 CPU investigation
-— restart warm daemon with `CTRS_VMNET=1`, rerun a W2 pair set,
-compare `cpu_seconds_est`; (2) W11 12 h x2 reliability legs (needs a
-long detached window — launch via nohup, not session-bound); (3)
-physical-memory (footprint/vmmap) and allocated-storage accounting;
-(4) decide non-inferior-vs-strict-win acceptance for RSS cells.
+**W2 CPU investigation — narrowed, not solved (2026-11-16):**
+- `CTRS_VMNET=1` W2 run `base-20261115T195437-467a` (10/10): cpu
+  1.281 — WORSE than vsock 1.187. vmnet rejected; stays opt-in.
+- Exonerated: seccomp (~2%), bridge-nf-call-iptables (0%),
+  conntrack/netfilter on inter-container traffic (count ~44 under
+  load; real kernel bridge), TCP sysctls, CPU mitigations.
+- Controlled cgroup cpu.stat (20 s load): ctrs api 19.95 CPU-s
+  (sys 31%) vs orbstack 13.59 (sys 17%) at equal rps — the gap is
+  INSIDE the api container's own syscall/softirq path, ~130us/req.
+- strace -c histogram: sendto/recvfrom/epoll counts identical;
+  **futex calls 2.2x higher on ctrs (377K vs 171K)** — scheduler/
+  wakeup-path suspicion in the 6.18.58 guest kernel vs OrbStack's
+  7.2.12-orbstack. Next: guest-kernel config diff (HZ/PREEMPT/
+  futex) or in-guest futex microbenchmark; W10 cpu/recovery
+  losses likely share this root cause.
+
+**Next executable action:** monitor
+`.work/native-perf/logs/queue-footprint-20261115T202223.log`;
+spot-check each `base-*` report for 10/10 valid + footprint cell
+measured. Then: (1) futex/kernel investigation above; (2) W10
+re-measure on the footprint sweep; (3) allocated-storage cells +
+idle/growth budgets; (4) W11 12 h x2 once the candidate freezes.
 
 **Historical task detail (NP-04, complete):**
 **E2E-verified and committed `3b5f5ba` (2026-11-15):**
