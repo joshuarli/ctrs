@@ -51,6 +51,25 @@ Order W1,W3,W4,W5,W9,W10,W7,W8,W2,W6 then W8 `--under-load`,
 ETA several hours. Prior runs remain valid for timing cells but
 lack the footprint cell; this sweep is the resource-qualified set.
 
+**Sweep findings so far (2026-11-16 ~05:00 UTC):** W1,W3,W4,W5,W9,
+W10,W7 all completed rc=0; W2 running pair ~7/10. **W8 ctrs 0/10 —
+not an engine regression:** the 1 TiB disk migration discarded the
+named volume `npw8-reg-data-ctrs`, so `ensure_registry` recreated it
+empty at 04:48 and every fixture pull 404'd (`manifest unknown`).
+OrbStack-side W8 unaffected (OrbStack volume persisted). Remedy after
+the sweep: `runner.py prepare --engines ctrs` to rebuild+push the
+portfolio, then re-run W8 and W8 `--under-load` (the sweep's W8ul
+leg will fail the same way — expected, rerun covers it). Note the
+footprint sweep's W8 run id `base-20261115T204801-f1f1` is invalid
+for scoring. `peak_phys_footprint_bytes` is already in
+`RESOURCE_METRICS` (reporting.py) so it scores on every case and
+missing samples fail closed as `unmeasured`; cases.toml metric
+lists updated to declare it. Also: an earlier diagnostic futex
+pingpong container (`gcc:14.2.0-bookworm`, ~1 spinning vCPU) ran on
+the ctrs engine 04:25–04:50 overlapping W3–W8 trials — wall-time
+cells unaffected in expectation (16/17 vCPUs free, CPU metric only
+counts matched engine pids) but noted for provenance.
+
 **W2 CPU investigation — narrowed, not solved (2026-11-16):**
 - `CTRS_VMNET=1` W2 run `base-20261115T195437-467a` (10/10): cpu
   1.281 — WORSE than vsock 1.187. vmnet rejected; stays opt-in.

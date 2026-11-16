@@ -27,7 +27,7 @@ title = "compose up: API + Postgres + Redis -> verified health + DB/cache roundt
 fixture = "fixtures/w1"
 status = "implemented"
 metrics = ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s",
-           "peak_total_rss_kb", "cpu_seconds_est"]
+           "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]                    # cold implemented for ctrs only (engine-cold); orbstack cold unsupported on shared daemon
 correctness = ["health", "roundtrip_db_and_cache", "persist_after_db_restart"]
 
@@ -38,7 +38,7 @@ title = "sustained mixed read/write JSON load vs seeded Postgres+Redis stack via
 fixture = "fixtures/w1 + fixtures/w2/load.py"
 status = "implemented"
 metrics = ["wall_seconds", "rps", "p50_ms", "p95_ms", "p99_ms", "errors",
-           "peak_total_rss_kb", "cpu_seconds_est"]
+           "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]
 params = { concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
 correctness = ["http_errors_zero", "item_count_equals_seed_plus_writes"]
@@ -112,7 +112,7 @@ status = "implemented"
 metrics = ["wall_seconds", "pull_wall_seconds", "setup_seconds",
            "pull_<name>_s", "run_<name>_s",
            "load_rps", "load_p95_ms", "load_p99_ms",
-           "peak_total_rss_kb", "cpu_seconds_est"]
+           "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]                    # cold unsupported: registry+portfolio live on the warm engine
 params = { under_load = [false, true], duration_s = 30, concurrency = 8, write_ratio = 0.3 }
 correctness = ["pull_<name>_digest_match", "run_<name>",
@@ -168,7 +168,7 @@ fixture = "fixtures/holdout"
 status = "implemented"
 metrics = ["setup_seconds", "time_to_health_s", "admin_s", "seed_s",
            "workload_s", "ops", "ops_per_s", "api_errors", "clone_s",
-           "clones", "peak_total_rss_kb", "cpu_seconds_est"]
+           "clones", "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]
 params = { ops = 240, repos = 8, issues_per_repo = 5, clones = 4, seed = 1 }
 correctness = ["healthz", "admin_created", "repos_exact", "issues_exact",
