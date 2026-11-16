@@ -153,15 +153,29 @@ pattern excludes the XPC. Still owed for full resource gates:
 validated physical-memory method (footprint/vmmap), idle/growth
 budgets, allocated-storage cells.
 
+**Queue results so far (2026-11-16):** W1 strict-win all cells
+(`base-20261115T181027-6546`); W5 strict-win (`...-182037-0086`,
+RSS non-inferior 1.010); W8 pull/cpu strict-win but load cells
+UNMEASURED — needs `--under-load` rerun (queued in
+`queue-followup.sh`, waits for main queue); **W2 has a real
+losing cell: cpu_seconds_est 1.187 [1.139,1.221]** — ~20% more
+guest CPU under sustained API load, ~96% inside the VM XPC.
+Leading hypothesis: published-port vsock relay + guest-agent
+userspace proxying per connection vs orbstack's vmnet kernel
+path; ctrs deliberately defaults to vsock (`ports.rs`
+`vmnet_enabled`, opt-in `CTRS_VMNET=1` after bulk-pull stall
+measurements). W1's light-I/O cpu ratio was 0.197 — consistent
+with per-packet/conn overhead dominating only under load.
+NEXT INVESTIGATION: after queue, rerun a W2 trial with
+`CTRS_VMNET=1` daemon and compare cpu_seconds_est; if vmnet
+closes the gap, weigh the bulk-pull stall trade-off (maybe
+hybrid: vmnet for interactive ports, vsock budget for bulk).
+
 **Next executable action:** monitor
-`.work/native-perf/logs/queue-qualify-20261115T181026.log` — W1
-finishing ~pair 9/10 all-OK (ctrs ~3.65s vs orbstack ~6.3s wall,
-strong early signal). As each `base-*` id prints, spot-check
-`runner.py report --match <id>`. After queue: W11 12 h
-qualification on both engines (session fix removed the known
-flake; watch daemon-manual.log for residual resets), then
-physical-memory/storage accounting depth and any losing-cell
-fixes.
+`.work/native-perf/logs/queue-qualify-20261115T181026.log`
+(W3 running; then W4,W9,W10,W6,W7 resource runs). Spot-check
+each `base-*` report. Then W11 12 h x2, then W2-CPU investigation
++ physical-memory/storage accounting depth.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
