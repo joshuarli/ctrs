@@ -1533,3 +1533,69 @@ syscall/network-stack efficiency (6.18 vs OrbStack's custom 7.2).
 Next: in-guest perf/ftrace profiling of the api container's syscall
 mix, or a kernel-config diff against OrbStack's. W10 cpu/recovery
 losses likely share this root cause.
+
+## Footprint sweep + phys_footprint correction (2026-11-16)
+
+Full W1–W10 sweep `queue-footprint-20261115T202223.log`,
+`--driver default`, 10 pairs/case, warm engine on 1 TiB disk:
+
+- W1 `base-20261115T202223-4df7`, W3 `base-20261115T202439-3619`,
+  W4 `base-20261115T202626-9e40`, W5 `base-20261115T202740-a225`,
+  W9 `base-20261115T202904-a029`, W10 `base-20261115T203105-29a0`,
+  W7 `base-20261115T203959-cc38`, W2 `base-20261115T204938-9af6`,
+  W6 `base-20261115T205817-9966`: all 10/10 valid pairs except
+  noted cells. Timing cells strict-win nearly everywhere (W2 rps
+  0.825, p99 0.449; W7 all six strict-win; W6 rust 0.881/zlib
+  0.452). **cpu_seconds_est losses on this sweep: W2 1.40
+  [1.15,1.73], W7 1.42 [1.24,1.51], W9 1.49 [1.47,1.51]** — worse
+  than earlier runs; W2 leg overlapped leftover diagnostic
+  containers on the ctrs engine (noted, CPU metric only counts
+  matched pids but scheduler contention may inflate wall-linked
+  work). W3/W4 cpu cells `incomplete`/`unmeasured` (missing
+  cputime on short trials).
+- **W8 `base-20261115T204801-f1f1` INVALID for scoring**: the 1 TiB
+  disk migration discarded named volume `npw8-reg-data-ctrs`;
+  `ensure_registry` recreated it empty and all ctrs pulls 404'd
+  (`manifest unknown`). OrbStack side unaffected. W8ul
+  `base-20261115T211141-bafd` failed identically on ctrs.
+  Remedy: `runner.py prepare --engines ctrs` then merge the
+  orbstack portfolio section back into `w8-portfolio.json`
+  (prepare rewrites the whole file per selected engines).
+- **phys_footprint parser bug (fixed `3503831`)**: collect.py
+  parsed the category-table `Footprint:` total, NOT the
+  `phys_footprint:` auxiliary field (Activity Monitor metric).
+  The category total excludes IOKit/IOSurface-accounted pages and
+  undercounts the OrbStack VM helper >10x (recorded ~1.5 GB vs
+  real phys_footprint 15–19 GB). All `peak_phys_footprint_bytes`
+  values in the sweep above are the wrong (smaller) number —
+  footprint cells need full re-measurement. Fallback order is now
+  phys_footprint → category total; records carry
+  `footprint_field: "phys_footprint"`.
+
+## W2 futex/wake-path decomposition (2026-11-16)
+
+Controlled in-guest C microbenchmark (static binary, 2 threads,
+atomic state handoff, N=20000–40000; source preserved at
+`.work/native-perf/futexping.c`):
+
+| test | ctrs 6.18.58 | orbstack 7.2.12 |
+| --- | --- | --- |
+| futex ping-pong, unpinned | 7.3 us/handoff | 0.4 us/handoff |
+| same after HZ_1000+PREEMPT+LSE kernel | 6.7 us | — |
+| pure atomic spin handoff | ~0.03 us | ~0.1 us |
+| futex pinned to one CPU | 0.5 us | 0.5 us |
+| futex + all 17 vCPUs kept busy | 8.0 us | 25.3 us |
+
+Findings: same-CPU wake+schedule is identical (0.5 us); the gap
+is specific to the **cross-vCPU wake path** (~7 us vs ~0.4 us).
+Guest-idle check: both guests idle ~100% (/proc/stat), so vCPUs
+halt on both — the difference is interrupt delivery / host-side
+vCPU resume, not guest idle behaviour. Kernel candidate
+CONFIG_HZ_1000 + CONFIG_PREEMPT + ARM64_USE_LSE_ATOMICS built
+and tested: 6.7 us — **does not close the gap; reverted**
+(`guest/kernel/ctrs.config` back to PREEMPT_VOLUNTARY/HZ_250,
+Image rebuilt). Next hypothesis: host-side vCPU wake mechanics —
+ctrs uses the com.apple.Virtualization.VirtualMachine XPC service
+while orbstack's VM lives inside "OrbStack Helper" (possibly
+VZ-in-process or a custom hypervisor). Investigate VZ vCPU
+scheduling/QoS vs orbstack's mechanism before more kernel work.
