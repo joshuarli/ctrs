@@ -139,8 +139,8 @@ fn wait_socket_dead(secs: u64) -> bool {
 }
 
 fn status_json(args: &[String]) -> io::Result<bool> {
-    let json = args.iter().any(|a| a == "--json");
-    let unexpected: Vec<&String> = args.iter().filter(|a| a.as_str() != "--json").collect();
+    let json = args.iter().any(|a| a == cli_long_json!());
+    let unexpected: Vec<&String> = args.iter().filter(|a| a.as_str() != cli_long_json!()).collect();
     if !unexpected.is_empty() {
         return Err(io::Error::other(format!("ctrs engine status: unexpected arguments: {}", unexpected.iter().map(|a| a.as_str()).collect::<Vec<_>>().join(" "))));
     }
@@ -185,7 +185,7 @@ fn start() -> io::Result<()> {
     }
     let exe = std::env::current_exe()?;
     let mut child = Command::new(&exe)
-        .arg("daemon")
+        .arg(cli_daemon!())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -259,9 +259,9 @@ fn stop() -> io::Result<()> {
 
 fn validate(args: &[String]) -> io::Result<()> {
     match args.first().map(String::as_str) {
-        Some("start" | "stop" | "restart") if args.len() == 1 => Ok(()),
-        Some("start" | "stop" | "restart") => Err(io::Error::other(format!("ctrs engine: unexpected arguments: {}", args[1..].join(" ")))),
-        Some("status") => status_json(&args[1..]).map(drop),
+        Some(cli_start!() | cli_stop!() | cli_restart!()) if args.len() == 1 => Ok(()),
+        Some(cli_start!() | cli_stop!() | cli_restart!()) => Err(io::Error::other(format!("ctrs engine: unexpected arguments: {}", args[1..].join(" ")))),
+        Some(cli_status!()) => status_json(&args[1..]).map(drop),
         _ => Err(io::Error::other(USAGE)),
     }
 }
@@ -272,10 +272,10 @@ pub(crate) fn validate_args(args: &[String]) -> io::Result<()> { validate(args) 
 pub fn run(args: &[String]) -> io::Result<()> {
     validate(args)?;
     match args[0].as_str() {
-        "start" => start(),
-        "stop" => stop(),
-        "status" => status(&args[1..]),
-        "restart" => { stop()?; start() }
+        cli_start!() => start(),
+        cli_stop!() => stop(),
+        cli_status!() => status(&args[1..]),
+        cli_restart!() => { stop()?; start() }
         _ => unreachable!(),
     }
 }

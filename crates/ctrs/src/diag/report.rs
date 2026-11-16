@@ -47,8 +47,8 @@ const MAC_REPORT_BUDGET: usize = 24 << 10;
 
 pub fn run(args: &[String]) -> io::Result<()> {
     match args.first().map(String::as_str) {
-        Some("logs") => logs_cli(&args[1..]),
-        Some("report") => report_cli(&args[1..]),
+        Some(cli_logs!()) => logs_cli(&args[1..]),
+        Some(cli_report!()) => report_cli(&args[1..]),
         _ => Err(io::Error::other(USAGE)),
     }
 }
@@ -170,14 +170,14 @@ fn parse_logs_args(args: &[String]) -> io::Result<LogsArgs> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "-f" | "--follow" => follow = true,
-            "--ui" | "--window" => parts.push(Part::Ui),
-            "--engine" | "--daemon" => parts.push(Part::Daemon),
-            "--cli" => parts.push(Part::Cli),
-            "--errors" => errors = true,
-            "--op" => op = Some(it.next().ok_or_else(|| io::Error::other("--op needs an id"))?.clone()),
-            "-n" => n = it.next().and_then(|v| v.parse().ok()).ok_or_else(|| io::Error::other("-n needs a number"))?,
-            s if s.strip_prefix("-n").is_some_and(|v| v.parse::<usize>().is_ok()) => n = s[2..].parse().unwrap_or(n),
+            cli_short_f!() | cli_long_follow!() => follow = true,
+            cli_long_ui!() | cli_long_window!() => parts.push(Part::Ui),
+            cli_long_engine!() | cli_long_daemon!() => parts.push(Part::Daemon),
+            cli_long_cli!() => parts.push(Part::Cli),
+            cli_long_errors!() => errors = true,
+            cli_long_op!() => op = Some(it.next().ok_or_else(|| io::Error::other("--op needs an id"))?.clone()),
+            cli_short_n!() => n = it.next().and_then(|v| v.parse().ok()).ok_or_else(|| io::Error::other("-n needs a number"))?,
+            s if s.strip_prefix(cli_short_n!()).is_some_and(|v| v.parse::<usize>().is_ok()) => n = s[2..].parse().unwrap_or(n),
             _ => return Err(io::Error::other(USAGE)),
         }
     }
@@ -460,7 +460,7 @@ fn parse_report_args(args: &[String]) -> io::Result<Option<PathBuf>> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--out" | "-o" => out = Some(PathBuf::from(it.next().ok_or_else(|| io::Error::other("--out needs a path"))?)),
+            cli_long_out!() | cli_short_o!() => out = Some(PathBuf::from(it.next().ok_or_else(|| io::Error::other("--out needs a path"))?)),
             _ => return Err(io::Error::other(USAGE)),
         }
     }
