@@ -92,6 +92,21 @@ def bounded_load_cycle(base, cycle, directory, drain_deadline):
     return json.loads((directory / 'acknowledged-writes.json').read_text())
 
 
+def worker_failures(futures):
+    errors = []
+    for name, future in futures.items():
+        try:
+            result = future.result()
+            if name == 'queue' and not result['correctness']['ok']:
+                errors.append('queue: ' + repr(result.get('validation_errors', ['failed integrity checks'])))
+        except ci_jobs.ConditionFailed as exc:
+            errors.append(name + ': ' + repr([{key: job[key] for key in ('job', 'error', 'cleanup_error')}
+                                             for job in exc.results if job['error'] or job['cleanup_error']]))
+        except Exception as exc:
+            errors.append(name + ': ' + repr(exc))
+    return errors
+
+
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
         cleanup_deadline=None, expected_boot_assets=None):
     validate_refs(refs)
@@ -208,12 +223,12 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 save(cycle_dir / 'build-jobs.json', result)
                 return result
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            futures = {}
             try:
                 with runner.resource_phase(engine, rec, f'cycle_{cycle}_mixed_work'):
-                    futures = {
-                        'api': pool.submit(timed, 'api', lambda: load_cycle(base, cycle, cycle_dir) if drain_deadline is None else bounded_load_cycle(base, cycle, cycle_dir, drain_deadline)),
-                        'queue': pool.submit(timed, 'queue', queue_work),
-                        'build': pool.submit(timed, 'build', build_work)}
+                    futures['api'] = pool.submit(timed, 'api', lambda: load_cycle(base, cycle, cycle_dir) if drain_deadline is None else bounded_load_cycle(base, cycle, cycle_dir, drain_deadline))
+                    futures['queue'] = pool.submit(timed, 'queue', queue_work)
+                    futures['build'] = pool.submit(timed, 'build', build_work)
                     outcomes, failures = {}, []
                     for name, future in futures.items():
                         try:
@@ -227,10 +242,15 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     if not queue_result['correctness']['ok'] or len(jobs) != 16:
                         raise RuntimeError('mixed queue/build work failed')
             finally:
+                cycle_failure = sys.exc_info()[1]
                 if drain_deadline is not None:
                     signal.setitimer(signal.ITIMER_REAL, 0)
                 pool.shutdown(wait=True, cancel_futures=True)
                 save(cycle_dir / 'intervals.json', intervals)
+                errors = worker_failures(futures)
+                rec['validation_errors'].extend(f'cycle {cycle} worker outcome: {error}' for error in errors)
+                if errors and cycle_failure is None:
+                    raise RuntimeError('mixed worker outcomes failed: ' + repr(errors))
                 if drain_deadline is not None and sys.exc_info()[0] is None:
                     signal.setitimer(signal.ITIMER_REAL, max(.001, drain_deadline - time.monotonic()))
             cumulative.extend(api_writes)
