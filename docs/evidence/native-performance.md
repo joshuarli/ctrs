@@ -3000,3 +3000,30 @@ exclusive window. A loss requires accounting/optimization, not weakening durabil
 to obtain a win. Host power-loss and full-disk guarantees remain unqualified; an
 owned VM interruption does not simulate power loss. Authoritative host metadata
 and guest volume data must remain separate parts of the promised failure model.
+
+## Futex decoder conformance before application detail
+
+`futex-decode-20261116T071100` validates ARM64 saved-argument and signed return
+fetches with one identical C binary on both engines. Formal driver
+`futex-decode-20261116T071630-9ccc` repeats with globally unique event names,
+actual `/proc/1/exe` hash, owned engine identity, explicit zero misses, graceful
+C exit 0 and owned probe absence. C source SHA 1992dab6655a851ba4a8f6a7a312558beda9b9c478f869655b08fd4f5155da8c;
+binary SHA 42d52c709e8268620cfcb27bd0e890db3b9a81a8bf9506844c9343b94678992a,
+879,624 bytes, GCC14.2.0 pinned image c5be7957...; build receipt retained. CPU0
+on each engine, 100 iterations, exactly 300 calls/200 WAIT/100 WAKE, 100 each
+EAGAIN/ETIMEDOUT/zero and no positive return. No latency/CPU/wake-path verdict.
+
+Capability failures remain preserved: tracepoint name= aliases are unsupported;
+no-merge implies a system-wide aggregation mode incompatible with per-thread
+attachment; chained arithmetic mask comparison is not accepted filter grammar.
+Explicit opcode comparisons pass under unchanged privileges. The EPERM text
+from the invalid filter does not establish a privilege defect. Pinned perf's
+ordered blocks are checked against known counts; no inferred alias labels.
+
+Formal driver 071517 caught a lifecycle bug: stopping PID1 before probe cleanup
+made later exec cleanup impossible, and the FIFO writer could be killed by PID1's
+namespace exit. Fixed ordering removes probes first, preserves the stop writer's
+0/137 status and separately requires C exit 0. Both engines pass 071630. Failed
+ctrs attempt used only an owned VM, which was stopped; no shared OrbStack probe
+was left behind. The decoder is now a repeatable conformance check before W2
+command/return attribution. Application resource/observer acceptance stays open.

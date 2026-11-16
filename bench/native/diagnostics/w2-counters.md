@@ -49,3 +49,37 @@ observer budget needs exclusive, interleaved confirmation with differences above
 CPU quantization. Short busy-host records leave overhead inconclusive. No corrected
 CPU-efficiency ratio is derived by multiplying published medians. Scored W2 still
 requires exclusive aligned 50k application profiling, with saturation separate.
+
+## Validate command and return decoding
+
+`futex_decode_pilot.py` uses an identical pinned static ARM64 C binary on both
+engines. Build `futex_calls.c` with the pinned GCC 14.2.0 image and verify the
+recorded source/binary hashes. The local compilation receipt is
+`.work/tmp/futex-calls/build.json`.
+
+```sh
+TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/futex_decode_pilot.py \
+  --proof-binary .work/tmp/futex-calls/proof \
+  --tools-archive .work/tmp/w2-profile/native-tools.tar.gz \
+  --image-refs .work/native-perf/results/w11-mixed-20261116T063716-8565/ctrs-host/refs.json \
+  --ctrs-binary .work/tmp/disk-expand-target/release/ctrs
+```
+
+The single thread is pinned to CPU0. Each of 100 iterations performs one WAIT
+with a mismatched value, one WAKE with no waiter, and one WAIT with a 1ns timeout.
+Expected totals are 300 calls, 200 WAITs, 100 WAKEs, 100 EAGAIN, 100 ETIMEDOUT,
+100 zero returns and zero positive returns. FIFO commands bound work. The running
+C executable hash is checked through `/proc/1/exe`. This validates argument and
+return decoding, not latency or VM scheduling performance.
+
+One entry probe fetches the ARM64 syscall wrapper's saved second argument. One
+return probe fetches its signed return, with maxactive 4096. Required missed-probe
+counts are zero. Filters use explicit opcode comparisons. The pinned perf rejects
+tracepoint `name=` terms, so raw selectors appear as ordered event blocks. This
+known-count proof verifies that ordering before those labels are used on W2.
+Probe event names include the random run tag to disambiguate miss accounting.
+
+Probes are removed before the C process exits. The stop writer may exit 137 when
+PID1 terminates its namespace; its raw status is preserved and the C process must
+still exit 0. Native cleanup confirms owned probes absent. These are expected
+control-process semantics, not recovered application failures.

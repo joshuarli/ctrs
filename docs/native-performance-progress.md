@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main c74b1a1 plus
+No new product performance win is qualified. Current source main ae379b8 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -91,14 +91,21 @@ These are instrumented diagnostic counts under foreign load, not causal CPU cost
 ctrs API migrates only 3 times versus OrbStack 7,458; endpoint CPUs do not establish
 residency. Keep the next boundary in the actual API's worker/GIL/futex operations.
 
-Next executable action: extend the bounded counter diagnostic to distinguish
-futex WAIT/WAKE commands and EAGAIN/zero-return outcomes. First validate ARM64
-probe argument/return decoding against identical known-count C calls on both
-engines. Reuse the pinned compiler/tools, unique group, per-thread attachment and
-cleanup; keep missing events unknown. Then use exact W2, raw off/on controls and
-actual CPU placement. No kernel/backend optimization until cost/request explains
-a material measured deficit. Exclusive aligned 50k profile/observer confirmation
-is still deferred by hot Niceforge jobs. No measured Mac job is active.
+Known-count ARM64 futex decoder now passes both engines at
+`futex-decode-20261116T071630-9ccc`: exact 300 calls/200 WAIT/100 WAKE,
+100 EAGAIN/timeout/zero returns, no misses, C exit 0, owned probes absent.
+Source/binary pins and command: `diagnostics/w2-counters.md`. Perf tracepoint
+aliases and chained mask comparisons are unsupported; verified ordered selectors
+and explicit opcode comparisons work. This is not a latency/CPU verdict.
+
+Next executable action: integrate those checked command/return selectors into
+W2's counter pilot. Put shared probe/event facts in one owner imported by the
+host and mounted guest helper. Version v2 records; preserve v1 history. Require
+zero kretprobe misses, strict per-thread selector blocks, disclosed in-flight
+edge bounds and unchanged exact work/data. Run short raw off/on controls, then
+use actual placement plus counts to explain a material cost per successful
+request. Exclusive aligned 50k profile/observer confirmation is still deferred
+by hot Niceforge jobs. No measured Mac job is active.
 
 ## Ready queue
 
