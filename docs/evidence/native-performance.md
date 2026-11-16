@@ -2870,3 +2870,32 @@ about exhaustion after the preflight, I/O failure recovery or power loss.
 Integrated as 380ca26; native host/guest binaries retain the tested hashes above.
 Workspace guest publication is recorded in the current queue. No shared daemon
 was restarted. No comparative timing claim from these correctness checks.
+
+## Representative W11 short mixed-cycle proof
+
+Parent completed W11 after the terminal incomplete worker. `mixed_cycle.py` and
+`diagnostics/mixed_pilot.py` enforce the pinned common W8 images plus immutable
+multilayer W4 worker. Each cycle starts 5,000 API operations, 200 Redis queue jobs
+with 12,800 events/400 exact artifacts, and 16 real Marked build/CLI-test jobs at
+concurrency four. API/PostgreSQL/Redis persist across cycles. Disjoint worker IDs
+namespace writes with the unchanged pinned W2 loader, avoiding W2/W8 input drift.
+Exact cumulative rows detect loss/duplicates/corruption; committed DB/cache value,
+volume and engine process/start/artifact identities are checked after every cycle.
+Actual component begin/end times are saved; overlap is not uniform load.
+
+Native `w11-mixed-20261116T063716-8565` passes two cycles per engine: each has
+10,000 successful API operations (6,938 reads/3,062 unique writes), 400 queue jobs,
+25,600 events/800 artifacts and 32 exact build jobs/96 CLI tests. Setup, two work,
+two verification and cleanup native counter phases have complete counters and no
+errors on both engines. Owned stack/queue/build cleanup succeeds. API/queue/build
+intervals overlap on both engines. Running binary/guest identities are recorded.
+Foreign Niceforge import PID 82895 at 99.3% invalidates timing; no speed, growth or
+reliability-duration verdict. Original sources/pins/host snapshots/results retained.
+
+W4 verifier now has an owned name and 180s timeout. Cleanup distinguishes explicit
+absence from inspection errors. Native injected 1s verifier timeout
+`w4-verifier-20261116T063825` remains a visible failure and removes the owned
+sleeping verifier on both engines. Three focused mock lifecycle checks plus two
+real HTTP-client/cumulative-state/pin checks pass; all 128 Python harness tests
+pass. No shared daemon was restarted or user workload removed. The finite 12-hour
+supervisor, resource-growth qualification and frozen-candidate gates remain open.

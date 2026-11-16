@@ -162,7 +162,7 @@ states = ["warm"]
 params = { duration_s = 300, window_s = 30, concurrency = 8, write_ratio = 0.3, churn_jobs = 8, churn_every = 4 }
 correctness = ["engine_alive", "errors_zero", "load_windows_valid",
                "churn_all_ok", "item_count == expected"]
-note = "PILOT default 300 s in fixture (CLI defaults to 20 s, so pass --duration explicitly). Qualification is one finite 12-hour run per engine on a frozen candidate, after representative mixed workloads and growth gates are implemented. Requires zero errors, valid nonempty window summaries, exact acknowledged writes and successful churn. Alive probes do not yet establish continuous process identity. Resource growth is sampled but not gated; raw window/request/churn counts are not speed claims."
+note = "LEGACY DIAGNOSTIC only; these request-window/churn metrics cannot qualify W11. Representative v2 short cycles now live in diagnostics/mixed_pilot.py and fixtures/w11-v2: persistent API/DB/cache, fixed real queue artifacts and build/test jobs, exact cumulative state and process identity. Do not pool v1/v2 records. Durable finite 12-hour execution, frozen inputs and resource-growth qualification remain open."
 
 [[case]]
 id = "HOLDOUT"

@@ -1612,7 +1612,8 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
 
 
 def trial_w4(ctx, engine: Engine, state: str,
-             workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events") -> dict:
+             workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
+             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -1620,7 +1621,7 @@ def trial_w4(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
     net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
-    image = "np-w4-events:v2"
+    image = image_ref
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
@@ -1630,7 +1631,7 @@ def trial_w4(ctx, engine: Engine, state: str,
         engine.sh(["network", "create", "--label", label, net])
         owned_containers.append(queue)
         engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
-                   W4_IMAGE, "redis-server", "--save", "", "--appendonly", "no"])
+                   redis_ref, "redis-server", "--save", "", "--appendonly", "no"])
         owned_containers.append(app)
         engine.sh(["run", "-d", "--name", app, "--label", label, "--network", net,
                    image, "serve", "--redis-host", queue])
@@ -1670,8 +1671,10 @@ def trial_w4(ctx, engine: Engine, state: str,
             rec["metrics"][f"workers_{count}_s"] = completed - started
             rec["metrics"][f"ingest_{count}_s"] = ingested - started
             rec["metrics"][f"drain_{count}_s"] = completed - ingested
-            verify = engine.sh(["run", "--rm", "--label", label, "--network", net,
-                                "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], check=False)
+            verifier = f"{proj}-verify-{count}"
+            owned_containers.append(verifier)
+            verify = engine.sh(["run", "--rm", "--name", verifier, "--label", label, "--network", net,
+                                "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], timeout=180, check=False)
             checks[f"workers_{count}"] = (all(cp.returncode == 0 for cp in outcomes)
                                            and verify.returncode == 0 and verify.stdout.strip() == "verified 200")
             (trial_dir / f"workers-{count}.json").write_text(json.dumps({
@@ -1692,7 +1695,10 @@ def trial_w4(ctx, engine: Engine, state: str,
             try:
                 inspected = engine.sh([kind, "inspect", name], check=False)
                 if inspected.returncode:
-                    return
+                    if any(message in inspected.stderr.lower() for message in
+                           ("no such object", "no such container", "no such volume", "no such network")):
+                        return
+                    raise RuntimeError(f"inspection failed: {inspected.stderr}")
                 data = json.loads(inspected.stdout)[0]
                 labels = data.get("Config", {}).get("Labels", {}) if kind == "container" else data.get("Labels", {})
                 if not labels or labels.get("dev.ctrs.campaign.run") != ctx.run_id:

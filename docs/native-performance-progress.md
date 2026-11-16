@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main 380ca26 plus
+No new product performance win is qualified. Current source main b1ffb55 plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -55,59 +55,41 @@ eventual frozen-candidate confirmation and known correctness debt remain open.
 
 ## Exact next action
 
-W9 is integrated at be7f41d: same 16 real build/test jobs at each 1/4/8/16
-concurrency, strict common image/tools/artifact/source pin, exact CLI goldens.
-`w9-fixed-20261116T044711` and runner 045355 pass both engines; native timeout
-cleanup 045624 passes both. Setup/job/cleanup counters complete. All 123 regressions
-pass. Timings unqualified under foreign Niceforge work. CLI now requires
---image-ref for W9 run/baseline/noop; see fixtures/w9-v2/README.md. No historical
-proxy metrics are pooled. W11 retains its old diagnostic until replaced.
-Worker 794c2b37 is terminal and integrated, no resume/duplicate needed. Its worktree
-`.work/wt/np-w9-v2` is retained for provenance pending bounded cleanup.
+W11 representative short cycles now pass both engines: run
+`w11-mixed-20261116T063716-8565`, two cycles each, exact 10k operations/3,062
+unique writes, 400 queue jobs/800 artifacts and 32 real build/test jobs per engine.
+Complete six native resource phases, stable persistent data/volume/process/artifact
+identity, owned cleanup. W4 native verifier-timeout cleanup 063825 passes both.
+All 128 Python tests pass. Foreign Niceforge import invalidates timing. This is
+not the 12h leg or a growth verdict; legacy W11 remains diagnostic-only.
+Command/input details: `bench/native/fixtures/w11-v2/README.md`. Terminal incomplete
+worker d503a4bc partials were completed directly; its original tree is retained.
 
-Next source task: representative W11 mixed cycles using the persistent real
-API/database/cache stack, W4 queue/artifacts, W9 fixed builds, exact cumulative
-persisted state and owned cleanup. First prove short cycles, then implement the
-durable finite 12h runner; do not launch 12h qualification before the full freeze.
-W11 source lane is terminal incomplete: `.work/wt/np-w11-v2`, base 847b1a7,
-bridge usrw_d503a4bc-a057-421f-91aa-a8ba63937b14, watch exec45590 ended. Only
-W4 image-reference plumbing, one mocked test and worker-pin.json were returned;
-no mixed coordinator/CLI. Parent completes directly; no duplicate worker/retry.
-First fix W4's untracked verifier container and cleanup's nonzero-inspect ambiguity.
-Cumulative W2 writes need unique cycle identities (seed alone does not namespace
-names), with affected fixture pins/version updated if shared load.py changes.
-W4 common worker export/pin is `.work/native-perf/inputs/w11-worker-v1/`;
-manifest f880c4ff... and archive a6f9cd32... verified against current app bytes.
+Disk expansion is integrated at 380ca26 after independent review 9d1f3dd3 (terminal
+complete, no demonstrated finding) and parent native proofs. `disk-expand-04b85cfe`
+preserves exact 5k-operation DB/cache state, named volumes, FSUUID and inode across
+64GiB→1TiB and restart, allocation +33,505,280 bytes against 512MiB budget.
+Owned low-space `disk-space-ff734318` refuses before size/inode/SHA mutation, then
+old engine reads exact data. Source/review trees retained; do not rerun completed
+feasibility probes. Workspace guest initrd is 71934e6d...; explicit signed host
+`.work/tmp/disk-expand-target/release/ctrs` SHA 37bec61b... contains expansion.
+Main target/release remains older. No shared daemon restarted. Cached+Fsync audit
+and full-disk recovery remain open; free-space preflight is not reserved capacity.
 
-Disk expansion 380ca26 is integrated (reviewed candidate 8b41bc2).
-In-place probes 1→2→64→1024GiB preserve exact bytes, volume metadata, disk inode
-and filesystem identity; final feasibility allocation delta 29,065,216 bytes.
-Actual application upgrade `disk-expand-04b85cfe` passes 5,000 operations and
-exact DB/cache data through automatic 64GiB→1TiB expansion and restart; actual
-allocation increase 33,505,280 bytes (512MiB budget). No power-loss claim.
-Host binary `.work/tmp/disk-expand-target/release/ctrs` SHA 37bec61b...;
-guest variant `.work/native-perf/guest-variants/disk-expand`, initrd 71934e6d....
-Workspace `guest/out/initramfs.cpio` now has that tested initrd. Main
-target/release/ctrs remains older; use the explicit signed expansion host above.
-Owned APFS low-space proof `disk-space-ff734318` passes with 535,040,000 bytes
-free: refusal before disk size/inode/SHA changes; old engine reads exact data.
-Independent scout review usrw_9d1f3dd3-251b-4b98-bc86-8712128068d4 is terminal
-complete, no demonstrated findings, no edits. Parent native proofs above pass.
-Source uses >=1GiB free-space preflight, full-syncs backing capacity, then resizes
-ext4 before agent startup. Preflight is not a reservation/full-disk recovery proof.
-Cached+Fsync durability audit remains open. Next source task is W11 cleanup and
-mixed coordinator above; use unique worker IDs per cycle with the unchanged
-pinned W2 loader to avoid changing W2/W8 inputs. No measured Mac job is active.
-
-W8 runtime command (uses the tested signed metadata-fix binary):
-`TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_pilot.py --layout .work/native-perf/inputs/w8-portfolio-v2/layout --ctrs-binary .work/tmp/image-diffids-target/release/ctrs`.
-Cold/retained proof and interleaved resource timing remain open. Preserve shared
-OrbStack state. Never remove user images/content to manufacture cold pulls.
+Next executable source task: add a low-overhead W2 tagged syscall/wake counter
+pilot beside `diagnostics/scheduler_pilot.py`. Reuse pinned tools and thread-tag
+bootstrap, enforce pinned common service refs, exact 5k fixed work/data, narrow
+tracepoint filters, trace loss checks and profiler-off/on raw controls. First
+inspect tracepoint/filter capability; preserve missing counters as unknown. Do
+not make a kernel/backend change from counts alone. Run a short functional pilot
+under current foreign load; defer aligned 50k efficiency confirmation until host
+exclusivity. Boundary plan `.work/tmp/w2-scheduler-trace-plan.md` and last scheduler
+proof 015213 remain valid inputs. No measured Mac job is active.
 
 ## Ready queue
 
-1. Implement/prove W11 representative mixed cycles above, then durable bounded
-   execution support. Request windows plus trivial churn remain insufficient.
+1. W2 tagged syscall/wake counter pilot and raw profiler-off/on control above.
+   Representative fixture upgrades no longer block this investigation.
 2. W2: low-overhead tagged wake/futex/network syscall counts with profiler-on/off
    controls, then aligned 50k application profiling in a genuinely exclusive host
    window. Existing scheduler command:
@@ -119,8 +101,8 @@ OrbStack state. Never remove user images/content to manufacture cold pulls.
    `bench/native/diagnostics/resources.md`. Unknown cache/allocation stays unknown.
 4. W8 content-absent/retained design, portable artifact reproduction and scored
    phase integration. No proxy history pooled with common portfolio.
-5. Persistent-disk expansion/migration on disposable state, exact named-volume
-   contents/identity. Audit Cached+Fsync, guest flush, Full synchronization and
+5. Existing-disk expansion is proved/integrated. Audit Cached+Fsync, guest flush,
+   Full synchronization and
    promised failure guarantees. Normal restart/upgrade proof is not power-loss
    durability. Sparse 1 TiB capacity is not reclaim, migration or full-disk proof.
 6. W10: only resume 50ms candidate after an exclusive host window and v2 protocol
@@ -129,7 +111,8 @@ OrbStack state. Never remove user images/content to manufacture cold pulls.
    Prior confirmation 010356 has a preserved host EADDRNOTAVAIL failure and invalid
    timing; no retry-to-green, no omitted failed pair. New short v2 proof alone does
    not establish every stress condition fixed.
-7. Resolve known correctness failures; freeze candidate and per-cell matrix.
+7. Implement durable finite W11 supervision before qualification. Resolve known
+   correctness failures; freeze candidate and per-cell matrix.
    Then affected confirmations, full paired qualification, independent batch,
    fresh held-out app and durable finite 12h W11 per engine.
 
