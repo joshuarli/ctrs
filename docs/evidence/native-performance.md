@@ -2644,3 +2644,37 @@ All other worktrees remain. About46MiB of completed checkout/build cache was
 removed;22MiB candidate,22MiB historical guest and32KiB review evidence remain.
 Bridge session usrw_59a84adb-9320-418b-971e-3e2ca9a23d08 is terminal, acceptance
 met, only this evidence file changed. No runtime or timing work was involved.
+
+## W2 resource-cycle integration and short functional coverage
+
+The bounded `diagnostics/resource_pilot.py` consumes W2 fixed work rather than
+adding a second load generator. `resource_cycles.py` uses complete native idle
+intervals and exact CPU boundaries plus interior samples for setup/workload/
+cleanup. It records collection durations and sampled-peak scope. Explicit active
+backing-file allocation is statted outside phase boundaries, including after
+owned cleanup and reclamation. Missing VM/counters invalidate totals. Unknown
+exclusive allocation/build-cache size remains unknown; the existing system/df
+reader now also rejects missing/negative/bool cache sizes rather than summing zero.
+Numerical budgets and minimum five-cycle/30-second design are declared in
+`diagnostics/resources.md` and BUDGETS v1 before selection. No candidate selected.
+
+Run `w2-resources-20261116T041130`: both engines completed ten total trials,
+5,200 successful operations, exact persisted payloads and all 30 complete native
+phases. Two cycles/3-second windows intentionally leave growth unknown. Initial
+idle observer CPU was 0.005893s and 0.006180s over approximately 3s; maximum native
+boundary collection 44us/69us. These are diagnostic observer records, not engine
+performance wins. Both gates exited 0, but saved snapshots show Niceforge PID 39150
+at 105.8% and fz acceptance jobs 39033/40100 at 21.6%/80.6%. All engine timing and
+comparative resource verdicts are invalid; no foreign jobs stopped.
+
+Follow-up `w2-resources-20261116T041443` validates the timed allocation snapshots,
+saved source hashes/copies and raw-cell budget report on both engines. Every
+before-work allocation ends before workload CPU begins; every after-work stat is
+after workload CPU ends and before cleanup CPU begins; after-cleanup stats follow
+cleanup CPU. Six trials/18 phases complete. Budget report remains explicitly
+unqualified; storage comparisons remain unknown because shared extents and aged
+state are incomparable. `041549` confirms full-work warmup on ctrs; final source
+uses the same work count for warmup and main cycles, rather than next-use count.
+All 110 harness regressions pass, including missing-large-VM short phases,
+unknown coverage propagation, insufficient cycles and unknown cache accounting.
+No qualification or product performance claim follows from these pilots.

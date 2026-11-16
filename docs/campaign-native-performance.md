@@ -215,6 +215,11 @@ is CPU-seconds per successful operation over the same workload phase, computed
 from paired raw records; fixed work/offered load and saturation are distinct.
 Do not multiply published median ratios to create a corrected measurement.
 
+The bounded [W2 resource-cycle pilot](../bench/native/diagnostics/resources.md)
+predeclares numerical idle, wake, footprint, next-use and allocation budgets.
+Its explicit active-disk scope leaves exclusive allocation and build-cache size
+unknown; short or contaminated pilots cannot close resource acceptance cells.
+
 Other candidates must follow current profiles: bulk/control interference,
 parallel installs, real host-bind loops, published-port tails, builder
 lifecycle and memory reclaim. Several transport/install optimizations

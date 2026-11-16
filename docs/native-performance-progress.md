@@ -32,9 +32,13 @@ This is the single queue. Historical results and rejected hypotheses live in
   image on both engines. Functional coverage only; final workload not frozen.
 - W8 selected-engine preparation preserves the other valid section atomically.
   Identical multilayer independent-registry acceptance is still pending.
-- Resource primitives validate complete intervals, numerical budgets, peak
-  cleanup growth and actual explicit-file allocation. Exclusive APFS allocation
-  remains unknown. Full idle/reclaim/storage/growth acceptance is not integrated.
+- W2 resource-cycle pilot now integrates complete idle CPU/wakes, sampled
+  steady/peak footprint, reclamation/next use, explicit active-disk allocation
+  before/after work and cleanup, and post-warmup growth. Numerical budgets
+  predeclared. Short both-engine pilots pass exact data/counter coverage;
+  timings invalid under foreign Niceforge/fz work. Final acceptance remains
+  open: five-cycle/30s design, interleaving, freeze and exclusivity. Exclusive
+  APFS allocation and build-cache size stay unknown.
 - Successful default build-driver behavior and W6/W7 wins are preserved.
   Frozen-candidate confirmation and known correctness debt remain required.
 
@@ -91,13 +95,23 @@ unchanged; no daemon restarted. Variants preserved under
 fallback baseline is diagnostic-only, unsafe for new qualification. Proof command:
 `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/disk_mount_pilot.py --candidate-guest-dir guest/out --baseline-guest-dir .work/native-perf/guest-variants/pre-mount-guard --proof-binary .work/tmp/disk-mount-proof/proof`.
 
-Next executable source task while exclusive timing is unavailable: integrate
-resource_cells.py with a bounded W2-driven resource pilot. Declare idle/wake,
-physical footprint, reclaim/next-use, allocated-host-storage and five post-warmup
-cycle budgets before collection. Capture setup/workload/cleanup separately;
-retain unknown exclusive allocation/build-cache size. Use required VM coverage
-and actual running-asset identity. Do not score busy-host pilots. Then continue
-persistent-disk flush-path/Full synchronization and disposable expansion audit.
+Resource pilot implemented: `w2-resources-20261116T041130` has 10 exact trials,
+5,200 operations and30 complete phases on both engines; follow-up041443 confirms
+allocation snapshots outside phase CPU and preserves source copies/hashes.
+041549 confirms full-work warmup on ctrs. All 110 regressions pass. Short windows
+and foreign jobs mean no resource/timing acceptance. Actual guard guest identity
+was measured. Read `bench/native/diagnostics/resources.md` for predeclared budgets.
+Command: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/resource_pilot.py --orbstack-storage-file '/Users/josh/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data/data.img.raw' --orbstack-storage-file '/Users/josh/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data/swap.img'`.
+Do not compare aged absolute disk sizes or call shared extents exclusive.
+The two completed mount-guard worktrees were retired; variants/review preserved.
+
+Next executable source task while timing is unavailable: version the W10
+client protocol with bounded persistent HTTP connections, preserving every
+failed request without implicit retry. Existing fresh-connection stress failure
+remains invalid; do not pool versions. Verify healthy connection reuse and
+restart recovery/data checks on both engines before another TTL comparison.
+Then continue W2 low-overhead on/off profiling, W8 portfolio, and persistent-disk
+flush-path/Full synchronization/disposable expansion audit.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session
@@ -115,9 +129,10 @@ Retire only after final integration proof. No measured Mac job is active.
 
 ## Ordered queue
 
-1. Integrate idle CPU/wakes, steady/peak footprint, post-load reclaim/next-use,
-   actual allocated storage before/after/cleanup, and repeated-cycle growth.
-   Predeclare absolute and ratio budgets. Unknown cache/allocation stays unknown.
+1. Finish resource qualification design: interleave the integrated W2 resource
+   pilot, freeze inputs, obtain an exclusive host window and collect declared
+   five-cycle/30s minima. Unknown cache/exclusive allocation stays unknown.
+   Do source work below while foreign host jobs prevent valid timing.
 2. W2: low-overhead wake/syscall counts and profiler on/off controls, then clean
    50k application profiles with task CPU and off-CPU waits kept separate. Add
    vCPU/load controls without reconfiguring shared OrbStack. No speculative VMM.

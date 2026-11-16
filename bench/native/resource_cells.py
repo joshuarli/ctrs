@@ -3,6 +3,7 @@ import math
 import os
 import stat
 import statistics
+import time
 
 
 COUNTERS = ('cputime_s', 'user_cpu_s', 'system_cpu_s', 'pkg_idle_wakeups',
@@ -118,6 +119,7 @@ def evaluate_cycles(initial, cleanup_values, *, warmup_cycles, minimum_cycles,
 
 def allocation_snapshot(paths):
     """Stat only explicit owned regular files; allocation can include shared extents."""
+    started = time.monotonic()
     files, errors, seen = [], [], set()
     for path in paths:
         try:
@@ -140,6 +142,7 @@ def allocation_snapshot(paths):
     if not paths:
         errors.append('no owned paths')
     return {'status': 'unknown' if errors else 'ok', 'errors': errors, 'files': files,
+            'started_monotonic': started, 'ended_monotonic': time.monotonic(),
             'allocated_bytes': None if errors else sum(f['allocated_bytes'] for f in files),
             'allocation_method': 'stat.st_blocks * 512; may include shared clone extents',
             'exclusive_allocated_bytes': None, 'exclusive_allocation_status': 'unsupported',

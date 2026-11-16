@@ -18,6 +18,7 @@ import argparse
 import ownership
 import watch_loop
 import collect
+import resource_cells
 from contextlib import contextmanager
 import base64
 import concurrent.futures
@@ -539,8 +540,10 @@ class Engine:
             cache = data.get("BuildCache") or []
             if cache:
                 out["build_cache_entries"] = len(cache)
-                out["build_cache_size_bytes"] = sum(
-                    b.get("Size") or 0 for b in cache)
+                sizes = [b.get("Size") for b in cache]
+                if all(isinstance(size, int) and not isinstance(size, bool) and size >= 0
+                       for size in sizes):
+                    out["build_cache_size_bytes"] = sum(sizes)
             return out or None
         except Exception:
             return None
@@ -897,7 +900,8 @@ def exact_w2_items(actual, writes):
 
 def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
              duration: float, write_ratio: float, seed: int,
-             operations: int | None = None) -> dict:
+             operations: int | None = None, *,
+             allocation_paths: tuple[Path, ...] = ()) -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
     case_id = "W2"
     proj = project_name(ctx.run_id, engine.name, case_id)
@@ -915,6 +919,9 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         engine.ensure_up()
         compose_down(engine, proj)
         sampler, trace = start_sampler(engine, trial_dir)
+        if allocation_paths:
+            rec["resources"]["disk_allocation"] = {
+                "before_setup": resource_cells.allocation_snapshot(allocation_paths)}
         with resource_phase(engine, rec, "setup"):
             up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
             if up.returncode != 0:
@@ -935,6 +942,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             return {key: int(value) for key, value in
                     (line.split() for line in cp.stdout.splitlines())}
         app_before = application_cpu()
+        if allocation_paths:
+            rec["resources"]["disk_allocation"]["before_work"] = resource_cells.allocation_snapshot(allocation_paths)
         with resource_phase(engine, rec, "workload"):
             load = subprocess.run(
                 [sys.executable, str(LOAD_PY), "--url", api,
@@ -1001,13 +1010,19 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
-        if sampler is not None:
-            with resource_phase(engine, rec, "cleanup"):
+        try:
+            if allocation_paths:
+                rec["resources"].setdefault("disk_allocation", {})["after_work"] = resource_cells.allocation_snapshot(allocation_paths)
+            if sampler is not None:
+                with resource_phase(engine, rec, "cleanup"):
+                    compose_down(engine, proj)
+            else:
                 compose_down(engine, proj)
-        else:
-            compose_down(engine, proj)
-        if sampler is not None:
-            stop_sampler(sampler)
+            if allocation_paths:
+                rec["resources"]["disk_allocation"]["after_cleanup"] = resource_cells.allocation_snapshot(allocation_paths)
+        finally:
+            if sampler is not None:
+                stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
