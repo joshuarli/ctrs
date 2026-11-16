@@ -14,7 +14,7 @@ created = "2026-11-14"
 competitors = ["orbstack"]          # macOS lane; Docker Desktop excluded
 active_lane = "macos-arm64"
 evidence_status = "pilot"
-measurement_revision = "2026-11-15-w2-fixed-work-v2"
+measurement_revision = "2026-11-16-native-v3-resource-and-fixed-jobs"
 strict_win_pct = 5.0
 noninferiority_pct = 3.0
 bootstrap_iters = 2000
@@ -124,15 +124,16 @@ note = "PILOT: per-engine scratch+COPY portfolios are not yet identical pinned m
 
 [[case]]
 id = "W9"
-family = "parallel-ci-churn"
-title = "J concurrent docker run jobs (1/4/8/16) doing ~0.6 s CPU work each in python:3.13-slim; wall time + marker verification"
-fixture = "inline (python:3.13-slim service image)"
+family = "parallel-ci-jobs"
+title = "16 fixed Marked TypeScript build/CLI-test jobs at concurrency 1/4/8/16"
+fixture = "fixtures/w9-v2 + pinned common W8 Marked image"
+fixture_version = "w9-v2-marked-fixed16"
 status = "implemented"
-metrics = ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"]
+metrics = ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s"]
 states = ["warm"]
 params = {}
-correctness = ["jobs_<J> all markers present, rc=0"]
-note = "v1 churn: concurrent create/start/run/rm with CPU work and log capture; temp networks, writable-layer writes and artifact collection are deferred to a v2 cell."
+correctness = ["16 complete jobs per declared concurrency", "exact tools/source lock", "identical pinned bundle hash", "all CLI goldens exact", "owned cleanup"]
+note = "jobs.json owns fixed work and concurrency. --image-ref must name the pinned preinstalled common Marked manifest. Warmup excludes VM boot; each job phase includes create/start/build/test/rm. Separate setup and cleanup counters. Old timed-loop records remain historical diagnostics and are not pooled."
 
 [[case]]
 id = "W10"

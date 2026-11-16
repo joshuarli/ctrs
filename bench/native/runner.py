@@ -19,7 +19,8 @@ import ownership
 import watch_loop
 import collect
 import resource_cells
-from contextlib import contextmanager
+import ci_jobs
+from contextlib import contextmanager, nullcontext
 import base64
 import concurrent.futures
 import hashlib
@@ -77,7 +78,7 @@ API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
-W9_IMAGE = "python:3.13-slim"
+W11_CHURN_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
 W6_IMAGE = "gcc:14.2.0-bookworm"
 W6_RUST_IMAGE = "rust:1.100.0-bookworm"
@@ -176,14 +177,14 @@ def _w3_tx_sql(i: int) -> str:
             f" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'; COMMIT;\n")
 # ~0.6 s of CPU work inside the container, deterministic across engines
 # (same image, same interpreter); argv[1] is the job marker.
-W9_WORK = (
+W11_CHURN_WORK = (
     "import sys,time,hashlib\n"
     "end=time.monotonic()+0.6\n"
     "h=hashlib.sha256()\n"
     "i=0\n"
     "while time.monotonic()<end:\n"
     "    h.update(str(i).encode());i+=1\n"
-    "print('npw9-'+sys.argv[1]+'-ok-'+h.hexdigest()[:12])\n"
+    "print('npw11-'+sys.argv[1]+'-ok-'+h.hexdigest()[:12])\n"
 )
 
 # W8: a per-engine local OCI registry (registry:2 on a published loopback
@@ -1536,51 +1537,78 @@ def trial_w6(ctx, engine: Engine, state: str,
             rec["resources"]["trace"] = _trace_ref(trace)
 
 
-def trial_w9(ctx, engine: Engine, state: str,
-             jobs: tuple = (1, 4, 8, 16)) -> dict:
-    """W9: parallel container churn — J concurrent `docker run` jobs, each
-    doing ~0.6 s of CPU work in python:3.13-slim and printing a marker.
-    Wall time per job count is the metric; every marker must appear."""
-    case_id = "W9"
-    trial_dir = ctx.trial_dir(engine.name, case_id, state)
-    rec = ctx.new_record(engine, case_id, state, trial_dir)
-    checks = rec["correctness"]["checks"]
+def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
+             concurrency_levels: tuple = tuple(ci_jobs.SPEC['concurrency']),
+             fixture_version: str = ci_jobs.SPEC['fixture_version']) -> dict:
+    """Run the same fixed Marked build/test jobs at each declared concurrency."""
+    ci_jobs.validate_image_ref(image_ref)
+    if fixture_version != ci_jobs.SPEC['fixture_version'] or tuple(concurrency_levels) != tuple(ci_jobs.SPEC['concurrency']):
+        raise ValueError('W9 fixture version or concurrency differs from declared work')
+    trial_dir = ctx.trial_dir(engine.name, 'W9', state)
+    rec = ctx.new_record(engine, 'W9', state, trial_dir)
     sampler = trace = None
+    owned_jobs = []
+    engine_ready = False
+    prefix = 'np-w9-' + hashlib.sha256(rec['trial_id'].encode()).hexdigest()[:16]
+    rec['metrics'].update(fixture_version=fixture_version, fixed_jobs=ci_jobs.SPEC['fixed_jobs'],
+                          artifact_sha256=ci_jobs.ARTIFACT)
+    rec['notes'].append('Warm engine: image must be preinstalled; boot/warmup before resource discovery is not scored. Job phases include create/start/build/test/rm. CPU scope is owned engine processes, excluding Docker CLI/coordinator.')
     try:
         engine.ensure_up()
+        engine_ready = True
+        warmup = prefix + '-warmup'
+        owned_jobs.append({'name': warmup})
+        engine.sh(['run', '--rm', '--pull=never', '--name', warmup, '--label', 'dev.ctrs.campaign.run=' + prefix, '--entrypoint', 'node', image_ref, '-e', 'process.exit(0)'], timeout=90)
         sampler, trace = start_sampler(engine, trial_dir)
-        all_ok = True
-        for j in jobs:
-            t0 = time.monotonic()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=j) as ex:
-                futs = [
-                    ex.submit(engine.sh,
-                             ["run", "--rm", W9_IMAGE, "python3", "-c",
-                              W9_WORK, str(i)],
-                             timeout=180, check=False)
-                    for i in range(j)
-                ]
-                outs = [f.result() for f in futs]
-            wall = round(time.monotonic() - t0, 3)
-            rec["metrics"][f"jobs_{j}_s"] = wall
-            ok = all(
-                cp.returncode == 0
-                and f"npw9-{i}-ok-" in cp.stdout
-                for i, cp in enumerate(outs))
-            checks[f"jobs_{j}"] = ok
-            all_ok = all_ok and ok
-        rec["correctness"]["ok"] = all_ok
+        with resource_phase(engine, rec, 'setup'):
+            image = json.loads(engine.sh(['image', 'inspect', image_ref]).stdout)[0]
+            if image['Architecture'] != 'arm64' or image_ref not in image['RepoDigests']:
+                raise ValueError('W9 installed image differs from native pinned reference')
+            (trial_dir / 'image.json').write_text(json.dumps(image, indent=2))
+        for concurrency in concurrency_levels:
+            try:
+                with resource_phase(engine, rec, f'jobs_at_{concurrency}'):
+                    results = ci_jobs.run_condition(engine, image_ref, prefix, concurrency)
+            except ci_jobs.ConditionFailed as exc:
+                results = exc.results
+                owned_jobs.extend(results)
+                (trial_dir / f'jobs-at-{concurrency}.json').write_text(json.dumps(results, indent=2))
+                raise
+            owned_jobs.extend(results)
+            (trial_dir / f'jobs-at-{concurrency}.json').write_text(json.dumps(results, indent=2))
+            rec['metrics'][f'fixed16_at_{concurrency}_s'] = rec['resources']['phases'][f'jobs_at_{concurrency}']['operation_wall_seconds']
+            rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = len(results) == ci_jobs.SPEC['fixed_jobs']
+        rec['correctness']['ok'] = all(rec['correctness']['checks'].values())
         return rec
     except Exception as exc:
-        rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
+        rec['correctness']['ok'] = False
+        rec['validation_errors'].append(str(exc))
         return rec
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
+        try:
+            if engine_ready:
+                with resource_phase(engine, rec, 'cleanup') if sampler is not None else nullcontext():
+                    remaining = engine.sh(['ps', '-a', '--no-trunc', '--format', '{{json .}}']).stdout
+                    (trial_dir / 'containers-after.jsonl').write_text(remaining)
+                    present = {json.loads(row)['Names'] for row in remaining.splitlines()}
+                    for job in owned_jobs:
+                        if job['name'] in present:
+                            rec['correctness']['ok'] = False
+                            rec['validation_errors'].append('owned job remained after --rm: ' + job['name'])
+                            try:
+                                ci_jobs.cleanup(engine, job['name'], job['name'].rsplit('-', 1)[0])
+                            except Exception as exc:
+                                rec['validation_errors'].append('cleanup failed: ' + str(exc))
+                    rec['correctness']['checks']['owned_cleanup'] = not any(job['name'] in present for job in owned_jobs)
+        except Exception as exc:
+            rec['correctness']['ok'] = False
+            rec['validation_errors'].append('cleanup verification failed: ' + str(exc))
+        finally:
+            if sampler is not None:
+                stop_sampler(sampler)
+        rec['resources'].update(summarize_trace(trace) if trace else {})
         if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+            rec['resources']['trace'] = _trace_ref(trace)
 
 
 def trial_w4(ctx, engine: Engine, state: str,
@@ -2099,8 +2127,8 @@ def trial_w11(ctx, engine: Engine, state: str,
                         max_workers=churn_jobs) as ex:
                     futs = [
                         ex.submit(engine.sh,
-                                  ["run", "--rm", W9_IMAGE, "python3",
-                                   "-c", W9_WORK, str(i)],
+                                  ["run", "--rm", W11_CHURN_IMAGE, "python3",
+                                   "-c", W11_CHURN_WORK, str(i)],
                                   timeout=180, check=False)
                         for i in range(churn_jobs)
                     ]
@@ -2680,6 +2708,8 @@ def cmd_run(args) -> int:
     if args.case in ("W2", "W8", "W10", "W11"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed}
+    if args.case == "W9":
+        kw["image_ref"] = args.image_ref
     if args.case == "W2":
         kw["operations"] = getattr(args, "operations", None)
     if args.case in ("W6", "W7"):
@@ -2719,6 +2749,8 @@ def cmd_baseline(args) -> int:
                           "duration": args.duration,
                           "write_ratio": args.write_ratio,
                           "seed": args.seed + pair * 10}
+                if args.case == "W9":
+                    kw["image_ref"] = args.image_ref
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
                 if args.case in ("W6", "W7"):
@@ -2826,6 +2858,7 @@ def main() -> int:
     p = sub.add_parser("run")
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
                    help="ctrs only: fresh CTRS_DATA_DIR (engine-cold)")
@@ -2846,6 +2879,7 @@ def main() -> int:
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--pairs", type=int, default=3)
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true")
@@ -2864,6 +2898,7 @@ def main() -> int:
 
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
+    p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
@@ -2899,6 +2934,13 @@ def main() -> int:
         return 0
     if args.cmd == "report":
         return cmd_report(args)
+    if getattr(args, 'case', None) == 'W9':
+        try:
+            ci_jobs.validate_image_ref(getattr(args, 'image_ref', None) or '')
+        except ValueError as exc:
+            ap.error('--image-ref: ' + str(exc))
+    elif getattr(args, 'image_ref', None):
+        ap.error('--image-ref applies only to W9')
     for name in ("duration", "pairs", "concurrency", "ops", "repos", "issues", "clones"):
         value = getattr(args, name, None)
         if value is not None and value <= 0:

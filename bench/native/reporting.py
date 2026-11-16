@@ -24,7 +24,7 @@ CASE_METRICS = {
     "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
            for state in ("uncached", "warm", "incr")],
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
-    "W9": ["jobs_1_s", "jobs_4_s", "jobs_8_s", "jobs_16_s"],
+    "W9": ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s"],
     # Legacy load_rps counts failed attempts during downtime, not useful work.
     "W10": ["recovery_s"],
     # Soak windows/requests/churn counts are reliability observations.

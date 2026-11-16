@@ -150,7 +150,7 @@ and must not be compared against later runs.
   checksum-verifiable); it is a real FastAPI/Postgres/Redis app, not a
   microbenchmark, but it is not a third-party application.
 - W4's Redis-cli hashing, W5's generated modules, W7's compileall/random
-  bytes and W9's timed hash loop are diagnostic proxies. They do not
+  bytes and W9's historical timed hash loop are diagnostic proxies. They do not
   complete the promised real app/CI/dev matrix. W6 also needs a
   checksum-pinned source preparation path: its zlib archive is absent
   from a fresh checkout. All these gaps remain explicit queue items.
@@ -169,3 +169,8 @@ and finishes with real `git clone` smart-HTTP operations. Results land
 in `.work/native-perf/holdout-*/` like any trial but are excluded from
 the scored matrix; parameters are frozen in `cases.toml` — do not tune
 against its failures.
+
+W9 v2 runs 16 fixed Marked build/test jobs at each declared concurrency, using the
+pinned common W8 image. Supply --image-ref for run/baseline/noop; see
+[the fixture contract](fixtures/w9-v2/README.md). Old timed-loop W9 records are not
+pooled with the new metrics. W11's remaining timed churn is still a diagnostic.
