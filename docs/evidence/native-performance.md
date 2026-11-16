@@ -2349,3 +2349,34 @@ allocation cannot be hidden by a final return; explicit-file st_blocks reports
 shared-extent uncertainty and does not invent exclusive APFS allocation.
 These helpers are implemented, not full idle/reclamation/storage acceptance.
 Unknown total/exclusive allocation and incomplete coverage still block those gates.
+
+## W5 v2 integrated Marked watch/rebuild/test pilots
+
+The old per-invocation Python loop is replaced by a persistent esbuild context
+building Marked v15.0.12 TypeScript and testing its actual CLI. `workload.json`
+pins the upstream archive, lockfile, Node image and Node/npm versions, controlled
+source edit and exact CLI bytes. Runtime validation rejects mismatched fixture
+hashes and non-ARM64 images. esbuild is 0.25.3 from the upstream lockfile. The
+fixture adds no product dependency. A first prototype failed because the real
+CLI appends an additional newline. The expectation was corrected to the complete
+actual output, without trimming or relaxing equality.
+
+Integrated runner pilot `w5-v2-runner-20261116T004333`: both engines, separate
+fresh bind and volume sources, four alternating edits each. All sixteen edits
+and four initial builds pass exact HTML, success and stderr checks. Each watcher
+keeps its PID/start identity and remains running through the final edit. All
+24 setup/edit/cleanup boundaries have complete native CPU counters. Pre/post
+perf-gate-ready pass. Common exported image archive SHA256
+04c27dcc420fd25cc9f1510f64d874d04afd0219f821c40863896be98f838876;
+OrbStack image ID c10ffc119a7a8a34bd30c68c93927936e2e6e85aef15e7b8c0f7064251989a03.
+Records preserve layers and installed Node22.15.0/npm10.9.2/esbuild0.25.3 identities.
+The host interval is edit begin to receipt of exact tested output. Volume edits
+include Docker exec transport, recorded separately. Setup includes initial build
+and source population. These are functional pilots, not frozen qualification or
+a performance win. Historical Python W5 timings are incompatible diagnostics.
+
+Six focused tests cover reversible edits, source/hash rejection, exact CLI bytes,
+host editor equivalence, event state and cleanup continuation after an ownership
+failure. The integrated harness suite had 88 passing tests before the additional
+cleanup regression. A container cleanup failure cannot skip owned volume cleanup.
+W10 tracing remains a separate uncommitted product slice; no cache TTL change.

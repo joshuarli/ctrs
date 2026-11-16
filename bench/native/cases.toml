@@ -72,14 +72,15 @@ note = "v2 event-batch processing replaces v1 Redis shell hashing. Primary inter
 [[case]]
 id = "W5"
 family = "monorepo-edit-test-loop"
-title = "60-module python repo: timed docker run test loop on host bind mount vs named volume, host edit between bind iterations"
-fixture = "fixtures/w5/repo"
+title = "Pinned Marked TypeScript CLI: persistent esbuild watch -> exact CLI HTML after source edits"
+fixture = "fixtures/w5-v2"
+fixture_version = "w5-v2-marked"
 status = "implemented"
-metrics = ["bind_median_s", "volume_median_s", "bind_iters_s", "volume_iters_s"]
+metrics = ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s", "bind_setup_s", "volume_setup_s"]
 states = ["warm"]
 params = { iters = 5 }
-correctness = ["volume_seed", "bind_iter_<i> marker+edit visible", "vol_iter_<i> marker"]
-note = "v1 uses a python fixture repo (offline); a TS/pnpm repo is deferred. Bind iterations verify host->guest write coherence via the printed edit marker. Host bind = virtiofs path; named volume = guest-native storage — kept as separate metrics, never blended."
+correctness = ["source and dependency lock hashes", "pinned native ARM64 tool image", "persistent watcher PID/start identity", "exact rebuilt CLI output each edit", "owned cleanup"]
+note = "v2 uses real TS sources and dependencies; host bind edits use the coordinator file write, guest volume edits include Docker exec transport. Startup/population separate. Old Python fixture remains diagnostic data and its timings are incompatible. Workload/image must still be frozen before qualification."
 
 [[case]]
 id = "W6"

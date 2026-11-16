@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "fixture_version": "w5-v2-marked",
+  "source": {
+    "name": "marked",
+    "version": "15.0.12",
+    "url": "https://codeload.github.com/markedjs/marked/tar.gz/refs/tags/v15.0.12",
+    "sha256": "2da1adfd5d17b47477dbeecdf6d9de69cbfd84558320807987406b9e7a1e8ca5",
+    "lock_sha256": "5acaa75805a6efc1d58be5415cc94cb09058ad6ec3ff7c0fb1a4f05491b1abf4"
+  },
+  "tools": {
+    "node": "v22.15.0",
+    "npm": "10.9.2",
+    "image": "node:22.15.0-bookworm-slim@sha256:557e52a0fcb928ee113df7e1fb5d4f60c1341dbda53f55e3d815ca10807efdce"
+  },
+  "edit": {
+    "path": "src/Renderer.ts",
+    "original": "return `<h${depth}>${this.parser.parseInline(tokens)}</h${depth}>\\n`;",
+    "edited": "return `<h${depth} class=\"w5\">${this.parser.parseInline(tokens)}</h${depth}>\\n`;"
+  },
+  "test": {
+    "input": "# Hello *world*\n\nA [link](https://example.com).\n",
+    "original": "<h1>Hello <em>world</em></h1>\n<p>A <a href=\"https://example.com\">link</a>.</p>\n\n",
+    "edited": "<h1 class=\"w5\">Hello <em>world</em></h1>\n<p>A <a href=\"https://example.com\">link</a>.</p>\n\n"
+  }
+}

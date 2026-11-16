@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ownership
+import watch_loop
 import collect
 from contextlib import contextmanager
 import base64
@@ -77,7 +78,6 @@ LOAD_PY = FIXTURES / "w2" / "load.py"
 W8_DIR = FIXTURES / "w8"
 W9_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
-W5_DIR = FIXTURES / "w5"
 W6_IMAGE = "gcc:14.2.0-bookworm"
 W6_RUST_IMAGE = "rust:1.100.0-bookworm"
 W6_DIR = FIXTURES / "w6"
@@ -158,8 +158,6 @@ HOLDOUT_COMPOSE = HOLDOUT_DIR / "compose.yaml"
 HOLDOUT_IMAGE = "gitea/gitea:1.24.7"
 HOLDOUT_USER = "npadmin"
 HOLDOUT_PASSWORD = "npadmin-pass-123"
-W5_IMAGE = "python:3.13-slim"
-W5_VOL = "npw5-repo"
 W3_PASSWORD = "npw3pw"
 W3_TXS = 300
 # Deterministic transaction mix: each tx inserts one row and updates a
@@ -1836,91 +1834,42 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
 
 
 def trial_w5(ctx, engine: Engine, state: str,
-             iters: int = 5) -> dict:
-    """W5: monorepo edit-test loop — the same 60-module repo tested via
-    `docker run` on (a) a host bind mount and (b) a named volume, kept
-    as separate metrics per the campaign. Between bind iterations the
-    host edits edited.txt; run_tests.py prints the marker so output
-    proves host→guest write coherence through the mount."""
-    case_id = "W5"
-    trial_dir = ctx.trial_dir(engine.name, case_id, state)
-    rec = ctx.new_record(engine, case_id, state, trial_dir)
-    checks = rec["correctness"]["checks"]
-    repo = W5_DIR / "repo"
-    edited = repo / "edited.txt"
-    orig = edited.read_text()
-    vol = f"{W5_VOL}-{ctx.run_id[-6:]}"
+             iters: int = 5, fixture_version: str = "w5-v2-marked") -> dict:
+    """Persistent real TS app watch/rebuild/test; bind and volume kept separate."""
+    trial_dir = ctx.trial_dir(engine.name, "W5", state)
+    rec = ctx.new_record(engine, "W5", state, trial_dir)
     sampler = trace = None
     try:
+        spec = watch_loop.contract()
+        if fixture_version != spec['fixture_version']:
+            raise ValueError("W5 fixture version mismatch")
+        archive = WORK / "inputs" / f"marked-{spec['source']['version']}.tar.gz"
+        if not archive.is_file() or sha256_file(archive) != spec['source']['sha256']:
+            raise ValueError("W5 pinned source unavailable; run prepare first")
         engine.ensure_up()
-        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=30)
-        # Populate the volume once (untimed): copy the fixture repo in.
-        cp = engine.sh(
-            ["run", "--rm", "-v", f"{vol}:/dst",
-             "-v", f"{repo}:/src:ro", W5_IMAGE, "sh", "-c",
-             "cp -r /src/. /dst/"],
-            timeout=120, check=False)
-        checks["volume_seed"] = cp.returncode == 0
-        if cp.returncode != 0:
-            rec["validation_errors"].append(
-                f"volume seed rc={cp.returncode}: "
-                f"{(cp.stderr or cp.stdout).strip()[-300:]}")
+        rec["inputs"] = watch_loop.check_image(engine)
         sampler, trace = start_sampler(engine, trial_dir)
-
-        bind_times, vol_times = [], []
-        for i in range(iters):
-            # Bind iteration: host edit, then timed test run.
-            edited.write_text(f"iter-{i}\n")
-            t0 = time.monotonic()
-            cp = engine.sh(
-                ["run", "--rm", "-v", f"{repo}:/repo:ro", "-w", "/repo",
-                 W5_IMAGE, "python3", "run_tests.py"],
-                timeout=120, check=False)
-            bind_times.append(round(time.monotonic() - t0, 3))
-            ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout
-                  and f"iter-{i}" in cp.stdout)
-            checks[f"bind_iter_{i}"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"bind iter {i} rc={cp.returncode}: "
-                    f"{(cp.stderr or cp.stdout).strip()[-200:]}")
-
-            # Volume iteration: same test against the named volume.
-            t0 = time.monotonic()
-            cp = engine.sh(
-                ["run", "--rm", "-v", f"{vol}:/repo:ro", "-w", "/repo",
-                 W5_IMAGE, "python3", "run_tests.py"],
-                timeout=120, check=False)
-            vol_times.append(round(time.monotonic() - t0, 3))
-            ok = (cp.returncode == 0 and "npw5-ok" in cp.stdout)
-            checks[f"vol_iter_{i}"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"vol iter {i} rc={cp.returncode}: "
-                    f"{(cp.stderr or cp.stdout).strip()[-200:]}")
-
-        rec["metrics"]["bind_iters_s"] = bind_times
-        rec["metrics"]["volume_iters_s"] = vol_times
-        rec["metrics"]["bind_median_s"] = round(
-            statistics.median(bind_times), 3)
-        rec["metrics"]["volume_median_s"] = round(
-            statistics.median(vol_times), 3)
-        rec["correctness"]["ok"] = all(
-            v for k, v in checks.items() if k != "volume_seed"
-        ) and checks.get("volume_seed", False)
-        return rec
+        for mode in ("bind", "volume"):
+            result = watch_loop.run_mode(engine, trial_dir / mode, mode, ctx.run_id,
+                                         archive, iters,
+                                         lambda phase: resource_phase(engine, rec, f"{mode}-{phase}"),
+                                         docker_cli=DOCKER)
+            rec["metrics"][f"{mode}_edit_to_result_median_s"] = result["median_s"]
+            rec["metrics"][f"{mode}_setup_s"] = result["setup_s"]
+            rec["metrics"][f"{mode}_edits_s"] = [e["edit_to_result_s"] for e in result["edits"]]
+            rec["correctness"]["checks"][f"{mode}_persistent_exact_results"] = True
+        rec["metrics"]["fixture_version"] = fixture_version
+        rec["correctness"]["ok"] = True
     except Exception as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(str(exc))
     finally:
         if sampler is not None:
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
-        edited.write_text(orig)
-        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
+    return rec
 
 
 def trial_w10(ctx, engine: Engine, state: str,
@@ -2661,6 +2610,10 @@ def cmd_prepare(args) -> int:
 
             engine.sh(["build", "--load", "-t", "np-w4-events:v2",
                        str(FIXTURES / "w4")], timeout=300)
+            w5_source = watch_loop.contract()["source"]
+            w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
+                "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")
+            watch_loop.prepare_image(engine, w5_archive, WORK / "tmp")
 
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side

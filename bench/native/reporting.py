@@ -19,7 +19,7 @@ CASE_METRICS = {
     "W3": ["tx_tps", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
     "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
-    "W5": ["bind_median_s", "volume_median_s"],
+    "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],
     "W6": ["build_rust_s", "build_zlib_s"],
     "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
            for state in ("uncached", "warm", "incr")],
