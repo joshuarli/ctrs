@@ -1498,3 +1498,38 @@ experiment.
   [0.513,0.613]. Source `457767e`. This supersedes the 9/10
   `base-20261115T184735-18b8` attempt for resource qualification;
   timing stands on `base-20261115T163439-18ee`.
+
+## W2 CPU-loss investigation (2026-11-16)
+
+Goal: explain `cpu_seconds_est` 1.187–1.281 losses under sustained
+API load. Experiments, all on the same W1 stack (api+pg+redis),
+identical load.py seed/duration:
+
+- **CTRS_VMNET=1 A/B** (`base-20261115T195437-467a`, 10/10 valid):
+  cpu 1.281 — WORSE than vsock's 1.187; latency cells improved
+  (p50/p95/p99 all strict-win, rps 0.842 strict-win) but the CPU
+  hypothesis is rejected. vmnet stays opt-in; daemon back on vsock.
+- **seccomp=unconfined A/B**: api cgroup cpu 19.48s vs 19.95s
+  confined — ~2% effect, exonerated.
+- **bridge-nf-call-iptables=0**: no change (6.16s vs 6.23s system).
+- **Guest topology**: container networks are real kernel bridges
+  (ctrs15, 10.89.0.0/24); conntrack count stays ~44 under load —
+  inter-container traffic is clean L2, no per-packet netfilter.
+- **Controlled cgroup cpu.stat delta** (20 s load, seed 7):
+  ctrs api 19.95 CPU-s (system 6.23s, 31%) vs orbstack api
+  13.59 CPU-s (system 2.35s, 17%) at equal rps (~2450). Under
+  vsock the gap persists (18.4s/5.1s): **+47% container CPU,
+  ~2.6x system time, inside the api cgroup itself** — not the
+  port-forward/agent path.
+- **Microbench**: open/close syscall rate 1.99M/s vs 2.16M/s
+  (~8% slower); context switches 3.7 voluntary vs 2.0+2.1 mixed
+  per request — neither explains ~130us/req of extra kernel time.
+- Kernel mitigations/vulnerabilities identical; TCP sysctls
+  similar; kernels differ (ctrs 6.18.58 vs orbstack
+  7.2.12-orbstack-00394).
+
+**Status**: root cause not isolated; points to guest-kernel
+syscall/network-stack efficiency (6.18 vs OrbStack's custom 7.2).
+Next: in-guest perf/ftrace profiling of the api container's syscall
+mix, or a kernel-config diff against OrbStack's. W10 cpu/recovery
+losses likely share this root cause.
