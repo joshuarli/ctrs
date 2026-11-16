@@ -2323,3 +2323,29 @@ build procedure removes only repeated apt installation; original source remains
 untouched. Existing ctrs-kbuild cache was verified unused by any other container.
 All output is isolated under the worktree's .work/kernel-mc; live guest/out and
 host binary are untouched. No application benefit/acceptance claim until measured.
+
+## SCHED_MC-only candidate rejected after bounded application pilot
+
+Build job exited 0 with saved exit 0, identical compiler SHA and only one
+.config difference (SCHED_MC). Fresh stock Image SHA
+acb53b1b103c9821a97dd606b7eb94e38a9752200cd92e78b3cb7e86a0b3167d;
+candidate 73e74021f734903ff64c94b78cedbf1ab83ad987cf1ae8be9ac9a7ae440d296c.
+`sched-mc-pilot-20261115T232639`: three balanced same-host/same-binary pairs,
+20k fixed requests each, concurrency 4, 17 vCPUs, matched pair seeds. Actual
+open boot Image hash verified for every launch, disks/host binary unchanged.
+All six exact-data checks pass; native interval summaries complete all required
+process counters. Pre/post perf-gate-ready pass. Candidate host CPU/success
+ratios 1.0275/1.0216/1.0237; API CPU ratios 1.0088/0.9955/1.0038; wall about
+1.0016/0.9984/1.0023. These are small diagnostic pairs, not a qualified regression
+verdict. They do not show the preregistered >=10% API / >=5% host CPU benefit.
+REJECT: retain stock. Do not spend idle/W6/full-matrix confirmation on a weak
+candidate. No conclusion that guest kernels generally are exonerated. Next
+profiling boundary: isolated per-TID scheduler wake/run traces and domain policy.
+
+Resource primitives pass seven tests and live native collection in all six
+pilot intervals: complete CPU/user/system/wakes, steady/peak ri_phys_footprint,
+explicit numerical comparisons and post-warm cleanup growth. Maximum cleanup
+allocation cannot be hidden by a final return; explicit-file st_blocks reports
+shared-extent uncertainty and does not invent exclusive APFS allocation.
+These helpers are implemented, not full idle/reclamation/storage acceptance.
+Unknown total/exclusive allocation and incomplete coverage still block those gates.

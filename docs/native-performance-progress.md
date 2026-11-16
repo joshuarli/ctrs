@@ -81,24 +81,28 @@ affinity and zero migrations. Pre/post host gates pass. Old unpinned 18x contras
 is not reproduced under matched placement; no demonstrated VZ latency ceiling.
 Guest topology captured; stock ctrs SCHED_MC is off and cache topology differs.
 
-RUNNING guest build: `.work/wt/np-sched-mc`, branch campaign/np-sched-mc,
-base 85e361a. Only source diff CONFIG_SCHED_MC=y. Docker-owned durable job
-`np-sched-mc-build`, ID a42e49d9c721d47ddb18341acef6fd47fc9c17ef851e211d635e31578dc032bc,
-started 2026-11-16T07:17:11Z, timeout 900s (deadline ~07:32:11Z). Wait exec 37901.
-Job outputs/logs/plan/saved exit are in its `.work/kernel-mc/`; source/tool inputs
-are hashed. Builds a clean stock baseline then MC candidate with the SAME compiler
-container, original procedure minus repeated package installation. ctrs-kbuild
-had no other user when admitted. Existing main guest/out is untouched. Both
-variant asset dirs link the original initramfs and sparse template.
+SCHED_MC experiment REJECTED. Durable build np-sched-mc-build exited 0;
+stock/candidate compiler hashes match and effective configs differ only in MC.
+Three-pair pilot `sched-mc-pilot-20261115T232639` (exec 3007 terminal), 20k exact
+operations each, verified boot hashes, all six correctness/resource-coverage
+checks pass, pre/post host gates pass. No predicted benefit: host CPU/success
+candidate/baseline ~1.02; API CPU ~1.00 and wall ~1.00. Small diagnostic batch,
+not a qualified regression claim. Stock retained; no idle/W6/full-sweep reruns.
+Experiment tree `.work/wt/np-sched-mc`, branch campaign/np-sched-mc, assets under
+.work/kernel-mc retained for fresh-stock baseline/debug provenance. Main guest/out
+and default driver unchanged. Do not deploy the rejected candidate.
 
-Next executable action: observe this exact build once for terminal state; require
-saved exit-status=0, Docker State.ExitCode=0, both Images/configs, matching compiler
-hashes and effective config diff limited to MC. Do not retry from observation
-timeout. Select finished assets via CTRS_GUEST_DIR in owned warm engine, keeping
-host binary/default driver/data disk fixed. Run affected fixed-work W2 and declared
-idle/wake/footprint/storage/next-use guards before selection; W6 parallel-build
-regression if credible. Hypothesis and numerical budgets are in latest evidence.
-No VMM/backend experiment is justified by current matched wake data.
+Next W2 action: isolated per-TID sched wake/run tracing and scheduler-domain
+inspection before another candidate. Actual-application placement and matched
+microbenchmarks point to scheduling policy; intrinsic VZ wake limitation is not
+demonstrated. Additional vCPU-count/load controls remain. No speculative backend.
+
+Native resource helpers integrated for complete intervals, explicit budgets,
+post-warmup peak cleanup growth and explicit-file allocated bytes. Seven tests
+pass; six actual engine intervals pass full required-process coverage. CPU
+utilization field is generic cpu_cores, not mislabeled idle for workload intervals.
+Exclusive APFS allocation remains unknown. Full idle/reclaim/storage/growth and
+persistence acceptance cells still need runner integration and real pilots.
 
 W8 prepare state-preserving update is repaired with four focused tests: selected
 engine section merges atomically, other valid section remains untouched, malformed
@@ -120,20 +124,20 @@ fixture size and all per-cell budgets still require freeze/qualification.
 Old hash-only W4 results are incompatible diagnostics. Retire worker tree
 `.work/wt/np-w4` only after useful final source is safely committed/integrated.
 
-W5 v2 source lane: `.work/wt/np-w5`, branch campaign/np-w5, base 565c3e2.
-Bridge worker usrw_6f9b0a5e-9e1f-4616-a10d-8c05803d73c3 (watch 33323) ended
-incomplete as expected pending build clearance. Marked v15.0.12 real TS CLI,
-archive/lock/Node/npm/image digests pinned; persistent rebuild + exact HTML test.
-Three offline tests and source preparation passed. Parent must review files,
-build and run bind/volume watch pilots after kernel build; do not claim W5 coverage.
-No Docker/engine actions authorized in that lane while build owns Mac.
+W5 v2 source lane copied to main for integration: pinned Marked v15.0.12 CLI,
+archive/lockfile, Node22.15.0/npm10.9.2 and image index locked. Three offline
+tests pass. Image np-w5-marked:v2 built successfully on OrbStack (exec 29042
+terminal), 541 upstream packages installed; no product dependency added. Before
+commit: persistent watcher bind and volume correctness pilots on both engines,
+image architecture/installed size, and real host event-receipt timing integration.
+No performance claim. Root build context .work/tmp/w5-v2-context; worker source
+.work/wt/np-w5 retained, base565c3e2, terminal bridge
+usrw_6f9b0a5e-9e1f-4616-a10d-8c05803d73c3 (watch33323).
 
-Resource-cell source lane: `.work/wt/np-resource-cells`, branch
-campaign/np-resource-cells, base 85e361a. Bridge
-usrw_4e78a6d8-998e-413d-ba63-7b7e435f0c34, watch exec 32535. Owns resource_cells.py/test_resource_cells.py only;
-complete native intervals, idle CPU/wakes/steady+peak footprint, explicit budgets,
-post-warmup growth, sparse host allocation with clone/volume uncertainty. No
-engine/build or measured workloads. Parent integration/Mac pilot pending.
+Resource helper worker complete (usrw_4e78a6d8-998e-413d-ba63-7b7e435f0c34,
+watch32535 terminal); main includes parent-reviewed source plus stronger peak
+cleanup guard and accurate utilization name. Tree .work/wt/np-resource-cells,
+branch campaign/np-resource-cells retained until final source integration cleanup.
 
 Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'` (join the wrapped command).
