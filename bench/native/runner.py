@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import ownership
+import collect
+from contextlib import contextmanager
 import base64
 import concurrent.futures
 import hashlib
@@ -677,12 +679,30 @@ def start_sampler(engine: Engine, trial_dir: Path):
     except Exception as exc:
         identity = {"required_processes": [], "error": str(exc)}
     identity_path.write_text(json.dumps(identity, indent=2) + "\n")
+    engine.measurement_identity = identity
     proc = subprocess.Popen(
         [sys.executable, str(COLLECT), "--match", MATCH_PATTERNS[engine.name],
          "--ownership", str(identity_path),
          "--interval", "0.2", "--out", str(trace)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc, trace
+
+
+@contextmanager
+def resource_phase(engine, rec, name):
+    identity = engine.measurement_identity
+    before = collect.cpu_boundary(identity)
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        ended = time.monotonic()
+        after = collect.cpu_boundary(identity)
+        result = collect.cpu_delta(before, after)
+        result.update({"operation_started_monotonic": started,
+                       "operation_ended_monotonic": ended,
+                       "operation_wall_seconds": ended - started})
+        rec["resources"].setdefault("phases", {})[name] = result
 
 
 def stop_sampler(proc: subprocess.Popen) -> None:
@@ -715,8 +735,10 @@ def summarize_trace(trace: Path) -> dict:
     footprints = []
     cpu = 0.0
     cpu_complete = len(records) >= 2
-    ownership = bool(records) and all(r.get("ownership_verified") is True for r in records)
+    ownership = bool(records) and all(r.get("ownership_verified") is True for r in records
+                                      if r.get("record_type") != "footprint_only")
     previous = None
+    cpu_records = 0
     footprint_incomplete = False
     for rec in records:
         procs = rec.get("procs", [])
@@ -734,6 +756,9 @@ def summarize_trace(trace: Path) -> dict:
             else:
                 footprint_incomplete = True
                 errors.append("incomplete phys_footprint sample")
+        if rec.get("record_type") == "footprint_only":
+            continue
+        cpu_records += 1
         if previous is not None:
             old = {(p.get("pid"), p.get("start_identity")): p for p in previous.get("procs", [])}
             new = {(p.get("pid"), p.get("start_identity")): p for p in procs}
@@ -747,8 +772,9 @@ def summarize_trace(trace: Path) -> dict:
                 else:
                     cpu += after - before
         previous = rec
+    cpu_complete = cpu_complete and cpu_records >= 2
     qualified_cpu = cpu_complete and ownership and not errors
-    qualified_fp = ownership and bool(footprints) and not footprint_incomplete and not errors
+    qualified_fp = ownership and cpu_records > 0 and bool(footprints) and not footprint_incomplete and not errors
     return {
         "samples": len(records),
         "peak_total_rss_kb": peak_rss,
@@ -892,25 +918,27 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         engine.ensure_up()
         compose_down(engine, proj)
         sampler, trace = start_sampler(engine, trial_dir)
-        up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
-        if up.returncode != 0:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append(
-                f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
-            return rec
-        t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
-        if t_ready is None:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append("stack never became healthy")
-            return rec
-        rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
+        with resource_phase(engine, rec, "setup"):
+            up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
+            if up.returncode != 0:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(
+                    f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
+                return rec
+            t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+            if t_ready is None:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append("stack never became healthy")
+                return rec
+            rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
 
-        load = subprocess.run(
-            [sys.executable, str(LOAD_PY), "--url", api,
-             "--concurrency", str(concurrency), "--duration", str(duration),
-             "--write-ratio", str(write_ratio), "--seed", str(seed),
-             "--out", str(load_out)],
-            capture_output=True, text=True, timeout=duration + 120)
+        with resource_phase(engine, rec, "workload"):
+            load = subprocess.run(
+                [sys.executable, str(LOAD_PY), "--url", api,
+                 "--concurrency", str(concurrency), "--duration", str(duration),
+                 "--write-ratio", str(write_ratio), "--seed", str(seed),
+                 "--out", str(load_out)],
+                capture_output=True, text=True, timeout=duration + 120)
         if load_out.exists():
             summary = json.loads(load_out.read_text())
             rec["metrics"].update({
@@ -945,7 +973,11 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
-        compose_down(engine, proj)
+        if sampler is not None:
+            with resource_phase(engine, rec, "cleanup"):
+                compose_down(engine, proj)
+        else:
+            compose_down(engine, proj)
         if sampler is not None:
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})

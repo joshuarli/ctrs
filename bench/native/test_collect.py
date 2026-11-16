@@ -62,3 +62,25 @@ class ResourceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class BoundaryTests(unittest.TestCase):
+    def test_short_operation_has_two_explicit_cpu_boundaries(self):
+        def boundary(value):
+            return {'errors': [], 'procs': [
+                {'pid': 1, 'start_identity': 'daemon', 'cputime_s': value},
+                {'pid': 2, 'start_identity': 'VM', 'cputime_s': value * 10}]}
+        result = collect.cpu_delta(boundary(1), boundary(1.01))
+        self.assertAlmostEqual(result['cpu_seconds'], .11)
+        self.assertEqual(result['errors'], [])
+        broken = boundary(1.01)
+        broken['procs'][1]['cputime_s'] = None
+        self.assertIsNone(collect.cpu_delta(boundary(1), broken)['cpu_seconds'])
+
+    def test_terminal_footprint_does_not_erase_cpu_coverage(self):
+        fixture = ResourceTests()
+        samples = [fixture.sample(), fixture.sample(3, 12)]
+        samples.append({'record_type': 'footprint_only', 'footprint': {
+            'required_pids': [1, 2], 'values': {'1': 100, '2': 200000}, 'error': None}})
+        result = fixture.summary(samples)
+        self.assertEqual(result['cpu_seconds_est'], 3)
+        self.assertEqual(result['peak_phys_footprint_bytes'], 200100)

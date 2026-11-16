@@ -104,6 +104,46 @@ def validate_processes(required, processes):
     return errors
 
 
+def cpu_boundary(identity):
+    started = time.monotonic()
+    required = {p["pid"]: p for p in identity.get("required_processes", [])}
+    result = {"started_monotonic": started, "method": "ps cumulative CPU; 0.01s resolution",
+              "procs": [], "errors": []}
+    try:
+        cp = subprocess.run(["ps", "-axo", "pid=,time=,lstart=,comm="],
+                            capture_output=True, text=True, timeout=5, check=True)
+        for line in cp.stdout.splitlines():
+            parts = line.split(None, 7)
+            if len(parts) == 8 and int(parts[0]) in required:
+                result["procs"].append({"pid": int(parts[0]),
+                    "cputime_s": parse_cputime(parts[1]),
+                    "start_identity": " ".join(parts[2:7]), "comm": parts[7]})
+        result["errors"].extend(validate_processes(required, result["procs"]))
+    except Exception as exc:
+        result["errors"].append(str(exc))
+    result["ended_monotonic"] = time.monotonic()
+    return result
+
+
+def cpu_delta(before, after):
+    errors = before["errors"] + after["errors"]
+    old = {p["pid"]: p for p in before["procs"]}
+    new = {p["pid"]: p for p in after["procs"]}
+    total = 0.0
+    if not old or old.keys() != new.keys():
+        errors.append("CPU boundary process coverage differs")
+    for pid, proc in new.items():
+        prior = old.get(pid, {})
+        a, b = prior.get("cputime_s"), proc.get("cputime_s")
+        if (a is None or b is None or b < a or
+                prior.get("start_identity") != proc.get("start_identity")):
+            errors.append(f"missing or changed CPU boundary counter: {pid}")
+        else:
+            total += b - a
+    return {"cpu_seconds": round(total, 6) if not errors else None,
+            "errors": errors, "before": before, "after": after}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--match", required=True, help="regex on process comm")
@@ -191,6 +231,10 @@ def main():
             out.flush()
             time.sleep(max(0.0, args.interval - (time.time() - t0)))
 
+        if pending_fp is not None:
+            out.write(json.dumps({"record_type": "footprint_only",
+                                  "footprint": pending_fp.result()}) + "\n")
+            out.flush()
     pool.shutdown(wait=True)
 
 

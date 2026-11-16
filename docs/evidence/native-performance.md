@@ -2030,3 +2030,20 @@ phys_footprint sample, no collection errors. Not a timing, overhead, or engine
 comparison; worker activity was permitted because this was functional validation.
 56 offline tests pass, including unrelated VM exclusion and stale artifact/PID
 rejection. Explicit phase boundary accounting and overhead calibration remain.
+
+## Explicit phase boundaries and short ctrs collection pilot
+
+Owned benchmark VM restart preserved all 86 volume names; disk was not replaced.
+Boot/executable discovery now passes. This is identity preservation only, not
+volume-content or power-loss durability evidence.
+
+W2 pilot `run-20261115T220707-31a0`, duration 3 s, concurrency 4, seed 7:
+correct item count 2,799 (500 seed + 2,299 acknowledged writes), 5,454 successful
+reads, zero errors. 34 CPU ticks, complete required-process footprint sample,
+no collection errors. Raw explicit phase CPU totals setup/workload/cleanup
+0.88/5.55/0.09 CPU-s. Whole-trial sampled CPU is 6.50 s and must not be used as
+workload CPU. Boundary method is ps cumulative CPU, 0.01-s resolution, with
+~37-ms snapshot durations saved; operation wall excludes boundary collection.
+Pre/post perf-gate-ready passed. No engine ratio or observer-overhead claim.
+Terminal asynchronous footprint samples now survive sampler shutdown without
+altering CPU process coverage. 58 offline tests pass.

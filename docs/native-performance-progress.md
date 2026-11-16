@@ -9,31 +9,37 @@ Historical checkpoints and superseded claims are in
 ## Current slice and exact continuation
 
 Bounded collector/scoring repair is in progress. Strict fields reject category
-fallback and incomplete counters. Process attribution now uses the exact open
-Unix socket and dedicated ctrs VM data disk, plus PID/start identity. Open
-executable and guest asset inode/mtime checks prevent hashing replaced files
-as running artifacts. Build-output hashes are separately labeled. 56 offline
-regression tests pass. OrbStack 4-second collection pilot produced 20 CPU ticks,
-complete required-process counters, one complete phys_footprint sample and no
-errors. This is collection validation, not scored performance or overhead proof.
-Raw pilot: `.work/native-perf/results/strict-ownership-pilot/`.
+fallback and incomplete counters. Socket/dedicated disk ownership and PID/start
+identity are verified. Open executable/guest inode and mtime checks reject
+changed artifacts; build-output hashes are separately labeled. Explicit W2
+setup/workload/cleanup CPU boundaries and terminal footprint preservation are
+implemented. 58 offline tests pass.
 
-Next executable action: safely restart only daemon 7487 after revalidating its
-socket/start identity. Its VM helper 7488 holds the dedicated campaign disk;
-open guest Image was modified after VM start, so boot identity is unverified.
-Current owned engine inventory: registry `3fe7a64ed767` (npw8-reg-ctrs) and
-builder `1408fcf96f83` (dev.ctrs.builder=1); no diagnostic load found. Preserve
-all disks/volumes. Relaunch with existing dedicated data/state/socket paths,
-CTRS_CPUS=17 and CTRS_MEMORY_MIB=45091; rerun ownership.discover. Then finish
-explicit workload CPU boundaries and asynchronous terminal footprint records,
-run short ctrs pilot, and sampler-on/off comparison after worker completion and
-pre/post perf-gate-ready. No scored W2 until this calibration is sound.
+Owned ctrs daemon/VM restarted without replacing disk or deleting state; all
+86 volume names survived. This checks identities, not contents/durability.
+Raw restart inventory: `.work/native-perf/results/ownership-restart/`.
+Short W2 collection pilot `run-20261115T220707-31a0` passed: 7,753 successful
+requests, zero errors, exact item count 2,799; 34 CPU ticks, complete footprint,
+no resource errors. CPU phase totals setup/workload/cleanup 0.88/5.55/0.09 s.
+Pre/post perf-gate-ready passed. This is a collection/phase pilot, not an engine
+comparison or overhead acceptance. CPU ps resolution is 0.01 s; per-boundary
+collection takes ~37 ms and is explicitly recorded outside operation wall time.
+
+Next executable action: sampler-on/off calibration with a prepared W2 stack,
+3 alternating pairs, same duration/concurrency/seed, recording raw successful
+work and CPU phase cost in both modes; predeclare acceptable median throughput
+impact <=3% and CPU/operation inflation <=5%, otherwise reduce observer work.
+Run pre/post perf-gate-ready. Keep reported total sampled CPU separate from
+W2 workload-phase CPU. Then implement fixed-work W2, exact persisted payload
+checks, per-success raw normalization and saturation as a separate mode; obtain
+clean cgroup deltas and causal application profile before selecting candidates.
 
 Independent W4 fixture worker owns `.work/wt/np-w4` on `campaign/np-w4`, base
 0f5724f. Bridge session `usrw_6b9afa4c-6459-4baa-b303-25dc5df1b657`;
-watch exec session 17037. It may only edit fixtures/w4/ and test_w4.py, with
-offline checks, no engine/build/measurement actions. Inspect status and review
-before integrating. Integration worktree is the repo root on main.
+watch exec session 17037. Worker succeeded with offline checks. Parent review
+found the output is still tiny synthetic hash artifacts; it needs representative
+content processing and durable artifact outputs before acceptance integration.
+Keep this tree parked pending that correction; it is not W4 coverage. Integration worktree is the repo root on main.
 
 Regression command: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s
 bench/native -p 'test_*.py'` (join the wrapped command).
