@@ -130,11 +130,13 @@ meaningful. Count daemon, VM/VZ helper, guest, managed builder and owned
 services. Add startup, idle wake, shutdown and reclaim-to-next-use cells;
 do not trade a smaller idle screenshot for slower next-use.
 
-`collect.py` currently gives process-name RSS and sampled CPU, **not**
-qualified physical-memory/CPU accounting. Implement ownership attribution,
-validate the Mac method, expose unknowns, and freeze numerical idle/growth
-budgets before claiming these gates. Check post-warmup trends and return
-to bounded budgets after cleanup. Never invent data from prose tables.
+`collect.py` currently discovers processes by name and records start strings;
+this is not verified ownership. The resumed strict sampler removes category
+Footprint fallback and rejects incomplete counters, and keeps slow footprint
+work off CPU ticks. Resource acceptance remains unqualified until process/start
+ownership, actual running executable/boot identity, phase boundaries and short
+Mac calibration including observer overhead are verified. Historical resource
+wins must not be carried forward.
 
 ## Measurement rules
 
@@ -198,20 +200,19 @@ not establish representative inputs, durability or physical accounting.
 
 ## Immediate implementation priorities
 
-Follow the ordered queue in `native-performance-progress.md`: measurement
-validity → real W6/W7 baseline → default build-path improvement, alongside
-missing fixtures and resource accounting. Read
-[`buildkit-driver.md`](buildkit-driver.md) as a proposal, not a reason to
-park the default-build gap. Its historical timings need requalification.
+Follow the single ordered queue in `native-performance-progress.md`: bounded
+measurement repair and clean calibration first; normalized fixed-work W2 and
+causal application profiling next, with independent acceptance-fixture and
+idle/storage work. Preserve successful default docker-driver work. Investigate
+W10 separately with a recovery trace before selecting a change. The combined
+HZ_1000/PREEMPT/LSE candidate was rejected; guest kernels remain hypotheses.
+Unpinned futex results, guest idle counters and process names do not establish
+cross-vCPU equivalence, host halt behavior or OrbStack’s VM implementation.
 
-Trace real context transfer, solve, export, image ingest, guest install
-and first run. Implement one bounded milestone at a time: compatible
-endpoint/session plumbing, correctly loaded image, cancellation/error
-cleanup, or removal of a measured copy/export crossing. Preserve output
-modes, auth/secrets, attestations, digests/tags and explicit unsupported
-errors. A control win, header probe or another design note does not close
-this work. Evaluate reusable protocol components; do not assume custom
-HTTP/2/protobuf code is preferable solely to avoid a dependency.
+Use short affected-case diagnostics and predeclared confirmations. CPU efficiency
+is CPU-seconds per successful operation over the same workload phase, computed
+from paired raw records; fixed work/offered load and saturation are distinct.
+Do not multiply published median ratios to create a corrected measurement.
 
 Other candidates must follow current profiles: bulk/control interference,
 parallel installs, real host-bind loops, published-port tails, builder

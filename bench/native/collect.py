@@ -13,10 +13,13 @@ Every --footprint-interval seconds the matched pids are also measured with
 per-process `phys_footprint:` auxiliary field (Activity Monitor's memory
 metric); the category-table `Footprint:` total is NOT phys_footprint — it
 excludes IOKit/IOSurface and other accounted-elsewhere pages and undercounts
-VM helpers by >10x. Per-process `footprint_bytes` lands on that tick's
-records. RSS stays as a cheap approximation.
+VM helpers by >10x. Asynchronous footprint records expose required PIDs,
+missing PIDs, timing and errors. RSS stays as a cheap approximation.
 """
 
+import concurrent.futures
+import hashlib
+from pathlib import Path
 import argparse
 import json
 import os
@@ -28,7 +31,38 @@ import time
 
 FP_PID_RE = re.compile(r"\[(-?\d+)\]:")
 FP_PHYS_RE = re.compile(r"^\s*phys_footprint:\s+(\d+)\s*B")
-FP_TOTAL_RE = re.compile(r"Footprint:\s+(\d+)\s*B")
+SAMPLER_VERSION = "2-strict-phys"
+
+
+def parse_footprint(output: str) -> dict[int, int]:
+    """Extract only the macOS phys_footprint auxiliary field by PID."""
+    values = {}
+    pid = None
+    for line in output.splitlines():
+        header = FP_PID_RE.search(line)
+        if header:
+            pid = int(header.group(1))
+        value = FP_PHYS_RE.match(line)
+        if value and pid is not None:
+            values[pid] = int(value.group(1))
+    return values
+
+
+def measure_footprint(pids):
+    started = time.monotonic()
+    result = {"started_monotonic": started, "method": "footprint phys_footprint",
+              "required_pids": pids, "values": {}, "error": None}
+    try:
+        cp = subprocess.run(["/usr/bin/footprint", "-f", "bytes", *map(str, pids)],
+                            capture_output=True, text=True, timeout=30)
+        result["values"] = parse_footprint(cp.stdout)
+        if cp.returncode:
+            result["error"] = f"exit {cp.returncode}: {cp.stderr[-1000:]}"
+    except Exception as exc:
+        result["error"] = str(exc)
+    result["ended_monotonic"] = time.monotonic()
+    result["missing_pids"] = sorted(set(pids) - result["values"].keys())
+    return result
 
 
 def parse_cputime(text: str) -> float | None:
@@ -76,79 +110,58 @@ def main():
     signal.signal(signal.SIGTERM, _term)
     signal.signal(signal.SIGINT, _term)
 
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    pending_fp = None
+    sampler_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     with open(args.out, "w") as out:
         while not stop:
             t0 = time.time()
+            mono = time.monotonic()
             try:
                 ps = subprocess.run(
-                    ["ps", "-axo", "pid=,pcpu=,rss=,time=,comm="],
+                    ["ps", "-axo", "pid=,pcpu=,rss=,time=,lstart=,comm="],
                     capture_output=True, text=True, timeout=5,
                 )
+                if ps.returncode:
+                    raise RuntimeError(f"ps exit {ps.returncode}: {ps.stderr}")
                 procs = []
                 for line in ps.stdout.splitlines():
-                    parts = line.split(None, 4)
-                    if len(parts) < 5:
+                    parts = line.split(None, 9)
+                    if len(parts) < 10:
                         continue
                     try:
                         pid, pcpu, rss = int(parts[0]), float(parts[1]), int(parts[2])
                     except ValueError:
                         continue
                     cputime_s = parse_cputime(parts[3])
-                    comm = parts[4].strip()
+                    comm = parts[9].strip()
                     if rx.search(comm):
                         procs.append({"pid": pid, "comm": comm,
                                       "pcpu": pcpu, "rss_kb": rss,
-                                      "cputime_s": cputime_s})
+                                      "cputime_s": cputime_s,
+                                      "start_identity": " ".join(parts[4:9])})
             except Exception as exc:
                 procs = []
                 sample_error = str(exc)
             else:
                 sample_error = None
-            if (args.footprint_interval > 0 and procs
-                    and t0 >= next_fp):
+            footprint = None
+            if pending_fp is not None and pending_fp.done():
+                footprint = pending_fp.result()
+                pending_fp = None
+            if (args.footprint_interval > 0 and procs and t0 >= next_fp
+                    and pending_fp is None):
                 next_fp = t0 + args.footprint_interval
-                try:
-                    fp = subprocess.run(
-                        ["footprint", "-f", "bytes"]
-                        + [str(p["pid"]) for p in procs],
-                        capture_output=True, text=True, timeout=30)
-                    # Sections are headed by `Name [pid]:`; each carries a
-                    # `phys_footprint: N B` auxiliary line. Track the
-                    # current pid and keep the LAST phys_footprint seen in
-                    # its section. Fall back to the category `Footprint:`
-                    # total only if no phys_footprint lines exist at all.
-                    by_pid: dict[int, int] = {}
-                    cur_pid = None
-                    saw_phys = False
-                    for line in fp.stdout.splitlines():
-                        m = FP_PID_RE.search(line)
-                        if m:
-                            cur_pid = int(m.group(1))
-                            continue
-                        m = FP_PHYS_RE.match(line)
-                        if m and cur_pid is not None:
-                            by_pid[cur_pid] = int(m.group(1))
-                            saw_phys = True
-                            continue
-                    if not saw_phys:
-                        # Fallback: the `Footprint:` total sits on the same
-                        # header line as the pid, so check both per line.
-                        cur_pid = None
-                        for line in fp.stdout.splitlines():
-                            m = FP_PID_RE.search(line)
-                            if m:
-                                cur_pid = int(m.group(1))
-                            t = FP_TOTAL_RE.search(line)
-                            if (t and cur_pid is not None
-                                    and cur_pid not in by_pid):
-                                by_pid[cur_pid] = int(t.group(1))
-                    for p in procs:
-                        if p["pid"] in by_pid:
-                            p["footprint_bytes"] = by_pid[p["pid"]]
-                except Exception:
-                    pass
+                pending_fp = pool.submit(measure_footprint, [p["pid"] for p in procs])
             rec = {
-                "t": round(t0, 3),
+                "t": t0,
+                "monotonic": mono,
+                "cpu_sample_ended_monotonic": time.monotonic(),
+                "sampler_version": SAMPLER_VERSION,
+                "sampler_sha256": sampler_sha256,
+                "ownership_verified": False,
+                "ownership_method": "comm discovery only",
+                "footprint": footprint,
                 "loadavg": list(os.getloadavg()),
                 "procs": procs,
             }
@@ -157,6 +170,8 @@ def main():
             out.write(json.dumps(rec) + "\n")
             out.flush()
             time.sleep(max(0.0, args.interval - (time.time() - t0)))
+
+    pool.shutdown(wait=True)
 
 
 if __name__ == "__main__":

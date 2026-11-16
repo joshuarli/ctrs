@@ -695,57 +695,62 @@ def _trace_ref(trace: Path) -> str:
 def summarize_trace(trace: Path) -> dict:
     if not trace.exists():
         return {"samples": 0}
-    peak_rss = 0
-    peak_fp = 0
-    fp_samples = 0
-    cpu_seconds = 0.0
-    cpu_exact = 0.0
-    prev_t = None
-    samples = 0
-    prev_cpu: dict[int, float] = {}
-    used_exact = False
-    for line in trace.read_text().splitlines():
+    records = []
+    errors = []
+    for number, line in enumerate(trace.read_text().splitlines(), 1):
         try:
-            rec = json.loads(line)
+            records.append(json.loads(line))
         except json.JSONDecodeError:
-            continue
-        samples += 1
-        t = rec.get("t", 0.0)
-        dt = (t - prev_t) if prev_t is not None else 0.0
-        prev_t = t
-        total_rss = 0
-        total_fp = 0
-        fp_seen = False
-        cur_cpu: dict[int, float] = {}
-        for p in rec.get("procs", []):
-            total_rss += p.get("rss_kb", 0)
-            cpu_seconds += p.get("pcpu", 0.0) / 100.0 * dt
-            ct = p.get("cputime_s")
-            if ct is not None:
-                cur_cpu[p.get("pid", -1)] = ct
-                prev = prev_cpu.get(p.get("pid", -1))
-                if prev is not None and ct >= prev:
-                    cpu_exact += ct - prev
-                    used_exact = True
-            fb = p.get("footprint_bytes")
-            if fb is not None:
-                total_fp += fb
-                fp_seen = True
-        if fp_seen:
-            fp_samples += 1
-            peak_fp = max(peak_fp, total_fp)
-        prev_cpu = cur_cpu
-        peak_rss = max(peak_rss, total_rss)
+            errors.append(f"malformed sample {number}")
+    peak_rss = 0
+    footprints = []
+    cpu = 0.0
+    cpu_complete = len(records) >= 2
+    ownership = bool(records) and all(r.get("ownership_verified") is True for r in records)
+    previous = None
+    footprint_incomplete = False
+    for rec in records:
+        procs = rec.get("procs", [])
+        peak_rss = max(peak_rss, sum(p.get("rss_kb", 0) for p in procs))
+        if rec.get("error"):
+            errors.append(rec["error"])
+            cpu_complete = False
+        fp = rec.get("footprint")
+        if fp:
+            required = set(map(str, fp.get("required_pids", [])))
+            values = {str(k): v for k, v in fp.get("values", {}).items()}
+            if required and required <= values.keys() and not fp.get("error"):
+                footprints.append(sum(values[k] for k in required))
+            else:
+                footprint_incomplete = True
+                errors.append("incomplete phys_footprint sample")
+        if previous is not None:
+            old = {(p.get("pid"), p.get("start_identity")): p for p in previous.get("procs", [])}
+            new = {(p.get("pid"), p.get("start_identity")): p for p in procs}
+            if not new or old.keys() != new.keys():
+                cpu_complete = False
+            for key, proc in new.items():
+                prior = old.get(key, {})
+                before, after = prior.get("cputime_s"), proc.get("cputime_s")
+                if before is None or after is None or after < before:
+                    cpu_complete = False
+                else:
+                    cpu += after - before
+        previous = rec
+    qualified_cpu = cpu_complete and ownership and not errors
+    qualified_fp = ownership and bool(footprints) and not footprint_incomplete and not errors
     return {
-        "samples": samples,
+        "samples": len(records),
         "peak_total_rss_kb": peak_rss,
-        "peak_phys_footprint_bytes": peak_fp if fp_samples else None,
-        "footprint_samples": fp_samples,
-        "cpu_seconds_est": round(cpu_exact if used_exact else cpu_seconds, 2),
-        "method": "ps rss sum + cumulative cputime deltas over matched "
-                  "comms (pcpu fallback); footprint_bytes = "
-                  "footprint phys_footprint field summed over matched "
-                  "pids (category-total fallback on old macOS)",
+        "peak_phys_footprint_bytes": max(footprints) if qualified_fp else None,
+        "diagnostic_peak_phys_footprint_bytes": max(footprints) if footprints else None,
+        "footprint_samples": len(footprints),
+        "cpu_seconds_est": round(cpu, 6) if qualified_cpu else None,
+        "diagnostic_cpu_seconds": round(cpu, 6) if cpu_complete else None,
+        "cpu_counters_complete": cpu_complete,
+        "ownership_verified": ownership,
+        "resource_errors": errors,
+        "method": "cumulative process CPU deltas; asynchronous phys_footprint; ownership required",
         "footprint_field": "phys_footprint",
     }
 
