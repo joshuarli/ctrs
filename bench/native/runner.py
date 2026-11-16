@@ -495,6 +495,64 @@ class Engine:
                      timeout=30)
         return cp.stdout.strip()
 
+    def system_df(self) -> dict | None:
+        """Raw-byte `GET /system/df` snapshot for allocated-storage
+        accounting. Fields the engine does not report stay absent;
+        callers must treat missing keys as unknown, not zero."""
+        try:
+            import http.client
+            import json as _json
+            import socket as _socket
+
+            class _UnixHTTP(http.client.HTTPConnection):
+                def __init__(self, path: str):
+                    super().__init__("localhost")
+                    self._path = path
+
+                def connect(self):
+                    self.sock = _socket.socket(
+                        _socket.AF_UNIX, _socket.SOCK_STREAM)
+                    self.sock.settimeout(30)
+                    self.sock.connect(self._path)
+
+            path = self.socket.removeprefix("unix://")
+            conn = _UnixHTTP(path)
+            conn.request("GET", "/system/df")
+            resp = conn.getresponse()
+            if resp.status != 200:
+                return None
+            data = _json.loads(resp.read())
+            conn.close()
+            out = {}
+            if isinstance(data.get("LayersSize"), int):
+                out["layers_size_bytes"] = data["LayersSize"]
+            images = data.get("Images") or []
+            if images:
+                out["images_size_bytes"] = sum(
+                    i.get("Size") or 0 for i in images)
+                out["images_shared_bytes"] = sum(
+                    i.get("SharedSize") or 0 for i in images)
+            containers = data.get("Containers") or []
+            if containers:
+                out["containers_size_bytes"] = sum(
+                    (c.get("SizeRw") or 0) + (c.get("SizeRootFs") or 0)
+                    for c in containers)
+            volumes = data.get("Volumes") or []
+            if volumes:
+                known = [(v.get("UsageData") or {}).get("Size")
+                         for v in volumes]
+                known = [s for s in known if isinstance(s, int) and s >= 0]
+                if len(known) == len(volumes):
+                    out["volumes_size_bytes"] = sum(known)
+            cache = data.get("BuildCache") or []
+            if cache:
+                out["build_cache_entries"] = len(cache)
+                out["build_cache_size_bytes"] = sum(
+                    b.get("Size") or 0 for b in cache)
+            return out or None
+        except Exception:
+            return None
+
     def ensure_up(self, timeout: float = 300.0) -> None:
         if self.name == "orbstack":
             self.sh(["version"], timeout=30)
@@ -1653,6 +1711,22 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         want = f"{W3_TXS}|{expected_k}|{W3_TXS}"
         checks["verify_rows"] = (out.returncode == 0
                                  and want in out.stdout.replace(" ", "|"))
+        # Allocated-storage cell: bytes actually allocated for the
+        # persisted dataset (du counts blocks, not apparent size).
+        # `du -sk` is explicit KiB on both GNU and busybox.
+        du = engine.sh(["exec", name, "du", "-sk",
+                        "/var/lib/postgresql/data"],
+                       timeout=120, check=False)
+        if du.returncode == 0:
+            try:
+                rec["metrics"]["pgdata_allocated_bytes"] = (
+                    int(du.stdout.split()[0]) * 1024)
+            except (ValueError, IndexError):
+                rec["validation_errors"].append(
+                    f"du parse failed: {du.stdout.strip()[:120]}")
+        else:
+            rec["validation_errors"].append(
+                f"du rc={du.returncode}: {(du.stderr or '')[-200:]}")
         rec["correctness"]["ok"] = all(
             checks.get(k) for k in
             ("db_start", "db_ready", "migrate", "txmix", "checkpoint",
@@ -2362,6 +2436,9 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec["validation_errors"].append("engine unreachable after trial")
         info = safe_engine_info(engine)
         if info is not None:
+            df = engine.system_df()
+            if df:
+                info["system_df"] = df
             rec["resources"]["engine"] = info
         ctx.write(rec)
         return rec
