@@ -12,6 +12,12 @@ HEADER = re.compile(r'^\s*(\S+)\s+(\d+)/(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+cpu-cl
 FRAME = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+?)\s+\((.*)\)\s*$')
 
 
+def check_attachment(attached_tasks, phase_tasks, clock_ticks):
+    delta = sched_trace.application_cpu_delta(attached_tasks, phase_tasks, clock_ticks, required_tids=attached_tasks)
+    if delta['status'] != 'ok':
+        raise ValueError('profiler attachment task identity changed: ' + repr(delta['errors']))
+
+
 def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations, diagnostics='', raw_events=''):
     errors, samples = [], []
     current = None

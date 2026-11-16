@@ -42,6 +42,14 @@ class CPUProfile(unittest.TestCase):
         self.assertEqual(result['sample_count'], 5)
         self.assertTrue(all(record['samples'] == 1 for record in result['per_thread'].values()))
 
+    def test_attachment_task_reuse_before_phase_is_rejected(self):
+        warm = {'1': task('1', 0)}
+        measured = {'1': task('1', 10)}
+        cpu_profile.check_attachment(warm, measured, 100)
+        measured['1']['stat'] = measured['1']['stat'].replace(' 123 ', ' 124 ')
+        with self.assertRaisesRegex(ValueError, 'attachment task identity changed'):
+            cpu_profile.check_attachment(warm, measured, 100)
+
     def test_loss_unrecognized_frames_empty_and_foreign_tasks_invalidate(self):
         good = f'{TAG} 1/1 [000] 1.1: cpu-clock: 1234 leaf (/lib/libc.so)\n'
         for text in ('', good + 'LOST 10 events\n', good + 'bad frame\n', good.replace('1/1', '1/2'), good.replace(TAG, 'other')):

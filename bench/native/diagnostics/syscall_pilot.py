@@ -134,6 +134,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         phase = subprocess.Popen([runner.DOCKER, 'exec', '-i', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
             'phase', tag, mode], env=engine.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=phase_log, text=True)
         before = frame(phase, 'ready'); save(directory / 'phase-before.json', before)
+        cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
         started = time.monotonic()
         summary = load('work', operations, .3)
