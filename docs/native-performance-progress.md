@@ -71,12 +71,16 @@ distinct causes found so far:
    `400 BLOB_UNKNOWN` registry response instead of EOF.
 2. `/session` stream RST_STREAM error code 3 (h2 FLOW_CONTROL_ERROR)
    from buildkitd ~100ms into a solve — seen at 21:21, 22:12, 22:14,
-   22:37, 22:45 UTC across W6/W7 trials including non-concurrent
-   baseline patterns. NOT yet root-caused. Instrumentation added
-   (same commit): GOAWAY/RST error codes logged on both relay
-   directions, per-frame session rx debug, send-window overdraw
-   warnings. `cargo test -p ctrs` green; diagnostics verified live
-   (session rx frame/WINDOW_UPDATE/DATA logs confirmed flowing).
+   22:37, 22:45 UTC and again 2026-11-16T00:15:56 (clean W6 pair 6),
+   across W6/W7 trials including non-concurrent baseline patterns.
+   NOT yet root-caused. Instrumentation in tree: GOAWAY/RST error
+   codes on both relay directions, per-frame session rx debug,
+   send-window overdraw warnings, and (newest commit) a cumulative
+   sent-byte counter + window snapshot logged on session RST —
+   distinguishes oversend vs protocol violation. The newest binary is
+   built+signed but NOT yet deployed: the in-flight clean baseline
+   must finish first; restart the warm daemon with
+   `CTRS_LOG=debug` afterward to catch the next occurrence.
 
 **Final clean baselines in flight (2026-11-16):** W6 20-pair then
 W7 10-pair `--driver default`, debug OFF — log
