@@ -1,11 +1,15 @@
 # macOS performance campaign: progress and continuation
 
-**ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
-[Contract](campaign-native-performance.md). One coordinator owns Mac runs.
-This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main 1a48731 plus
-this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
-eventual frozen-candidate confirmation and known correctness debt remain open.
+## Status
+
+**WINDING DOWN — owner request, 2026-11-16.** Start no new campaign work.
+All worker lanes are terminal. No native benchmark or campaign engine is live.
+Storage source 538e2c3 has 165 passing tests and native relation-ENOSPC proofs,
+but two independent review findings remain. Park it before pausing.
+W8 source bc6625f is committed on campaign/np-w8-content, not parent-reviewed
+or integrated. Preserve its branch and exact continuation.
+The [contract](campaign-native-performance.md) remains the resume contract.
+This file owns continuation; history lives in [evidence](evidence/native-performance.md).
 
 ## Accepted and verified
 

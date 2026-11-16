@@ -1,6 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**Owner steering: 2026-11-15. ACTIVE, unattended, not complete.** This is
+**Owner steering: 2026-11-15. WINDING DOWN by owner request 2026-11-16; not complete.** This is
 the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
