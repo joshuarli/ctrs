@@ -2752,3 +2752,34 @@ Main-tree follow-up `w8-common-20261116T044051-d3d5` checks the final entrypoint
 All 117 harness tests pass. No elapsed/resource win or content-absence qualification
 is claimed; state proof, interleaved resource phases and frozen confirmation remain.
 Common images are retained, only owned containers/networks/volumes cleaned up.
+
+## W9 fixed build/test replacement
+
+Slice be7f41d replaces W9's timed hash loop with 16 identical jobs at each declared
+1/4/8/16 concurrency. Every new container compiles real Marked TypeScript, runs
+three exact CLI golden cases and returns the same pinned bundle hash. The common
+W8 manifest/tools/artifact and W5 source lock own pin facts; arbitrary tags or
+other image digests are rejected before engine access. Jobs have no network,
+bounded child/CLI waits and ownership-checked failure cleanup. Pending futures
+are cancelled on interruption. Old timed work remains only in the unfinished
+W11 diagnostic, not W9 acceptance. New metric names/version prevent pooling.
+
+Worker usrw_794c2b37-4b03-48b9-88a6-580f5982a4aa supplied three source files and
+six mocked tests, terminal acceptance met. Parent independently reviewed, enforced
+the exact manifest/shared pins/deadlines/cancellation, integrated runner/reporting/
+CLI/cases and performed native proof. No worker runtime claim was accepted.
+
+`w9-fixed-20261116T044711`: both engines pass all four conditions, 16 jobs each
+(128 total builds/384 CLI tests), identical artifact and no owned leftovers.
+`w9-runner-20261116T045355`: integrated path repeats all conditions successfully
+with complete setup/four-job-phase/cleanup native counters on both engines. Warmup
+is explicitly outside scored phases, includes VM boot and uses an owned label/name.
+Job phases include create/start/build/test/rm; cleanup verifies retained records.
+Each row remains unqualified. Host snapshot shows unrelated Niceforge smolvm
+PID 49340 at 99.7%; no timing or CPU ratio is accepted.
+
+`w9-cleanup-20261116T045624` injects a 1s Docker-client timeout into one owned idle
+Node container per engine. Both are confirmed running afterward; ownership-checked
+cleanup removes them, subsequent inspect fails, no cleanup errors. This is a fault
+probe, not the fixed-work fixture. All 123 integrated Python tests pass; missing
+W9 --image-ref exits 2 before engine access. No new dependency or build-driver change.

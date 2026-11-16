@@ -3,7 +3,7 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main 95c318f plus
+No new product performance win is qualified. Current source main be7f41d plus
 this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
@@ -50,26 +50,27 @@ eventual frozen-candidate confirmation and known correctness debt remain open.
   has full 389MB ctrs transfer versus retained OrbStack 0 bytes, explicitly NOT a
   comparable cold result. Old per-engine flattened fixtures stay diagnostic-only.
   Artifact/layout/export receipt: `.work/native-perf/inputs/w8-portfolio-v2/`.
-  All 117 Python harness tests pass. No final fixture/qualification claim.
+  All 123 Python harness tests pass. No final fixture/qualification claim.
 
 ## Exact next action
 
-Review and finish the source-only W9 lane, then run its functional native pilots.
-Worktree `.work/wt/np-w9-v2`, branch campaign/np-w9-v2, originally 96297f7 and now
-fast-forwarded to 95c318f. Bridge session
-usrw_794c2b37-4b03-48b9-88a6-580f5982a4aa, watch exec3416 is terminal succeeded;
-worker_status confirms only ci_jobs.py/test_ci_jobs.py/fixtures/w9-v2/jobs.json
-changed, no commits or out-of-scope paths, six mocked tests pass. Parent reviewed
-source; runtime still unverified. No duplicate worker or resume needed.
+W9 is integrated at be7f41d: same 16 real build/test jobs at each 1/4/8/16
+concurrency, strict common image/tools/artifact/source pin, exact CLI goldens.
+`w9-fixed-20261116T044711` and runner 045355 pass both engines; native timeout
+cleanup 045624 passes both. Setup/job/cleanup counters complete. All 123 regressions
+pass. Timings unqualified under foreign Niceforge work. CLI now requires
+--image-ref for W9 run/baseline/noop; see fixtures/w9-v2/README.md. No historical
+proxy metrics are pooled. W11 retains its old diagnostic until replaced.
+Worker 794c2b37 is terminal and integrated, no resume/duplicate needed. Its worktree
+`.work/wt/np-w9-v2` is retained for provenance pending bounded cleanup.
 
-Before integration, enforce the exact W8 Marked manifest, reuse W8/W5 pin facts
-instead of duplicate tool/lock/artifact constants, add internal child deadlines
-and explicit pending-future cancellation. Keep all 16 fixed jobs at each 1/4/8/16
-concurrency; exact CLI outputs and bundle hash must match. Verify all jobs and
-owned cleanup on both engines using the common Marked reference from W8 result.
-Integrate with runner.trial_w9 and version cases.toml; keep old 0.6s loop diagnostic
-or remove its obsolete acceptance path. Use separate setup/workload/cleanup
-boundaries. Foreign host work permits functional proof, never a timing win.
+Next source task: representative W11 mixed cycles using the persistent real
+API/database/cache stack, W4 queue/artifacts, W9 fixed builds, exact cumulative
+persisted state and owned cleanup. First prove short cycles, then implement the
+durable finite 12h runner; do not launch 12h qualification before the full freeze.
+In parallel, audit the existing persistent-disk expansion and flush path on
+disposable owned state. Current source simply reuses any existing data.img and
+mounts ext4; it does not expand an old filesystem to match the 1 TiB template.
 
 W8 runtime command (uses the tested signed metadata-fix binary):
 `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_pilot.py --layout .work/native-perf/inputs/w8-portfolio-v2/layout --ctrs-binary .work/tmp/image-diffids-target/release/ctrs`.
@@ -78,8 +79,8 @@ OrbStack state. Never remove user images/content to manufacture cold pulls.
 
 ## Ready queue
 
-1. Finish/integrate W9 above. Add W11 representative service/database/queue/
-   build/cleanup activity; request windows plus trivial churn are insufficient.
+1. Implement/prove W11 representative mixed cycles above, then durable bounded
+   execution support. Request windows plus trivial churn remain insufficient.
 2. W2: low-overhead tagged wake/futex/network syscall counts with profiler-on/off
    controls, then aligned 50k application profiling in a genuinely exclusive host
    window. Existing scheduler command:
