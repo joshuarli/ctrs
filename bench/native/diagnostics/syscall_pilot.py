@@ -130,6 +130,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             profiler_log = (directory / 'profiler.log').open('wb')
             profiler = subprocess.Popen([runner.DOCKER, 'exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
                 'launch', tag, *args], env=engine.env(), stdout=profiler_log, stderr=subprocess.STDOUT)
+        host_snapshot(directory, 'before')
         phase_log = (directory / 'phase.stderr').open('wb')
         phase = subprocess.Popen([runner.DOCKER, 'exec', '-i', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
             'phase', tag, mode], env=engine.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=phase_log, text=True)
@@ -142,6 +143,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         host_after = collect.cpu_boundary(identity)
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()
         after = frame(phase, 'done'); save(directory / 'phase-after.json', after)
+        host_snapshot(directory, 'after')
         if phase.wait(timeout=15):
             raise RuntimeError('phase helper exit failed')
         delta = sched_trace.application_cpu_delta(before['tasks'], after['tasks'], before['clock_ticks'], required_tids=tasks)
@@ -249,6 +251,7 @@ def main():
     parser.add_argument('--operations', type=int, default=5000)
     parser.add_argument('--engines', default='ctrs,orbstack')
     parser.add_argument('--profile-kind', choices=('counters', 'cpu'), default='counters')
+    parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
     args = parser.parse_args()
     engines = args.engines.split(',')
     if not 1 <= args.operations <= 100000 or len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
@@ -273,6 +276,7 @@ def main():
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
     save(root / 'plan.json', {'fixture_version': cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION,
         'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind == 'cpu' else None,
+        'mode_order': args.mode_order.split(','), 'engine_order': engines,
         'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'functional counter pilot; foreign host load and unfrozen candidate',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted',
@@ -288,9 +292,9 @@ def main():
         host_snapshot(directory, 'before')
         try:
             engine.ensure_up()
-            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind) for mode in ('off', 'on')]
-            save(directory / 'observer-raw-control.json', {'off': records[0], 'on': records[1], 'overhead_verdict': 'inconclusive',
-                'reason': 'short engine-block order and host exclusivity not certified; raw records only, no median-ratio correction'})
+            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind) for mode in args.mode_order.split(',')]
+            save(directory / 'observer-raw-control.json', {**{record['mode']: record for record in records}, 'overhead_verdict': 'inconclusive',
+                'reason': 'individual diagnostic block; host exclusivity and observer confirmation not certified; raw records only, no median-ratio correction'})
         finally:
             try:
                 engine.stop()

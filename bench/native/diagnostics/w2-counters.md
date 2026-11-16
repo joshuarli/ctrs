@@ -133,3 +133,14 @@ Neither pilot establishes observer overhead or a material mechanism. Before
 selecting a change, require exclusive interleaved 50k controls within the 5%
 CPU/wall observer budget and own-sample attribution of at least 25% of the
 contemporaneous CPU-per-success gap. Off-CPU waits remain a separate measurement.
+
+For the observer confirmation, predeclare ten 50k-operation blocks with both
+engines. Odd blocks use `--mode-order off,on --engines ctrs,orbstack`; even
+blocks use `--mode-order on,off --engines orbstack,ctrs`. Keep each run ID and
+all failed/invalid blocks; no replacement until green. Each trial now saves
+its own before/after perf gate, process, power and thermal snapshots. Gate
+failure or competing host work invalidates timing. Analyze whole off/on pairs
+per engine with the median CPU/wall ratio and a paired 95% interval; sparse
+samples or an inconclusive 5% budget cannot select a runtime change.
+Reverse-order 5k proof `w2-cpu-20261116T083838-d073` verifies controls are keyed
+by actual mode and both phases retain exact data. Its timing is unqualified.

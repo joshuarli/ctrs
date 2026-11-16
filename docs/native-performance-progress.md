@@ -3,8 +3,8 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main 4a4ad92 plus
-this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
+No new product performance win is qualified. Current source main e6bbb45 plus
+the balanced profile controls and this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
 ## Accepted and verified
@@ -114,13 +114,24 @@ SIGTERM `083059-fc2b` preserves -15 and clean owned teardown. Native stacks incl
 unresolved frames; worker samples are sparse. No overhead or causal-cost verdict.
 Commands and limitations: `bench/native/diagnostics/w2-counters.md`. Raw plan SHA
 f325adb9220a5f9dac011e71f53c1874f36669586b51f5ce7f630eb2cb99fe07.
-Next W2 action: independent tool review, then predeclared exclusive interleaved
-50k off/on controls. Estimate cost/op only from that profile's own CPU/sample
+Independent worker review bd03fc07 is terminal succeeded, no source changes.
+Its attachment-to-phase TID-reuse finding is fixed at e6bbb45 before workload
+admission; both native captures' warm/phase identities match. Full 148-test suite
+and then seven focused CPU tests pass. Source review tree retained at
+`.work/wt/np-cpu-review` (branch `campaign/np-cpu-review`, no unique source).
+Balanced mode/engine order is now executable; reverse-order native proof
+`w2-cpu-20261116T083838-d073` passes exact 5k off/on work and clean teardown.
+Each trial saves before/after host snapshots. Next W2 action: ten predeclared
+exclusive interleaved 50k blocks as specified in `w2-counters.md`. Estimate
+cost/op only from that profile's own CPU/sample
 records; require >=25% of the contemporaneous CPU-per-success gap for a material
 mechanism and <=5% CPU/wall observer overhead. Keep off-CPU wait separate. Current
 sync handlers share one psycopg connection; trace worker/GIL/connection locks.
 No runtime/fixture/kernel policy change. Recheck actual host load before timing;
 previous Niceforge contamination does not establish current exclusivity.
+At 08:33 local the gate rejected Niceforge PID 46238, an unrelated image import;
+do not stop it. Reverse-order 08:38 trial gates passed, which does not establish
+continued exclusivity. No scored batch is running.
 
 Durable supervisor 4a4ad92 is integrated after worker 48734034, parent fixes and
 independent review 527b2395. Eight real child lifecycle/ownership cases pass;
@@ -128,6 +139,16 @@ all 142 harness tests pass. Source/review trees retained, both lanes terminal.
 Command: `bench/native/diagnostics/durable-job.md`. No engine/12h job launched.
 Next W11 source work is persistent mixed-cycle deadline integration plus frozen-
 readiness guard; do not substitute repeated fresh short pilots for the 12h leg.
+Worker `usrw_30624954-fb51-4ce8-bf1f-f702b7394e6f` is implementing that slice in
+`.work/wt/np-w11-deadline`, branch `campaign/np-w11-deadline`, base 49dc710.
+The source lane is live; no native engine/12h launch is permitted to it. Scope and
+brief are `.work/tmp/w11-deadline-{scope.json,brief.md}`. Watch handle is exec
+session 99634; review watch 60376 is terminal. On resume inspect this SAME worker
+with `pi-subagent-bridge status "$PWD/.work/wt/np-w11-deadline" usrw_30624954-fb51-4ce8-bf1f-f702b7394e6f`.
+Do not start a replacement. If terminal, review full diff/untracked paths against
+49dc710, inspect proof and integrate only verified source; parent owns native
+short duration proof before acceptance. CLI bridge works; MCP registration is
+stale after its source changed, so use the supported CLI for this lane.
 
 Storage candidate f536b6e in `.work/wt/np-full-sync` changes VZ Cached+Fsync→Full.
 Signed host `.work/tmp/full-sync-target/release/ctrs` SHA
@@ -146,7 +167,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. W2 on-CPU tool review, larger application profile and observer controls above.
+1. W2 larger application profile and balanced observer controls above.
    Representative fixture upgrades no longer block this investigation.
 2. W11: integrate persistent mixed cycles with finite work/cleanup deadlines and
    frozen-readiness guard using the accepted supervisor. No 12h launch yet.
