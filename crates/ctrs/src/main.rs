@@ -2,6 +2,10 @@
 
 use std::process::ExitCode;
 
+#[cfg(unix)]
+#[macro_use]
+mod cli_names;
+
 // Headless (no window): plain `docker build` and `ctrs build-with` need the
 // builder provisioning on Linux too.
 #[cfg(unix)]
@@ -71,34 +75,34 @@ fn main() -> ExitCode {
     // Which process this is, for its log and crash reports.
     #[cfg(unix)]
     diag::init(match args.first().map(String::as_str) {
-        Some("daemon") => diag::Part::Daemon,
+        Some(cli_daemon!()) => diag::Part::Daemon,
         _ => diag::Part::Cli,
     });
     let result: std::io::Result<()> = match args.first().map(String::as_str) {
         #[cfg(unix)]
-        Some("daemon") => daemon::run(&args[1..]),
+        Some(cli_daemon!()) => daemon::run(&args[1..]),
         #[cfg(unix)]
         // The engine's own lifecycle. Bare `ctrs status` is its status too
         // (docker has no `status` subcommand).
-        Some("engine") => service::run(&args[1..]),
+        Some(cli_engine!()) => service::run(&args[1..]),
         #[cfg(unix)]
-        Some("status") => service::run(&args),
+        Some(cli_status!()) => service::run(&args),
         #[cfg(unix)]
         // Container operations, as docker has them; without a container
         // argument these stay in `ctrs engine`.
-        Some("start" | "stop" | "restart") if args.len() >= 2 => {
+        Some(cli_start!() | cli_stop!() | cli_restart!()) if args.len() >= 2 => {
             engine_version_check();
             docker::run(&args)
         }
         #[cfg(unix)]
-        Some("start" | "stop" | "restart") => {
+        Some(cli_start!() | cli_stop!() | cli_restart!()) => {
             eprintln!("usage: ctrs engine {}   (containers: ctrs {} CONTAINER)", args[0], args[0]);
             return ExitCode::FAILURE;
         }
         #[cfg(unix)]
-        Some("build-with") => buildwith::cli(&args[1..]),
+        Some(cli_build_with!()) => buildwith::cli(&args[1..]),
         #[cfg(unix)]
-        Some("diag") => diag::run(&args[1..]),
+        Some(cli_diag!()) => diag::run(&args[1..]),
         #[cfg(unix)]
         Some(c) if docker::handles(c) => {
             engine_version_check();
