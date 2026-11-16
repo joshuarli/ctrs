@@ -425,14 +425,18 @@ class GuestProvenanceTests(unittest.TestCase):
             with patch.object(runner, "REPO", Path(tmp)), \
                     patch.object(runner, "WORK", work), \
                     patch.object(runner, "sha256_file",
-                                 side_effect=lambda p: "ab" * 32) as digest:
+                                 side_effect=lambda p: "ab" * 32) as digest, \
+                    patch.object(runner, "sha256_sparse_file",
+                                 side_effect=lambda p: "cd" * 32) as sparse:
                 first = runner.guest_provenance()
                 second = runner.guest_provenance()
             self.assertEqual(first, second)
             self.assertEqual(set(first), {"guest_kernel_sha256",
                                           "guest_initramfs_sha256",
                                           "guest_data_sha256"})
-            self.assertEqual(digest.call_count, 3)
+            self.assertEqual(digest.call_count, 2)
+            self.assertEqual(sparse.call_count, 1)
+            self.assertEqual(first["guest_data_sha256"], "cd" * 32)
             self.assertTrue((work / "guest-asset-hashes.json").is_file())
 
 

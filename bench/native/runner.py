@@ -266,11 +266,71 @@ def sha256_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def sha256_sparse_file(path: Path) -> str | None:
+    """Content hash of a sparse file that skips holes: sha256 over the
+    file size plus each allocated extent's (offset, length, content
+    digest). The 1 TiB data.img template is almost entirely holes, so a
+    full read would hash ~1 TiB of zeros for minutes; extents are a few
+    GiB at most. Values are NOT comparable to `sha256_file` output —
+    used only for `guest_data_sha256`, whose asset already changed.
+    Falls back to a full read where SEEK_HOLE/SEEK_DATA is unsupported."""
+    if not path.is_file():
+        return None
+    size = path.stat().st_size
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return sha256_file(path)
+    try:
+        digest = hashlib.sha256(b"sparse-extent-v1")
+        digest.update(size.to_bytes(8, "little"))
+        pos = 0
+        extents = 0
+        while pos < size:
+            try:
+                start = os.lseek(fd, pos, os.SEEK_DATA)
+            except OSError:
+                break
+            if start >= size:
+                break
+            try:
+                end = os.lseek(fd, start, os.SEEK_HOLE)
+            except OSError:
+                end = size
+            end = min(end, size)
+            if end <= start:
+                break
+            inner = hashlib.sha256()
+            remaining = end - start
+            os.lseek(fd, start, os.SEEK_SET)
+            while remaining > 0:
+                chunk = os.read(fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                inner.update(chunk)
+                remaining -= len(chunk)
+            digest.update(start.to_bytes(8, "little"))
+            digest.update((end - start).to_bytes(8, "little"))
+            digest.update(inner.digest())
+            extents += 1
+            pos = end
+        if extents == 0 and size > 0:
+            # No data extents reported for a non-empty file: treat as
+            # unsupported and hash fully rather than record a weak ID.
+            return sha256_file(path)
+        return digest.hexdigest()
+    except OSError:
+        return sha256_file(path)
+    finally:
+        os.close(fd)
+
+
 def guest_provenance() -> dict:
     """Hashes of the guest kernel/initramfs/data disk — the guest-side
     identity behind `ctrs_binary_sha256`. data.img is a 1 TiB sparse
-    file (~27 s to hash), so results are cached by stat signature and
-    only rehashed when the asset is rebuilt."""
+    file hashed by allocated extent (`sha256_sparse_file`), so results
+    are cached by stat signature and only rehashed when the asset is
+    rebuilt."""
     assets = {"guest_kernel_sha256": "Image",
               "guest_initramfs_sha256": "initramfs.cpio",
               "guest_data_sha256": "data.img"}
@@ -289,7 +349,8 @@ def guest_provenance() -> dict:
                 and entry.get("mtime_ns") == st.st_mtime_ns):
             out[key] = entry["sha256"]
             continue
-        digest = sha256_file(path)
+        digest = (sha256_sparse_file(path) if name == "data.img"
+                  else sha256_file(path))
         out[key] = digest
         if st is not None:
             cache[name] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
