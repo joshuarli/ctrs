@@ -2369,7 +2369,7 @@ keeps its PID/start identity and remains running through the final edit. All
 perf-gate-ready pass. Common exported image archive SHA256
 04c27dcc420fd25cc9f1510f64d874d04afd0219f821c40863896be98f838876;
 OrbStack image ID c10ffc119a7a8a34bd30c68c93927936e2e6e85aef15e7b8c0f7064251989a03.
-Records preserve layers and installed Node22.15.0/npm10.9.2/esbuild0.25.3 identities.
+Records preserve layers and installed Node 22.15.0/npm10.9.2/esbuild0.25.3 identities.
 The host interval is edit begin to receipt of exact tested output. Volume edits
 include Docker exec transport, recorded separately. Setup includes initial build
 and source population. These are functional pilots, not frozen qualification or
@@ -2705,3 +2705,50 @@ The 250ms default and parked 50ms candidate remain unchanged. Real loopback test
 prove reuse, visible broken-connection failure, next-call reconnect, exact-body
 rejection and native host-address errno without retry. Full harness 112 tests pass.
 See `diagnostics/recovery-client.md`; never pool v1/v2 traces.
+
+## Common W8 portfolio and image identity correction
+
+Read-only export of API/PostgreSQL/Redis/Marked from the existing OrbStack store
+produced one 390,585,344-byte OCI archive, SHA256
+99dbbad6ba7df1f16919c7c41aaff39886cc2a826536deb3caf73be2dc51a592.
+Archive/layout/source inspections/export driver are preserved under
+`.work/native-perf/inputs/w8-portfolio-v2`. No daemon restart, prune or user tag
+change. The versioned portfolio pins selected ARM64 manifests, config/diff IDs,
+service/tool versions and exact application/load/seed inputs.
+
+`w8-common-registry-20261116T042529` pulls identical manifests through one
+independent host loopback registry. Mixed retained ctrs content transfers 14MB for
+API and mostly manifests for the other images; OrbStack transfers no bodies.
+These observations reject a cold-pull claim; deleting no tags is deliberate.
+The registry streams verified files, records completed/incomplete GET/HEAD writes
+and closes with its coordinator. Five tests cover corruption, symlinks, platform
+ambiguity, real loopback transfer, mutation, and pin mismatches. This completes
+the original worker's partial scaffolding under parent review, not a claim that
+its incomplete receipt established runtime acceptance.
+
+That experiment exposed ctrs image inspect returning registry blob digests in
+RootFS.Layers. Saved common API config bc70f0... defines diff IDs 04e61f... etc,
+while ctrs reported compressed acd43e... etc. OrbStack and
+[Moby's implementation](https://github.com/moby/moby/blob/master/daemon/images/image_inspect.go)
+return config diff IDs. Fix cdcbfb4 reads the saved config and rejects missing,
+malformed or count-inconsistent identity; no stored format, guest protocol,
+builder, layer installation or image-ID policy changes. All 177 ctrs tests pass.
+Signed isolated native binary SHA cd29f06cad1cd73bab4d6377ce535159ba08f081899cab3a4a8ec30aabae8126.
+
+Owned native deployment 043021 verifies all four common RootFS identities on both
+engines, health, 1,000 exact operations each (688 reads/312 writes), full seed and
+acknowledged payloads and committed DB/cache data across application restart.
+Both build Marked with Node 22.15.0/npm10.9.2/esbuild0.25.3 and produce identical
+bundle 0823c3960d93d71ea9b2e9bd1fe032659016ddf97b757cc35b38108ae677ef0b
+plus exact CLI HTML. Initial 042934 was invalidated by conservative same-second
+executable mtime/start ambiguity after codesign; unchanged later executable passes.
+Failure preserved; ownership check was not weakened.
+
+Integrated fixture driver `w8-common-20261116T043656-23ec` under the W8 worktree
+also passes both engines with pinned application contents/tools and exact data.
+Fresh ctrs data root transfers all 389,371,371 blob+manifest body bytes, whereas
+retained OrbStack transfers zero. This asymmetry is not a comparative result.
+Main-tree follow-up `w8-common-20261116T044051-d3d5` checks the final entrypoint.
+All 117 harness tests pass. No elapsed/resource win or content-absence qualification
+is claimed; state proof, interleaved resource phases and frozen confirmation remain.
+Common images are retained, only owned containers/networks/volumes cleaned up.
