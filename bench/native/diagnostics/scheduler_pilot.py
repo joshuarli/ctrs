@@ -1,11 +1,9 @@
 """Capture a filtered scheduler diagnostic; this command never qualifies timing."""
 import argparse
-import atexit
-import signal
 import sys,os,json,time,secrets,subprocess
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import runner,ownership,collect,sched_trace
+import runner,ownership,collect,sched_trace,diagnostic_signals
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--tools-archive',type=Path,required=True)
 parser.add_argument('--engines',default='ctrs,orbstack')
@@ -15,21 +13,7 @@ engines=args.engines.split(',')
 if args.operations<1 or len(set(engines))!=len(engines) or any(e not in ('ctrs','orbstack') for e in engines):parser.error('invalid engines or work count')
 archive=args.tools_archive.resolve()
 if runner.sha256_file(archive)!='475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b':parser.error('profiler archive differs from the pinned tools')
-requested_signal=None
-
-def stop_signal(number, frame):
- global requested_signal
- requested_signal=number
- for item in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP,signal.SIGQUIT):signal.signal(item,signal.SIG_IGN)
- raise SystemExit(128+number)
-
-def restore_signal():
- if requested_signal is not None:
-  signal.signal(requested_signal,signal.SIG_DFL)
-  os.kill(os.getpid(),requested_signal)
-
-atexit.register(restore_signal)
-for number in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP,signal.SIGQUIT):signal.signal(number,stop_signal)
+diagnostic_signals.install_cleanup_signals()
 runner.DOCKER=runner.find_docker();run='w2-scheduler-'+time.strftime('%Y%m%dT%H%M%S');root=runner.RESULTS/run;root.mkdir();(root/'driver.py').write_bytes(Path(__file__).read_bytes());print('RESULTS',root,flush=True)
 for name in engines:
  e=runner.Engine(name,run);directory=root/name;directory.mkdir();proj=runner.project_name(run,name,'W2sched');port=runner.free_port();base=f'http://127.0.0.1:{port}';tag='np'+secrets.token_hex(6);api=None;proc=None;log=None;primary=None

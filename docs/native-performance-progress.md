@@ -75,13 +75,29 @@ Executable: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/scheduler
 Do not choose a kernel/backend candidate from the short traced counts.
 The detailed profiling boundary is `.work/tmp/w2-scheduler-trace-plan.md`.
 
-Ready independent source task while timing is blocked: inspect persistent-disk
-synchronization and mount failure. `crates/ctrs-init/src/linux/mod.rs:data_dirs`
-currently falls back to tmpfs on ANY /dev/vda mount error. The daemon always
-boots with data_disk=true. Establish a disposable owned-state repro before a
-repair; investigate whether any legitimate diskless VM caller remains. Also
-read the local SDK Fsync/Full guarantees before changing storage policy. No
-shared OrbStack restart or user data mutation. No storage claim is qualified.
+Persistent mount data-loss guard landed at3fa2f01. Baseline owned repro
+`disk-mount-bad-2243934f` fsyncs a volume on tmpfs after an ext4 error, then loses
+the exact bytes across VM restart with unchanged volume identity. The fix aborts
+before serving the agent. New native proofs `disk-guard-c5651b1d` and earlier
+fb537399 reject invalid media without changing its SHA/identity, and preserve
+exact ext4 bytes plus named-volume metadata through old→new guest upgrade and
+new→new restart. No data/wire format or Fsync policy change. All103 harness
+tests pass, including cleanup-before-original-signal-death regression.
+
+The tested initramfs eb0ef32667a4d0560d23482cab670f0fa7693bbd013b0484d27fb1d349cf42c7
+is atomically published at guest/out after no open users were found. Kernel
+unchanged; no daemon restarted. Variants preserved under
+`.work/native-perf/guest-variants/{mount-guard,pre-mount-guard}`. The historical
+fallback baseline is diagnostic-only, unsafe for new qualification. Proof command:
+`TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/disk_mount_pilot.py --candidate-guest-dir guest/out --baseline-guest-dir .work/native-perf/guest-variants/pre-mount-guard --proof-binary .work/tmp/disk-mount-proof/proof`.
+
+Next executable source task while exclusive timing is unavailable: integrate
+resource_cells.py with a bounded W2-driven resource pilot. Declare idle/wake,
+physical footprint, reclaim/next-use, allocated-host-storage and five post-warmup
+cycle budgets before collection. Capture setup/workload/cleanup separately;
+retain unknown exclusive allocation/build-cache size. Use required VM coverage
+and actual running-asset identity. Do not score busy-host pilots. Then continue
+persistent-disk flush-path/Full synchronization and disposable expansion audit.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session
@@ -99,13 +115,12 @@ Retire only after final integration proof. No measured Mac job is active.
 
 ## Ordered queue
 
-1. W2: isolated per-TID sched waking/wakeup/switch tracing and scheduler-domain
-   inspection. Separate on-CPU cost from wait/wake latency. Add discriminating
-   vCPU/load controls without reconfiguring shared OrbStack. Obtain independent
-   review or change boundary after three neutral hypotheses. No speculative VMM.
-2. Integrate idle CPU/wakes, steady/peak footprint, post-load reclaim/next-use,
+1. Integrate idle CPU/wakes, steady/peak footprint, post-load reclaim/next-use,
    actual allocated storage before/after/cleanup, and repeated-cycle growth.
    Predeclare absolute and ratio budgets. Unknown cache/allocation stays unknown.
+2. W2: low-overhead wake/syscall counts and profiler on/off controls, then clean
+   50k application profiles with task CPU and off-CPU waits kept separate. Add
+   vCPU/load controls without reconfiguring shared OrbStack. No speculative VMM.
 3. Complete W8 common portfolio/independent registry, W9 fixed real build/test
    jobs and W11 service/database/queue/build/cleanup activity. Version fixtures
    and baselines. Never pool proxy history or call ten pilots frozen acceptance.

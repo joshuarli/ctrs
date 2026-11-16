@@ -33,6 +33,10 @@ Deleted in CTRS-06/07: `ctrs-win`, `ctrs-share-proto`, `crates/ctrs/src/ui/`, `w
 ## Engine integration points
 
 - macOS: ad-hoc signed `ctrs` binary with entitlement `com.apple.security.virtualization`; `cargo xtask host` does both. Boots `guest/out/Image` (`cargo xtask kernel`, 6.18.58) with `initramfs.cpio` (`cargo xtask guest`); data disk `data.img` (`cargo xtask disk`). One VM, many containers.
+  The ext4 data disk holds named-volume contents as well as image data. An
+  unmountable disk aborts guest startup. The VZ attachment uses Cached + Fsync,
+  which does not guarantee flushing the drive's internal cache to permanent
+  storage. Normal restart checks do not establish host power-loss durability.
 - Linux: no VM; `ctrs-init` runs as root on the host kernel; namespaces/cgroups directly.
 - Transport: host↔guest over vsock; published ports relayed (vsock fast path or IP path).
 - Delegation: `ctrs run`/`ps`/… exec the external `docker` CLI with `DOCKER_HOST=unix://<socket>`, `DOCKER_CONTEXT` stripped (`crates/ctrs/src/docker.rs`, `crates/ctrs/src/client.rs`).

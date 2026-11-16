@@ -2569,3 +2569,67 @@ pilot `w2-scheduler-20261116T014803` exits by the original signal (-15), records
 no cleanup error, and confirms its project containers/volumes are absent.
 Nine focused parser/CPU regressions pass. No product optimization or VZ limit
 is demonstrated by this slice.
+
+## Persistent disk mount failure: reproduced acknowledged data loss
+
+During synchronization audit, `ctrs-init:data_dirs` was found to mount tmpfs
+at /var/lib/ctrs after ANY /dev/vda mount error. The daemon always requests a
+persistent disk. Native Linux host agents use host_dirs and bypass this branch.
+The fallback therefore covered authoritative named-volume data, not only caches.
+
+Owned baseline repro `.work/tmp/disk-mount-bad-2243934f` attaches a deliberately
+invalid 64MiB raw image, imports a small static ARM64 file-proof program, creates
+an owned volume, writes exact bytes and fsyncs file and directory. The write
+returns success with filesystem magic1021994 (tmpfs). After normal VM restart,
+the same named-volume metadata remains but the exact file is absent (exit3).
+Console records the failed ext4 mount and memory fallback. No existing/user
+state was touched. Root, input, actual running-engine/boot identity and all
+commands/exits are retained. Initial relative-root identity attempt is preserved
+separately; final repro uses canonical absolute owned paths.
+
+Fix3fa2f01 propagates the ext4 mount error before serving the agent. No disk or
+wire format changes. No filesystem conversion or content deletion. Candidate
+initramfs SHA256 eb0ef32667a4d0560d23482cab670f0fa7693bbd013b0484d27fb1d349cf42c7,
+stock164f18b6dc4db69a8e21033038e15a78567e20d0b2cf4726ff0242be46e19239.
+Kernel unchanged. Isolated `cargo xtask guest --arch arm64` builds successfully.
+
+`disk-guard-14b5c9e1` and stronger `disk-guard-fb537399` native pilots pass:
+invalid disk returns failure before write acknowledgment; host daemon remains
+responsive; latter verifies its full SHA and identity unchanged. Valid ext4
+APFS-cloned state preserves exact payload and named-volume metadata across
+stock→candidate guest upgrade and candidate→candidate restart. Actual boot
+hashes and exits saved per leg. Static proof binary SHA256
+a11fcf5750b1f716a3411a9baf9326518c29836814e7e012685cc63baf253f2e;
+compiler GCC14.2.0-bookworm digest c5be79575f0886a3f8bdcf7cacc7de808ed56089975d43f54fda739a1d183d6c.
+This is functional data-safety evidence, not performance or power-loss proof.
+
+Independent read-only scout reviewed candidate code, callers and supplied runtime
+proofs and found no demonstrated defect. Its bridge assignment remained incomplete
+because exact Git diff/SDK source were unavailable in its initial file-only view;
+the single-attempt budget rejected a follow-up after those files were supplied.
+Do not call that a completed independent patch review. Parent reviewed the exact
+two-file diff, primary installed SDK header, caller search and both native proofs
+and owns the integration verdict. No reviewer change was integrated or accepted.
+
+The installed SDK VZDiskImageStorageDeviceAttachment.h distinguishes Full's
+synchronized-data panic/power-loss guarantee from Fsync's best-effort drive sync
+without ensuring permanent storage past the drive cache. Cached+Fsync remains
+configured. The old comment claiming all disk contents were resendable is removed.
+Guest flush propagation, host metadata synchronization, stronger policy comparison,
+expansion/migration and disruptive recovery guarantees remain open before storage
+superiority can be claimed. Restart survival is not host power-loss durability.
+
+Published the tested eb0ef3 initramfs atomically to the workspace guest/out after
+lsof found no open users. Old/new variants and manifests remain under
+.work/native-perf/guest-variants. No daemon restart, kernel change or system
+installation. Published-path proof `disk-guard-f8cd45f2` passes. Final regression
+`disk-guard-c5651b1d` uses the clonefile syscall with CLONE_NOFOLLOW_ANY and no
+full-copy fallback; all bad-disk and valid upgrade/restart checks pass. This
+avoids cp -c's documented fallback to a potentially enormous regular copy.
+Only owned disposable roots and derived templates are used.
+
+`diagnostic_signals.py` now owns the identical standalone cancellation policy
+for scheduler and disk diagnostics. Both callers install it once. A controlled
+subprocess regression proves finally cleanup completes before original SIGTERM
+death. All103 native harness tests pass. The guard's source branch is integrated;
+completed worktree build artifacts are preserved before targeted retirement.
