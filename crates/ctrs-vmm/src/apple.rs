@@ -411,8 +411,7 @@ fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Resul
 
         if let Some(disk) = &cfg.disk {
             let disk_url = url(disk)?;
-            // Cached with fsync: Apple's "full" sync is much slower, and the
-            // disk only holds data the host can always send again.
+            // Fsync does not guarantee that the drive's internal cache reaches permanent storage.
             let attachment = VZDiskImageStorageDeviceAttachment::initWithURL_readOnly_cachingMode_synchronizationMode_error(
                 VZDiskImageStorageDeviceAttachment::alloc(),
                 &disk_url,

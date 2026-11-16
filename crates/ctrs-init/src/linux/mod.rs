@@ -332,18 +332,12 @@ fn delegated(own: &std::path::Path, pids: &[String]) -> bool {
     pids.iter().all(|p| *p == me || *p == parent)
 }
 
-/// Mounts the data disk (or a tmpfs without one), creates the layer and
-/// container directories and the cgroup that all containers live under.
 fn data_dirs() -> io::Result<container::Paths> {
     sys::mkdir(c"/var/lib", 0o755);
     sys::mkdir(c"/var/lib/ctrs", 0o755);
     // noinit_itable: the disk is made with lazy inode tables; zeroing them in
     // the background would only write gigabytes of zeros to the host.
-    let disk = mount(c"/dev/vda", c"/var/lib/ctrs", c"ext4", libc::MS_NOATIME, Some(c"noinit_itable"));
-    if let Err(e) = disk {
-        eprintln!("ctrs-init: no data disk ({e}); keeping images in memory");
-        mount(c"ctrs", c"/var/lib/ctrs", c"tmpfs", libc::MS_NOATIME, Some(c"mode=0755"))?;
-    }
+    mount(c"/dev/vda", c"/var/lib/ctrs", c"ext4", libc::MS_NOATIME, Some(c"noinit_itable"))?;
     // The Mac's filesystem over virtiofs, for bind mounts.
     sys::mkdir(c"/mnt", 0o755);
     sys::mkdir(c"/mnt/mac", 0o755);
