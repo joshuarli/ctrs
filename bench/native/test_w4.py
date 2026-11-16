@@ -1,15 +1,23 @@
 """Offline W4 integration tests with a RESP server at the Redis boundary."""
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+import gzip
 from http.server import ThreadingHTTPServer
 import importlib.util
+import json
 from pathlib import Path
 import socketserver
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-spec = importlib.util.spec_from_file_location('w4_app', Path(__file__).parent / 'fixtures/w4/app.py')
+APP = Path(__file__).parent / 'fixtures/w4/app.py'
+spec = importlib.util.spec_from_file_location('w4_app', APP)
 w4 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(w4)
 
@@ -38,23 +46,39 @@ class RedisHandler(socketserver.StreamRequestHandler):
                 args.append(self.rfile.read(length))
                 assert self.rfile.read(2) == b'\r\n'
             with self.server.lock:
-                cmd, key = args[0], args[1]
-                values = self.server.lists.setdefault(key, [])
-                if cmd == b'RPUSH':
-                    values.extend(args[2:])
-                    response = b':%d\r\n' % len(values)
-                elif cmd == b'LPOP':
-                    item = values.pop(0) if values else None
-                    response = b'$-1\r\n' if item is None else b'$%d\r\n' % len(item) + item + b'\r\n'
-                elif cmd == b'LLEN':
-                    response = b':%d\r\n' % len(values)
-                elif cmd == b'LRANGE':
-                    assert args[2:] == [b'0', b'-1']
-                    response = b'*%d\r\n' % len(values) + b''.join(
-                        b'$%d\r\n' % len(item) + item + b'\r\n' for item in values)
+                cmd = args[0]
+                if cmd == b'PING':
+                    response = b'+PONG\r\n'
                 else:
-                    response = b'-ERR unsupported\r\n'
+                    values = self.server.lists.setdefault(args[1], [])
+                    if cmd == b'RPUSH':
+                        values.extend(args[2:])
+                        response = b':%d\r\n' % len(values)
+                    elif cmd == b'LPOP':
+                        item = values.pop(0) if values else None
+                        response = b'$-1\r\n' if item is None else b'$%d\r\n' % len(item) + item + b'\r\n'
+                    elif cmd == b'LLEN':
+                        response = b':%d\r\n' % len(values)
+                    else:
+                        response = b'-ERR unsupported\r\n'
             self.wfile.write(response)
+
+
+def expected_events(job):
+    routes = ('/api/orders', '/api/products', '/api/users', '/health')
+    statuses = (200, 201, 400, 404, 500, 503)
+    tenants = ('north', 'south', 'east', 'west')
+    result = []
+    for index in range(64):
+        n = job * 64 + index
+        result.append({
+            'timestamp': (datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=n)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'status': statuses[(n + job) % 6],
+            'route': routes[(n // 3 + job) % 4],
+            'latency_ms': 1 + (n * 37 + job * 11) % 2000,
+            'tenant': tenants[(n // 7 + job) % 4],
+        })
+    return result
 
 
 class W4Integration(unittest.TestCase):
@@ -81,39 +105,109 @@ class W4Integration(unittest.TestCase):
     def setUp(self):
         with self.redis.lock:
             self.redis.lists.clear()
+        self.temp = tempfile.TemporaryDirectory(dir=APP.parent)
+        self.addCleanup(self.temp.cleanup)
+        self.output = Path(self.temp.name)
+
+    def cli(self, command):
+        return subprocess.run([sys.executable, str(APP), command, '--redis-host', self.host,
+                               '--redis-port', str(self.port), '--output-dir', str(self.output)],
+                              capture_output=True, text=True, timeout=120)
 
     def run_pipeline(self, workers):
         w4.submit(self.url)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(w4.worker, self.host, self.port) for _ in range(workers)]
-            for future in futures:
-                future.result()
-        self.assertEqual(w4.verify(self.host, self.port), w4.JOBS)
+            results = list(pool.map(lambda _: self.cli('worker'), range(workers)))
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli('verify')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'verified 200')
+
+    def assert_artifacts(self):
+        names = set()
+        for job in range(200):
+            events = expected_events(job)
+            gz_name = f'job-{job:04d}.ndjson.gz'
+            summary_name = f'job-{job:04d}.summary.json'
+            names.update((gz_name, summary_name))
+            compressed = (self.output / gz_name).read_bytes()
+            self.assertEqual(compressed[4:8], b'\0\0\0\0')
+            lines = gzip.decompress(compressed).splitlines()
+            self.assertEqual([json.loads(line) for line in lines], events)
+            summary = json.loads((self.output / summary_name).read_bytes())
+            self.assertEqual(summary, {
+                'id': job,
+                'event_count': 64,
+                'status_counts': dict(Counter(str(event['status']) for event in events)),
+                'route_counts': dict(Counter(event['route'] for event in events)),
+                'tenant_counts': dict(Counter(event['tenant'] for event in events)),
+                'latency_ms_total': sum(event['latency_ms'] for event in events),
+                'latency_ms_max': max(event['latency_ms'] for event in events),
+            })
+        self.assertEqual({p.name for p in self.output.iterdir()}, names)
 
     def test_pipeline_all_worker_counts(self):
         for workers in (1, 4, 16):
-            with self.subTest(workers=workers):
-                self.setUp()
+            with self.subTest(workers=workers), tempfile.TemporaryDirectory(dir=APP.parent) as directory:
+                with self.redis.lock:
+                    self.redis.lists.clear()
+                self.output = Path(directory)
                 self.run_pipeline(workers)
+                self.assert_artifacts()
 
-    def test_missing_duplicate_and_corrupt_artifacts_fail(self):
+    def test_missing_duplicate_corrupt_and_extra_fail(self):
         self.run_pipeline(4)
-        results = self.redis.lists[w4.RESULTS.encode()]
-        original = results[:]
-        for mutation in ('missing', 'duplicate', 'corrupt'):
-            with self.subTest(mutation=mutation):
-                results[:] = original
-                if mutation == 'missing':
-                    results.pop()
-                elif mutation == 'duplicate':
-                    results.append(results[0])
-                else:
-                    results[0] = results[0].replace(b'ctrs-w4', b'bad--w4')
-                with self.assertRaises(ValueError):
-                    w4.verify(self.host, self.port)
+        path = self.output / 'job-0000.ndjson.gz'
+        original = path.read_bytes()
+        path.unlink()
+        self.assertNotEqual(self.cli('verify').returncode, 0)
+        path.write_bytes(original)
+        path.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
+        self.assertNotEqual(self.cli('verify').returncode, 0)
+        path.write_bytes(original)
+        extra = self.output / 'extra.json'
+        extra.write_text('{}')
+        self.assertNotEqual(self.cli('verify').returncode, 0)
+        extra.unlink()
+        redis = w4.Redis(self.host, self.port)
+        try:
+            redis.command('RPUSH', w4.QUEUE, w4.encode(w4.batch(0)))
+        finally:
+            redis.close()
+        duplicate = self.cli('worker')
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertIn('File exists', duplicate.stderr)
+        self.assertEqual(path.read_bytes(), original)
 
-    def test_pending_and_bad_ingest_fail(self):
-        for body in (b'{"id":200}', b'{"id":true}', b'{"id":0,"extra":1}', b'invalid'):
+    def test_worker_uses_submitted_payload_and_rejects_invalid_queue_data(self):
+        value = w4.batch(0)
+        value['events'][0]['latency_ms'] = 1999
+        req = Request(self.url + '/jobs', data=w4.encode(value), method='POST')
+        with urlopen(req, timeout=10) as response:
+            self.assertEqual(response.status, 202)
+        result = self.cli('worker')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [json.loads(line) for line in gzip.decompress(
+            (self.output / 'job-0000.ndjson.gz').read_bytes()).splitlines()]
+        self.assertEqual(events, value['events'])
+        summary = json.loads((self.output / 'job-0000.summary.json').read_text())
+        self.assertEqual(summary['latency_ms_total'], sum(e['latency_ms'] for e in events))
+        redis = w4.Redis(self.host, self.port)
+        try:
+            redis.command('RPUSH', w4.QUEUE, b'{"id":1,"events":[]}')
+        finally:
+            redis.close()
+        result = self.cli('worker')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected 64 events', result.stderr)
+
+    def test_pending_bad_ingest_and_readiness(self):
+        with urlopen(self.url + '/health', timeout=10) as response:
+            self.assertEqual(response.status, 200)
+        invalid = w4.batch(0)
+        invalid['events'][0]['latency_ms'] = True
+        for body in (b'{"id":200}', b'{"id":true}', b'invalid', w4.encode(invalid)):
             req = Request(self.url + '/jobs', data=body, method='POST')
             with self.assertRaises(HTTPError) as error:
                 urlopen(req, timeout=10)
@@ -121,12 +215,21 @@ class W4Integration(unittest.TestCase):
             error.exception.close()
         self.assertEqual(self.redis.lists, {})
         w4.submit(self.url)
-        with self.assertRaisesRegex(ValueError, 'pending=200'):
-            w4.verify(self.host, self.port)
-
-    def test_pinned_artifact(self):
-        self.assertEqual(w4.artifact(0), b'{"content":"ctrs-w4-v2-input-0000\\n","id":0,"sha256":"' +
-                         b'639d166d6c9ad42d5b5eafb8eaf7e2f80c8484e7bd1090f0a4b1c4d2354bb42d' + b'"}')
+        result = self.cli('verify')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pending=200', result.stderr)
+        unavailable = ThreadingHTTPServer(('127.0.0.1', 0), w4.handler(self.host, 0))
+        thread = threading.Thread(target=unavailable.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(HTTPError) as error:
+                urlopen('http://127.0.0.1:%d/health' % unavailable.server_port, timeout=10)
+            self.assertEqual(error.exception.code, 503)
+            error.exception.close()
+        finally:
+            unavailable.shutdown()
+            unavailable.server_close()
+            thread.join()
 
 
 if __name__ == '__main__':
