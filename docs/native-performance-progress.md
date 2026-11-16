@@ -82,23 +82,30 @@ distinct causes found so far:
    must finish first; restart the warm daemon with
    `CTRS_LOG=debug` afterward to catch the next occurrence.
 
-**Final clean baselines in flight (2026-11-16):** W6 20-pair then
-W7 10-pair `--driver default`, debug OFF — log
-`.work/native-perf/logs/np04-final-w6w7-20261115T160823.log`
-(detached, sequential `;`). Warm daemon runs signed `f3adade`.
-Prior same-commit debug-on W6 20-pair `base-20261115T153838-7b71`
-was 20/20 valid with strict wins on both cells (rust 0.892, zlib
-0.491); W7 `base-20261115T133627-c5f9` (commit `c9a5852`, clean)
-was 10/10 valid, 5 strict wins + 1 non-inferior.
+**Final clean baselines — results (2026-11-16):** W7
+`base-20261115T163439-18ee` QUALIFIED-clean: 10/10 valid, all six
+metrics strict-win (hyperfine 0.890/0.399/0.438, httpie
+0.785/0.414/0.457). W6 `base-20261115T160823-a303`: 18/20 valid —
+pairs 6+16 ctrs failed on the `/session` RST code-3 flake (zlib
+build canceled); ratios on valid pairs strict-win (rust 0.924,
+zlib 0.545) but correctness failures disqualify. Evidence recorded.
 
-**Next executable action:** when the final log finishes, run
-`python3.14 bench/native/runner.py report --match 'base-20261116*'`
-(and the W6 run id it prints), verify 10+/20+ valid pairs and every
-cell's CI, then record final ratios in `docs/evidence/native-performance.md`
-and checkpoint here. If a session code-3 flake fails a pair, rerun
-that case — the instrumentation stays in the tree to catch it.
-After W6+W7 qualify on the default driver, remaining "exceed" work:
-≥2 strict wins among W1/W2/W5/W8 and the W11 12 h reliability leg.
+**In flight:** W6 20-pair rerun under `CTRS_LOG=debug` with the new
+sent-byte/window-snapshot RST forensics — log
+`.work/native-perf/logs/np04-w6-debug-hunt-20261115T165554.log`.
+Warm daemon restarted with debug + forensic binary (env:
+CTRS_GUEST_RESERVE_MIB=950 CTRS_MEMORY_MIB=45087 CTRS_CPUS=17,
+data/state/socket under `.work/native-perf/engines/ctrs-warm/`).
+
+**Next executable action:** when the hunt log finishes, check
+`.work/native-perf/engines/ctrs-warm/daemon-manual.log` for
+`session stream reset` warnings (they now carry sent bytes +
+conn/stream window snapshot). If a pair fails, the snapshot
+distinguishes window oversend (sent ≈ window) from protocol
+violation (sent << window). Fix root cause, `cargo xtask host`,
+restart warm daemon, rerun W6 clean 20-pair (debug OFF) for the
+qualified number. Then: ≥2 strict wins among W1/W2/W5/W8 and the
+W11 12 h reliability leg; resource cells still unmeasured.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
