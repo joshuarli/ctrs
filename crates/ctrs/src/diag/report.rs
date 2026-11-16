@@ -152,7 +152,20 @@ pub fn render(v: &Value, utc: bool, color: bool) -> String {
     s
 }
 
-fn logs_cli(args: &[String]) -> io::Result<()> {
+struct LogsArgs {
+    parts: Vec<Part>,
+    follow: bool,
+    errors: bool,
+    n: usize,
+    op: Option<String>,
+}
+
+#[cfg(test)]
+pub(crate) fn validate_logs_args(args: &[String]) -> io::Result<()> {
+    parse_logs_args(args).map(drop)
+}
+
+fn parse_logs_args(args: &[String]) -> io::Result<LogsArgs> {
     let (mut parts, mut follow, mut errors, mut n, mut op) = (Vec::new(), false, false, 50usize, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -171,6 +184,11 @@ fn logs_cli(args: &[String]) -> io::Result<()> {
     if parts.is_empty() {
         parts = Part::ALL.to_vec();
     }
+    Ok(LogsArgs { parts, follow, errors, n, op })
+}
+
+fn logs_cli(args: &[String]) -> io::Result<()> {
+    let LogsArgs { parts, follow, errors, n, op } = parse_logs_args(args)?;
     let state = super::state_dir().ok_or_else(|| io::Error::other("HOME is not set"))?;
     let color = io::stdout().is_terminal();
     let mut out = io::stdout().lock();
@@ -432,7 +450,12 @@ pub fn save_report(text: &str, out: Option<PathBuf>) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-fn report_cli(args: &[String]) -> io::Result<()> {
+#[cfg(test)]
+pub(crate) fn validate_report_args(args: &[String]) -> io::Result<()> {
+    parse_report_args(args).map(drop)
+}
+
+fn parse_report_args(args: &[String]) -> io::Result<Option<PathBuf>> {
     let (mut out,) = (None,);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -441,6 +464,11 @@ fn report_cli(args: &[String]) -> io::Result<()> {
             _ => return Err(io::Error::other(USAGE)),
         }
     }
+    Ok(out)
+}
+
+fn report_cli(args: &[String]) -> io::Result<()> {
+    let out = parse_report_args(args)?;
     let text = report_text(false)?;
     let path = save_report(&text, out)?;
     println!("saved the report to {}", Redactor::home_only().apply(&path.display().to_string()));

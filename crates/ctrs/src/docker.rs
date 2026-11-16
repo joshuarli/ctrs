@@ -11,14 +11,59 @@ use crate::client;
 
 /// The docker commands `ctrs` answers. `import` is left out: `ctrs import`
 /// brings things over from OrbStack and Docker Desktop.
-pub const COMMANDS: &[&str] = &[
-    "attach", "build", "builder", "buildx", "commit", "compose", "container", "cp", "create", "diff", "events", "exec", "export", "history", "image", "images",
-    "info", "inspect", "kill", "load", "login", "logout", "logs", "manifest", "network", "pause", "port", "ps", "pull", "push", "rename", "restart", "rm", "rmi",
-    "run", "save", "search", "start", "stats", "stop", "system", "tag", "top", "unpause", "update", "version", "volume", "wait",
+pub const COMMANDS: &[(&str, &str)] = &[
+    ("attach", "my-container"),
+    ("build", "."),
+    ("builder", "ls"),
+    ("buildx", "ls"),
+    ("commit", "my-container my-image"),
+    ("compose", "ps"),
+    ("container", "ls"),
+    ("cp", "my-container:/tmp/file ./file"),
+    ("create", "alpine"),
+    ("diff", "my-container"),
+    ("events", ""),
+    ("exec", "my-container echo hello"),
+    ("export", "my-container"),
+    ("history", "alpine"),
+    ("image", "ls"),
+    ("images", ""),
+    ("info", ""),
+    ("inspect", "my-container"),
+    ("kill", "my-container"),
+    ("load", ""),
+    ("login", ""),
+    ("logout", ""),
+    ("logs", "my-container"),
+    ("manifest", "inspect alpine"),
+    ("network", "ls"),
+    ("pause", "my-container"),
+    ("port", "my-container"),
+    ("ps", ""),
+    ("pull", "alpine"),
+    ("push", "my-image"),
+    ("rename", "my-container new-name"),
+    ("restart", "my-container"),
+    ("rm", "my-container"),
+    ("rmi", "my-image"),
+    ("run", "alpine echo hello"),
+    ("save", "alpine"),
+    ("search", "alpine"),
+    ("start", "my-container"),
+    ("stats", ""),
+    ("stop", "my-container"),
+    ("system", "df"),
+    ("tag", "alpine my-image"),
+    ("top", "my-container"),
+    ("unpause", "my-container"),
+    ("update", "--memory 512m my-container"),
+    ("version", ""),
+    ("volume", "ls"),
+    ("wait", "my-container"),
 ];
 
 pub fn handles(command: &str) -> bool {
-    COMMANDS.contains(&command)
+    COMMANDS.iter().any(|(name, _)| *name == command)
 }
 
 /// Builds `docker <args>` with the engine's socket as `DOCKER_HOST` and any

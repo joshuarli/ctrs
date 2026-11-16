@@ -36,7 +36,10 @@ launchd example: [docs/development.md](docs/development.md) and
 
 ## Help
 
-Run `ctrs --help` for the command overview.
+Run `ctrs --help` for the native command reference, examples, and Docker
+compatibility routes. Docker defines the arguments and nested commands for
+those routes; consult Docker help for their complete syntax. Command-specific
+help is available with `ctrs COMMAND --help` without starting the engine.
 
 Bug reports and questions: <https://github.com/joshuarli/ctrs/issues>.
 Developer docs are indexed in [AGENTS.md](AGENTS.md).
