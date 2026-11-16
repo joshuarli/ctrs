@@ -124,13 +124,31 @@ strict-win, debug OFF, commit `67ff261`. With W7
 `base-20261115T163439-18ee` (10/10, six strict-wins) the W6+W7
 default-driver timing cells are done. Evidence recorded.
 
-**Next executable action:** resource cells are unmeasured in every
-run (`peak_total_rss_kb`, `cpu_seconds_est`) — extend the runner's
-resource capture (guest/host RSS peak, CPU-time delta, physical
-memory, allocated storage per trial) then re-qualify. In parallel
-queue: ≥2 strict wins among W1/W2/W5/W8 default-driver baselines,
-then the W11 12 h reliability leg on the fixed binary (the session
-fix removes the known flake source; watch for any residual).
+**Resource instrumentation landed (2026-11-16):** every trial
+(W1–W11, holdout) now runs `collect.py` sampling →
+`peak_total_rss_kb` + `cpu_seconds_est` per record (verified live on
+a W9 smoke: 14 samples, ~11.3 GB peak RSS, 15.0 CPU-s). NOTE: the
+campaign doc flags ps-RSS/pcpu as NOT qualified physical-memory/CPU
+accounting — ownership attribution + validated physical method +
+idle/growth budgets are still owed before resource gates can be
+claimed. Allocated-storage cells likewise unimplemented.
+
+**Qualified-baseline queue IN FLIGHT:**
+`.work/native-perf/queue-qualify.sh` → log
+`.work/native-perf/logs/queue-qualify-20261115T181026.log`.
+Sequential: W1,W2,W5,W8 (exceed candidates), W3,W4,W9,W10 (meet
+completeness), then W6,W7 10-pair resource re-qualification — all
+`--pairs 10 --driver default`. ETA many hours; check the log tail
+periodically. Warm daemon: clean (no CTRS_LOG), fixed binary
+`67ff261`+.
+
+**Next executable action:** monitor queue log; as each `base-*`
+run id prints, spot-check `runner.py report --match <id>` for
+valid-pair counts and assessments. After queue: W11 12 h
+qualification on both engines (the session fix removed the known
+flake; watch daemon-manual.log for residual `session stream
+reset`), then resource-accounting depth (physical memory, CPU
+ownership, allocated storage) and any losing-cell fixes.
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
