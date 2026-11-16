@@ -51,11 +51,20 @@ assets with `--input`; the operator must ensure the specified Compose plugin is
 actually selected. The supervisor rechecks receipts before execution. The raw
 guest template uses an explicit sparse-extent content receipt; ordinary files
 and packed templates use full SHA-256. Generated Python caches are excluded.
+The running VM's actual open kernel/initrd identities must match the launcher's
+frozen boot assets, including when an existing daemon is adopted.
 
 The finite work deadline stops admission of new cycles; an admitted cycle has
 up to 900 seconds to drain. Another 900 seconds precedes the supervisor's hard
 deadline for cleanup. A failed or unfinished cycle is a failed diagnostic, and
 the supervisor's terminal status and cleanup result must be inspected. The
+queue/build cleanup commands use that separate cleanup budget after drain
+expiry. Interruption grants the child up to 900 seconds, bounded by the hard
+deadline, to remove Docker fixtures before process-group KILL. Local group
+quiescence alone does not establish remote fixture cleanup; inspect workload
+results and ownership receipts as well. A hard deadline can leave remote
+fixtures requiring explicit owned cleanup and can never qualify reliability.
+The
 work interval includes setup; too short an interval can admit no cycles and
 fails. The duration is limited to one hour and remains unqualified. Both entry
 points refuse `--qualification`: a frozen candidate, assets, workload, final

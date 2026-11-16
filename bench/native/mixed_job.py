@@ -51,11 +51,13 @@ def main():
             parser.error(f'layout missing: {layout}')
         paths += [p for p in layout.rglob('*') if p.is_file()]
     template = None
+    boot_assets = {}
     if args.engine == 'ctrs':
         binary = args.ctrs_binary.resolve(strict=True)
         repo = next((p for p in binary.parents if (p / 'Cargo.lock').is_file() and (p / 'guest').is_dir()), REPO)
         guest = Path(os.environ.get('CTRS_GUEST_DIR', str(repo / 'guest/out')))
         paths += [guest / name for name in ('Image', 'initramfs.cpio')]
+        boot_assets = {str((guest / name).resolve()): durable_job.receipt(guest / name) for name in ('Image', 'initramfs.cpio')}
         template = guest / 'data.img'
         if not template.is_file():
             template = guest / '../data.img'
@@ -71,11 +73,14 @@ def main():
     argv = [str(Path(sys.executable).resolve()), str(HERE / 'diagnostics/mixed_pilot.py'),
             '--portfolio-layout', str(args.portfolio_layout.resolve()), '--worker-layout', str(args.worker_layout.resolve()),
             '--ctrs-binary', str(args.ctrs_binary.resolve()), '--engines', args.engine,
-            '--work-deadline-epoch', str(work), '--drain-deadline-epoch', str(drain)]
+            '--work-deadline-epoch', str(work), '--drain-deadline-epoch', str(drain), '--cleanup-deadline-epoch', str(hard - 5)]
+    if boot_assets:
+        argv += ['--expected-boot-assets', json.dumps({path: {'inode': entry['identity'][1], 'size': entry['identity'][2], 'sha256': entry['sha256']}
+                                                    for path, entry in boot_assets.items()})]
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8') as receipt_file:
         json.dump(receipts, receipt_file)
         receipt_file.flush()
-        durable_job.launch(args.job, hard, receipt_file.name, argv)
+        durable_job.launch(args.job, hard, receipt_file.name, argv, interrupt_grace_seconds=CLEANUP_SECONDS)
     return 0
 
 

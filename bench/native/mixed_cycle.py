@@ -92,13 +92,16 @@ def bounded_load_cycle(base, cycle, directory, drain_deadline):
     return json.loads((directory / 'acknowledged-writes.json').read_text())
 
 
-def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None):
+def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
+        cleanup_deadline=None, expected_boot_assets=None):
     validate_refs(refs)
     if work_deadline is None:
         if type(cycles) is not int or not 1 <= cycles <= 3:
             raise ValueError('short mixed pilot requires 1..3 cycles')
     elif cycles is not None or drain_deadline is None or drain_deadline <= work_deadline:
         raise ValueError('duration mode requires separate work and drain deadlines')
+    if cleanup_deadline is not None and (drain_deadline is None or cleanup_deadline <= drain_deadline):
+        raise ValueError('cleanup deadline must follow drain deadline')
     directory = ctx.results_dir / engine.name
     directory.mkdir()
     rec = ctx.new_record(engine, 'W11', 'mixed-v2', directory)
@@ -112,7 +115,8 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
     port = runner.free_port()
     base = f'http://127.0.0.1:{port}'
     def compose(args):
-        return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
+        command = cleanup_sh if args[:1] == ['down'] else engine.sh
+        return command(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
                          env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
     def rows(db):
         return json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c',
@@ -120,6 +124,13 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
     sampler = trace = None
     cumulative = []
     original_sh = engine.sh
+    def cleanup_sh(args, env_extra=None, timeout=120, check=True):
+        if cleanup_deadline is not None:
+            remaining = cleanup_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('mixed cleanup deadline expired')
+            timeout = min(timeout, remaining)
+        return original_sh(args, env_extra=env_extra, timeout=timeout, check=check)
     old_alarm = None
     command_deadline = [drain_deadline]
     if work_deadline is not None:
@@ -142,6 +153,11 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         save(directory / 'running-engine-before.json', identity)
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
+        if expected_boot_assets is not None:
+            actual = {str(Path(asset['path']).resolve()): {key: asset[key] for key in ('inode', 'size', 'sha256')}
+                      for process in identity['required_processes'] if process['role'] == 'vm' for asset in process['boot_assets']}
+            if actual != expected_boot_assets:
+                raise ValueError('running VM boot assets differ from frozen inputs')
         for name, ref in refs.items():
             info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
             pin = WORKER['worker'] if name == 'worker' else PIN['images']['np-v2/' + name]
@@ -180,12 +196,12 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 finally:
                     intervals[name]['end_monotonic'] = time.monotonic()
             def queue_work():
-                result = runner.trial_w4(cycle_ctx, engine, 'mixed', workers=(4,), image_ref=refs['worker'], redis_ref=refs['redis'])
+                result = runner.trial_w4(cycle_ctx, engine, 'mixed', workers=(4,), image_ref=refs['worker'], redis_ref=refs['redis'], cleanup_command=cleanup_sh)
                 save(cycle_dir / 'queue.json', result)
                 return result
             def build_work():
                 try:
-                    result = ci_jobs.run_condition(engine, refs['marked'], warmup + f'-c{cycle}', 4)
+                    result = ci_jobs.run_condition(engine, refs['marked'], warmup + f'-c{cycle}', 4, cleanup_command=cleanup_sh)
                 except ci_jobs.ConditionFailed as exc:
                     save(cycle_dir / 'build-jobs.json', exc.results)
                     raise
@@ -211,8 +227,6 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     if not queue_result['correctness']['ok'] or len(jobs) != 16:
                         raise RuntimeError('mixed queue/build work failed')
             finally:
-                # Do not interrupt joining owned workers: their commands and HTTP
-                # child are bounded by the drain deadline and must finish first.
                 if drain_deadline is not None:
                     signal.setitimer(signal.ITIMER_REAL, 0)
                 pool.shutdown(wait=True, cancel_futures=True)
@@ -257,8 +271,8 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         try:
             with runner.resource_phase(engine, rec, 'cleanup') if sampler is not None else nullcontext():
                 compose(['down', '-v', '--remove-orphans'])
-                ci_jobs.cleanup(engine, warmup, warmup)
-                containers = engine.sh(['ps', '-a', '--no-trunc', '--format', '{{json .}}']).stdout
+                ci_jobs.cleanup(engine, warmup, warmup, command=cleanup_sh)
+                containers = cleanup_sh(['ps', '-a', '--no-trunc', '--format', '{{json .}}']).stdout
                 save(directory / 'containers-after.json', [json.loads(line) for line in containers.splitlines()])
                 if any(json.loads(line)['Names'].startswith(project) or json.loads(line)['Names'].startswith(warmup) for line in containers.splitlines()):
                     raise RuntimeError('owned mixed service/build containers remain')

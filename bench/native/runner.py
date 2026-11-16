@@ -1613,7 +1613,8 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
 
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
-             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE) -> dict:
+             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE,
+             cleanup_command=None) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -1693,7 +1694,8 @@ def trial_w4(ctx, engine: Engine, state: str,
             rec["resources"]["trace"] = _trace_ref(trace)
         def cleanup(kind, name, remove):
             try:
-                inspected = engine.sh([kind, "inspect", name], check=False)
+                command = engine.sh if cleanup_command is None else cleanup_command
+                inspected = command([kind, "inspect", name], check=False)
                 if inspected.returncode:
                     if any(message in inspected.stderr.lower() for message in
                            ("no such object", "no such container", "no such volume", "no such network")):
@@ -1705,7 +1707,7 @@ def trial_w4(ctx, engine: Engine, state: str,
                     rec["validation_errors"].append(f"cleanup ownership mismatch: {kind} {name}")
                     rec["correctness"]["ok"] = False
                     return
-                removed = engine.sh(remove, check=False)
+                removed = command(remove, check=False)
                 if removed.returncode:
                     rec["validation_errors"].append(f"cleanup failed: {kind} {name}: {removed.stderr}")
                     rec["correctness"]["ok"] = False

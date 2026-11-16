@@ -95,6 +95,17 @@ class CIJobsTests(unittest.TestCase):
         self.assertIn('cleanup failed', raised.exception.results[3]['cleanup_error'])
         self.assertEqual(len(raised.exception.results), 16)
 
+    def test_expired_work_retains_separate_cleanup_budget(self):
+        engine = FakeEngine()
+        cleanup = engine.sh
+        def expired(*args, **kwargs):
+            raise TimeoutError('work drain expired')
+        engine.sh = expired
+        with self.assertRaises(ci_jobs.ConditionFailed) as raised:
+            ci_jobs.run_condition(engine, IMAGE, 'np-campaign', 4, cleanup_command=cleanup)
+        self.assertEqual(len(engine.removed), 16)
+        self.assertTrue(all(result['cleanup_error'] is None for result in raised.exception.results))
+
     def test_rejects_invalid_inputs_before_engine_calls(self):
         for image, prefix, concurrency, _ in [('example:tag', 'np-test', 1, 16), (IMAGE, 'other', 1, 16),
                                                    (IMAGE, 'np-test', 2, 16), (IMAGE, 'np-test', False, 16),

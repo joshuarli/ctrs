@@ -29,10 +29,10 @@ class DurableJobTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def start(self, program, seconds=10):
+    def start(self, program, seconds=10, grace=.5):
         return subprocess.run([PYTHON, str(SCRIPT), 'launch', '--job', str(self.job),
                                '--deadline-epoch', str(time.time() + seconds),
-                               '--inputs', str(self.receipts), '--', PYTHON, '-c', program],
+                               '--inputs', str(self.receipts), '--interrupt-grace-seconds', str(grace), '--', PYTHON, '-c', program],
                               capture_output=True, text=True, timeout=5)
 
     def read_when_present(self, name):
@@ -94,6 +94,26 @@ class DurableJobTest(unittest.TestCase):
         launched = self.start("print('must not run')")
         self.assertNotEqual(launched.returncode, 0)
         self.assertFalse(self.job.exists())
+
+    def test_interrupt_grace_allows_child_cleanup_beyond_default(self):
+        marker = self.root / 'cleaned'
+        program = ("import signal,time,pathlib;"
+                   "signal.signal(signal.SIGTERM,lambda *a: (_ for _ in ()).throw(SystemExit(143)));"
+                   "print('ready',flush=True);\n"
+                   "try: time.sleep(30)\n"
+                   "finally:\n time.sleep(.8)\n pathlib.Path(" + repr(str(marker)) + ").write_text('cleaned')\n")
+        launched = self.start(program, seconds=15, grace=2)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        running = self.read_when_present('running.json')
+        until = time.monotonic() + 3
+        while not (self.job / 'stdout').read_text().strip() and time.monotonic() < until:
+            time.sleep(.02)
+        self.assertEqual((self.job / 'stdout').read_text().strip(), 'ready')
+        os.kill(running['supervisor']['pid'], signal.SIGTERM)
+        status = self.read_when_present('status.json')
+        self.assertEqual(status['state'], 'interrupted')
+        self.assertEqual(marker.read_text(), 'cleaned')
+        self.assertTrue(status['cleanup_complete'])
 
     def test_sparse_input_is_verified_by_detached_supervisor(self):
         with self.input.open('r+b') as file:

@@ -143,11 +143,16 @@ def supervise(job):
     child = None
     stdout = stderr = None
     def finish_child(terminate):
-        until = time.monotonic() + 5
+        grace_seconds = .5
+        if result['state'] == 'interrupted':
+            grace_seconds = min(spec.get('interrupt_grace_seconds', .5),
+                                max(0, spec['deadline_monotonic'] - time.monotonic()),
+                                max(0, spec['deadline_epoch'] - time.time()))
+        until = time.monotonic() + grace_seconds + 5
         try:
             if terminate:
                 kill_owned_group(child, signal.SIGTERM, until)
-                grace = time.monotonic() + .5
+                grace = time.monotonic() + grace_seconds
                 while not child_done(child.pid) and time.monotonic() < grace:
                     time.sleep(.02)
             kill_owned_group(child, signal.SIGKILL, until)
@@ -226,9 +231,11 @@ def supervise(job):
                 os.kill(os.getpid(), signal_seen[0])
 
 
-def launch(job, deadline, inputs, argv):
+def launch(job, deadline, inputs, argv, *, interrupt_grace_seconds=.5):
     if not math.isfinite(deadline) or deadline <= time.time():
         raise ValueError('deadline must be a finite future Unix timestamp')
+    if not math.isfinite(interrupt_grace_seconds) or not 0 <= interrupt_grace_seconds <= 900:
+        raise ValueError('interrupt grace must be finite and within 0..900 seconds')
     if not argv or not Path(argv[0]).is_absolute():
         raise ValueError('command must start with an absolute executable path')
     argv = [str(Path(argv[0]).resolve(strict=True)), *argv[1:]]
@@ -255,6 +262,7 @@ def launch(job, deadline, inputs, argv):
         by_path[entry['path']] = entry
     created_epoch, created_monotonic = time.time(), time.monotonic()
     spec = {'version': 1, 'created_epoch': created_epoch, 'created_monotonic': created_monotonic, 'job_id': uuid.uuid4().hex, 'deadline_epoch': deadline,
+            'interrupt_grace_seconds': interrupt_grace_seconds,
             'inputs': list(by_path.values()),
             'deadline_monotonic': created_monotonic + max(0, deadline - created_epoch),
             'argv': argv, 'cwd': os.getcwd()}
@@ -277,6 +285,7 @@ def main():
     start.add_argument('--job', required=True)
     start.add_argument('--deadline-epoch', type=float, required=True)
     start.add_argument('--inputs', required=True)
+    start.add_argument('--interrupt-grace-seconds', type=float, default=.5)
     start.add_argument('argv', nargs=argparse.REMAINDER)
     worker = subs.add_parser('_supervise')
     worker.add_argument('job', type=Path)
@@ -285,7 +294,7 @@ def main():
         print(json.dumps([receipt(path, sparse=args.sparse) for path in args.paths], sort_keys=True))
     elif args.action == 'launch':
         argv = args.argv[1:] if args.argv[:1] == ['--'] else args.argv
-        launch(args.job, args.deadline_epoch, args.inputs, argv)
+        launch(args.job, args.deadline_epoch, args.inputs, argv, interrupt_grace_seconds=args.interrupt_grace_seconds)
     else:
         supervise(args.job)
 

@@ -37,8 +37,8 @@ class MixedJob(unittest.TestCase):
             argv = ['mixed_job', '--job', str(root / 'job'), '--duration', '10', '--engine', 'orbstack',
                     '--portfolio-layout', str(root / 'portfolio'), '--worker-layout', str(root / 'worker'), '--ctrs-binary', str(binary), '--compose-plugin', str(binary)]
             captured = {}
-            def launch(job, hard, receipt, child):
-                captured.update(hard=hard, receipts=json.loads(Path(receipt).read_text()), child=child)
+            def launch(job, hard, receipt, child, **kwargs):
+                captured.update(hard=hard, receipts=json.loads(Path(receipt).read_text()), child=child, **kwargs)
             with patch.object(sys, 'argv', argv), patch.object(mixed_job.sys, 'platform', 'darwin'), \
                  patch.object(mixed_job.os, 'uname', return_value=type('U', (), {'machine':'arm64'})()), \
                  patch.object(mixed_job.shutil, 'which', return_value=sys.executable), \
@@ -49,6 +49,7 @@ class MixedJob(unittest.TestCase):
             drain = float(child[child.index('--drain-deadline-epoch') + 1])
             self.assertEqual(drain - work, mixed_job.DRAIN_SECONDS)
             self.assertEqual(captured['hard'] - drain, mixed_job.CLEANUP_SECONDS)
+            self.assertEqual(captured['interrupt_grace_seconds'], mixed_job.CLEANUP_SECONDS)
             self.assertIn(str(binary), [r['path'] for r in captured['receipts']])
             self.assertIn(str((root / 'portfolio/blob')), [r['path'] for r in captured['receipts']])
 

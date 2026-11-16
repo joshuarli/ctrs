@@ -89,6 +89,25 @@ class W4References(unittest.TestCase):
         self.assertFalse(result['correctness']['ok'])
         self.assertTrue(any('permission denied' in error for error in result['validation_errors']))
 
+    def test_work_expiry_keeps_owned_cleanup_available(self):
+        from types import SimpleNamespace
+        engine = Engine()
+        expired = [False]
+        def work(args, **kwargs):
+            if args[0] == 'run' and 'verify' in args:
+                expired[0] = True
+            if expired[0]:
+                raise TimeoutError('work drain expired')
+            return engine.sh(args, **kwargs)
+        effects = SimpleNamespace(name=engine.name, ensure_up=engine.ensure_up, sh=work)
+        with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:
+            with patch.object(runner, 'start_sampler', return_value=(None, None)), patch.object(runner, 'resource_phase', side_effect=lambda *args: __import__('contextlib').nullcontext()):
+                result = runner.trial_w4(Context(Path(directory)), effects, 'mixed', workers=(4,), cleanup_command=engine.sh)
+        self.assertFalse(result['correctness']['ok'])
+        self.assertTrue(any('work drain expired' in error for error in result['validation_errors']))
+        self.assertFalse(any('cleanup error' in error for error in result['validation_errors']))
+        self.assertIn(['rm', '-f', 'nptest-w11fakew4-verify-4'], engine.calls)
+
 
 if __name__ == '__main__':
     unittest.main()

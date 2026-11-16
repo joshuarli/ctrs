@@ -128,7 +128,12 @@ class DurationAdmission(unittest.TestCase):
                 failure = json.loads((failure_root / 'orbstack/result.json').read_text())
                 self.assertFalse(failure['correctness']['ok'])
                 self.assertTrue(any('injected workload failure' in e for e in failure['validation_errors']))
-                self.assertEqual(cleanup.call_count, 2)
+                boot_root = root / 'boot-mismatch'; boot_root.mkdir()
+                ctx.results_dir = boot_root
+                with self.assertRaisesRegex(ValueError, 'boot assets differ'):
+                    mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
+                                    expected_boot_assets={'/unexpected/Image': {'sha256': 'wrong'}})
+                self.assertEqual(cleanup.call_count, 3)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
             self.assertEqual([c['service_ids'] for c in result['cycles']], [ids, ids])
             self.assertEqual(len(result['cycles']), 2)
