@@ -1612,7 +1612,8 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
 
 
 def trial_w4(ctx, engine: Engine, state: str,
-             workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events") -> dict:
+             workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events",
+             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -1620,7 +1621,7 @@ def trial_w4(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
     net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
-    image = "np-w4-events:v2"
+    image = image_ref
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
@@ -1630,7 +1631,7 @@ def trial_w4(ctx, engine: Engine, state: str,
         engine.sh(["network", "create", "--label", label, net])
         owned_containers.append(queue)
         engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
-                   W4_IMAGE, "redis-server", "--save", "", "--appendonly", "no"])
+                   redis_ref, "redis-server", "--save", "", "--appendonly", "no"])
         owned_containers.append(app)
         engine.sh(["run", "-d", "--name", app, "--label", label, "--network", net,
                    image, "serve", "--redis-host", queue])
