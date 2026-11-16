@@ -2783,3 +2783,31 @@ Node container per engine. Both are confirmed running afterward; ownership-check
 cleanup removes them, subsequent inspect fails, no cleanup errors. This is a fault
 probe, not the fixed-work fixture. All 123 integrated Python tests pass; missing
 W9 --image-ref exits 2 before engine access. No new dependency or build-driver change.
+
+## Existing-disk expansion criteria and bounded feasibility plan
+
+Current callers reuse any existing data.img; PID1 only mounts it. The 1 TiB sparse
+template does not expand an existing 64 GiB installation. Before selecting a path:
+retain exact named-volume data/identity, no shrink, no user-state experiment,
+no new host↔guest wire/on-disk-record format, no OrbStack/dockerd production
+dependency, bounded extra allocation and explicit failures. All volume contents
+remain authoritative; cache deletability requires independent proof. Eventual
+64GiB→1TiB metadata growth budget 512 MiB, excluding new authoritative file data.
+
+Two whole designs: in-place host sparse extension plus guest ext4 resize preserves
+inode/UUID and avoids copying data, but must establish supported resize semantics,
+failure recovery and actual metadata allocation. Shadow migration to a new
+filesystem can preserve an original rollback disk but changes filesystem identity,
+needs complete ownership/xattr/hardlink copy and crash-safe promotion, and needs
+headroom proportional to authoritative data. No design selected yet.
+
+First discriminating owned probe: 1 GiB→2GiB with the stock noinit_itable mount,
+Linux EXT4_IOC_RESIZE_FS, exact fsynced volume bytes and metadata across VM restart,
+raw device/statvfs geometry, filesystem UUID and host st_blocks allocation. Small
+probe allocation budget 128 MiB; results are diagnostics, not extrapolated wins.
+Native source/compiled helper is isolated under `.work/wt/np-disk-expand` and
+`.work/tmp/disk-resize-probe`. Execute `.work/tmp/disk-grow-preflight.py`.
+Kernel 6.18.58 resize source indicates noinit_itable can force eager inode-table
+zeroing; observe actual WRITE_ZEROES support/allocation before any 1 TiB attempt.
+The SDK still documents Fsync as best effort; Full has stronger permanent-storage
+guarantees. No power-loss or comparative storage claim follows from this probe.

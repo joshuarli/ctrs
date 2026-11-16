@@ -68,8 +68,21 @@ Next source task: representative W11 mixed cycles using the persistent real
 API/database/cache stack, W4 queue/artifacts, W9 fixed builds, exact cumulative
 persisted state and owned cleanup. First prove short cycles, then implement the
 durable finite 12h runner; do not launch 12h qualification before the full freeze.
-In parallel, audit the existing persistent-disk expansion and flush path on
-disposable owned state. Current source simply reuses any existing data.img and
+W11 source lane is now active: `.work/wt/np-w11-v2`, base 847b1a7,
+bridge usrw_d503a4bc-a057-421f-91aa-a8ba63937b14, watch exec45590. Owns only
+mixed_cycle.py/tests, fixtures/w11-v2, diagnostics/mixed_pilot.py and the narrow
+trial_w4 image-reference plumbing in runner.py. No engine/network/build work,
+no commits, one attempt. Do not duplicate or edit its files while running.
+W4 common worker export/pin is `.work/native-perf/inputs/w11-worker-v1/`;
+manifest f880c4ff... and archive a6f9cd32... verified against current app bytes.
+
+Parent disk lane `.work/wt/np-disk-expand` is separate. Execute
+`TMPDIR=$PWD/.work/tmp python3.14 .work/tmp/disk-grow-preflight.py` for the bounded
+1GiB→2GiB owned feasibility probe, source/plan recorded in evidence before
+selection. Small allocation budget 128MiB, eventual 64GiB→1TiB metadata budget 512MiB.
+Then choose in-place growth versus shadow migration from actual data/geometry/
+allocation and failure behavior. In parallel audit the flush path on disposable
+owned state. Current source simply reuses any existing data.img and
 mounts ext4; it does not expand an old filesystem to match the 1 TiB template.
 
 W8 runtime command (uses the tested signed metadata-fix binary):
