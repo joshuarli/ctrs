@@ -3,8 +3,8 @@
 **ACTIVE — resumed from reviewed 94f19a8; native ARM64 macOS only.**
 [Contract](campaign-native-performance.md). One coordinator owns Mac runs.
 This is the single queue; history lives in [evidence](evidence/native-performance.md).
-No new product performance win is qualified. Current source main e6bbb45 plus
-the balanced profile controls and this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
+No new product performance win is qualified. Current source main 1a48731 plus
+this checkpoint. Default build-driver behavior and W6/W7 wins are preserved;
 eventual frozen-candidate confirmation and known correctness debt remain open.
 
 ## Accepted and verified
@@ -137,18 +137,47 @@ Durable supervisor 4a4ad92 is integrated after worker 48734034, parent fixes and
 independent review 527b2395. Eight real child lifecycle/ownership cases pass;
 all 142 harness tests pass. Source/review trees retained, both lanes terminal.
 Command: `bench/native/diagnostics/durable-job.md`. No engine/12h job launched.
-Next W11 source work is persistent mixed-cycle deadline integration plus frozen-
-readiness guard; do not substitute repeated fresh short pilots for the 12h leg.
-Worker `usrw_30624954-fb51-4ce8-bf1f-f702b7394e6f` is implementing that slice in
-`.work/wt/np-w11-deadline`, branch `campaign/np-w11-deadline`, base 49dc710.
-The source lane is live; no native engine/12h launch is permitted to it. Scope and
-brief are `.work/tmp/w11-deadline-{scope.json,brief.md}`. Watch handle is exec
-session 99634; review watch 60376 is terminal. On resume inspect this SAME worker
-with `pi-subagent-bridge status "$PWD/.work/wt/np-w11-deadline" usrw_30624954-fb51-4ce8-bf1f-f702b7394e6f`.
-Do not start a replacement. If terminal, review full diff/untracked paths against
-49dc710, inspect proof and integrate only verified source; parent owns native
-short duration proof before acceptance. CLI bridge works; MCP registration is
-stale after its source changed, so use the supported CLI for this lane.
+W11 duration integration is accepted on main through 1a48731 (source lane
+3109451). The worker 30624954 is terminal succeeded. Review c1b14f9a found drain
+cleanup, group TERM and adopted-asset gaps; its receipt scope was incomplete and
+attempt exhausted. Corrected-slice review 16a260b2 is terminal succeeded, no source
+changes. Its parent-receipt aggregation finding is fixed at 1a48731 with a focused
+regression. All 162 harness tests pass on main. No runtime binary was rebuilt.
+
+`mixed_job.py` freezes inputs, including explicit sparse-content receipts for the
+1TiB template, and runs persistent same-stack cycles under the accepted supervisor.
+Work, drain and cleanup deadlines are separate. Owned queue/build cleanup retains
+its own budget after drain expiry. Extended interruption grace signals the child
+coordinator before group KILL so its engine remains available for teardown. Actual
+open kernel/initrd identities must match frozen receipts. Qualification still
+refuses before engine access: frozen candidate/final matrix/readiness proof are
+missing. This is a functional source milestone, not a substitute for either 12h leg.
+
+Final source normal proofs: `w11-mixed-20261116T090224-c24f` (ctrs, 11 cycles,
+55k exact operations/16,841 unique writes) and `090314-a02b` (OrbStack, seven cycles,
+35k operations/10,717 writes), each with exact queue/build artifacts and stable
+service/volume/process identities. Both exit 0 with clean teardown. Raw results
+remain in `.work/wt/np-w11-deadline/.work/native-perf/results/`. Their durable jobs
+are `.work/tmp/w11-final-20261116T0905-ctrs` and `w11-final-20261116T0906-orbstack`.
+Status SHA-256 respectively:
+`f2c46456adefd10105ce6afee240178e673dddb9a7aac3f4295d9beba2ca62b1`,
+`ef9e72bb12c075dcf532dcf68a30e9fb4b5a6f501f03fbf8142ddcabf11ae86e`.
+These 45s diagnostics leave timing, growth and 12h reliability unqualified.
+
+Native SIGTERM proof `085659-ee94`, durable job
+`.work/tmp/w11-cancel-20261116T0900-ctrs`, preserves supervisor/child signal 15;
+only expected SystemExit(143), all seven queue/build receipts clean, zero remaining
+containers in its isolated root. Earlier `085259-0967` exposed premature daemon
+TERM; its failed receipt is retained. Five owned resources (three containers,
+network, volume) were explicitly recovered after label inspection; receipt/driver
+`.work/tmp/w11-cancel-owned-cleanup.{json,py}`, receipt SHA
+49b89e781f502f66217224718c9336673cf76358ff073a4d02128ea759f82997.
+Failed isolated startup `085608-caa9` retains SUN_LEN failure; roots now use short
+job-parent scratch paths. Earlier 90s/45s feasibility runs remain separate.
+Source/review trees `np-w11-deadline`, `np-w11-review`, `np-w11-fix-review` are retained
+with raw proofs; all lanes are terminal. No native W11 job is running. Do not
+repeat these unchanged short proofs. Next W11 work is real frozen-readiness and
+resource-growth acceptance after matrix/candidate freeze.
 
 Storage candidate f536b6e in `.work/wt/np-full-sync` changes VZ Cached+Fsync→Full.
 Signed host `.work/tmp/full-sync-target/release/ctrs` SHA
@@ -169,8 +198,9 @@ No measured Mac job is active.
 
 1. W2 larger application profile and balanced observer controls above.
    Representative fixture upgrades no longer block this investigation.
-2. W11: integrate persistent mixed cycles with finite work/cleanup deadlines and
-   frozen-readiness guard using the accepted supervisor. No 12h launch yet.
+2. W11 duration/cleanup integration is accepted. Freeze actual qualification
+   readiness and resource-growth evidence with the final matrix/candidate; no
+   12h launch yet. Do not repeat unchanged short cycles.
    Existing W2 scheduler diagnostic remains available:
    `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/scheduler_pilot.py --tools-archive .work/tmp/w2-profile/native-tools.tar.gz`.
    Last proof 015213; input fingerprints 014544 match. No kernel/backend candidate
