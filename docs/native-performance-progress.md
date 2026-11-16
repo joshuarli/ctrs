@@ -117,16 +117,20 @@ daemon clean (no CTRS_LOG) on the fixed binary; RST forensics
 still warn-level. Prior clean W7 `base-20261115T163439-18ee`
 stands: 10/10 valid, all six strict-win.
 
-**Next executable action:** when the postfix log finishes, verify
-20/20 valid pairs and zero `session stream reset` warns in
-`.work/native-perf/engines/ctrs-warm/daemon-manual.log`; report via
-`python3.14 bench/native/runner.py report --match '<run-id>'`.
-If clean, record final W6 numbers in
-`docs/evidence/native-performance.md` — W6+W7 default-driver cells
-then qualified pending resource cells. Then: ≥2 strict wins among
-W1/W2/W5/W8 and the W11 12 h reliability leg; resource cells
-(peak_total_rss_kb, cpu_seconds_est, physical memory, allocated
-storage) still unmeasured.
+**QUALIFIED (2026-11-16):** post-fix clean W6
+`base-20261115T173857-2d73` — 20/20 valid, zero failures/resets;
+rust 0.9325 [0.9204,0.9367], zlib 0.5294 [0.4985,0.5497], both
+strict-win, debug OFF, commit `67ff261`. With W7
+`base-20261115T163439-18ee` (10/10, six strict-wins) the W6+W7
+default-driver timing cells are done. Evidence recorded.
+
+**Next executable action:** resource cells are unmeasured in every
+run (`peak_total_rss_kb`, `cpu_seconds_est`) — extend the runner's
+resource capture (guest/host RSS peak, CPU-time delta, physical
+memory, allocated storage per trial) then re-qualify. In parallel
+queue: ≥2 strict wins among W1/W2/W5/W8 default-driver baselines,
+then the W11 12 h reliability leg on the fixed binary (the session
+fix removes the known flake source; watch for any residual).
 
 **Landed 2026-11-15:** checksum-pinned source fetch
 (`ensure_pinned_source`, `6446af0`), the real W6 fixture (`f755f6d`),
