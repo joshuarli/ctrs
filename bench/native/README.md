@@ -83,10 +83,17 @@ does not yet verify an adopted daemon's executable or guest asset identity.
 
 Resource accounting caveats: RSS sums double-count shared pages and do
 not see compressed/swapped memory; `cpu_seconds_est` integrates sampled
-`pcpu`. On macOS the guest lives inside the `ctrs` process, so its
-footprint is included there; OrbStack's VM shows up under OrbStack
-helper processes matched by name. Treat both as approximations, not
-billing-grade numbers.
+`pcpu`/cumulative cputime deltas. `peak_phys_footprint_bytes` sums the
+per-process `phys_footprint:` field reported by `/usr/bin/footprint`
+(the Activity Monitor memory metric) over name-matched processes; the
+category-table `Footprint:` total is a different, smaller number and is
+only a fallback. On macOS the guest lives inside the `ctrs` process and
+its VZ XPC helper, so guest memory is included there; OrbStack's VM
+shows up under OrbStack helper processes matched by name. phys_footprint
+is sampled at ~1 s, so peaks between samples are missed — treat totals
+as approximations, not billing-grade numbers. Records written before the
+phys_footprint parser fix (2026-11-16) hold the smaller category total
+and must not be compared against later runs.
 
 ## Isolation behavior and remaining qualification
 

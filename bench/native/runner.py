@@ -743,8 +743,10 @@ def summarize_trace(trace: Path) -> dict:
         "footprint_samples": fp_samples,
         "cpu_seconds_est": round(cpu_exact if used_exact else cpu_seconds, 2),
         "method": "ps rss sum + cumulative cputime deltas over matched "
-                  "comms (pcpu fallback); footprint = /usr/bin/footprint "
-                  "phys_footprint summed over matched pids",
+                  "comms (pcpu fallback); footprint_bytes = "
+                  "footprint phys_footprint field summed over matched "
+                  "pids (category-total fallback on old macOS)",
+        "footprint_field": "phys_footprint",
     }
 
 

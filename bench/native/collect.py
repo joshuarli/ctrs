@@ -9,9 +9,12 @@ processes double-counts shared pages and misses compressed/swapped memory,
 so consumers must treat totals as approximations (see README).
 
 Every --footprint-interval seconds the matched pids are also measured with
-`/usr/bin/footprint -f bytes` (phys_footprint, the Activity Monitor
-metric): per-process `footprint_bytes` on that tick's records. It is the
-qualified physical-memory signal; RSS stays as a cheap approximation.
+`/usr/bin/footprint -f bytes`. The qualified physical-memory signal is the
+per-process `phys_footprint:` auxiliary field (Activity Monitor's memory
+metric); the category-table `Footprint:` total is NOT phys_footprint — it
+excludes IOKit/IOSurface and other accounted-elsewhere pages and undercounts
+VM helpers by >10x. Per-process `footprint_bytes` lands on that tick's
+records. RSS stays as a cheap approximation.
 """
 
 import argparse
@@ -23,7 +26,9 @@ import subprocess
 import sys
 import time
 
-FP_RE = re.compile(r"\[(\d+)\]:.*?Footprint:\s+(\d+)\s*B")
+FP_PID_RE = re.compile(r"\[(-?\d+)\]:")
+FP_PHYS_RE = re.compile(r"^\s*phys_footprint:\s+(\d+)\s*B")
+FP_TOTAL_RE = re.compile(r"Footprint:\s+(\d+)\s*B")
 
 
 def parse_cputime(text: str) -> float | None:
@@ -106,9 +111,37 @@ def main():
                     fp = subprocess.run(
                         ["footprint", "-f", "bytes"]
                         + [str(p["pid"]) for p in procs],
-                        capture_output=True, text=True, timeout=10)
-                    by_pid = {int(m.group(1)): int(m.group(2))
-                              for m in FP_RE.finditer(fp.stdout)}
+                        capture_output=True, text=True, timeout=30)
+                    # Sections are headed by `Name [pid]:`; each carries a
+                    # `phys_footprint: N B` auxiliary line. Track the
+                    # current pid and keep the LAST phys_footprint seen in
+                    # its section. Fall back to the category `Footprint:`
+                    # total only if no phys_footprint lines exist at all.
+                    by_pid: dict[int, int] = {}
+                    cur_pid = None
+                    saw_phys = False
+                    for line in fp.stdout.splitlines():
+                        m = FP_PID_RE.search(line)
+                        if m:
+                            cur_pid = int(m.group(1))
+                            continue
+                        m = FP_PHYS_RE.match(line)
+                        if m and cur_pid is not None:
+                            by_pid[cur_pid] = int(m.group(1))
+                            saw_phys = True
+                            continue
+                    if not saw_phys:
+                        # Fallback: the `Footprint:` total sits on the same
+                        # header line as the pid, so check both per line.
+                        cur_pid = None
+                        for line in fp.stdout.splitlines():
+                            m = FP_PID_RE.search(line)
+                            if m:
+                                cur_pid = int(m.group(1))
+                            t = FP_TOTAL_RE.search(line)
+                            if (t and cur_pid is not None
+                                    and cur_pid not in by_pid):
+                                by_pid[cur_pid] = int(t.group(1))
                     for p in procs:
                         if p["pid"] in by_pid:
                             p["footprint_bytes"] = by_pid[p["pid"]]
