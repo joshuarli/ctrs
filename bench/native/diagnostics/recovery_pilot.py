@@ -17,6 +17,7 @@ if args.pairs<1 or args.read_concurrency<1 or args.read_interval<0:parser.error(
 runner.DOCKER=runner.find_docker();runner.CTRS_BIN=args.ctrs_binary.resolve()
 os.environ['CTRS_LOG']='debug'
 run='w10-trace-'+time.strftime('%Y%m%dT%H%M%S');root=runner.RESULTS/run;root.mkdir()
+print('RESULTS',root,flush=True)
 (root/'driver.py').write_bytes(Path(__file__).read_bytes())
 (root/'plan.json').write_text(json.dumps({'kind':'diagnostic; policy identity comes from actual binary hash','read_concurrency':args.read_concurrency,'read_interval_s':args.read_interval,'probe_interval_s':.002,'planned_down_s':.5,'pre_post_s':1,'deadline_s':120,'binary_sha256':runner.sha256_file(runner.CTRS_BIN),'bootstrap_sha256':runner.sha256_file(Path('bench/native/diagnostics/w10_service.py'))},indent=2))
 (root/'override.json').write_text(json.dumps({'services':{'api':{'command':['python','-u','/diagnostics/w10_service.py'],'volumes':[str(Path('bench/native/diagnostics/w10_service.py').resolve())+':/diagnostics/w10_service.py:ro']}}}))
@@ -27,23 +28,25 @@ for pair in range(1,args.pairs+1):
   port=runner.free_port();base=f'http://127.0.0.1:{port}';env={'NP_API_PORT':str(port),'NP_API_TAG':runner.API_TAG}
   def compose(args):return e.sh(['compose','-f',str(runner.COMPOSE_FILE),'-f',str(root/'override.json'),'-p',proj,*args],env_extra=env,timeout=120)
   def query(path,kind):
-   begin=time.monotonic_ns();status=None;body=None;error=None
+   begin=time.monotonic_ns();status=None;body=None;error=None;error_errno=None
    try:
     with urllib.request.urlopen(base+path,timeout=.2) as response:status=response.status;body=json.load(response)
    except urllib.error.HTTPError as exc:status=exc.code;error=str(exc)
-   except Exception as exc:error=repr(exc)
+   except Exception as exc:
+    error,error_errno=recovery_trace.transport_error(exc)
    ok=(status==200 and (body=={'ok':True} if kind=='health' else body=={'items':[{'id':i,'name':f'item-{i}'} for i in range(1,26)]}))
-   return dict(kind=kind,started_ns=begin,ended_ns=time.monotonic_ns(),wall_ns=time.time_ns(),status=status,ok=ok,error=error,body=body if not ok else None)
+   return dict(kind=kind,started_ns=begin,ended_ns=time.monotonic_ns(),wall_ns=time.time_ns(),status=status,ok=ok,error=error,error_errno=error_errno,body=body if not ok else None)
   def probe(kind):
    while not stop.is_set():
     t=time.monotonic();attempts.append(query('/health' if kind=='health' else '/items?limit=25',kind));stop.wait(max(0,(.002 if kind=='health' else args.read_interval)-(time.monotonic()-t)))
   def tcp_probe():
    while not stop.is_set():
-    a=time.monotonic_ns();error=None
+    a=time.monotonic_ns();error=None;error_errno=None
     try:
      with socket.create_connection(('127.0.0.1',port),timeout=.05):pass
-    except Exception as exc:error=repr(exc)
-    tcp.append(dict(started_ns=a,ended_ns=time.monotonic_ns(),ok=error is None,error=error));stop.wait(.01)
+    except Exception as exc:
+     error,error_errno=recovery_trace.transport_error(exc)
+    tcp.append(dict(started_ns=a,ended_ns=time.monotonic_ns(),ok=error is None,error=error,error_errno=error_errno));stop.wait(.01)
   try:
    e.ensure_up();compose(['up','-d','--no-build']);ready,_=runner.wait_health(base,90);assert ready
    api=compose(['ps','-q','api']).stdout.strip();assert api
@@ -65,12 +68,16 @@ for pair in range(1,args.pairs+1):
    if ename=='ctrs':
     logpath=e.dir/'state/logs/daemon.log';logoffset=logpath.stat().st_size if logpath.exists() else 0
    before=collect.cpu_boundary(e.measurement_identity)
+   marks={"healthy_before":before}
    for kind in ['health']+['read']*args.read_concurrency:
     t=threading.Thread(target=probe,args=(kind,));threads.append(t);t.start()
    t=threading.Thread(target=tcp_probe);threads.append(t);t.start()
    time.sleep(1)
+   marks["healthy_after"]=collect.cpu_boundary(e.measurement_identity)
    timeline['kill_command_begin_ns']=time.monotonic_ns();timeline['kill_wall_ns']=time.time_ns();e.sh(['kill',api]);timeline['kill_command_returned_ns']=time.monotonic_ns()
+   marks["outage_before"]=collect.cpu_boundary(e.measurement_identity)
    time.sleep(.5)
+   marks["outage_after"]=collect.cpu_boundary(e.measurement_identity)
    timeline['start_command_begin_ns']=time.monotonic_ns();timeline['start_wall_ns']=time.time_ns();e.sh(['start',api]);timeline['start_command_returned_ns']=time.monotonic_ns();timeline['start_return_wall_ns']=time.time_ns()
    deadline=time.monotonic()+30
    while time.monotonic()<deadline:
@@ -79,9 +86,12 @@ for pair in range(1,args.pairs+1):
      timeline['first_success_ns']=min(a['ended_ns'] for a in successes);break
     time.sleep(.002)
    assert 'first_success_ns' in timeline,'recovery deadline'
+   marks["post_before"]=collect.cpu_boundary(e.measurement_identity)
    time.sleep(1);stop.set()
    for t in threads:t.join(timeout=2);assert not t.is_alive()
    after=collect.cpu_boundary(e.measurement_identity)
+   marks['post_after']=after
+   (d/'phase-cpu.json').write_text(json.dumps({name:collect.cpu_delta(marks[name+'_before'],marks[name+'_after']) for name in ('healthy','outage','post')},indent=2))
    operation_cpu=collect.cpu_delta(before,after)
    (d/'operation-cpu.json').write_text(json.dumps(operation_cpu,indent=2))
    assert not operation_cpu['errors'],operation_cpu['errors']
@@ -96,11 +106,15 @@ for pair in range(1,args.pairs+1):
    for _ in range(5):
     a=time.time_ns();g=int(e.sh(['exec',api,'python','-c','import time;print(time.time_ns())']).stdout);b=time.time_ns();guest_after.append(dict(host_begin_ns=a,host_end_ns=b,guest_ns=g))
    (d/'clock-after.json').write_text(json.dumps(guest_after,indent=2))
-   failures=recovery_trace.classify_failures(attempts,timeline['kill_command_begin_ns'],timeline['first_success_ns']);assert not failures['unexpected_errors'],failures['unexpected_errors']
+   failures=recovery_trace.classify_failures(attempts,timeline['kill_command_begin_ns'],timeline['first_success_ns'])
+   (d/'request-validation.json').write_text(json.dumps(failures,indent=2))
+   assert failures['host_client_valid'],'host address allocation failed; measurement invalid'
+   assert not failures['unexpected_errors'],f"unexpected request errors: {len(failures['unexpected_errors'])}; see request-validation.json"
    result=dict(engine=ename,correctness=True,timeline=timeline,intervals=recovery_trace.recovery_intervals(timeline),clock_before=recovery_trace.clock_bracket(clock),clock_after=recovery_trace.clock_bracket(guest_after),expected_outage_errors=len(failures['expected_outage_errors']),unexpected_errors=len(failures['unexpected_errors']),read_successes=sum(a['ok'] and a['kind']=='read' for a in attempts),tcp_note='host accept only; not guest readiness')
    (d/'result.json').write_text(json.dumps(result,indent=2));all_results.append(result);print(json.dumps(result),flush=True)
   finally:
    stop.set()
+   (d/'timeline.json').write_text(json.dumps(timeline,indent=2))
    for t in threads:t.join(timeout=2)
    (d/'attempts.jsonl').write_text(''.join(json.dumps(a)+'\n' for a in sorted(attempts,key=lambda a:a['started_ns'])))
    (d/'tcp.jsonl').write_text(''.join(json.dumps(a)+'\n' for a in tcp))
@@ -117,4 +131,4 @@ for pair in range(1,args.pairs+1):
      if sampler:runner.stop_sampler(sampler)
     finally:
      e.stop()
-(root/'summary.json').write_text(json.dumps(all_results,indent=2));print('RESULTS',root,flush=True)
+(root/'summary.json').write_text(json.dumps(all_results,indent=2));print('COMPLETED',root,flush=True)

@@ -40,18 +40,32 @@ This is the single queue. Historical results and rejected hypotheses live in
 
 ## Active work and exact next action
 
-W10 instrumentation preserves 250ms cache TTL and passed focused Rust tests,
-92 Python tests and real traces. Integrated run `w10-trace-20261116T005215`
-completed two alternating pairs, exact committed data, zero unexpected errors,
-clean gates. First trace shows a ~96ms (+/-13ms) listener-to-published-success
-wait largely accounted for by refusal-cache expiry. No comparison win claimed.
-Source command: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/recovery_pilot.py --ctrs-binary .work/tmp/w10-target/release/ctrs --pairs 2`.
-The isolated signed baseline binary hash is in evidence. Default binary unchanged.
+W10 hooks and traces are landed at 579dbeb, keeping 250ms TTL. Source now
+preserves host errno, failure validation, run identity/timeline and separate
+healthy/outage/post CPU boundaries. All 93 harness regressions pass.
+Final baseline-only functional pilot `w10-trace-20261116T011249` passes. Timings
+are invalid because saved gate diagnostics show unrelated hot host work.
 
-Next: test ONLY a 50ms cache TTL in an isolated candidate tree/binary. Evidence
-predeclares predicted >=25ms or 10% recovery gain, three paced and three stress
-baseline/candidate pairs, exact-data/error and CPU guards, then 30s idle guards.
-Reject weak results. No policy change is selected yet. Preserve negative caching.
+50ms candidate is PARKED, not selected. Diagnostic three-pair gains are invalid
+for timing, as is confirmation `w10-ttl-confirm-20261116T010356`: gate exit0
+only checks aggregate load while logs show hot Niceforge/Tailscale work. Stress
+pair9 candidate additionally failed with 149 host EADDRNOTAVAIL errors and
+unexpected timeouts; exact committed data survived. Original and annotated
+records retained, no failed pair omitted. Idle CPU/wake verdict also invalid;
+actual footprint/counter coverage remains complete. Do not retry to green.
+Candidate saved at local branch campaign/np-refusal-ttl, commit54c6a00; clean
+worktree `.work/wt/np-refusal-ttl` retired. Recreate from that branch only when
+retry conditions hold. Isolated
+binaries `.work/tmp/w10-{target,candidate-target}/release/ctrs`, hashes/plans
+under `w10-ttl-confirm-20261116T010356`. Revisit only after bounded versioned
+client protocol and an exclusive host window. Preserve 250ms default.
+
+Next executable W2 action: `.work/tmp/w2-scheduler-trace-plan.md` specifies
+per-TID scheduler tracing of actual application work, blocked vs runnable wait,
+wake cost and migrations. Stock config has PERF_EVENTS/FTRACE. Inspect tracefs
+and verified task identity, then implement a narrow loss-aware trace parser and
+actual-API capture. No new timing score on the currently busy host. Independent
+fixture/resource/durability source work remains authorized.
 
 Independent source-only W8 lane `.work/wt/np-w8-v2`, branch campaign/np-w8-v2,
 base7cc2c5bee01b86b47173b60e00279b49431b9b2f. Bridge session
@@ -60,7 +74,8 @@ fixtures/w8-v2, registry_portfolio.py and its test. No engine/server/build work.
 Worker is terminal incomplete (watch7404). It delivered only layout validation
 and pull-only server scaffolding with three mocked HTTP tests; portfolio/state/
 health integration remains absent. Review before accepting any narrow sub-slice.
-Parent owns integration and runtime proof. No duplicate worker.
+Parent added file-backed streaming/mutation and real loopback tests (4 pass).
+No common portfolio/state/health integration. Parent owns runtime proof. No duplicate worker.
 
 Regression: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s bench/native -p 'test_*.py'`.
 W5 source tree `.work/wt/np-w5` and W4/resource trees retain worker provenance.
@@ -68,21 +83,21 @@ Retire only after final integration proof. No measured Mac job is active.
 
 ## Ordered queue
 
-1. Finish W10 trace and select a targeted recovery change from the evidence.
-   Preserve command cost, exact committed data and expected/unexpected errors.
-2. W2: isolated per-TID sched waking/wakeup/switch tracing and scheduler-domain
+1. W2: isolated per-TID sched waking/wakeup/switch tracing and scheduler-domain
    inspection. Separate on-CPU cost from wait/wake latency. Add discriminating
    vCPU/load controls without reconfiguring shared OrbStack. Obtain independent
    review or change boundary after three neutral hypotheses. No speculative VMM.
-3. Integrate idle CPU/wakes, steady/peak footprint, post-load reclaim/next-use,
+2. Integrate idle CPU/wakes, steady/peak footprint, post-load reclaim/next-use,
    actual allocated storage before/after/cleanup, and repeated-cycle growth.
    Predeclare absolute and ratio budgets. Unknown cache/allocation stays unknown.
-4. Complete W8 common portfolio/independent registry, W9 fixed real build/test
+3. Complete W8 common portfolio/independent registry, W9 fixed real build/test
    jobs and W11 service/database/queue/build/cleanup activity. Version fixtures
    and baselines. Never pool proxy history or call ten pilots frozen acceptance.
-5. Disposable-state disk expansion/migration preserving named-volume contents
+4. Disposable-state disk expansion/migration preserving named-volume contents
    and identity. Audit Cached+Fsync, guest flush and supported failure guarantees.
    Separate authoritative volumes from caches. No power-loss claim from restart.
+5. Revisit parked W10 only after a bounded versioned client protocol and an
+   exclusive window. Retain command cost, exact committed data and full errors.
 6. Resolve known correctness failures. Freeze candidate and complete per-cell
    status matrix only after fixtures/resources/durability gates exist. Run
    affected confirmations, then full paired qualification, independent batch,

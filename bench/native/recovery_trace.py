@@ -1,16 +1,27 @@
 """Pure interpretation of bounded W10 host probes and guest clock brackets."""
+import errno
+import urllib.error
+
+
+def transport_error(exc):
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    return repr(exc), reason.errno if isinstance(reason, OSError) else None
 
 
 def classify_failures(attempts, interrupted_ns, recovered_ns):
-    expected, unexpected = [], []
+    expected, unexpected, host_address_errors = [], [], []
     for attempt in attempts:
         if attempt['ok']:
             continue
+        if attempt.get('error_errno') == errno.EADDRNOTAVAIL:
+            host_address_errors.append(attempt)
         if attempt['ended_ns'] >= interrupted_ns and attempt['started_ns'] <= recovered_ns:
             expected.append(attempt)
         else:
             unexpected.append(attempt)
-    return {'expected_outage_errors': expected, 'unexpected_errors': unexpected}
+    return {'expected_outage_errors': expected, 'unexpected_errors': unexpected,
+            'host_address_errors': host_address_errors,
+            'host_client_valid': not host_address_errors}
 
 
 def clock_bracket(samples):

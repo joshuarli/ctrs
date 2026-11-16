@@ -1,8 +1,19 @@
 import unittest
+import errno
+import urllib.error
 import recovery_trace as trace
 
 
 class RecoveryTraceTests(unittest.TestCase):
+    def test_host_address_error_invalidates_even_inside_expected_outage(self):
+        error, error_errno = trace.transport_error(
+            urllib.error.URLError(OSError(errno.EADDRNOTAVAIL, "Can't assign requested address")))
+        result = trace.classify_failures([dict(started_ns=12, ended_ns=13,
+                    ok=False, error=error, error_errno=error_errno)], 10, 20)
+        self.assertFalse(result['host_client_valid'])
+        self.assertEqual(len(result['expected_outage_errors']), 1)
+        self.assertEqual(len(result['host_address_errors']), 1)
+
     def test_only_errors_overlapping_outage_are_expected(self):
         attempts = [dict(started_ns=a, ended_ns=b, ok=ok) for a, b, ok in
                     [(1, 9, False), (8, 11, False), (11, 19, False),

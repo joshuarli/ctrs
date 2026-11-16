@@ -2434,3 +2434,78 @@ fails to show the predicted application benefit. Separately verify 30s idle
 CPU/wakes/physical footprint: <=0.01 core, <=max(5 wakes/s,3%), <=max(16MiB,3%)
 regression. These are pilot rejection guards, not full qualification. If weak,
 keep 250ms; do not remove negative caching or keep CPUs busy to win latency.
+
+## W10 50ms TTL diagnostic pairs, confirmation plan
+
+`w10-ttl-compare-20261116T005549`: three balanced baseline/candidate pairs per
+paced and stress condition, all twelve exact-data checks and pre/post gates pass.
+Paired recovery ratios paced 0.8341/0.8406/0.7846, stress
+1.0169/0.8207/0.8320. Median absolute reductions 45.8ms and 48.9ms. Healthy
+verified-request CPU ratios paced 0.8398/0.8656/0.8288, stress
+1.0465/0.9200/0.8952. Stress pair 1 is neutral for recovery and its healthy CPU
+exceeds 3%; do not hide it. All outage CPU increases stay below the 0.05 CPU-s
+absolute guard; healthy p95 differences stay below 5ms. Application entry/readiness
+variation remains visible. This is promising pilot evidence, not selection.
+
+Before idle, inventory found the historical ctrs W8 registry with unless-stopped
+policy restarting briefly then exiting. Confirmed ownership using explicit
+benchmark endpoint, exact registry image, named-volume mount and saved port
+(55621); shared OrbStack's historical owned registry has matching proof/port
+56171 and was already exited. Both containers were explicitly stopped while
+preserving image, volume and preparation metadata. Proof:
+`diagnostic-registry-cleanup-20261116T005957.json`. No unrelated workload stopped.
+Earlier diagnostic timings are not promoted to clean qualification from this
+cleanup. The first idle attempt correctly failed required-VM coverage because
+only the lazy daemon had started; no daemon-only footprint was accepted.
+Revised idle guard boots the VM with identical Node warmup/cleanup first.
+
+One fresh confirmation batch is declared before selection: ten balanced pairs
+per condition after owned-registry cleanup. Evaluate paired medians and bootstrap
+95% intervals from raw records, retaining every failure. Require recovery median
+improvement >=25ms or 10% with interval excluding no improvement, healthy
+CPU/success upper ratio <=1.03, healthy p95 upper difference <=max(5ms,3%), and
+outage CPU per fixed half-second window increase <=max(0.05 CPU-s,20%). Idle
+30s CPU/wake/physical guards remain required. If any guard is inconclusive,
+park the candidate and investigate the boundary rather than repeat until it wins.
+This confirms only the bounded recovery change; frozen W10 and full campaign
+qualification remain separate.
+
+## W10 candidate parked: invalid confirmation and host client failure
+
+**Correction to the preceding pilot interpretation:** saved `perf-gate-ready`
+output reports unrelated hot Niceforge jobs and Tailscale extension activity
+while returning 0. The installed tool intentionally gates aggregate load only.
+Its exit status does not establish this campaign's stronger exclusivity rule.
+Therefore BOTH `w10-ttl-compare-20261116T005549` and fresh confirmation
+`w10-ttl-confirm-20261116T010356` are invalid for timing/scoring. The paired
+30s idle verdict `w10-idle-20261116T010155` is also unknown for timing guards.
+Original collected records are preserved alongside annotated records. Complete
+physical/counter coverage and functional checks remain evidence, not wins.
+No unrelated host work was stopped and no product TTL change was selected.
+
+Confirmation stopped at stress pair 9 candidate, after ten paced pairs and eight
+complete stress pairs plus pair9 baseline. The failed trial is
+`w10-trace-20261116T010853`. It retained 149 host client EADDRNOTAVAIL errors
+("Can't assign requested address") plus timeouts outside the planned outage.
+Exact three committed records and Redis matches still passed after load stopped.
+This proves host address allocation failed, not a guest data-loss defect.
+Ephemeral exhaustion from fresh-connection churn is a hypothesis: contemporaneous
+socket-state counters were not saved. A later empty TIME_WAIT snapshot cannot
+prove the earlier failure. Do not call the stress confirmation passed or relabel
+these as expected outage errors. Keep the failed trial and unmeasured remainder.
+
+The diagnostic now records structured OS errno, invalidates even an in-outage
+host address failure, emits its run path before execution and always saves the
+timeline. Failed validation is written before raising, so no missing result path
+can hide the trial. Healthy/outage/post phases now have separate complete fast
+CPU boundaries. Four pure regression tests pass, including the actual
+URLError(OSError(EADDRNOTAVAIL)) shape. Final baseline-only functional pilot
+`w10-trace-20261116T011249` passes exact data/counters and the new path/timeline/
+validation outputs. Its timing is explicitly invalid due captured host activity.
+No retry-to-green candidate confirmation. Keep 250ms. Park the 50ms branch until
+a bounded, versioned client protocol and a genuinely exclusive window exist.
+
+W8 source lane is partial and unaccepted. Parent review replaced whole-portfolio
+RAM retention with verified file-backed streaming, rejects mutations and exposes
+incomplete writes. Four offline/loopback tests pass in `.work/wt/np-w8-v2`.
+No pinned real portfolio, cold-state proof or deployed-health pilot exists yet.
