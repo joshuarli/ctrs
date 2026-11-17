@@ -28,6 +28,28 @@ TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
 GUEST_CLIENT_SUFFIX = '-guest-client-v2'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
 BOOTSTRAP = Path(__file__).with_name('w2_scheduler_app.py')
+CPU_PROFILES = {'cpu': cpu_profile.VERSION, 'cpu-leaf': cpu_profile.LEAF_VERSION}
+
+
+def cpu_record_args(profile_kind, tasks):
+    args = ['/tmp/np-tools/usr/bin/perf', 'record', '--no-inherit', '-t', ','.join(tasks),
+            '-e', 'cpu-clock', '-c', str(cpu_profile.PERIOD_NS)]
+    if profile_kind == 'cpu':
+        args += ['--call-graph', 'dwarf,16384']
+    return args + ['--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
+                   '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/cpu.data']
+
+
+def profile_identity(profile_kind, api_cpus, client_location):
+    version = CPU_PROFILES.get(profile_kind, counter_specs.VERSION)
+    if api_cpus is not None:
+        version += '-api-affinity-v1'
+    if client_location == 'guest':
+        version += GUEST_CLIENT_SUFFIX
+    identity = version
+    if api_cpus is not None:
+        identity += '-' + ','.join(map(str, api_cpus))
+    return version, identity
 
 
 def save(path, value):
@@ -135,12 +157,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     api = None
     client = project + '-client'
     phase = profiler = profiler_log = phase_log = None
-    version = cpu_profile.VERSION if profile_kind == 'cpu' else counter_specs.VERSION
-    if api_cpus is not None:
-        version += '-api-affinity-v1'
-    if client_location == 'guest':
-        version += GUEST_CLIENT_SUFFIX
-    result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
+    version, identity_label = profile_identity(profile_kind, api_cpus, client_location)
+    result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': identity_label, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
     result.update(concurrency=concurrency, seed=seed)
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
@@ -209,11 +227,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
         if mode == 'on':
-            if profile_kind == 'cpu':
-                args = ['/tmp/np-tools/usr/bin/perf', 'record', '--no-inherit', '-t', ','.join(tasks),
-                        '-e', 'cpu-clock', '-c', str(cpu_profile.PERIOD_NS), '--call-graph', 'dwarf,16384',
-                        '--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
-                        '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/cpu.data']
+            if profile_kind in CPU_PROFILES:
+                args = cpu_record_args(profile_kind, tasks)
             else:
                 helper('probes')
                 args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
@@ -268,7 +283,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             result['profiler_exit'] = code
             if code not in (0, 130):
                 raise RuntimeError('profiler exit failed')
-            if profile_kind == 'cpu':
+            if profile_kind in CPU_PROFILES:
                 engine.sh(['cp', api + ':/tmp/np-count/cpu.data', str(directory / 'cpu.data')])
                 script = engine.sh(['exec', '--privileged', api, 'env', 'LD_LIBRARY_PATH=/tmp/np-tools/lib/aarch64-linux-gnu',
                     '/tmp/np-tools/usr/bin/perf', 'script', '--ns', '--show-lost-events',
@@ -284,7 +299,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                 profiler_log.flush()
                 profile = cpu_profile.analyze(script.stdout, tag=tag, tasks_before=before['tasks'], tasks_after=after['tasks'],
                     application_cpu=delta, successful_operations=operations,
-                    diagnostics=(directory / 'profiler.log').read_text() + script.stderr + raw.stderr, raw_events=raw.stdout)
+                    diagnostics=(directory / 'profiler.log').read_text() + script.stderr + raw.stderr,
+                    raw_events=raw.stdout, leaf_only=profile_kind == 'cpu-leaf')
                 save(directory / 'cpu-profile.json', profile)
                 if profile['status'] != 'ok':
                     raise ValueError('CPU profile coverage invalid: ' + repr(profile['errors']))
@@ -363,15 +379,20 @@ def main():
     parser.add_argument('--image-refs', type=Path, required=True)
     parser.add_argument('--ctrs-binary', type=Path, required=True)
     parser.add_argument('--operations', type=int, default=5000)
+    parser.add_argument('--concurrency', type=int, default=4, help='concurrent fixed-work client threads')
+    parser.add_argument('--seed', type=int, default=7, help='shared workload seed for every trial in the block')
     parser.add_argument('--engines', default='ctrs,orbstack')
     parser.add_argument('--client-location', choices=('host', 'guest'), default='host')
     parser.add_argument('--api-cpus', type=parse_api_cpus, default=None, help='explicit comma-separated guest API CPU IDs')
-    parser.add_argument('--profile-kind', choices=('counters', 'cpu'), default='counters')
+    parser.add_argument('--profile-kind', choices=('counters', *CPU_PROFILES), default='counters',
+                        help='syscall counters, 49 Hz DWARF stacks, or 49 Hz leaf PCs')
     parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
     args = parser.parse_args()
     engines = args.engines.split(',')
     if not 1 <= args.operations <= 100000 or len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
         parser.error('require 1..100000 operations and distinct supported engines')
+    if args.concurrency < 1:
+        parser.error('--concurrency must be positive')
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')
     archive = args.tools_archive.resolve()
@@ -384,7 +405,8 @@ def main():
             parser.error('service reference differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
-    run = ('w2-affinity-cpu-' if args.profile_kind == 'cpu' else 'w2-affinity-count-') if args.api_cpus is not None else ('w2-cpu-' if args.profile_kind == 'cpu' else 'w2-count-')
+    kind_label = args.profile_kind if args.profile_kind in CPU_PROFILES else 'count'
+    run = 'w2-' + ('affinity-' if args.api_cpus is not None else '') + kind_label + '-'
     if args.client_location == 'guest':
         run = run.replace('w2-', 'w2-guest-client-', 1)
     run = run + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
@@ -393,20 +415,25 @@ def main():
     hashes = {}
     for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    guest_suffix = GUEST_CLIENT_SUFFIX if args.client_location == 'guest' else ''
-    save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix,
+    version, identity_label = profile_identity(args.profile_kind, args.api_cpus, args.client_location)
+    scope = {
+        'counters': 'matched stock ARM64 syscall-entry kprobes on both engines; per-API-thread attachment; no sampled trace buffer/loss; missing counts invalidate',
+        'cpu': 'separate per-API-thread cpu-clock sampling with native DWARF stacks; no syscall probes; zero loss required',
+        'cpu-leaf': 'per-API-thread cpu-clock leaf PCs without stacks; every API thread sampled; zero loss required',
+    }
+    save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': version,
         'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
-        'profile_identity': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix + ('-' + ','.join(map(str, args.api_cpus)) if args.api_cpus is not None else ''),
-        'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind == 'cpu' else None,
+        'profile_identity': identity_label,
+        'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind in CPU_PROFILES else None,
         'mode_order': args.mode_order.split(','), 'engine_order': engines,
-        'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
+        'operations': args.operations, 'concurrency': args.concurrency, 'seed': args.seed,
+        'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'functional counter pilot; foreign host load and unfrozen candidate',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted',
         'ctrs_requested_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_requested_memory_mib': os.environ.get('CTRS_MEMORY_MIB'),
         'observer_confirmation_budget': {'application_cpu_relative': .05, 'workload_wall_relative': .05,
             'required': 'exclusive host; interleaved confirmations; CPU difference above counter quantization'},
-        'scope': 'separate per-API-thread cpu-clock sampling with native DWARF stacks; no syscall probes; zero loss required' if args.profile_kind == 'cpu' else
-                 'matched stock ARM64 syscall-entry kprobes on both engines; per-API-thread attachment; no sampled trace buffer/loss; missing counts invalidate'})
+        'scope': scope[args.profile_kind]})
     print('RESULTS', root, flush=True)
     for name in engines:
         directory = root / name; directory.mkdir()
@@ -414,7 +441,9 @@ def main():
         host_snapshot(directory, 'before')
         try:
             engine.ensure_up()
-            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind, args.api_cpus, args.client_location) for mode in args.mode_order.split(',')]
+            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind,
+                             args.api_cpus, args.client_location, concurrency=args.concurrency, seed=args.seed)
+                       for mode in args.mode_order.split(',')]
             save(directory / 'observer-raw-control.json', {**{record['mode']: record for record in records}, 'overhead_verdict': 'inconclusive',
                 'reason': 'individual diagnostic block; host exclusivity and observer confirmation not certified; raw records only, no median-ratio correction'})
         finally:

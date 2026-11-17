@@ -6,6 +6,7 @@ import re
 import sched_trace
 
 VERSION = 'w2-cpu-v1-native-dwarf'
+LEAF_VERSION = 'w2-cpu-v1-native-leaf'
 FREQUENCY = 49
 PERIOD_NS = round(1_000_000_000 / FREQUENCY)
 HEADER = re.compile(r'^\s*(\S+)\s+(\d+)/(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+cpu-clock:\s*(.*)$')
@@ -18,7 +19,8 @@ def check_attachment(attached_tasks, phase_tasks, clock_ticks):
         raise ValueError('profiler attachment task identity changed: ' + repr(delta['errors']))
 
 
-def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations, diagnostics='', raw_events=''):
+def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations,
+            diagnostics='', raw_events='', leaf_only=False):
     errors, samples = [], []
     current = None
     if re.search(r'lost|throttl', diagnostics, re.IGNORECASE):
@@ -50,6 +52,11 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
             errors.append(f'unrecognized CPU trace line: {number}')
     if not samples or any(not sample['frames'] for sample in samples):
         errors.append('missing CPU samples or sample frames')
+    if leaf_only:
+        if not raw_events:
+            errors.append('missing raw CPU event audit')
+        if any(len(sample['frames']) > 1 for sample in samples):
+            errors.append('leaf-only trace contains a call stack')
     if raw_events and len(re.findall(r'\bPERF_RECORD_SAMPLE\b', raw_events)) != len(samples):
         errors.append('raw/decoded sample count mismatch')
     if type(successful_operations) is not int or successful_operations <= 0:
@@ -68,20 +75,27 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
         if delta['status'] != 'ok':
             errors.extend(delta['errors'])
         selected = [sample for sample in samples if sample['tid'] == tid and sample['frames']]
+        if leaf_only and not selected:
+            errors.append('leaf-only trace has no samples for API thread: ' + tid)
         leaves, inclusive = Counter(), Counter()
         for sample in selected:
             names = [frame['symbol'] + ' (' + frame['dso'] + ')' for frame in sample['frames']]
             leaves[names[0]] += 1
-            inclusive.update(set(names))
+            if not leaf_only:
+                inclusive.update(set(names))
         per_thread[tid] = {'samples': len(selected), 'cpu': delta,
-            'leaf_counts': dict(leaves.most_common()), 'inclusive_counts': dict(inclusive.most_common()),
+            'leaf_counts': dict(leaves.most_common()),
             'unknown_leaf_samples': sum(1 for sample in selected if sample['frames'][0]['symbol'] == '[unknown]'),
-            'cost_per_success_estimates': None if not selected or delta['status'] != 'ok' or successful_operations <= 0 else
+            'cost_per_success_estimates': None if errors or not selected or delta['status'] != 'ok' else
                 {name: delta['cpu_seconds'] * count / len(selected) / successful_operations for name, count in leaves.most_common()}}
+        if not leaf_only:
+            per_thread[tid]['inclusive_counts'] = dict(inclusive.most_common())
     return {'status': 'unknown' if errors else 'ok', 'errors': errors,
-        'fixture_version': VERSION, 'sample_count': len(samples), 'nominal_sampling_hz': FREQUENCY,
+        'fixture_version': LEAF_VERSION if leaf_only else VERSION, 'sample_count': len(samples), 'nominal_sampling_hz': FREQUENCY,
         'fixed_cpu_clock_period_ns': PERIOD_NS, 'raw_event_coverage_checked': bool(raw_events),
         'successful_operations': successful_operations, 'application_cpu': application_cpu,
         'per_thread': None if errors else per_thread,
         'qualification_eligible': False,
-        'limitations': 'native DWARF stacks, not Python source stacks; unknown/truncated frames retained; sparse samples and tick quantization limit attribution; per-thread leaf estimates use only this profile CPU; inclusive counts overlap; no off-CPU attribution or observer correction'}
+        'limitations': ('native sampled leaf PCs; unresolved symbols retained; no inclusive counts'
+                        if leaf_only else 'native DWARF stacks, not Python source stacks; unknown/truncated frames retained; inclusive counts overlap')
+                       + '; sparse samples and tick quantization limit attribution; per-thread leaf estimates use only this profile CPU; no off-CPU attribution or observer correction'}
