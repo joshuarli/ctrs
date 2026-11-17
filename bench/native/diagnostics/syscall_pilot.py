@@ -117,6 +117,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             raise ValueError('API application inputs differ')
         engine.sh(['cp', str(archive), api + ':/tmp/np-tools.tgz'])
         helper('prepare')
+        hardware = "import pathlib,json,os;print(json.dumps({'cpuinfo':pathlib.Path('/proc/cpuinfo').read_text(),'meminfo':pathlib.Path('/proc/meminfo').read_text(),'boot_id':pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'kernel':list(os.uname())}))"
+        save(directory / 'guest-hardware.json', json.loads(engine.sh(['exec', api, 'python', '-c', hardware]).stdout))
         engine.sh(['exec', '--privileged', api, 'mount', '-t', 'tracefs', 'tracefs', '/sys/kernel/tracing'])
         def load(label, count, write_ratio):
             out = directory / (label + '.json')
