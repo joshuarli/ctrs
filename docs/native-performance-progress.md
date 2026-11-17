@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** measure pinned default-policy W2 resource growth and reclaim.
+**Current action:** attribute the measured Full-synchronization WAL wait.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -142,16 +142,29 @@ Private Full be06882 is unmerged. Uncached+Full b030772 is REJECTED by job
 the predeclared10% wall improvement/every-pair lead are absent. Main stays Cached+
 Fsync. Original Full branch/proofs remain parked; host power loss remains unknown.
 
-**Exact continuation:** implement the bounded guest fdatasync/block-flush
-timing diagnostic recommended by terminal read-only scout
-usrw_140c29f3-0a3f-4add-a8a3-54747a939f23, tree`.work/wt/np-wal-review`.
-It found no per-commit engine/RPC path but did not inspect raw JSON; parent did.
-Profile the actual PostgreSQL backend under Full using owned tracefs/kprobes
-and block request issue/completion, retaining SQL/row/checkpoint/restart oracles,
-loss accounting and cleanup. Use existing traced-flush feasibility source
-`.work/tmp/full-flush-pilot.py` and counter helper as references, not another
-orderly-restart-only proof. No native job or source worker active. Never treat
-absent VM counters as zero or suppress unsupported/lost trace coverage.
+Read-only scout `usrw_140c29f3-0a3f-4add-a8a3-54747a939f23` is terminal,
+zero changes, source review only: it did not inspect raw JSON at the supplied
+worktree paths; parent inspected the actual main-checkout records. It found no
+per-commit engine RPC and recommends guest syscall/block timing. No host trace
+was run: `sudo -n /usr/bin/true` requires a password; preserve host settings.
+
+**Exact continuation:** consume registered watch for helper worker
+`usrw_cd854af3-5017-4804-831b-9c0811a2e4d6`, tree`.work/wt/np-wal-trace`,
+branch`experiment/wal-trace`, base`d233f47cc05d183934abf0f4b6bd8bc02a59df3a`.
+It owns only `bench/native/diagnostics/wal_trace_guest.py` and
+`bench/native/test_wal_trace_guest.py`. Parent reviewed its initial two-commit
+diff once. One same-session correction is admitted: use encoded numeric dev_t,
+explicit signed return fetch/maxactive, exact zero-missed kprobe_profile coverage,
+and persist all event formats. Review only that delta plus final scope/proof;
+run the narrow module, integrate, and include it in bounded resource selection.
+No native job active. The prepared parent coordinator is
+`.work/tmp/w3-full-flush-trace-20261117/run.py`; it maps the actual PostgreSQL
+backend from container NSpid to guest-global PID and keeps one psql connection,
+then retains all1000 transaction/checkpoint/restart oracles. Adapt to the accepted
+helper CLI, freeze helper/source inputs, launch once with its adjacent launch.py,
+register a finite status watch and inspect exact entry/return/issue/completion
+coverage and losses before attributing wait. Preserve failures, unsupported
+tracing and missing counters; never suppress them or substitute zero.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
