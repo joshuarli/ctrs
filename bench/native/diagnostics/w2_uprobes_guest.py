@@ -14,6 +14,7 @@ LIBRARY = Path('/usr/local/lib/libpython3.13.so.1.0')
 LIBRARY_SHA256 = '1cf1fea4c287605d994fcde537ad7e6d078bb4325e12a34f19b783a5f2badc3b'
 LIBRARY_SIZE = 5306944
 BUFFER_KB = 4096
+BUFFER_REQUEST_KB = 4000
 SCHEMA = 'w2-uprobes-v1'
 
 
@@ -95,7 +96,7 @@ def _read_receipt(tag):
                 not receipt['cpus'] or len(set(receipt['cpus'])) != len(receipt['cpus']) or
                 any(not re.fullmatch(r'cpu[0-9]+', cpu) for cpu in receipt['cpus']) or
                 receipt['phase'] not in ('setup', 'running', 'stopped') or
-                receipt['buffer_kb'] != BUFFER_KB or '[mono]' not in receipt['trace_clock'].split()):
+                not BUFFER_REQUEST_KB <= receipt['buffer_kb'] <= BUFFER_KB or '[mono]' not in receipt['trace_clock'].split()):
             raise ValueError('receipt mismatch')
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise RuntimeError('missing or invalid ownership receipt') from exc
@@ -146,8 +147,9 @@ def setup(tag, tids_text):
         clock = (instance / 'trace_clock').read_text().strip()
         if '[mono]' not in clock.split():
             raise RuntimeError('monotonic trace clock unavailable')
-        _write(instance / 'buffer_size_kb', BUFFER_KB)
-        if int((instance / 'buffer_size_kb').read_text().strip()) != BUFFER_KB:
+        _write(instance / 'buffer_size_kb', BUFFER_REQUEST_KB)
+        actual_buffer_kb = int((instance / 'buffer_size_kb').read_text().strip())
+        if not BUFFER_REQUEST_KB <= actual_buffer_kb <= BUFFER_KB:
             raise RuntimeError('trace buffer size was not selected')
         for filename, lines in defs.items():
             for line in lines:
@@ -175,7 +177,7 @@ def setup(tag, tids_text):
         receipt = {'schema': SCHEMA, 'tag': tag, 'tids': tids, 'instance': str(instance),
                    'definitions': defs, 'filter': filt, 'library': identity,
                    'formats': formats, 'filter_readback': filter_readback, 'cpus': cpus,
-                   'trace_clock': clock, 'buffer_kb': BUFFER_KB, 'phase': 'setup'}
+                   'trace_clock': clock, 'buffer_kb': actual_buffer_kb, 'phase': 'setup'}
         marker.write_text(json.dumps(receipt, sort_keys=True))
         return {'status': 'setup', 'receipt': receipt}
     except Exception:
@@ -201,7 +203,7 @@ def start(tag):
         raise RuntimeError('pinned library inode changed')
     if (instance / 'tracing_on').read_text().strip() != '0':
         raise RuntimeError('instance is not stopped')
-    if '[mono]' not in (instance / 'trace_clock').read_text().split() or int((instance / 'buffer_size_kb').read_text().strip()) != BUFFER_KB:
+    if '[mono]' not in (instance / 'trace_clock').read_text().split() or int((instance / 'buffer_size_kb').read_text().strip()) != receipt['buffer_kb']:
         raise RuntimeError('trace clock or buffer changed')
     for event in event_paths(tag):
         root = instance / 'events' / event

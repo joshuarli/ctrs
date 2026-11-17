@@ -89,6 +89,26 @@ class TraceTests(unittest.TestCase):
         (self.trace / 'uprobe_profile').write_text(''.join(
             f'{trace.LIBRARY} {TAG}_{name} 2\n' for name in ('save', 'save_ret', 'restore', 'restore_ret')))
 
+    def test_kernel_rounding_retains_actual_size_within_ceiling(self):
+        def rounded_buffer(path, value):
+            self.write(path, int(value) + 3 if path.name == 'buffer_size_kb' else value)
+        self.writer.side_effect = rounded_buffer
+        receipt = trace.setup(TAG, '1')['receipt']
+        self.assertEqual(receipt['buffer_kb'], trace.BUFFER_REQUEST_KB + 3)
+        trace.start(TAG)
+        self.profiles()
+        self.assertEqual(trace.stop(TAG)['status'], 'ok')
+        trace.cleanup(TAG)
+
+    def test_kernel_rounding_above_ceiling_fails_and_rolls_back(self):
+        def oversized_buffer(path, value):
+            self.write(path, trace.BUFFER_KB + 1 if path.name == 'buffer_size_kb' else value)
+        self.writer.side_effect = oversized_buffer
+        with self.assertRaisesRegex(RuntimeError, 'buffer size'):
+            trace.setup(TAG, '1')
+        self.assertFalse((self.trace / 'instances' / TAG).exists())
+        self.assertFalse((self.state / (TAG + '.json')).exists())
+
     def test_validation_and_filters(self):
         for bad in ('npu0123456789a', 'npu0123456789AB', 'npu0123456789ab;'):
             with self.assertRaises(ValueError):
