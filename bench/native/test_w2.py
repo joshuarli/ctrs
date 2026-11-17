@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
 import threading
 import unittest
 from unittest.mock import patch
@@ -26,6 +27,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, {'items': [{'id': i, 'name': f'item-{i}'} for i in range(1, 26)]})
 
     def reply(self, status, data):
+        time.sleep(getattr(self.server, "delay", 0))
         payload = json.dumps(data).encode()
         self.send_response(status)
         self.send_header('Content-Length', str(len(payload)))
@@ -72,6 +74,82 @@ class FixedWorkTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+
+class FixedRateTests(unittest.TestCase):
+    def run_load(self, delay):
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        server.writes, server.lock, server.delay = [], threading.Lock(), delay
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'load.json'
+                with patch.object(load.sys, 'argv', ['load.py', '--url',
+                        f'http://127.0.0.1:{server.server_port}', '--operations', '8',
+                        '--concurrency', '2', '--request-rate', '10', '--seed', '7',
+                        '--write-ratio', '.7', '--out', str(output)]), contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(SystemExit) as result:
+                        load.main()
+                summary = json.loads(output.read_text())
+                writes = [json.loads(line) for line in Path(str(output) + '.writes.jsonl').read_text().splitlines()]
+                self.assertEqual(sorted(server.writes, key=lambda row: row['name']), writes)
+                self.assertEqual(len(writes), summary['writes_ok'])
+                return result.exception.code, summary, writes
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_paced_exact_work_and_late_backlog(self):
+        code, healthy, writes = self.run_load(0)
+        self.assertEqual(code, 0)
+        self.assertEqual(healthy['fixture_version'], 'w2-v3-fixed-rate')
+        self.assertEqual(healthy['mode'], 'fixed-rate')
+        self.assertTrue(healthy['offered_rate_valid'])
+        self.assertEqual((healthy['planned_requests'], healthy['offered_requests'],
+                          healthy['delivered_requests']), (8, 8, 8))
+        self.assertEqual([row['slot'] for row in healthy['slots']], list(range(8)))
+        code, delayed, delayed_writes = self.run_load(.3)
+        self.assertEqual(code, 1)
+        self.assertFalse(delayed['offered_rate_valid'])
+        self.assertGreater(delayed['late_requests'], 0)
+        self.assertEqual((delayed['planned_requests'], delayed['offered_requests'],
+                          delayed['delivered_requests']), (8, 8, 8))
+        self.assertEqual(writes, delayed_writes)
+        self.assertEqual([row['slot'] for row in delayed['slots']], list(range(8)))
+        self.assertGreater(delayed['slots'][-1]['start_lag_ms'], 100)
+        self.assertGreater(delayed['slots'][-1]['scheduled_latency_ms'], 400)
+
+    def test_invalid_options_rejected_before_engine_access(self):
+        import runner
+        for rate in ('nan', 'inf', '-1', '0', '1e-320'):
+            argv = ['runner.py', 'run', '--case', 'W2', '--engine', 'ctrs',
+                    '--operations', '2', '--request-rate', rate]
+            with self.subTest(rate=rate), patch.object(runner.sys, 'argv', argv), \
+                    patch.object(runner, 'find_docker', side_effect=AssertionError('engine access')), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    runner.main()
+                self.assertEqual(result.exception.code, 2)
+        for extra in (['--request-rate', '1'],
+                      ['--operations', '2', '--request-rate', '1', '--case', 'W1'],
+                      ['--operations', '2', '--request-rate']):
+            argv = ['runner.py', 'run', '--case', 'W2', '--engine', 'ctrs'] + extra
+            with self.subTest(extra=extra), patch.object(runner.sys, 'argv', argv), \
+                    patch.object(runner, 'find_docker', side_effect=AssertionError('engine access')), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    runner.main()
+                self.assertEqual(result.exception.code, 2)
+        for rate in ('nan', 'inf', '0', '1e-320'):
+            with self.subTest(loader_rate=rate), patch.object(load.sys, 'argv',
+                    ['load.py', '--url', 'http://unused', '--operations', '2', '--request-rate', rate]), \
+                    patch.object(load.http.client, 'HTTPConnection', side_effect=AssertionError('connection')), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    load.main()
+                self.assertEqual(result.exception.code, 2)
 
 
 class PersistedStateTests(unittest.TestCase):

@@ -11,6 +11,7 @@ import argparse
 import concurrent.futures
 import http.client
 import json
+import math
 import random
 import sys
 import threading
@@ -25,18 +26,50 @@ def pct(sorted_vals, q):
     return sorted_vals[idx]
 
 
+SCHEDULE_LAG_BUDGET_MS = 10.0
+MAX_PLANNED_SPAN_S = 3600.0
+
+
+def planned_span(operations, request_rate):
+    if operations is None or operations <= 0:
+        raise ValueError("--request-rate requires positive --operations")
+    if not math.isfinite(request_rate) or request_rate <= 0:
+        raise ValueError("--request-rate must be positive and finite")
+    span = (operations - 1) / request_rate
+    if not math.isfinite(span) or span > MAX_PLANNED_SPAN_S:
+        raise ValueError("planned request span must be at most 3600 seconds")
+    return span
+
+
 def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop,
-           error_log, t_start, operations=None, writes=None):
+           error_log, t_start, operations=None, writes=None, request_rate=None,
+           concurrency=None, slots=None):
     rng = random.Random(rng_seed)
     host, port = base
     conn = http.client.HTTPConnection(host, port, timeout=10)
     seq = 0
     end = time.monotonic() + duration
+    previous_start = None
+    previous_scheduled = None
     while ((seq < operations if operations is not None else time.monotonic() < end)
            and not stop.is_set()):
         write = rng.random() < write_ratio
         seq += 1
+        scheduled = None
+        if request_rate is not None:
+            slot = (seq - 1) * concurrency + wid
+            scheduled = t_start + slot / request_rate
+            # Once late, keep this worker paced instead of bursting to catch up.
+            deadline = scheduled
+            if (previous_start is not None and
+                    (previous_start - previous_scheduled) * 1000 > SCHEDULE_LAG_BUDGET_MS):
+                deadline = max(deadline, previous_start + concurrency / request_rate)
+            delay = deadline - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
         t0 = time.monotonic()
+        previous_start = t0
+        previous_scheduled = scheduled
         try:
             if write:
                 body = json.dumps({"name": f"load-{wid}-{seq}", "payload": "x" * 64})
@@ -68,7 +101,12 @@ def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop,
             except Exception:
                 pass
             conn = http.client.HTTPConnection(host, port, timeout=10)
-        lat = (time.monotonic() - t0) * 1000.0
+        completed = time.monotonic()
+        lat = (completed - t0) * 1000.0
+        if slots is not None:
+            slots.append({"slot": slot, "start_lag_ms": (t0 - scheduled) * 1000.0,
+                          "scheduled_latency_ms": (completed - scheduled) * 1000.0,
+                          "ok": ok})
         # Failed connection attempts are not useful work. Keep successful
         # request latency/throughput separate from the error counts, so a
         # fast-refusing engine cannot appear faster during W10 downtime.
@@ -99,6 +137,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--operations", type=int, default=None,
                     help="fixed total attempted operations; duration mode is saturation")
+    ap.add_argument("--request-rate", type=float, default=None, help="fixed offered requests per second (requires --operations)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -106,6 +145,12 @@ def main():
         ap.error("concurrency, duration and operations must be positive")
     if not 0 <= args.write_ratio <= 1:
         ap.error("write ratio must be in [0, 1]")
+    span = None
+    if args.request_rate is not None:
+        try:
+            span = planned_span(args.operations, args.request_rate)
+        except ValueError as exc:
+            ap.error(str(exc))
     u = urllib.parse.urlparse(args.url)
     base = (u.hostname, u.port or 80)
 
@@ -114,14 +159,17 @@ def main():
     stop = threading.Event()
     error_log = []
     writes = []
-    t_start = time.monotonic()
+    slots = []
+    t_start = time.monotonic() + (0.05 if args.request_rate is not None else 0)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         futures = [pool.submit(
             worker, i, base, args.duration, args.write_ratio, args.seed * 1000 + i,
             latencies, counts, stop, error_log, t_start,
             operations=(args.operations // args.concurrency +
                         (i < args.operations % args.concurrency))
-            if args.operations is not None else None, writes=writes)
+            if args.operations is not None else None, writes=writes,
+            request_rate=args.request_rate, concurrency=args.concurrency,
+            slots=slots if args.request_rate is not None else None)
             for i in range(args.concurrency)]
         try:
             for future in futures:
@@ -156,6 +204,16 @@ def main():
             "max": latencies[-1] if latencies else None,
         },
     }
+    if args.request_rate is not None:
+        slots.sort(key=lambda row: row["slot"])
+        late = sum(row["start_lag_ms"] > SCHEDULE_LAG_BUDGET_MS for row in slots)
+        valid = (total == args.operations and successful == args.operations and late == 0)
+        summary.update({"fixture_version": "w2-v3-fixed-rate", "mode": "fixed-rate",
+                        "request_rate": args.request_rate, "planned_span_s": span,
+                        "schedule_lag_budget_ms": SCHEDULE_LAG_BUDGET_MS,
+                        "planned_requests": args.operations, "offered_requests": len(slots),
+                        "delivered_requests": successful, "late_requests": late,
+                        "offered_rate_valid": valid, "slots": slots})
     text = json.dumps(summary)
     print(text)
     if args.out:
@@ -168,7 +226,8 @@ def main():
             for e in error_log:
                 f.write(json.dumps(e) + "\n")
     complete = args.operations is None or total == args.operations
-    sys.exit(0 if counts["errors"] == 0 and successful > 0 and complete else 1)
+    sys.exit(0 if counts["errors"] == 0 and successful > 0 and complete
+             and (args.request_rate is None or summary["offered_rate_valid"]) else 1)
 
 
 if __name__ == "__main__":
