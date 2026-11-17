@@ -1,0 +1,65 @@
+{
+  "w11.mixed-cycle-correctness": {
+    "workload": "W11",
+    "dimension": "correctness",
+    "metric": "incorrect_or_incomplete_cycles",
+    "state": "warm-persistent",
+    "load": "mixed-c4",
+    "unit": "cycles",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.retained-state-persistence": {
+    "workload": "W11",
+    "dimension": "persistence",
+    "metric": "retained_state_or_identity_failures",
+    "state": "warm-persistent",
+    "load": "mixed-c4",
+    "unit": "failures",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.acknowledged-write-durability": {
+    "workload": "W11",
+    "dimension": "durability",
+    "metric": "lost_acknowledged_durable_writes",
+    "state": "declared-failure-model",
+    "load": "mixed-c4",
+    "unit": "writes",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.physical-footprint-growth": {
+    "workload": "W11",
+    "dimension": "resource_growth",
+    "metric": "physical_footprint_growth",
+    "state": "post-cleanup",
+    "load": "mixed-c4",
+    "unit": "bytes",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.file-descriptor-growth": {
+    "workload": "W11",
+    "dimension": "resource_growth",
+    "metric": "file_descriptor_growth",
+    "state": "post-cleanup",
+    "load": "mixed-c4",
+    "unit": "descriptors",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.active-disk-allocation-growth": {
+    "workload": "W11",
+    "dimension": "resource_growth",
+    "metric": "active_disk_allocation_growth",
+    "state": "post-cleanup",
+    "load": "mixed-c4",
+    "unit": "bytes",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  },
+  "w11.mixed-work-reliability": {
+    "workload": "W11",
+    "dimension": "reliability",
+    "metric": "unexpected_errors_or_deaths",
+    "state": "warm-persistent",
+    "load": "mixed-c4-12h",
+    "unit": "failures",
+    "fixture_version": "w11-v4-post-cleanup-resources"
+  }
+}

@@ -2,7 +2,6 @@
 import argparse
 import json
 import os
-import platform
 from pathlib import Path
 import secrets
 import sys
@@ -79,41 +78,21 @@ def main():
     readiness_receipt = None
     resource_environment = {}
     admission_epoch = time.time()
-    assets = runner.BENCH / 'assets.lock'
-    frozen_paths = []
     if args.qualification:
         if work_deadline is None or args.work_deadline_epoch - time.time() < qualification.MINIMUM_WORK_SECONDS:
             parser.error('qualification requires a finite work deadline at least twelve hours away, plus setup allowance')
-        if args.resource_observation_seconds is None or args.resource_observation_seconds < 30:
-            parser.error('qualification requires --resource-observation-seconds of at least 30')
+        minimum_observation = mixed_cycle.mixed_resources.BUDGETS['minimum_observation_seconds']
+        if args.resource_observation_seconds is None or args.resource_observation_seconds < minimum_observation:
+            parser.error(f'qualification requires --resource-observation-seconds of at least {minimum_observation}')
         if 'orbstack' in engines and not args.orbstack_storage_file:
             parser.error('qualification requires explicit --orbstack-storage-file coverage')
         if 'ctrs' in engines and args.ctrs_root.exists():
             parser.error('qualification requires a new isolated --ctrs-root')
         try:
-            guest = Path(os.environ['CTRS_GUEST_DIR'])
-            template = guest / 'data.img'
-            frozen_paths = [Path(sys.executable), args.ctrs_binary, guest / 'Image', guest / 'initramfs.cpio', template,
-                            runner.COMPOSE_FILE, runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY,
-                            runner.FIXTURES / 'w4/app.py', runner.FIXTURES / 'w8-v2/portfolio.json',
-                            runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE, assets]
-            frozen_paths += [path for path in runner.BENCH.glob('*.py') if not path.name.startswith('test_')]
-            frozen_paths += list((runner.BENCH / 'diagnostics').glob('*.py'))
-            for layout in (args.portfolio_layout, args.worker_layout):
-                frozen_paths += [path for path in layout.rglob('*') if path.is_file()]
-            readiness_receipt = durable_job.receipt(args.readiness)
-            frozen = qualification.require_readiness(args.readiness, required_paths=frozen_paths,
-                                                    assets_path=assets, sparse_paths=(template,), admission_epoch=admission_epoch)
-            durable_job.check_receipt(readiness_receipt)
-            if frozen['fixtures']['W11']['version'] != mixed_cycle.mixed_resources.VERSION:
-                raise qualification.ReadinessError('W11 fixture version differs from the observation runner')
-            expected = {'ctrs_binary': args.ctrs_binary, 'guest_kernel': guest / 'Image',
-                        'guest_initramfs': guest / 'initramfs.cpio'}
-            if any(frozen['artifacts'][key]['path'] != str(path.resolve(strict=True)) for key, path in expected.items()):
-                raise qualification.ReadinessError('requested running artifacts differ from the freeze')
-            if (frozen['tools']['python']['version'] != platform.python_version()
-                    or frozen['tools']['python']['artifact']['path'] != str(Path(sys.executable).resolve())):
-                raise qualification.ReadinessError('running Python differs from the freeze')
+            leg_inputs = {'ctrs_binary': args.ctrs_binary, 'guest': Path(os.environ['CTRS_GUEST_DIR']),
+                          'portfolio_layout': args.portfolio_layout, 'worker_layout': args.worker_layout}
+            frozen, readiness_receipt = qualification.require_leg_readiness(
+                args.readiness, **leg_inputs, admission_epoch=admission_epoch)
             boot = {item['path']: {'inode': item['identity'][1], 'size': item['identity'][2], 'sha256': item['sha256']}
                     for key, item in frozen['artifacts'].items() if key != 'ctrs_binary'}
             if args.expected_boot_assets is not None and args.expected_boot_assets != boot:
@@ -235,8 +214,8 @@ def main():
                         issues.append('engine resource envelope changed or became unknown')
                     try:
                         durable_job.check_receipt(readiness_receipt)
-                        qualification.require_readiness(args.readiness, required_paths=frozen_paths,
-                                                       assets_path=assets, sparse_paths=(template,), admission_epoch=admission_epoch)
+                        qualification.require_leg_readiness(args.readiness, **leg_inputs,
+                                                            admission_epoch=admission_epoch)
                     except (OSError, ValueError) as exc:
                         issues.append(str(exc))
                     try:

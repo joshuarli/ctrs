@@ -31,15 +31,13 @@ class Readiness(unittest.TestCase):
             path = root / name; path.write_text(name)
             artifacts[name] = durable_job.receipt(path)
         proof = artifacts['proof']
+        versions = {key: key + '-v-test' for key in gate.CASES}
+        versions['W11'] = gate.mixed_resources.VERSION
         contract = {key: {'workload': 'W1', 'dimension': key, 'metric': key,
             'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': 'W1-v-test'} for key in gate.DIMENSIONS}
         contract.update({key: {'workload': key, 'dimension': 'application', 'metric': 'test-metric',
-            'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': key + '-v-test'} for key in gate.CASES})
-        for dimension in gate.W11_REQUIRED_DIMENSIONS:
-            contract[f'w11-{dimension}'] = {
-                'workload': 'W11', 'dimension': dimension, 'metric': f'w11-{dimension}',
-                'state': 'warm', 'load': 'mixed', 'unit': 'test-unit', 'fixture_version': 'W11-v-test',
-            }
+            'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': versions[key]} for key in gate.CASES})
+        contract.update(copy.deepcopy(gate.W11_CELLS))
         contract_digest = hashlib.sha256(
             json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         self.assets.write_text(f'[freeze]\nstatus="frozen"\ncell_contract_sha256="{contract_digest}"\n[tools]\npython="test-version"\n'
@@ -60,7 +58,7 @@ class Readiness(unittest.TestCase):
             'engine_versions': {'ctrs': 'ctrs-test', 'orbstack': 'orb-test'},
             'tools': {key: {'version': 'test-version', 'artifact': artifacts[key]} for key in ('python', 'docker', 'compose', 'buildx')},
             'inputs': [*artifacts.values(), durable_job.receipt(self.assets), durable_job.receipt(self.source)],
-            'fixtures': {key: {'version': key + '-v-test', 'evidence': proof} for key in gate.CASES},
+            'fixtures': {key: {'version': version, 'evidence': proof} for key, version in versions.items()},
             'prerequisites': {key: {'status': 'pass', 'evidence': proof} for key in gate.PREREQUISITES},
             'durability': {'failure_model': 'explicit disposable fixture failure model',
                 'ctrs_guarantee': 'declared', 'orbstack_guarantee': 'declared', 'comparable': True, 'evidence': proof},
@@ -95,7 +93,14 @@ class Readiness(unittest.TestCase):
             json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         path.write_text(json.dumps(review))
         proof['evidence'] = durable_job.receipt(path)
-        with self.assertRaisesRegex(gate.ReadinessError, 'W11 is missing required dimensions'):
+        with self.assertRaisesRegex(gate.ReadinessError, 'missing or changed required W11 cell'):
+            self.check()
+
+    def test_one_growth_cell_cannot_cover_other_resources(self):
+        name = 'w11.active-disk-allocation-growth'
+        self.doc['cell_contract'].pop(name)
+        self.doc['matrix'].pop(name)
+        with self.assertRaisesRegex(gate.ReadinessError, 'missing or changed required W11 cell: ' + name):
             self.check()
 
     def test_reviewed_cell_edit_cannot_change_a_frozen_contract(self):
@@ -376,6 +381,7 @@ class ManualAdmission(unittest.TestCase):
             deadline = time.time() + gate.MINIMUM_WORK_SECONDS + 600
             with patch.dict('os.environ', {'CTRS_GUEST_DIR': tmp}):
                 self.invoke(['--qualification', '--readiness', str(path), '--engines', 'orbstack',
+                    '--portfolio-layout', tmp, '--worker-layout', tmp,
                     '--resource-observation-seconds', '30', '--orbstack-storage-file', '/missing',
                     '--work-deadline-epoch', str(deadline), '--drain-deadline-epoch', str(deadline + 300),
                     '--cleanup-deadline-epoch', str(deadline + 600)], 'assets.lock is not frozen')
