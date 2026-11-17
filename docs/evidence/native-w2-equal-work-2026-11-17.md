@@ -410,6 +410,43 @@ Result SHA-256
 Terminal status SHA-256
 `6fbb6c2840782696770cce29242d9aa3e9be9d856021d6df1656d7e124dbfe4a`.
 
+## Lower fixed sample frequency
+
+Job `0f4d52b0bc314c75bc291ca344d43295` exited 0. Two blocks compared
+off, 49 Hz and 19 Hz at the same 17-vCPU guest envelopes. Both engine
+and observer order reverse in block two. All 12 cells verified their
+50,000-operation workload, giving 600,000 successful requests. The six
+write sets matched within each block. Both native daemons cleaned up and
+all 161 frozen receipts rechecked.
+
+The 19 Hz traces recorded 271–477 samples per cell versus 715–1,016 at
+49 Hz. All nine API threads were sampled at both rates. The fewest
+samples on any API thread at 19 Hz was six. Raw coverage matched the
+decoded samples, with no loss or throttle records.
+
+| Block | Engine | 49 Hz API CPU on/off | 19 Hz API CPU on/off | 49 Hz wall on/off | 19 Hz wall on/off |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | ctrs | 1.035 | 1.285 | 1.038 | 1.313 |
+| 1 | OrbStack | 1.067 | 1.725 | 1.078 | 1.719 |
+| 2 | ctrs | 0.990 | 1.014 | 0.958 | 0.978 |
+| 2 | OrbStack | 0.914 | 0.955 | 0.699 | 0.784 |
+
+The 19 Hz mode used more observed API CPU and wall time in each of the
+four matched rate comparisons. This shared-host, two-block result gives
+no basis to select the lower rate or qualify the observer. Source
+`e2127f0` stays on `experiment/w2-cpu-19hz`. Its 18 focused tests pass.
+Keep the 49 Hz default for diagnostic stack profiles. A distinct test
+could collect just leaf PCs at 49 Hz to test the cost of copying DWARF
+stacks. Such samples omit inclusive attribution by design.
+
+Reproduce from `e2127f0` using the ten-block recipe with two blocks and
+separate sample-rate directories. Run off, 49 Hz, 19 Hz in block one
+and reverse both orders in block two. Pass `cpu_frequency=19` to
+`syscall_pilot.trial` in the lower-rate cells. The host and workload
+requirements match the primary profiler comparison.
+Terminal status SHA-256
+`84ea6f0fb70210ab7b11505a853233530c874a4155c4c700d7b4e1c07b7edd8c`.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign

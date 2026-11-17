@@ -27,7 +27,10 @@ tests with zero skips. The 49 Hz comparison completed all 40 exact
 trials. In all ten blocks an unrelated VM was active and the observer
 intervals exceeded the 5% acceptance band. W8 retained pin checks are
 integrated at `4c07c4e`; W11 evidence binding remains parked.
-The 19 Hz comparison `0f4d52b0bc314c75bc291ca344d43295` owns the host.
+The 19 Hz comparison completed all 12 exact trials and captured all API
+threads. Its lower rate did not reduce observed API CPU or wall in the
+four matched rate comparisons. Both observer validations remain open.
+No campaign-owned measured job is active.
 
 ## Accepted and verified
 
@@ -58,14 +61,20 @@ The 19 Hz comparison `0f4d52b0bc314c75bc291ca344d43295` owns the host.
 
 ## Exact next action
 
-Read the terminal status of `0f4d52b0bc314c75bc291ca344d43295` at
-`.work/tmp/w2-observer-rate-20261117/job/status.json`. Compare the
-same pinned C8 fixed work at 17 matched guest vCPUs across off, 49 Hz and
-19 Hz. The two blocks reverse engine and observer order. Keep both the
-exact payload proof and per-thread sample coverage. Review host gates,
-task CPU and workload wall. This finite diagnostic cannot certify the
-observer budget. The parked source is `e2127f0` on
-`experiment/w2-cpu-19hz`.
+Check host availability with `perf-gate-ready` and actual process
+snapshots before the next scored run. The previous ten-block W2 observer
+run was shared with a Niceforge VM despite successful readiness exits.
+The 19 Hz comparison is complete and the lower-rate code stays parked.
+
+In a suitable host window, test the next distinct W2 instrumentation
+hypothesis in the smallest practical control. Collect 49 Hz leaf PCs
+without DWARF stacks and bind the same 50,000 exact C8 operations, seed,
+matched capacity and API task counters to off/on cells. Require every
+API thread, valid native samples and zero loss. Keep leaf-only identity
+separate from the existing call-stack record and require fresh paired
+observer acceptance before using any resulting profile for product
+selection. If the Mac stays shared, continue the W8 retained/derived
+content scopes or the W11 frozen cell plan without scoring timing.
 
 The reduced observer proof is complete. Source `7184d42` remains on
 `experiment/w2-wake-entry-only`. Use the evidence record for its verified
