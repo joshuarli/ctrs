@@ -14,7 +14,7 @@ from test_safety import FixtureContext, fake_engine
 
 
 def trial():
-    return {'correctness': {'ok': True}, 'validation_errors': [],
+    return {'trial_id': 'test-w2', 'correctness': {'ok': True}, 'validation_errors': [],
             'metrics': {'reads_ok': 700, 'writes_ok': 300, 'errors': 0,
                         'cpu_seconds_per_success': 999},
             'resources': {'cpu_seconds_est': 999,
@@ -59,11 +59,12 @@ class ObserverControls(unittest.TestCase):
             with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, 'incomplete periodic'):
                 pilot._trial_totals(record, 1000)
 
-    def test_work_failure_survives_cleanup_failure_and_closes_registry(self):
+    @patch.object(pilot, '_prepare_tools', return_value={})
+    def test_work_failure_survives_cleanup_failure_and_closes_registry(self, tools):
         for failure in ('engine', 'registry', 'result-save'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 results = Path(directory)
-                written, engines = [], []
+                written, engines, trial_events = [], [], []
                 class Context:
                     def __init__(self, run_id):
                         self.results_dir = results / run_id
@@ -92,6 +93,9 @@ class ObserverControls(unittest.TestCase):
                         if failure == 'registry': raise RuntimeError('registry cleanup failed')
                 server = Server()
                 failed = trial(); failed['correctness']['ok'] = False
+                def run_trial(*args, **kwargs):
+                    trial_events.append('measure')
+                    return failed
                 portfolio = SimpleNamespace(manifests={'np-v2/' + name: 'sha256:' + 'a' * 64
                     for name in ('api', 'postgres', 'redis')})
                 identity = {'required_processes': [{'pid': 999999, 'start_identity': 'absent'}]}
@@ -105,12 +109,12 @@ class ObserverControls(unittest.TestCase):
                      patch.object(pilot.runner, 'DOCKER', pilot.runner.DOCKER), \
                      patch.object(pilot.runner, 'RunContext', Context), \
                      patch.object(pilot.runner, 'find_docker', return_value='docker'), \
-                     patch.object(pilot.runner, 'trial_w2', return_value=failed), \
+                     patch.object(pilot.runner, 'trial_w2', side_effect=run_trial), \
                      patch.object(pilot.registry_portfolio, 'prepare_pinned_portfolio', return_value=portfolio), \
                      patch.object(pilot.registry_portfolio, 'serve', return_value=server), \
                      patch.object(pilot.resource_pilot, 'ResourceEngine', Engine), \
                      patch.object(pilot.resource_pilot, 'verify_images'), \
-                     patch.object(pilot.resource_pilot, 'warmup_api'), \
+                     patch.object(pilot.resource_pilot, 'warmup_api', side_effect=lambda *args: trial_events.append('prime')), \
                      patch.object(pilot.resource_pilot, 'verify_binary'), \
                      patch.object(pilot.resource_pilot, 'host_snapshot'), \
                      patch.object(pilot.resource_pilot, 'save', side_effect=failing_save), \
@@ -125,6 +129,7 @@ class ObserverControls(unittest.TestCase):
                     self.assertIn('failed correctness', outcome['error'])
                     self.assertTrue(any(failure + ' cleanup failed' in item for item in outcome['cleanup_errors']))
                     self.assertEqual(outcome['status'], 'failed')
+                self.assertEqual(trial_events, ['prime', 'prime', 'measure'])
                 self.assertEqual(len(engines), 1)
                 self.assertTrue(engines[0].stopped)
                 self.assertFalse(written[0]['correctness']['ok'])
@@ -162,6 +167,15 @@ class ObserverControls(unittest.TestCase):
         for invalid in (rows[:-1], [*rows, rows[0]], bad):
             with self.subTest(rows=invalid), self.assertRaises(ValueError):
                 pilot._paired_controls(invalid, 1)
+
+    def test_schedule_reverses_engine_and_observer_order_across_blocks(self):
+        actual = [(pair, engine, mode.value) for pair, engine, mode in pilot._trial_schedule(2)]
+        self.assertEqual(actual, [
+            (1, 'ctrs', 'boundaries'), (1, 'orbstack', 'boundaries'),
+            (1, 'ctrs', 'periodic'), (1, 'orbstack', 'periodic'),
+            (2, 'orbstack', 'periodic'), (2, 'ctrs', 'periodic'),
+            (2, 'orbstack', 'boundaries'), (2, 'ctrs', 'boundaries'),
+        ])
 
     def test_invalid_invocation_cannot_prepare_or_access_engine(self):
         for changed in ({'run_id': '../outside'}, {'pairs': 0}, {'pairs': True},

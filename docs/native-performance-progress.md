@@ -2,17 +2,12 @@
 
 ## Status
 
-**WINDING DOWN 2026-11-17 — explicit owner stop; campaign not complete.**
-Launch no experiments or lanes. Preserve unfinished source and finish the reboot audit.
-Accepted integration HEAD is4fc901b: reviewed W11 v3, local growth capability81e51d2 and counter-window correction.
-Latest product remains2f37d02. Default builder work stays accepted and unchanged.
-Native W11 job0a89d8f8 passes20,000 API operations,800 queue jobs and64 build/test jobs;172 inputs unchanged.
-No native job remains active. No W2 batch started after the owner accepted some background noise.
-Unfinished guard/tool-provenance changes will park on `campaign/w11-admission-20261117`; review and native v4 proof remain pending.
-Existing parked branches and retained checkouts are listed in [the inventory](native-performance-retained.md#after-cleanup-2026-11-17).
-Owner now accepts some noise: use disclosed interleaved W2 diagnostics, preserve unrelated workloads and keep invalid cells explicit.
-On resume, first run `codex-campaign-closeout.py cancel`, then read this file and inspect the parked branch.
-Prioritize normalized W2 reproduction/profiling over further qualification tooling. Full qualification remains unready.
+**Active 2026-11-17 after owner resume.** Closeout cancellation succeeded.
+The product baseline remains `2f37d02`; parked `5bcf48a` stays separate.
+The first W2 batch stopped after six exact trials when the idle ctrs VM
+slept before observation. The primed five-block diagnostic owns the measured
+host. Job `4587075d90bc49baa5f7cebf9297cbb6` is admitted.
+[W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
 
 ## Accepted and verified
 
@@ -43,31 +38,23 @@ Prioritize normalized W2 reproduction/profiling over further qualification tooli
 
 ## Exact next action
 
-After an explicit resume, run `codex-campaign-closeout.py cancel` and inspect
-`git show --stat 5bcf48a`. That unaccepted source is preserved on
-`campaign/w11-admission-20261117`, not main. Its122-test W2 component check
-passes, but independent review and native v4 observation proof remain pending.
-Do not make that whole admission patch a prerequisite for W2 investigation.
+Read the terminal status for job `4587075d90bc49baa5f7cebf9297cbb6` under
+`.work/tmp/w2-equal-work-primed-20261117/job/status.json`. Until terminal status is
+available, keep that job's frozen inputs in place and launch no other measured
+host workload. The durable job has a 40-minute deadline. Records go to
+`.work/native-perf/results/w2-equal-work-primed-20261117`.
 
-Prioritize a bounded interleaved W2 equal-work/observer batch under the owner's
-explicit acceptance of some background noise. Use the existing pinned common
-portfolio, accepted binary/boot assets and `runner.trial_w2` through
-`diagnostics.resource_pilot.ResourceEngine`. Predeclare five blocks of50,000
-operations at concurrency8 and write ratio0.3, matching each block's seed and
-read/write mix across engines and periodic-on/boundary-only controls. Alternate
-engine and observer order. Keep setup, work and cleanup separate. Preserve all
-failures and derive CPU per successful operation from each raw workload phase.
-Report API cgroup usage/user/system costs, spread and paired uncertainty.
-Record actual resource envelopes and tools. Keep installed-default and matched
-default-driver cohorts separate. Whole-OrbStack-process CPU may include its
-unrelated VM; do not relabel that aggregate as isolated application efficiency.
-Run a separate declared saturation batch and profile actual API work if the
-normalized deficit persists. Do not repeat rejected microbench matrices.
+After the job exits, check frozen receipts, exact persisted data and paired
+read/write counts. Compute API cgroup usage, user and system cost per successful
+operation from raw trial records. Report whole-block uncertainty and separate
+observer modes. Keep the default-size ctrs configuration separate from the
+matched-resource cohort. Whole OrbStack helper CPU includes unrelated VM work.
+Record failures and unattempted cells. Run a separate declared saturation batch
+and profile the actual API workload if the normalized deficit persists.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
-No native job or source lane remains active. The20,000-operation result is not
-the12-hour leg and does not close growth, timing or durability gates.
+The 20,000-operation result leaves the 12-hour, growth, timing and durability gates open.
 
 The final c3775ce functional job13731c9782f64101a2425063857ddf49 exits0 with
 all four1000-operation trials correct,708 reads/292 writes each, complete phase
@@ -133,10 +120,13 @@ next-action paragraphs from that historical revision.
    next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
-2. Review parked5bcf48a separately. Main already contains the optional growth
-   capability81e51d2 and counter-window fix4fc901b. The parked patch adds CLI
-   wiring, frozen-evidence admission, actual tool receipts and resource-envelope
-   checks. Native v4 proof, real frozen evidence and review remain missing.
+2. Parked admission `5bcf48a` still needs a canonical cell contract and native
+   v4 proof. The separate review confirmed that `qualification.require_readiness`
+   checks workload and dimension sets independently. Its own
+   `test_frozen_receipts_admit_readiness_without_promoting_unknown_cells`
+   passes with only an application cell for W11. Define required cell identities
+   per workload before admitting a qualification leg. Growth capability
+   `81e51d2` and counter-window fix `4fc901b` are already integrated.
 3. W8: strengthen comparable retained/content-absent evidence and complete
    exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
    AB/BA order, actual transfer/deployment and source-state unknowns explicit.

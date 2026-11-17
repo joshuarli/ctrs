@@ -1,7 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**Owner steering: 2026-11-17. WINDING DOWN at the owner's explicit request; not complete.** This is
-the current execution contract. It supersedes the previous campaign's
+**Active 2026-11-17 after owner resume.** This is the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
 [`native-performance-progress.md`](native-performance-progress.md).

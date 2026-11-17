@@ -1,4 +1,5 @@
 """Pinned fixed-work observer controls; raw ratios never qualify product performance."""
+from contextlib import ExitStack, contextmanager
 import json
 import math
 import os
@@ -72,12 +73,85 @@ def _paired_controls(rows, pairs):
     return result
 
 
-def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operations=10000):
+def _trial_schedule(pairs):
+    for pair in range(1, pairs + 1):
+        engines = ('ctrs', 'orbstack')
+        modes = (runner.SamplingMode.BOUNDARIES, runner.SamplingMode.PERIODIC)
+        if pair % 2 == 0:
+            engines, modes = engines[::-1], modes[::-1]
+        for mode in modes:
+            for name in engines:
+                yield pair, name, mode
+
+
+def _prepare_tools(engine):
+    plugins = json.loads(engine.sh(['info', '--format', '{{json .ClientInfo.Plugins}}']).stdout)
+    compose, = [plugin for plugin in plugins if plugin['Name'] == 'compose']
+    return {
+        'python': {'path': sys.executable, 'sha256': runner.sha256_file(Path(sys.executable)),
+                   'version': sys.version},
+        'docker': {'path': runner.DOCKER, 'sha256': runner.sha256_file(Path(runner.DOCKER)),
+                   'version': engine.sh(['--version']).stdout.strip()},
+        'compose': {'path': compose['Path'], 'sha256': runner.sha256_file(Path(compose['Path'])),
+                    'version': engine.sh(['compose', 'version']).stdout.strip()},
+    }
+
+
+@contextmanager
+def _prepared_engine(name, run_id, root, refs, binary_hash, result):
+    directory = root / name
+    directory.mkdir()
+    store = runner.REPO / '.work/tmp' / ('sc-' + uuid.uuid4().hex[:8]) if name == 'ctrs' else None
+    engine = resource_pilot.ResourceEngine(name, run_id, refs, directory, fresh_dir=store)
+    identity = None
+    try:
+        engine.ensure_up()
+        for image in ('api', 'postgres', 'redis'):
+            cp = engine.sh(['pull', refs[image]], timeout=180)
+            (directory / (image + '-pull.log')).write_text(cp.stdout + cp.stderr)
+        resource_pilot.verify_images(engine, refs, directory)
+        resource_pilot.warmup_api(engine, refs['api'])
+        identity = ownership.discover(name, Path(engine.socket.removeprefix('unix://')), engine.dir)
+        if name == 'ctrs':
+            resource_pilot.verify_binary(identity, binary_hash)
+        resource_pilot.save(directory / 'running-engine.json', identity)
+        resource_pilot.save(directory / 'engine-info.json', runner.safe_engine_info(engine))
+        resource_pilot.save(directory / 'tools.json', _prepare_tools(engine))
+        yield engine
+    finally:
+        primary = sys.exc_info()[1]
+        if store is not None:
+            result['ctrs_store'] = str(store)
+            result['native_stop_verified'] = False
+        try:
+            engine.stop()
+            if store is not None:
+                current = getattr(engine, 'measurement_identity', {})
+                known = [*(identity or {}).get('required_processes', []), *current.get('required_processes', [])]
+                deadline = time.monotonic() + 10
+                while known:
+                    table = ownership.process_table()
+                    live = [p['pid'] for p in known
+                            if table.get(p['pid'], {}).get('start_identity') == p['start_identity']]
+                    if not live or time.monotonic() >= deadline:
+                        result['native_stop_verified'] = not live
+                        break
+                    time.sleep(.2)
+                if not result['native_stop_verified']:
+                    result['cleanup_errors'].append('native stop not verified')
+        except BaseException as exc:
+            result['cleanup_errors'].append(repr(exc))
+            if primary is None:
+                raise
+
+
+def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operations=10000, concurrency=4):
     """Run finite diagnostic controls in a dedicated process; return their result directory."""
     if (not isinstance(run_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', run_id)
             or type(pairs) is not int or not 1 <= pairs <= 5
-            or type(operations) is not int or not 1 <= operations <= 100000):
-        raise ValueError('require a simple run ID, 1..5 pairs and 1..100000 operations')
+            or type(operations) is not int or not 1 <= operations <= 100000
+            or type(concurrency) is not int or not 1 <= concurrency <= 64):
+        raise ValueError('require a simple run ID, 1..5 pairs and 1..100000 operations and 1..64 workers')
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         raise ValueError('native ARM64 macOS only')
     binary = Path(ctrs_binary).resolve(strict=True)
@@ -99,11 +173,12 @@ def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operation
     result = {'status': 'failed', 'records': [], 'cleanup_errors': [],
               'timing_eligible': False, 'qualification_eligible': False}
     resource_pilot.save(root / 'plan.json', {'pairs_per_engine': pairs, 'operations': operations,
-        'concurrency': 4, 'write_ratio': .3, 'seed': '7 + pair', 'sampler_version': collect.SAMPLER_VERSION,
-        'order': 'engine blocks; alternate boundaries/periodic within each engine',
+        'concurrency': concurrency, 'write_ratio': .3, 'seed': '7 + pair', 'sampler_version': collect.SAMPLER_VERSION,
+        'order': [{'pair': pair, 'engine': name, 'sampling_mode': mode.value}
+                  for pair, name, mode in _trial_schedule(pairs)],
         'observer_limits': {'cpu_per_success_inflation': .05, 'wall_inflation': .05},
         'timing_eligible': False, 'qualification_eligible': False,
-        'scope': 'pinned W2 fixed work; no engine comparison or certified observer-overhead verdict',
+        'scope': 'pinned W2 fixed work; engine comparisons and observer estimates are diagnostic only',
         'ctrs_binary_sha256': runner.sha256_file(binary), 'source_contract': pin,
         'source_sha256': {str(path.relative_to(runner.REPO)): runner.sha256_file(path) for path in
             (Path(__file__), Path(runner.__file__), runner.COLLECT, Path(ownership.__file__),
@@ -114,70 +189,37 @@ def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operation
         thread.start()
         refs = {name.rsplit('/', 1)[1]: f'127.0.0.1:{server.server_port}/{name}@{digest}'
                 for name, digest in portfolio.manifests.items()}
-        for name in ('ctrs', 'orbstack'):
-            directory = root / name
-            directory.mkdir()
-            store = runner.REPO / '.work/tmp' / ('sc-' + uuid.uuid4().hex[:8]) if name == 'ctrs' else None
-            engine = resource_pilot.ResourceEngine(name, run_id, refs, directory, fresh_dir=store)
-            identity = None
-            try:
-                engine.ensure_up()
-                for image in ('api', 'postgres', 'redis'):
-                    cp = engine.sh(['pull', refs[image]], timeout=180)
-                    (directory / (image + '-pull.log')).write_text(cp.stdout + cp.stderr)
-                resource_pilot.verify_images(engine, refs, directory)
-                resource_pilot.warmup_api(engine, refs['api'])
-                identity = ownership.discover(name, Path(engine.socket.removeprefix('unix://')), engine.dir)
-                if name == 'ctrs':
-                    resource_pilot.verify_binary(identity, runner.sha256_file(binary))
-                resource_pilot.save(directory / 'running-engine.json', identity)
-                resource_pilot.save(directory / 'engine-info.json', runner.safe_engine_info(engine))
-                for pair in range(1, pairs + 1):
-                    modes = [runner.SamplingMode.BOUNDARIES, runner.SamplingMode.PERIODIC]
-                    if pair % 2 == 0:
-                        modes.reverse()
-                    for mode in modes:
-                        trial = directory / f'{pair}-{mode.value}'
-                        trial.mkdir()
-                        resource_pilot.host_snapshot(trial, 'before')
-                        ctx.workload_params = {'operations': operations, 'concurrency': 4, 'write_ratio': .3, 'seed': 7 + pair}
-                        rec = runner.trial_w2(ctx, engine, 'sampler-' + mode.value, 4, 20, .3, 7 + pair,
-                                              operations, sampling=mode)
-                        rec.update(measurement_valid=False, measurement_invalidation='observer diagnostic; host exclusivity not certified',
-                                   calibration_pair=pair, sampling_mode=mode.value, engine_server_version=runner.safe_version(engine))
-                        ctx.write(rec)
-                        resource_pilot.host_snapshot(trial, 'after')
-                        row = _trial_totals(rec, operations) | {'engine': name, 'pair': pair,
-                            'sampling_mode': mode.value, 'trial_id': rec['trial_id']}
-                        result['records'].append(row)
-                        resource_pilot.save(root / 'result.json', result)
-            finally:
-                primary = sys.exc_info()[1]
-                if store is not None:
-                    result['ctrs_store'] = str(store)
-                    result['native_stop_verified'] = False
+        with ExitStack() as stack:
+            engines = {}
+            binary_hash = runner.sha256_file(binary)
+            for pair, name, mode in _trial_schedule(pairs):
+                if name not in engines:
+                    engines[name] = stack.enter_context(_prepared_engine(name, run_id, root, refs, binary_hash, result))
+                engine = engines[name]
+                trial = root / name / f'{pair}-{mode.value}'
+                trial.mkdir()
+                resource_pilot.host_snapshot(trial, 'before')
                 try:
-                    engine.stop()
-                    if store is not None:
-                        current = getattr(engine, 'measurement_identity', {})
-                        known = [*(identity or {}).get('required_processes', []), *current.get('required_processes', [])]
-                        deadline = time.monotonic() + 10
-                        while known:
-                            table = ownership.process_table()
-                            live = [p['pid'] for p in known
-                                    if table.get(p['pid'], {}).get('start_identity') == p['start_identity']]
-                            if not live or time.monotonic() >= deadline:
-                                result['native_stop_verified'] = not live
-                                break
-                            time.sleep(.2)
-                        if not result['native_stop_verified']:
-                            result['cleanup_errors'].append('native stop not verified')
-                except BaseException as exc:
-                    result['cleanup_errors'].append(repr(exc))
-                    if primary is None:
-                        raise
-            if result['cleanup_errors']:
-                raise RuntimeError('observer control cleanup failed')
+                    resource_pilot.warmup_api(engine, refs['api'])
+                    resource_pilot.save(trial / 'engine-info-before.json', runner.safe_engine_info(engine))
+                    ctx.workload_params = {'operations': operations, 'concurrency': concurrency,
+                                           'write_ratio': .3, 'seed': 7 + pair}
+                    rec = runner.trial_w2(ctx, engine, 'sampler-' + mode.value, concurrency, 20, .3, 7 + pair,
+                                          operations, sampling=mode)
+                finally:
+                    resource_pilot.host_snapshot(trial, 'after')
+                    resource_pilot.save(trial / 'engine-info-after.json', runner.safe_engine_info(engine))
+                rec.update(measurement_valid=False, measurement_invalidation='observer diagnostic; host exclusivity not certified',
+                           calibration_pair=pair, sampling_mode=mode.value, engine_server_version=runner.safe_version(engine))
+                ctx.write(rec)
+                row = {'engine': name, 'pair': pair, 'sampling_mode': mode.value, 'trial_id': rec['trial_id']}
+                result['records'].append(row)
+                try:
+                    row.update(_trial_totals(rec, operations))
+                except (KeyError, TypeError, ValueError) as exc:
+                    row['error'] = str(exc)
+                    raise
+                resource_pilot.save(root / 'result.json', result)
         result['comparison'] = _paired_controls(result['records'], pairs)
         result['status'] = 'passed' if not result['cleanup_errors'] else 'failed'
     except BaseException as exc:
