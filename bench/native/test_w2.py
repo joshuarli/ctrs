@@ -107,7 +107,7 @@ class FixedRateTests(unittest.TestCase):
     def test_paced_exact_work_and_late_backlog(self):
         code, healthy, writes = self.run_load(0)
         self.assertEqual(code, 0 if healthy['offered_rate_valid'] else 1)
-        self.assertEqual(healthy['fixture_version'], 'w2-v3-fixed-rate')
+        self.assertEqual(healthy['fixture_version'], 'w2-v3.1-fixed-rate')
         self.assertEqual(healthy['mode'], 'fixed-rate')
         self.assertEqual(healthy['errors'], 0)
         self.assertEqual((healthy['planned_requests'], healthy['offered_requests'],
@@ -127,23 +127,24 @@ class FixedRateTests(unittest.TestCase):
         self.assertGreater(delayed['latency_ms']['p99'], 400)
         self.assertGreater(delayed['latency_ms']['p99'], delayed['service_latency_ms']['p99'])
 
-    def test_healthy_delivery_with_controlled_clock(self):
+    def scripted_load(self, delays, request_rate=10, sleep_overshoot=0.0):
         clock = [0.0]
+        response_delays = iter(delays)
         connection = Mock()
         response = Mock(status=200)
         payload = json.dumps({'items': [{'id': i, 'name': f'item-{i}'} for i in range(1, 26)]}).encode()
         def read():
-            clock[0] += .004
+            clock[0] += next(response_delays)
             return payload
         response.read.side_effect = read
         connection.getresponse.return_value = response
         def sleep(seconds):
             self.assertGreater(seconds, 0)
-            clock[0] += seconds
+            clock[0] += seconds + sleep_overshoot
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'load.json'
-            argv = ['v3.py', '--url', 'http://unused', '--operations', '3',
-                    '--concurrency', '1', '--request-rate', '10', '--write-ratio', '0', '--out', str(output)]
+            argv = ['v3.py', '--url', 'http://unused', '--operations', str(len(delays)),
+                    '--concurrency', '1', '--request-rate', str(request_rate), '--write-ratio', '0', '--out', str(output)]
             with patch.object(rate_load.sys, 'argv', argv), \
                     patch.object(rate_load.time, 'monotonic', side_effect=lambda: clock[0]), \
                     patch.object(rate_load.time, 'sleep', side_effect=sleep), \
@@ -152,12 +153,26 @@ class FixedRateTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as result:
                     rate_load.main()
             summary = json.loads(output.read_text())
-        self.assertEqual(result.exception.code, 0)
+        return result.exception.code, summary
+
+    def test_healthy_delivery_with_controlled_clock(self):
+        code, summary = self.scripted_load([.004] * 3)
+        self.assertEqual(code, 0)
         self.assertTrue(summary['offered_rate_valid'])
         self.assertEqual(summary['late_requests'], 0)
         self.assertEqual([row['slot'] for row in summary['slots']], [0, 1, 2])
         self.assertEqual(summary['delivered_requests'], 3)
         self.assertAlmostEqual(summary['latency_ms']['p99'], 4.0)
+
+    def test_one_late_response_does_not_rebase_future_slots(self):
+        code, summary = self.scripted_load([.020, .001, .001, .001, .001], request_rate=125,
+                                           sleep_overshoot=.001)
+        self.assertEqual(code, 1)
+        self.assertFalse(summary['offered_rate_valid'])
+        self.assertEqual(summary['delivered_requests'], 5)
+        self.assertEqual(summary['late_requests'], 1)
+        self.assertGreater(summary['slots'][1]['start_lag_ms'], 10)
+        self.assertLess(summary['slots'][-1]['start_lag_ms'], 2)
 
     def test_invalid_options_rejected_before_engine_access(self):
         import runner

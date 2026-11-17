@@ -12,9 +12,10 @@ Invalid combinations fail before engine access. Existing fixed-work and duration
 saturation modes keep their defaults and use the v2 client.
 
 Each request has one absolute scheduled slot shared across the workers. A slow
-request does not reset later deadlines. Once a worker exceeds the 10ms schedule
-lag budget, it keeps pacing rather than bursting to catch up; original deadlines
-and accumulated lag remain in every slot. All planned operations are attempted.
+request does not reset later deadlines. An overdue request starts when its
+worker becomes available; its original deadline and accumulated lag remain.
+Recovery cannot erase an earlier late slot or make the entire run valid.
+All planned operations are attempted.
 Any late slot, failed request or incomplete work invalidates rate delivery and
 returns failure. The client records planned/offered/delivered counts and every
 slot's lag, completion latency and success.
@@ -24,6 +25,9 @@ including queued time. `service_latency_ms` retains issue-to-response latency.
 Late backlog cannot appear as low latency merely because requests waited outside
 the HTTP call. Successful-request latency excludes failures, which remain errors
 and prevent a pass. Never pool v2 closed-loop or v3 paced records.
+Version v3.1 removes v3's re-pacing after lateness: one delayed response plus
+timer overshoot otherwise permanently shifted later requests. The regression
+fails on v3 (four late slots) and passes on v3.1 (one late slot, still invalid).
 
 Example exploratory command, using the runner's existing prepared engine inputs:
 
