@@ -42,14 +42,6 @@ class ResourcePins(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'installed image identity'):
                 pilot.verify_images(engine, pins, Path('.'))
 
-    def test_cleanup_is_project_scoped(self):
-        commands = []
-        engine = SimpleNamespace(sh=lambda args, **kwargs: commands.append(args) or SimpleNamespace(stdout='owned-id\n' if args[0] == 'ps' else ''))
-        pilot.runner.compose_down(engine, 'owned-project')
-        self.assertEqual(commands[0][-3:], ['down', '-v', '--remove-orphans'])
-        self.assertIn('name=owned-project', commands[1])
-        self.assertEqual(commands[2], ['rm', '-f', 'owned-id'])
-
     def test_running_binary_identity(self):
         identity = {'required_processes': [{'role': 'daemon', 'executable': {'sha256': 'other'}}]}
         with self.assertRaisesRegex(ValueError, 'running daemon'):
@@ -67,13 +59,48 @@ class ResourcePins(unittest.TestCase):
         engine.sh = lambda args, **kwargs: commands.append((args, kwargs)) or SimpleNamespace(stdout=json.dumps(pilot.mixed_cycle.PIN['api_files_sha256']))
         engine.compose('project', ['up', '-d'])
         engine.compose('project', ['ps', '-q', 'api'])
-        pilot.warmup_api(engine, pins['api'])
+        with patch.object(pilot.ci_jobs, 'cleanup') as cleanup:
+            pilot.warmup_api(engine, pins['api'])
+        owner = commands[2][0][commands[2][0].index('--name') + 1]
+        cleanup.assert_called_once_with(engine, owner, owner)
         self.assertEqual(saved[0]['services'], {'api': {'image': pins['api']}, 'db': {'image': pins['postgres']}, 'cache': {'image': pins['redis']}})
         self.assertEqual(commands[0][0][-5:], ['up', '-d', '--no-build', '--pull', 'never'])
         self.assertIn('/run/compose-override.json', commands[0][0])
         self.assertIn('/run/compose-override.json', commands[1][0])
-        self.assertEqual(commands[2][0][:4], ['run', '--rm', '--pull=never', pins['api']])
+        self.assertEqual(commands[2][0][:3], ['run', '--rm', '--pull=never'])
+        self.assertIn(pins['api'], commands[2][0])
+        self.assertIn('dev.ctrs.campaign.run=' + owner, commands[2][0])
+        self.assertEqual(commands[2][0][commands[2][0].index('--network') + 1], 'none')
         self.assertTrue(commands[0][1]['check'] is False)
+
+    def test_source_mismatch_cleans_only_verified_warmup(self):
+        commands = []
+        def sh(args, **kwargs):
+            commands.append(args)
+            if args[0] == 'run':
+                return SimpleNamespace(stdout='{}')
+            if args[0] == 'inspect':
+                owner = commands[0][commands[0].index('--name') + 1]
+                return SimpleNamespace(returncode=0, stdout=json.dumps([
+                    {'Config': {'Labels': {'dev.ctrs.campaign.run': owner}}}]))
+            return SimpleNamespace(returncode=0)
+        engine = SimpleNamespace(sh=sh)
+        with self.assertRaisesRegex(ValueError, 'API contents differ'):
+            pilot.warmup_api(engine, refs()['api'])
+        owner = commands[0][commands[0].index('--name') + 1]
+        self.assertEqual(commands[1:], [['inspect', owner], ['rm', '-f', owner]])
+
+    def test_warmup_cleanup_rejects_foreign_container(self):
+        commands = []
+        def sh(args, **kwargs):
+            commands.append(args)
+            if args[0] == 'run':
+                return SimpleNamespace(stdout='{}')
+            return SimpleNamespace(returncode=0, stdout=json.dumps([
+                {'Config': {'Labels': {'dev.ctrs.campaign.run': 'foreign'}}}]))
+        with self.assertRaisesRegex(RuntimeError, 'ownership mismatch'):
+            pilot.warmup_api(SimpleNamespace(sh=sh), refs()['api'])
+        self.assertEqual([args[0] for args in commands], ['run', 'inspect'])
 
 
 if __name__ == '__main__':

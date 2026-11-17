@@ -53,9 +53,11 @@ TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/resource_pilot.py \
 
 Both options are required. The refs file must contain the five mixed-portfolio
 references; the three W2 images must already be installed with matching ARM64
-digests and DiffIDs. The API source and running ctrs daemon binary are checked.
-Compose cannot build or pull images, and warmup cannot pull. The plan records
-the pins and source hashes. These checks have not yet been proved by a native
+digests and DiffIDs before warmup. The pinned, network-isolated warmup boots the
+guest and checks API source; its uniquely named container is cleaned up only
+after ownership verification. The live ctrs daemon binary is then checked before
+resource trials. Compose cannot build or pull images, and warmup cannot pull.
+The plan records the pins and source hashes. These checks have not yet been proved by a native
 resource run and do not establish qualification.
 
 The supplied storage files must be nonsymlink regular files open by an identified engine
