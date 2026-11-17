@@ -201,6 +201,10 @@ def setup(tag, pid, trace=TRACE, state=STATE):
                                      'formats': formats}, sort_keys=True))
         instance.mkdir()
         made_instance = True
+        _write(instance / 'trace_clock', 'mono')
+        trace_clock = (instance / 'trace_clock').read_text().strip()
+        if '[mono]' not in trace_clock:
+            raise RuntimeError('owned trace instance did not select monotonic clock')
         for definition in definitions:
             _write(trace / 'kprobe_events', definition)
             owned_defs.append(definition)
@@ -227,6 +231,7 @@ def setup(tag, pid, trace=TRACE, state=STATE):
             'block_rq_complete': flush_filter,
         }
         receipt['formats'] = formats
+        receipt['trace_clock'] = trace_clock
         receipt['scope'] = {'backend_pid': pid, 'device': '/dev/vda',
                             'device_major_minor': device, 'device_filter_value': device_filter_value,
                             'instance': str(instance)}
@@ -320,7 +325,7 @@ def stop(tag, trace=TRACE, state=STATE):
     result = {'status': status, 'scope': receipt['scope'], 'identity': {
         'tag': tag, 'backend_pid': receipt['pid'], 'definitions': receipt['definitions']},
         'raw_trace': raw_trace, 'per_cpu_loss': loss, 'event_formats': receipt['formats'],
-        'filters': receipt['filters'], 'probe_profile': profile}
+        'filters': receipt['filters'], 'probe_profile': profile, 'trace_clock': receipt['trace_clock']}
     return result
 
 
