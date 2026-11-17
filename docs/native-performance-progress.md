@@ -4,10 +4,52 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-Resume steering: storage review repairs, real W8 content-unique validation and
-20-phase native engine-resource accounting are accepted below. Measurement
-exclusivity limits W2 acceptance. Continue W8 fixture-service resource accounting
-and under-pull application-load coverage while foreign host work prevents timing.
+Resume steering: storage repair, pinned W8 warmup, service-resource coverage and
+fixed under-pull work are accepted below. W8 paired execution/reporting is
+integrated as 2769bd0 with parent repairs through 78c9145. Source worker
+`usrw_93079a50-48c8-474d-a095-65c3791b64c5` is terminal succeeded. Its retained
+tree `.work/wt/np-w8-paired` preserves the original bfcf4a9 source for review.
+Under-load diagnostic pair `w8-paired-5db1bf25cd77` passes both legs,
+24 complete scopes, identical paired inputs, actual candidate/guest hashes and
+readiness before background drain. Reporter has no metadata gaps and correctly
+rejects all diagnostic timings (zero ratios). Command SIGTERM proof
+`w8-paired-281d436905d4` preserves -15, client -15, owned stack cleanup and a partial
+1/2-record receipt; interruption is now distinct from ordinary failure.
+Two-pair default-mode proof `w8-paired-9e18895467fc` completes real AB/BA order,
+21 scopes each and exact outputs, but does NOT prove continuous hot residency:
+daemon PID 26527 persists while VM 26530 becomes 27136. The owned daemon log
+records normal `VM asleep` at 02:15:45 UTC, idle_s=60; source
+`Engine::start_sleeper`/`sleep_if_idle` confirms no runtime defect is established.
+Resident proof `w8-paired-f8cf4ddcd42e` then passes all four real AB/BA legs and
+21 complete scopes each. The ctrs daemon and VM kernel-start identities remain
+unchanged across a 100.553-second between-trial gap. Shared inputs match within
+each pair and differ between pairs. `resident-proof.json` captures those facts.
+Only the owned benchmark daemon uses `CTRS_IDLE_SECS=0`. Caller environment is
+restored, adopted daemons with unknown idle policy are refused, and identity
+drift fails validation. This is a **resource-matched resident control**, not the
+installed-default lane. Product idle policy and idle/wake/reclaim cells are open.
+Both diagnostic reports reject all timings and produce no ratios. Planned and
+completed record counts, source and actual running binary hashes, raw workflow
+boundaries, nested scopes, host snapshots and reports are retained per run.
+Native `w8-image-id-guard-20261116` accepts unseen IDs and rejects cached variants
+on both engines using the correct store-specific ID kind. Failed engine discovery
+cannot be hidden by fixture counters. All 201 harness tests pass.
+
+Command: `TMPDIR=$PWD/.work/tmp python3.14 bench/native/runner.py w8-baseline --layout .work/native-perf/inputs/w8-portfolio-v2/layout --ctrs-binary .work/tmp/disk-expand-target/release/ctrs --pairs 2 --diagnostic`.
+Add `--under-load` for the distinct fixed-work mode. Generic proxy W8 scoring
+entry points now refuse with this replacement command. CLI/sampler footprints,
+allocated storage, sub-API guest-cache absence, frozen observer acceptance,
+installed-default comparisons and full qualification remain unproved.
+
+Next: recheck exclusivity and execute the predeclared W2 ten-block observer
+confirmation in `diagnostics/w2-counters.md`. If busy, defer timing and investigate
+the reproduced normal-shutdown error classification: owned daemon logs report
+"the VM stopped unexpectedly" immediately after planned SIGTERM, while current
+`engine.rs:1202` distinguishes sleep but not shutdown. Preserve genuine crash
+reporting. This is an observability lead, not proof of an unexplained VM death.
+Do not repeat completed W8 diagnostic or short W11 proofs. No measured job is
+active. Niceforge still contaminated the latest preflight;
+the earlier async quiet-window request is pending. Continue independent work.
 No runtime policy change is accepted.
 Read the [contract](campaign-native-performance.md), then inspect
 `git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
@@ -356,10 +398,11 @@ No measured Mac job is active.
 3. Interleave resource cycles, freeze inputs and collect declared five-cycle/
    30s minima with exclusive host use. Command and budgets:
    `bench/native/diagnostics/resources.md`. Unknown cache/allocation stays unknown.
-4. W8 content-unique preparation is integrated at 00ac842 and the real generation,
-   full-transfer/marker/application proofs pass above. Next: scored phase/resource
-   integration and guest pre-content-state accounting. No history is pooled with
-   the common portfolio; API image absence is not complete guest-cache absence.
+4. W8 representative paired execution and reporting now pass the functional proofs
+   above, including shared inputs, AB/BA order, resident control, complete native
+   scopes and deliberate invalidation of diagnostic timing. Next: exclusive
+   paired acceptance and guest pre-content-state accounting. Installed-default
+   coverage remains separate. Do not pool common, derived or older proxy histories.
 5. Existing-disk expansion is proved/integrated. Audit Cached+Fsync, guest flush,
    Full synchronization and
    promised failure guarantees. Normal restart/upgrade proof is not power-loss
