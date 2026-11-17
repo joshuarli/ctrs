@@ -41,16 +41,43 @@ entry points now refuse with this replacement command. CLI/sampler footprints,
 allocated storage, sub-API guest-cache absence, frozen observer acceptance,
 installed-default comparisons and full qualification remain unproved.
 
-Next: recheck exclusivity and execute the predeclared W2 ten-block observer
-confirmation in `diagnostics/w2-counters.md`. If busy, defer timing and investigate
-the reproduced normal-shutdown error classification: owned daemon logs report
-"the VM stopped unexpectedly" immediately after planned SIGTERM, while current
-`engine.rs:1202` distinguishes sleep but not shutdown. Preserve genuine crash
-reporting. This is an observability lead, not proof of an unexplained VM death.
-Do not repeat completed W8 diagnostic or short W11 proofs. No measured job is
-active. Niceforge still contaminated the latest preflight;
-the earlier async quiet-window request is pending. Continue independent work.
-No runtime policy change is accepted.
+Current experiment: finite job
+`.work/tmp/w2-affinity-explore-20261116/job`, ID
+`1e855e77f2ed4713ad5a714e3d0e28a7`, runs nine predeclared diagnostic blocks:
+three rotated rounds of default/all, CPU0, CPU0,1 API affinity, both engines,
+50k operations per off/on phase, alternating engine/mode order. Source and
+baseline binary/guest inputs are frozen by `inputs.json`; do not edit/rebuild
+them until terminal. Only this job owns native workloads. Its plan retains
+contention and failures and stops on the first failure without replacement.
+All timings and qualification are explicitly ineligible. Inspect its terminal
+receipt once, aggregate profiles by CPU set without pooling defaults, then
+choose the next mechanism experiment. Real ten-block exclusive observer
+confirmation remains required before kernel candidate selection or speed claims.
+
+The preceding stock exploratory batch stopped on its first block
+`w2-cpu-20261116T185652-c15a`: an analyzer falsely interpreted the valid kernel
+symbol `blkcg_maybe_throttle_current` as a perf throttle diagnostic. Fix 2756b7f
+distinguishes parsed frames from diagnostic text while still rejecting raw
+loss/throttle records. Twelve focused CPU tests pass. Reanalysis is saved beside
+the original failed receipt; the aborted batch is not silently converted into
+completed pairs. Niceforge/OrbStack contention remains recorded and unqualified.
+
+Shutdown classification fix ae7b63e sets the existing expected-stop flag only
+immediately before intentional VM shutdown; a crash during container grace still
+uses the unexpected-loss path. Native `conformance/vm-stop.py` exercises idle,
+wake, injected loss/recovery and SIGTERM. Baseline 37bec61b… FAILS with unexpected
+count 1→2; signed candidate 6f4dff55… PASSES with 1→1. Both clean up successfully.
+Receipts: `.work/tmp/vm-stop-dg57yw9k/` and `vm-stop-821ch53a/`. Candidate size
+6,651,912 bytes versus baseline 6,613,856; this is a correctness repair, not a
+performance promotion. `cargo check -p ctrs` and the isolated two-job release
+build pass. No guest, durability or installed-default idle policy changed.
+
+Bounded offline commands now require an explicit component:
+`python3.14 bench/native/runner.py check w2|w8|resources`. Missing/full selections,
+zero tests, skips, import errors, failures and timeout fail closed. Parent checks:
+7 selector contract tests; W2 44 tests in 1.612s; W8 62 and resources 56 tests
+pass. Full discovery/workspace/conformance/qualification remain manual-only;
+see `bench/native/README.md`. Do not repeat completed W8 or short W11 proofs.
 Read the [contract](campaign-native-performance.md), then inspect
 `git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
 Resumed source milestones: W8 bc6625f reviewed and integrated as 00ac842;
