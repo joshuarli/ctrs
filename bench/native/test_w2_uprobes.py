@@ -3,7 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent / 'diagnostics'))
 import w2_uprobes_guest as trace
@@ -135,6 +135,46 @@ class TraceTests(unittest.TestCase):
                 trace.setup(TAG, '1')
         self.writer.assert_not_called()
 
+    def test_library_read_is_bounded_and_oversized_file_is_not_read(self):
+        import hashlib
+        path = Path(self.tmp.name) / 'library'
+        path.write_bytes(b'abcdef')
+        with path.open('rb') as real_stream:
+            stream = MagicMock(wraps=real_stream)
+            stream.__enter__.return_value = stream
+            with patch.object(trace, 'LIBRARY', path), patch.object(trace, 'LIBRARY_SIZE', 5), \
+                    patch.object(Path, 'open', return_value=stream):
+                with self.assertRaisesRegex(RuntimeError, 'digest mismatch'):
+                    REAL_IDENTITY()
+                stream.read.assert_not_called()
+            with patch.object(trace, 'LIBRARY', path), patch.object(trace, 'LIBRARY_SIZE', 6), \
+                    patch.object(trace, 'LIBRARY_SHA256', hashlib.sha256(b'abcdef').hexdigest()), \
+                    patch.object(Path, 'open', return_value=stream):
+                REAL_IDENTITY()
+                stream.read.assert_called_once_with(7)
+
+    def test_wrong_filter_readback_rolls_back_only_owned_probes(self):
+        foreign = {'uprobe_events': 'p:other/other_u /foreign:0x0',
+                   'kprobe_events': 'p:other/other_k __arm64_sys_read'}
+        for name, line in foreign.items():
+            (self.trace / name).write_text(line + '\n')
+        def wrong_filter(path, value):
+            self.write(path, 'common_pid == 999' if path.name == 'filter' else value)
+        self.writer.side_effect = wrong_filter
+        with self.assertRaisesRegex(RuntimeError, 'filter readback mismatch'):
+            trace.setup(TAG, '12,34')
+        for name, line in foreign.items():
+            self.assertEqual((self.trace / name).read_text().splitlines(), [line])
+        self.assertFalse((self.trace / 'instances' / TAG).exists())
+        self.assertFalse((self.state / (TAG + '.json')).exists())
+
+    def test_filter_readback_allows_only_whitespace_differences(self):
+        def spaced_filter(path, value):
+            self.write(path, 'common_pid==12||common_pid==34' if path.name == 'filter' else value)
+        self.writer.side_effect = spaced_filter
+        trace.setup(TAG, '12,34')
+        trace.cleanup(TAG)
+
     def test_changed_definition_refuses_cleanup_before_any_mutation(self):
         trace.setup(TAG, '1')
         path = self.trace / 'kprobe_events'
@@ -165,6 +205,19 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(result['status'], 'invalid')
         self.assertTrue(any('overrun' in e for e in result['errors']))
         self.assertTrue(any('profile' in e for e in result['errors']))
+        trace.cleanup(TAG)
+
+    def test_stop_rejects_changed_clock_and_buffer(self):
+        trace.setup(TAG, '1')
+        trace.start(TAG)
+        self.profiles()
+        instance = self.trace / 'instances' / TAG
+        (instance / 'trace_clock').write_text('mono [global]')
+        (instance / 'buffer_size_kb').write_text('8192')
+        result = trace.stop(TAG)
+        self.assertEqual(result['status'], 'invalid')
+        self.assertIn('trace clock changed or unavailable', result['errors'])
+        self.assertIn('trace buffer size changed or unavailable', result['errors'])
         trace.cleanup(TAG)
 
 
