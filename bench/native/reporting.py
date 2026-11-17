@@ -185,6 +185,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "missing or duplicated trial order"
         elif workload_params(a[0]) != workload_params(b[0]):
             reason = "executed parameters or seeds differ"
+        elif identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == "w8-paired-v1" and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
+            reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
         if not reason and any(r.get("measurement_valid") is False for r in (*a, *b)):
@@ -201,6 +203,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
         result["note"] = "Reliability observations only; no request/window/churn speed verdicts."
         return result
     metrics = [*CASE_METRICS.get(identity["case"], []), *RESOURCE_METRICS]
+    if identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == "w8-paired-v1":
+        metrics = ["pull_to_health_s", "cpu_seconds_est", "peak_phys_footprint_bytes"]
+        if identity["workload_params"].get("under_load"):
+            metrics += ["under_pull_p95_ms", "under_pull_p99_ms"]
     if identity["case"] == "W2":
         metrics.remove("cpu_seconds_est")
     if identity["case"] == "W7" and any("build_empty_s" in r.get("metrics", {}) for r in records):
@@ -216,7 +222,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             ratios.append(right / left if metric in HIGHER_BETTER else left / right)
         low, high = bootstrap_ci(ratios)
         assessment = classify(len(ratios), low, high)
-        if metric == "build_empty_s":
+        if metric == "build_empty_s" or (identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") != "w8-paired-v1"):
             assessment = "historical-only"
         elif hard_failure:
             assessment = "failed"

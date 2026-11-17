@@ -174,3 +174,8 @@ W9 v2 runs 16 fixed Marked build/test jobs at each declared concurrency, using t
 pinned common W8 image. Supply --image-ref for run/baseline/noop; see
 [the fixture contract](fixtures/w9-v2/README.md). Old timed-loop W9 records are not
 pooled with the new metrics. W11's remaining timed churn is still a diagnostic.
+
+Canonical W8 paired pilots use `w8-baseline --layout <original-v2-layout>
+--ctrs-binary <signed-ctrs>`. See [the W8 fixture guide](fixtures/w8-v3/README.md)
+for prerequisites, measurement boundaries and diagnostic mode. The generic W8
+proxy commands are retired from scoring.
