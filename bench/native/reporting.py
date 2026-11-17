@@ -13,6 +13,7 @@ import statistics
 from pathlib import Path
 
 MIN_PAIRS = 10
+W8_PAIRED_FIXTURE = 'w8-paired-v1'
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
@@ -185,7 +186,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "missing or duplicated trial order"
         elif workload_params(a[0]) != workload_params(b[0]):
             reason = "executed parameters or seeds differ"
-        elif identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == "w8-paired-v1" and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
+        elif identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == W8_PAIRED_FIXTURE and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
@@ -203,7 +204,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
         result["note"] = "Reliability observations only; no request/window/churn speed verdicts."
         return result
     metrics = [*CASE_METRICS.get(identity["case"], []), *RESOURCE_METRICS]
-    if identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == "w8-paired-v1":
+    if identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") == W8_PAIRED_FIXTURE:
         metrics = ["pull_to_health_s", "cpu_seconds_est", "peak_phys_footprint_bytes"]
         if identity["workload_params"].get("under_load"):
             metrics += ["under_pull_p95_ms", "under_pull_p99_ms"]
@@ -222,7 +223,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             ratios.append(right / left if metric in HIGHER_BETTER else left / right)
         low, high = bootstrap_ci(ratios)
         assessment = classify(len(ratios), low, high)
-        if metric == "build_empty_s" or (identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") != "w8-paired-v1"):
+        if metric == "build_empty_s" or (identity["case"] == "W8" and identity.get("workload_params", {}).get("fixture_version") != W8_PAIRED_FIXTURE):
             assessment = "historical-only"
         elif hard_failure:
             assessment = "failed"

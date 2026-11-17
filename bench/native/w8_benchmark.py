@@ -5,14 +5,16 @@ from pathlib import Path
 import secrets
 import threading
 import traceback
+import sys
 
 import registry_portfolio
 import registry_variant
 import runner
+import reporting
 from diagnostics import registry_variant_pilot as pilot
 from diagnostics.resource_pilot import host_snapshot
 
-FIXTURE = 'w8-paired-v1'
+FIXTURE = reporting.W8_PAIRED_FIXTURE
 SCOPE = 'w8-whole-workflow-v1'
 
 
@@ -49,14 +51,25 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     gate_fn = gate_fn or gate
     contract = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
     registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
-    run = 'w8-paired-' + secrets.token_hex(12)
+    run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
     ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load}
     ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v2/portfolio.json'),
                            'w8_driver_sha256': runner.sha256_file(Path(__file__)),
                            'w8_pilot_sha256': runner.sha256_file(Path(pilot.__file__))})
+    outputs = ctx.provenance.get('build_outputs', {})
+    ctx.provenance.update({key: outputs[key] for key in ('ctrs_binary_sha256', 'guest_kernel_sha256',
+        'guest_initramfs_sha256', 'guest_data_sha256') if key in outputs})
+    pilot.save(ctx.results_dir / 'plan.json', {'pairs': args.pairs, 'seed': args.seed,
+        'under_load': args.under_load, 'diagnostic': args.diagnostic, 'fixture_version': FIXTURE,
+        'resource_scope': SCOPE, 'source_layout': str(args.layout), 'provenance': ctx.provenance,
+        'order': 'AB/BA', 'qualification_eligible': False})
+    print(f'results: {ctx.jsonl}', flush=True)
     engines = {name: engine_factory(name, run) for name in ('ctrs', 'orbstack')}
     failed = False
+    completed = 0
+    finished = False
+    stopped_reason = None
     try:
         for pair in range(1, args.pairs + 1):
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
@@ -75,17 +88,21 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                     rec.update(pair_id=pair, order_index=index, paired_inputs={'seed_hex': seed.hex(), 'receipt': receipt})
                     rec['correctness'] = {'ok': False, 'checks': {'workload': False}}
                     rec['measurement_valid'] = False
+                    busy_initial = False
                     try:
                         before = gate_fn(directory, 'before')
                         if not before and not args.diagnostic:
+                            busy_initial = True
                             raise RuntimeError('initial host gate busy; scored trial refused')
-                        result = measure(engine, directory, run, contract, portfolio, receipt, layout, server, args.under_load)
+                        result = measure(engine, directory, f'{run}-p{pair:03d}', contract, portfolio, receipt, layout, server, args.under_load)
                         rec['engine_server_version'] = runner.safe_version(engine)
                         info = runner.safe_engine_info(engine)
                         rec['resources'] = resource_metrics(result)
                         rec['resources']['engine'] = info or {}
                         rec['resources']['detail'] = result.get('resources', {})
-                        ok = result.get('correctness') is True and result.get('resources', {}).get('status') == 'ok' and bool(info) and rec['engine_server_version'] != 'unreachable'
+                        budgets = bool(info) and all(type(info.get(key)) is int and info[key] > 0
+                                                    for key in ('ncpu', 'mem_total_bytes'))
+                        ok = result.get('correctness') is True and result.get('resources', {}).get('status') == 'ok' and budgets and rec['engine_server_version'] != 'unreachable'
                         rec['correctness'] = {'ok': ok, 'checks': {'workload_and_resources': ok}}
                         rec['validation_errors'].extend(result.get('errors', []))
                         if ok:
@@ -105,8 +122,12 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                         if not rec['measurement_valid']:
                             rec['measurement_invalidation'] = 'diagnostic mode or host gate contamination'
                         ctx.write(rec)
-                    failed |= not rec['correctness']['ok'] or not rec['measurement_valid']
+                        completed += 1
+                    failed |= not rec['correctness']['ok'] or bool(rec['validation_errors']) or (not args.diagnostic and not rec['measurement_valid'])
                     print(f"pair {pair} {name}: {'OK' if rec['correctness']['ok'] else 'FAIL'}", flush=True)
+                    if busy_initial:
+                        stopped_reason = 'initial-host-busy'
+                        return 1
             finally:
                 if thread.ident is not None:
                     server.shutdown()
@@ -115,7 +136,16 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                     thread.join(timeout=5)
                 if thread.is_alive():
                     raise RuntimeError('registry did not terminate')
-        print(f'results: {ctx.jsonl}')
+        finished = True
         return int(failed)
     finally:
-        engines['ctrs'].stop()
+        try:
+            engines['ctrs'].stop()
+        except BaseException:
+            finished = False
+            raise
+        finally:
+            pilot.save(ctx.results_dir / 'status.json', {'state': 'complete' if finished and not failed else 'failed',
+                'completed_records': completed, 'planned_records': args.pairs * 2,
+                'stopped_reason': stopped_reason, 'error': repr(sys.exc_info()[1]) if sys.exc_info()[1] else None,
+                'timing_eligible': not args.diagnostic, 'qualification_eligible': False})

@@ -35,7 +35,7 @@ class PairedBatch(unittest.TestCase):
                     self.rows = []
                     contexts.append(self)
                 def trial_dir(self, name, case, state):
-                    path = root / str(len(self.rows)); path.mkdir(); return path
+                    path = root / f'{len(contexts)}-{len(self.rows)}'; path.mkdir(); return path
                 def new_record(self, engine, case, state, directory):
                     return dict(run_id=self.run_id, host_id='host', arch='arm64', git_sha='sha', case=case,
                                 state=state, engine=engine.name, workload_params=dict(self.workload_params),
@@ -74,6 +74,23 @@ class PairedBatch(unittest.TestCase):
                 if change == 'diagnostic': altered[0]['measurement_valid'] = False
                 if change == 'duplicate': altered.append(altered[0])
                 self.assertTrue(reporting.analyze(altered)['cohorts'][0]['rejections'], change)
+            args.diagnostic = True
+            with mock.patch.object(w8.runner, 'RunContext', Context), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
+                 mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
+                 mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 100}):
+                code = w8.run_batch(args, engine_factory=Engine, measure=measure, prepare=prepare,
+                                    serve=lambda *a: Server(), gate_fn=lambda *a: False)
+            self.assertEqual(code, 0)
+            diagnostic = contexts[-1].rows
+            self.assertTrue(all(r['correctness']['ok'] and not r['measurement_valid'] for r in diagnostic))
+            cohort = reporting.analyze(diagnostic)['cohorts'][0]
+            self.assertEqual(cohort['valid_pairs'], 0)
+            self.assertTrue(all(m['ratio_median'] is None for m in cohort['metrics']))
+            status = json.loads((root / 'status.json').read_text())
+            self.assertEqual(status['completed_records'], status['planned_records'])
+            self.assertFalse(status['timing_eligible'])
 
     def test_failed_leg_is_retained_and_ctrs_is_stopped(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -104,6 +121,28 @@ class PairedBatch(unittest.TestCase):
             self.assertTrue(all('failed leg' in ''.join(r['validation_errors']) for r in records))
             self.assertTrue(reporting.analyze(records)['cohorts'][0]['rejections'])
             self.assertEqual((instances['ctrs'].stops, instances['orbstack'].stops), (1, 0))
+
+    def test_measurement_does_not_swallow_cancellation(self):
+        engine = mock.Mock(name='engine')
+        engine.name = 'ctrs'
+        contract = {'images': {'np-v2/api': {'config': 'sha256:api'}}}
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.object(w8.pilot, 'prepare_warm_engine', side_effect=SystemExit(143)), \
+             mock.patch.object(w8.pilot, 'finish_engine') as finish:
+            with self.assertRaises(SystemExit) as signal:
+                w8.pilot.measure_engine(engine, Path(temp), 'run', contract,
+                    mock.Mock(manifests={}), {}, Path(temp), mock.Mock())
+        self.assertEqual(signal.exception.code, 143)
+        self.assertFalse(finish.call_args.kwargs['stop'])
+        engine.stop.assert_not_called()
+
+    def test_trial_names_do_not_collide_after_engine_project_truncation(self):
+        import runner
+        run = 'w8-paired-' + 'a' * 12
+        projects = [runner.project_name(f'{run}-p{pair:03d}', engine, case)
+            for pair in (1, 100) for engine in ('ctrs', 'orbstack')
+            for case in ('W8v2', 'w8underpull', 'marker-api', 'marker-redis')]
+        self.assertEqual(len(projects), len(set(projects)))
 
     def test_gate_rejects_hot_tree_even_on_success(self):
         with tempfile.TemporaryDirectory() as temp:

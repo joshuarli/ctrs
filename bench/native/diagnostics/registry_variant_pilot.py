@@ -252,8 +252,10 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 if [i['Id'] for i in retained_before] != [i['Id'] for i in retained_after]:
                     raise ValueError('retained image identity changed')
             result['correctness'] = True
-    except BaseException:
+    except BaseException as exc:
         result['errors'].append(traceback.format_exc())
+        if not isinstance(exc, Exception):
+            raise
     finally:
         finish_engine(result, engine, sampler, trace, directory, stop=False)
 

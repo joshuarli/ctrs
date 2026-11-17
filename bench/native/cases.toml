@@ -111,7 +111,7 @@ id = "W8"
 family = "real-image-deployment"
 title = "paired derived common portfolio pull and deployment"
 fixture = "fixtures/w8-v3 + independent host registry"
-status = "pilot"
+status = "implemented"
 metrics = ["pull_to_health_s", "under_pull_p95_ms", "under_pull_p99_ms", "cpu_seconds_est", "peak_phys_footprint_bytes"]
 states = ["warm"]
 params = { under_load = [false, true] }
