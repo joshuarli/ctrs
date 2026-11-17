@@ -177,3 +177,39 @@ Reconstruct a retired source checkout with `git worktree add .work/wt/<name>
 <branch>`. Rebuild assets using the pinned component instructions on main; do not
 rely on retained binary locations or old symlinks. Original detailed checkpoints
 remain in Git at `2f37d02:docs/native-performance-progress.md`.
+
+## After cleanup 2026-11-17
+
+This list supersedes the earlier temporary checkout-retention inventory.
+The owner requested campaign resume after cleanup; these remaining parked trees
+have committed source and are not currently running workloads. The completed
+cleanup controller is retired. [Cleanup results](evidence/native-cleanup-resources-2026-11-17.md)
+record the 28 retirements and removed disposable stores/Docker resources.
+
+| Exact checkout under `.work/wt` | Branch | Current consumer / retained cause |
+| --- | --- | --- |
+| `np-builder-readiness` | `diagnostic/np-builder-readiness` | Diagnostic probe instrumentation; keep source branch, tool cannot retire unintegrated instrumentation. |
+| `np-durable-job` | `campaign/np-durable-job` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-durable-review` | `review/np-durable-job` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-full-sync` | `campaign/np-full-sync` | Unpromoted candidate; pending durability and exclusive resource confirmation. |
+| `np-gzip-backend` | `experiment/np-gzip-backend` | Rejected decoder candidate; source and optional assets retained. |
+| `np-lse-only` | `experiment/np-lse-only` | Rejected private kernel configuration; source and optional assets retained. |
+| `np-preempt-full` | `experiment/np-preempt-full` | Rejected private kernel configuration; source and optional assets retained. |
+| `np-ready-audit` | `diagnostic/np-ready-audit` | Diagnostic two-log observer; keep source branch, instrumentation is intentionally unintegrated. |
+| `np-resource-cells` | `campaign/np-resource-cells` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-sched-mc` | `campaign/np-sched-mc` | Rejected private kernel configuration; source and optional assets retained. |
+| `np-uprobes` | `experiment/np-uprobes` | Diagnostic private kernel; unintegrated source and optional reproducible assets. |
+| `np-vm-stop` | `fix/np-vm-stop` | Accepted source provenance but history merge conflicts in development docs; trial aborted, no new implementation. |
+| `np-w10-cache-trace` | `campaign/np-w10-cache-trace` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-w11-v2` | `campaign/np-w11-v2` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-w2-rate` | `experiment/w2-fixed-rate` | Unverified superseded proposal preserved in dabc710; compare with current implementation before retry. |
+| `np-w3-full` | `experiment/np-w3-uncached` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-w4` | `campaign/np-w4` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-w5` | `campaign/np-w5` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
+| `np-zstd-load` | `perf/zstd-load` | Rejected global default due to valid-layer expansion incompatibility; unintegrated source. |
+| `np-zstd-review` | `review/np-zstd-load` | Read-only source snapshot of rejected default; unintegrated source. |
+| `stuf89` | `fix/stuf89-help` | Unrelated original owner task; contents untouched. |
+
+The earlier branch/revision tables still preserve retired source provenance.
+Ancestor branches removed by `worktree-retire` are reachable through main's
+history. Source reconstruction uses Git, not the deleted ignored stores.
