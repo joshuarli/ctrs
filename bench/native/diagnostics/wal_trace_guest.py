@@ -10,8 +10,9 @@ import sys
 
 TRACE = Path('/sys/kernel/tracing')
 STATE = Path('/tmp')
-SCHEMA = 'npwal-trace-v1'
+SCHEMA = 'npwal-trace-v2'
 LOSS_FIELDS = ('overrun', 'commit overrun', 'dropped events')
+KRETPROBE_MAXACTIVE = 4096
 TAG_RE = re.compile(r'npwal[0-9a-f]{12}\Z')
 _NO_PID = object()
 
@@ -25,8 +26,52 @@ def validate(tag, pid=_NO_PID):
 
 def event_definitions(tag):
     group = 'npwal_' + tag[5:]
-    return [f'p:{group}/fdatasync __arm64_sys_fdatasync',
-            f'r:{group}/fdatasync_ret __arm64_sys_fdatasync ret=$retval']
+    return [f'p:{group}/{tag}_fdatasync __arm64_sys_fdatasync',
+            f'r{KRETPROBE_MAXACTIVE}:{group}/{tag}_fdatasync_ret __arm64_sys_fdatasync ret=$retval:s64']
+
+
+def encode_dev_t(device):
+    match = re.fullmatch(r'([0-9]+):([0-9]+)', device) if isinstance(device, str) else None
+    if match is None:
+        raise ValueError('device must be a major:minor pair')
+    major, minor = map(int, match.groups())
+    if major >= (1 << 12) or minor >= (1 << 20):
+        raise ValueError('device major/minor outside Linux dev_t filter encoding')
+    return (major << 20) | minor
+
+
+def block_flush_filter(device_number):
+    return f'dev == {device_number} && rwbs ~ "*F*"'
+
+
+def probe_profile_summary(text, tag):
+    """Require one well-formed profile row for each owned probe and zero misses."""
+    names = {f'{tag}_fdatasync', f'{tag}_fdatasync_ret'}
+    rows, errors = {}, []
+    if not isinstance(text, str):
+        return {'status': 'unknown', 'errors': ['kprobe_profile unavailable'], 'rows': rows}
+    for line in text.splitlines():
+        columns = line.split()
+        if not columns or columns[0] not in names:
+            continue
+        name = columns[0]
+        if name in rows:
+            errors.append(f'duplicate kprobe_profile row: {name}')
+        elif len(columns) != 3 or not columns[1].isdigit() or not columns[2].isdigit():
+            errors.append(f'malformed kprobe_profile row: {name}')
+        else:
+            rows[name] = {'hits': int(columns[1]), 'missed': int(columns[2])}
+            if int(columns[2]) != 0:
+                errors.append(f'{name}: missed={columns[2]}')
+    missing = names - rows.keys()
+    errors.extend(f'missing kprobe_profile row: {name}' for name in sorted(missing))
+    if any('missed=' in error for error in errors):
+        status = 'loss'
+    elif errors:
+        status = 'unknown'
+    else:
+        status = 'ok'
+    return {'status': status, 'errors': errors, 'rows': rows}
 
 
 def marker_path(tag, state=STATE):
@@ -74,15 +119,18 @@ def _owned(tag, trace=TRACE, state=STATE):
     if receipt.get('schema') != SCHEMA or receipt.get('tag') != tag or receipt.get('instance') != str(instance) or receipt.get('definitions') != expected_defs:
         raise RuntimeError('ownership receipt identity mismatch')
     validate(tag, receipt.get('pid'))
-    group = 'npwal_' + tag[5:]
-    flush_filter = f'dev == {receipt.get("device")} && rwbs ~ "*F*"'
+    try:
+        expected_device_number = encode_dev_t(receipt.get('device'))
+    except ValueError as exc:
+        raise RuntimeError('ownership receipt device is invalid') from exc
+    flush_filter = block_flush_filter(expected_device_number)
     expected_filters = {'fdatasync': f'common_pid == {receipt["pid"]}',
                         'fdatasync_ret': f'common_pid == {receipt["pid"]}',
                         'block_rq_issue': flush_filter, 'block_rq_complete': flush_filter}
     expected_scope = {'backend_pid': receipt['pid'], 'device': '/dev/vda',
-                      'device_number': receipt.get('device'), 'instance': str(instance)}
-    if (not isinstance(receipt.get('device'), str) or
-            not re.fullmatch(r'[0-9]+:[0-9]+', receipt['device']) or
+                      'device_major_minor': receipt.get('device'),
+                      'device_filter_value': expected_device_number, 'instance': str(instance)}
+    if (receipt.get('device_filter_value') != expected_device_number or
             receipt.get('filters') != expected_filters or receipt.get('scope') != expected_scope):
         raise RuntimeError('ownership receipt scope or filters mismatch')
     if not instance.is_dir():
@@ -125,9 +173,12 @@ def setup(tag, pid, trace=TRACE, state=STATE):
         raise RuntimeError('tracefs instance already exists; refuse adoption')
     global_lines = _global_definitions(trace)
     names = {line.split(' ', 1)[0] for line in global_lines}
-    if any(definition.split(' ', 1)[0] in names for definition in definitions):
+    group = 'npwal_' + tag[5:]
+    if (any(definition.split(' ', 1)[0] in names for definition in definitions) or
+            any(':' + group + '/' in line.split(' ', 1)[0] for line in global_lines)):
         raise RuntimeError('namespaced kprobe name already exists; refuse adoption')
     device = _device()
+    device_filter_value = encode_dev_t(device)
     block_events = ('block/block_rq_issue', 'block/block_rq_complete')
     formats = {name: _format(trace / 'events' / name / 'format') for name in block_events}
     owned_defs = []
@@ -139,7 +190,8 @@ def setup(tag, pid, trace=TRACE, state=STATE):
             made_marker = True
             output.write(json.dumps({'schema': SCHEMA, 'tag': tag, 'pid': pid,
                                      'instance': str(instance), 'definitions': definitions,
-                                     'device': device, 'formats': formats}, sort_keys=True))
+                                     'device': device, 'device_filter_value': device_filter_value,
+                                     'formats': formats}, sort_keys=True))
         instance.mkdir()
         made_instance = True
         for definition in definitions:
@@ -149,14 +201,15 @@ def setup(tag, pid, trace=TRACE, state=STATE):
         if any(actual.count(definition) != 1 for definition in definitions):
             raise RuntimeError('created kprobe definitions differ from requested definitions')
         formats.update({name: (instance / 'events' / name / 'format').read_text()
-                        for name in (f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret')})
-        for event in (f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret'):
+                        for name in (f'npwal_{tag[5:]}/{tag}_fdatasync', f'npwal_{tag[5:]}/{tag}_fdatasync_ret')})
+        for event in (f'npwal_{tag[5:]}/{tag}_fdatasync', f'npwal_{tag[5:]}/{tag}_fdatasync_ret'):
             _write(instance / 'events' / event / 'filter', f'common_pid == {pid}')
-        flush_filter = f'dev == {device} && rwbs ~ "*F*"'
+        flush_filter = block_flush_filter(device_filter_value)
         for event in block_events:
             _write(instance / 'events' / event / 'filter', flush_filter)
         # A fresh instance starts disabled and empty; no global trace buffer is touched.
-        for event in (f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret', *block_events):
+        for event in (f'npwal_{tag[5:]}/{tag}_fdatasync',
+                      f'npwal_{tag[5:]}/{tag}_fdatasync_ret', *block_events):
             _write(instance / 'events' / event / 'enable', 0)
         _write(instance / 'tracing_on', 0)
         receipt = _read_json(marker)
@@ -166,7 +219,9 @@ def setup(tag, pid, trace=TRACE, state=STATE):
             'block_rq_issue': flush_filter,
             'block_rq_complete': flush_filter,
         }
-        receipt['scope'] = {'backend_pid': pid, 'device': '/dev/vda', 'device_number': device,
+        receipt['formats'] = formats
+        receipt['scope'] = {'backend_pid': pid, 'device': '/dev/vda',
+                            'device_major_minor': device, 'device_filter_value': device_filter_value,
                             'instance': str(instance)}
         marker.write_text(json.dumps(receipt, sort_keys=True))
         return {'status': 'setup', 'scope': receipt['scope'], 'filters': receipt['filters'], 'formats': formats}
@@ -187,7 +242,7 @@ def start(tag, trace=TRACE, state=STATE):
         raise RuntimeError('owned kprobe definition changed; refuse start')
     if (instance / 'tracing_on').read_text().strip() != '0':
         raise RuntimeError('owned instance is already running or has unknown tracing state')
-    events = [f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret',
+    events = [f'npwal_{tag[5:]}/{tag}_fdatasync', f'npwal_{tag[5:]}/{tag}_fdatasync_ret',
               'block/block_rq_issue', 'block/block_rq_complete']
     try:
         for event in events:
@@ -236,7 +291,7 @@ def stop(tag, trace=TRACE, state=STATE):
     if (instance / 'tracing_on').read_text().strip() != '1':
         raise RuntimeError('owned instance is not running; refuse stop')
     _write(instance / 'tracing_on', 0)
-    events = [f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret',
+    events = [f'npwal_{tag[5:]}/{tag}_fdatasync', f'npwal_{tag[5:]}/{tag}_fdatasync_ret',
               'block/block_rq_issue', 'block/block_rq_complete']
     for event in events:
         _write(instance / 'events' / event / 'enable', 0)
@@ -248,10 +303,17 @@ def stop(tag, trace=TRACE, state=STATE):
             stats_path = path / 'stats'
             stats[match.group(1)] = stats_path.read_text() if stats_path.is_file() else None
     loss = loss_summary(stats)
-    result = {'status': loss['status'], 'scope': receipt['scope'], 'identity': {
+    try:
+        profile_text = (trace / 'kprobe_profile').read_text()
+    except OSError:
+        profile_text = None
+    profile = probe_profile_summary(profile_text, tag)
+    status = ('loss' if 'loss' in (loss['status'], profile['status']) else
+              'unknown' if 'unknown' in (loss['status'], profile['status']) else 'ok')
+    result = {'status': status, 'scope': receipt['scope'], 'identity': {
         'tag': tag, 'backend_pid': receipt['pid'], 'definitions': receipt['definitions']},
         'raw_trace': raw_trace, 'per_cpu_loss': loss, 'event_formats': receipt['formats'],
-        'filters': receipt['filters']}
+        'filters': receipt['filters'], 'probe_profile': profile}
     return result
 
 
@@ -260,7 +322,7 @@ def cleanup(tag, trace=TRACE, state=STATE):
     if (instance / 'tracing_on').read_text().strip() not in ('0', '1'):
         raise RuntimeError('owned instance tracing state is unknown')
     _write(instance / 'tracing_on', 0)
-    events = [f'npwal_{tag[5:]}/fdatasync', f'npwal_{tag[5:]}/fdatasync_ret',
+    events = [f'npwal_{tag[5:]}/{tag}_fdatasync', f'npwal_{tag[5:]}/{tag}_fdatasync_ret',
               'block/block_rq_issue', 'block/block_rq_complete']
     for event in events:
         _write(instance / 'events' / event / 'enable', 0)

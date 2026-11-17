@@ -54,6 +54,21 @@ class WalTraceGuestTests(unittest.TestCase):
             with self.subTest(stats=stats):
                 self.assertEqual(wal_trace.loss_summary({'0': stats})['status'], 'loss')
 
+    def test_encoded_linux_device_filter_uses_actual_dev_t_value(self):
+        self.assertEqual(wal_trace.encode_dev_t('254:0'), 254 << 20)
+        self.assertEqual(wal_trace.block_flush_filter(254 << 20), 'dev == 266338304 && rwbs ~ "*F*"')
+        with self.assertRaises(ValueError):
+            wal_trace.encode_dev_t('4096:0')
+
+    def test_kprobe_profile_requires_both_owned_events_and_zero_misses(self):
+        tag = 'npwal0123456789ab'
+        profile = f'{tag}_fdatasync 8 0\n{tag}_fdatasync_ret 8 0\nforeign_probe 0 0'
+        self.assertEqual(wal_trace.probe_profile_summary(profile, tag)['status'], 'ok')
+        missed = profile.replace(f'{tag}_fdatasync_ret 8 0', f'{tag}_fdatasync_ret 8 1')
+        self.assertEqual(wal_trace.probe_profile_summary(missed, tag)['status'], 'loss')
+        self.assertEqual(wal_trace.probe_profile_summary(f'{tag}_fdatasync 8 0', tag)['status'], 'unknown')
+        self.assertEqual(wal_trace.probe_profile_summary(f'{tag}_fdatasync malformed', tag)['status'], 'unknown')
+
 
 if __name__ == '__main__':
     unittest.main()
