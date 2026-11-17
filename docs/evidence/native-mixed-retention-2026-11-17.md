@@ -94,3 +94,37 @@ for ctrs and
 `52debc5a4e9947de616bdc809125c2a3d42ca2f2192c4c8c87ef44c7663164ad`
 for OrbStack. The bounded working-state slice is accepted. W11 resource-growth
 accounting, frozen readiness and the12-hour legs remain open.
+
+
+## W11 v4 post-cleanup observations
+
+Job `a9856e75b2144596af2c5415301eee49` exited 0 using parked
+`campaign/w11-required-cells-20261117` at `8aa9b65`. Both engines
+completed two exact mixed cycles. Across both engines the trial verified
+20,000 API operations, 800 queue jobs, 1,600 artifacts and 64 build/test jobs.
+Every cycle kept the 500 seed rows, committed witness and named-volume identity.
+Both resource traces have v4 ownership and complete CPU counters. All 181
+frozen receipts rechecked unchanged. The ctrs ownership receipt confirms the
+accepted loaded kernel and initramfs.
+
+Each cycle recorded a 30-second post-cleanup interval. All four process
+footprint and file-descriptor observations were valid. Both ctrs private
+disk allocation observations were valid. OrbStack allocated bytes remained
+unknown because the job supplied no identified open backing file. Two cycles
+leave the five post-warmup observations required for a resource-growth
+verdict unsatisfied. The proof does not close either 12-hour leg.
+
+The separate readiness correction `0c0e10a` rejects declarations that place
+W11 correctness, persistence, durability, growth or reliability solely in
+other workloads. The new counterexample was admitted by `5bcf48a` and
+rejected after the correction. All 12 readiness tests pass. The branch stays
+parked pending the complete cell contract and actual frozen qualification inputs.
+
+Reproduce from `8aa9b65` with the short native command above, absolute paths
+to the prepared layouts and binary, and `--resource-observation-seconds 30`.
+Use a new private ctrs root. The versioned observer keeps the v3 functional
+records separate. Raw run ID is `w11-mixed-20261117T134730-e2bd`.
+Trial receipt SHA-256
+`4bae89bb68c67b49f3bb6b96c8eccecda445dfbd4aacf7e74b97dbe1b0dc84ff`.
+Job status SHA-256
+`bebd27db56322dd26c657fbbe7cad6f4e2892b735d843321556f2fb96164c39b`.
