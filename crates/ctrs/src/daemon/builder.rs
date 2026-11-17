@@ -761,7 +761,10 @@ pub fn create_for_buildx(engine: &Engine, name: Option<&str>) -> Option<Result<V
 /// endpoints (buildgrpc.rs). Same pin and lifecycle gates as classic
 /// builds; the caller reaches buildkitd's TCP listener itself.
 pub(crate) fn ensure_for_driver(engine: &Engine) -> Result<String, Error> {
-    ensure_running(engine, &mut |_| {})
+    let began = Instant::now();
+    let result = ensure_running(engine, &mut |_| {});
+    crate::diag::info!("builder driver readiness profile", elapsed_us = began.elapsed().as_micros() as u64, success = result.is_ok());
+    result
 }
 
 /// The builder, made if need be, started and answering. `say` hears what
@@ -812,8 +815,12 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str)) -> Resu
     let id = id.to_owned();
     LAST_USE.store(now_secs(), Ordering::Relaxed);
     let deadline = Instant::now() + Duration::from_secs(30);
+    let readiness_began = Instant::now();
+    let mut probes = 0_u64;
     loop {
+        probes += 1;
         if let Ok((0, _)) = engine.exec_capture(&id, &["buildctl", "debug", "workers"]) {
+            crate::diag::info!("builder worker readiness profile", elapsed_us = readiness_began.elapsed().as_micros() as u64, probes = probes, needs_start = needs_start);
             return Ok(id);
         }
         if find(engine).is_none_or(|r| r.status != Status::Running) || Instant::now() > deadline {
