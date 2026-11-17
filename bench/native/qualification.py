@@ -72,7 +72,8 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
             raise ReadinessError('unsupported readiness schema')
         if doc.get('scope') != 'native-arm64-macos' or doc.get('freeze_status') != 'frozen':
             raise ReadinessError('require a frozen native ARM64 macOS candidate')
-        if assets.get('freeze', {}).get('status') != 'frozen':
+        freeze = assets.get('freeze', {})
+        if freeze.get('status') != 'frozen':
             raise ReadinessError('assets.lock is not frozen')
         if re.fullmatch(r'[0-9a-f]{40}', str(doc.get('runtime_revision'))) is None:
             raise ReadinessError('runtime_revision must identify the built runtime source')
@@ -219,6 +220,8 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         review_path = prerequisites['complete_cell_contract']['evidence']['path']
         review = _object(json.loads(Path(review_path).read_text(), object_pairs_hook=_unique), 'cell contract review')
         digest = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        if freeze.get('cell_contract_sha256') != digest:
+            raise ReadinessError('cell contract differs from assets.lock')
         if (review.get('kind') != 'native-cell-contract-review' or review.get('conclusion') != 'complete'
                 or review.get('cell_contract_sha256') != digest):
             raise ReadinessError('cell contract lacks a matching completeness review')

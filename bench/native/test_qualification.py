@@ -25,10 +25,6 @@ class Readiness(unittest.TestCase):
         self.addCleanup(self.scratch.cleanup)
         root = Path(self.scratch.name)
         self.assets = root / 'assets.lock'
-        self.assets.write_text('[freeze]\nstatus="frozen"\n[tools]\npython="test-version"\n'
-            'docker_cli="test-version"\ndocker_compose="test-version"\ndocker_buildx="test-version"\n[images]\n' +
-            '\n'.join(f'{name}="example/{name}@{gate.PIN["images"][image]["manifest"]}"' for name, image in
-                (('postgres', 'np-v2/postgres'), ('redis', 'np-v2/redis'), ('fixture_api', 'np-v2/api'), ('api_base', 'np-v2/api'))))
         self.source = root / 'runtime.py'; self.source.write_text('frozen input\n')
         artifacts = {}
         for name in ('ctrs_binary', 'guest_kernel', 'guest_initramfs', 'python', 'docker', 'compose', 'buildx', 'proof'):
@@ -44,10 +40,15 @@ class Readiness(unittest.TestCase):
                 'workload': 'W11', 'dimension': dimension, 'metric': f'w11-{dimension}',
                 'state': 'warm', 'load': 'mixed', 'unit': 'test-unit', 'fixture_version': 'W11-v-test',
             }
+        contract_digest = hashlib.sha256(
+            json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assets.write_text(f'[freeze]\nstatus="frozen"\ncell_contract_sha256="{contract_digest}"\n[tools]\npython="test-version"\n'
+            'docker_cli="test-version"\ndocker_compose="test-version"\ndocker_buildx="test-version"\n[images]\n' +
+            '\n'.join(f'{name}="example/{name}@{gate.PIN["images"][image]["manifest"]}"' for name, image in
+                (('postgres', 'np-v2/postgres'), ('redis', 'np-v2/redis'), ('fixture_api', 'np-v2/api'), ('api_base', 'np-v2/api'))))
         review = root / 'review.json'
         review.write_text(json.dumps({'kind': 'native-cell-contract-review', 'reviewer': 'test-reviewer',
-            'conclusion': 'complete', 'cell_contract_sha256': hashlib.sha256(
-                json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}))
+            'conclusion': 'complete', 'cell_contract_sha256': contract_digest}))
         host_review = root / 'host-review.json'
         stamp = time.time()
         host_review.write_text(json.dumps({'kind': 'native-host-conditions-review', 'host_id': gate.socket.gethostname(),
@@ -95,6 +96,19 @@ class Readiness(unittest.TestCase):
         path.write_text(json.dumps(review))
         proof['evidence'] = durable_job.receipt(path)
         with self.assertRaisesRegex(gate.ReadinessError, 'W11 is missing required dimensions'):
+            self.check()
+
+    def test_reviewed_cell_edit_cannot_change_a_frozen_contract(self):
+        contract = self.doc['cell_contract']
+        contract['W2']['load'] = 'edited after freeze'
+        proof = self.doc['prerequisites']['complete_cell_contract']
+        path = Path(proof['evidence']['path'])
+        review = json.loads(path.read_text())
+        review['cell_contract_sha256'] = hashlib.sha256(
+            json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        path.write_text(json.dumps(review))
+        proof['evidence'] = durable_job.receipt(path)
+        with self.assertRaisesRegex(gate.ReadinessError, 'cell contract differs from assets.lock'):
             self.check()
 
     def test_unfrozen_assets_fail_before_receipt_verification(self):
