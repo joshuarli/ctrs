@@ -78,13 +78,15 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, prepare the W10 owned-engine interruption case.
-Use a private ctrs root and keep acknowledged state across engine restart.
-Bind the old and new daemon and VM identities to the same owned artifacts
-and verify exact state after recovery. Leave comparative engine interruption
-open until an isolated OrbStack target is available. The
-[W10 service fixtures](../bench/native/diagnostics/recovery-client.md#queue-service-recovery)
-now cover API, database and persistent queue recovery offline.
+If the Mac stays shared, integrate current main into the parked
+`campaign/w11-bind-completed-cycles` branch. Resolve shared runner and
+mixed-fixture changes while preserving the seven required W11 cells, exact
+completed-cycle counts, and the finite launcher. Recheck the parked
+qualification suite against the new fixture sources and leave the asset
+lock in pilot status.
+The [W10 fixtures](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
+now include an owned ctrs crash diagnostic. Native validation and a separate
+isolated OrbStack interruption target remain open.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)

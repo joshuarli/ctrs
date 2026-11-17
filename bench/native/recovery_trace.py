@@ -82,3 +82,33 @@ def recovery_intervals(events):
             'command_and_ready_s': (max(success, returned) - begin) / 1e9,
             'after_command_to_first_success_s': max(0, success - returned) / 1e9,
             'success_preceded_command_return': success < returned}
+
+
+def owned_ctrs_processes(manifest, socket_path, child_pid, binary_sha256):
+    if manifest['engine'] != 'ctrs' or manifest['socket'] != socket_path:
+        raise ValueError('recovery socket is not owned by ctrs')
+    processes = manifest['required_processes']
+    roles = {process['role']: process for process in processes}
+    if len(processes) != 2 or set(roles) != {'daemon', 'vm'}:
+        raise ValueError('recovery needs one owned daemon and one VM helper')
+    daemon, vm = roles['daemon'], roles['vm']
+    if (daemon['pid'] != child_pid or daemon['executable']['sha256'] != binary_sha256
+            or daemon['pid'] == vm['pid']):
+        raise ValueError('recovery daemon is not the requested child')
+    if {asset['path'].rsplit('/', 1)[-1] for asset in vm['boot_assets']} != {'Image', 'initramfs.cpio'}:
+        raise ValueError('recovery needs both booted guest artifacts')
+    return roles
+
+
+def verify_ctrs_restart(before, after, disk_before, disk_after):
+    if disk_after != disk_before:
+        raise ValueError('recovery changed the owned guest disk identity')
+    for role in ('daemon', 'vm'):
+        old, new = before[role], after[role]
+        if (old['pid'], old['kernel_start_identity']) == (new['pid'], new['kernel_start_identity']):
+            raise ValueError(f'{role} process did not restart')
+        if old['executable'] != new['executable']:
+            raise ValueError(f'{role} loaded executable changed during recovery')
+    if sorted(before['vm']['boot_assets'], key=lambda asset: asset['path']) != sorted(
+            after['vm']['boot_assets'], key=lambda asset: asset['path']):
+        raise ValueError('booted guest artifacts changed during recovery')

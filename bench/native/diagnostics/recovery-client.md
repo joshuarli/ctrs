@@ -89,5 +89,31 @@ Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4_lifecycle
 test_w4 test_mixed_cycle test_recovery_client test_recovery_trace
 test_reporting`. All 53 focused tests passed. They include the local RESP
 snapshot, a simulated Redis restart, a corrupted backlog, and owned-volume
-cleanup. Native AOF restart validation and the owned-engine interruption
-condition remain open.
+cleanup. Native AOF restart validation remains open.
+
+## Owned-engine recovery
+
+The `engine` target is a standalone ctrs diagnostic. The runner creates its
+own data root and socket, then warms the stack before the interruption.
+It proves the socket belongs to the launched daemon and the VM holds the
+private guest disk. It sends SIGKILL only to its own daemon child and waits
+for both old processes to exit before restarting.
+
+```sh
+python3.14 bench/native/runner.py run --case W10 --engine ctrs \
+  --interrupt-service engine --duration 90
+```
+
+The runner restores the original Compose project without rebuilding or
+pulling images. The recovery receipts require new daemon and VM process
+identities, the same loaded executables and boot artifacts, and the same
+guest disk and API/database container identities. The exact PostgreSQL
+row check and post-recovery load checks still apply. Results stay in the
+private run directory. They carry no comparative timing or CPU verdict.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
+test_recovery_trace test_w4_lifecycle test_safety test_reporting`. All 74
+focused tests passed. They cover a simulated engine interruption on the
+local HTTP fixture, identity and artifact rejection, refusal to signal a
+foreign daemon, and waiting for the old VM. Native crash validation and
+an isolated OrbStack interruption target remain open.

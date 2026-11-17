@@ -1,11 +1,34 @@
 import unittest
 import errno
 import hashlib
+from copy import deepcopy
 import urllib.error
 import recovery_trace as trace
 
 
 class RecoveryTraceTests(unittest.TestCase):
+    def test_owned_engine_restart_checks_new_processes_and_same_boot_and_disk(self):
+        socket = '/private/run/docker.sock'
+        daemon = dict(role='daemon', pid=10, kernel_start_identity=20, executable={'sha256': 'binary'})
+        vm = dict(role='vm', pid=11, kernel_start_identity=21, executable={'sha256': 'vm'},
+                  boot_assets=[{'path': '/guest/Image', 'sha256': 'kernel'},
+                               {'path': '/guest/initramfs.cpio', 'sha256': 'initrd'}])
+        manifest = dict(engine='ctrs', socket=socket, required_processes=[daemon, vm])
+        before = trace.owned_ctrs_processes(manifest, socket, daemon['pid'], 'binary')
+        after = deepcopy(before)
+        after['daemon'].update(pid=12, kernel_start_identity=22)
+        after['vm'].update(pid=13, kernel_start_identity=23)
+        trace.verify_ctrs_restart(before, after, (1, 10), (1, 10))
+        with self.assertRaisesRegex(ValueError, 'requested child'):
+            trace.owned_ctrs_processes(manifest, socket, 99, 'binary')
+        with self.assertRaisesRegex(ValueError, 'disk identity'):
+            trace.verify_ctrs_restart(before, after, (1, 10), (1, 11))
+        with self.assertRaisesRegex(ValueError, 'vm process did not restart'):
+            trace.verify_ctrs_restart(before, after | {'vm': vm}, (1, 10), (1, 10))
+        after['vm']['boot_assets'][0]['sha256'] = 'changed'
+        with self.assertRaisesRegex(ValueError, 'booted guest artifacts changed'):
+            trace.verify_ctrs_restart(before, after, (1, 10), (1, 10))
+
     def test_host_address_error_invalidates_even_inside_expected_outage(self):
         error, error_errno = trace.transport_error(
             urllib.error.URLError(OSError(errno.EADDRNOTAVAIL, "Can't assign requested address")))

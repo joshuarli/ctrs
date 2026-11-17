@@ -477,6 +477,7 @@ class Engine:
         self.name = name
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
+        self.recovery_root: Path | None = None
         if name == "orbstack":
             self.dir = None
             self.socket = f"unix://{ORBSTACK_SOCK}"
@@ -488,6 +489,17 @@ class Engine:
         endpoint_hash = hashlib.sha256(self.socket.encode()).hexdigest()[:12]
         self.builder_name = f"np-dc-{self.name}-{endpoint_hash}"
         self.buildx_config = WORK / "buildx" / f"{self.name}-{endpoint_hash}"
+
+    @classmethod
+    def for_recovery(cls, run_id: str):
+        parent = WORK / "engines"
+        parent.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix="w10-", dir=parent))
+        if len(os.fsencode(root / "run/docker.sock")) >= 104:
+            raise ValueError("W10 recovery Unix socket path is too long")
+        engine = cls("ctrs", run_id, fresh_dir=root)
+        engine.recovery_root = root
+        return engine
 
     def env(self, extra: dict | None = None) -> dict:
         env = os.environ.copy()
@@ -2254,6 +2266,39 @@ def trial_w5(ctx, engine: Engine, state: str,
     return rec
 
 
+def _w10_engine_identity(engine, binary_sha):
+    if engine.name != "ctrs" or engine.dir != engine.recovery_root or engine.recovery_root is None:
+        raise ValueError("engine interruption requires a new private ctrs root")
+    child = engine.proc
+    if child is None or child.poll() is not None:
+        raise ValueError("recovery engine is not a live owned child")
+    path = engine.dir / "run/docker.sock"
+    if engine.socket != f"unix://{path}":
+        raise ValueError("recovery engine socket is outside its private root")
+    manifest = ownership.discover("ctrs", path, engine.dir)
+    roles = recovery_trace.owned_ctrs_processes(manifest, str(path), child.pid, binary_sha)
+    disk = (engine.dir / "data/vm/data.img").stat()
+    return roles, (disk.st_dev, disk.st_ino)
+
+
+def _w10_crash_engine(engine, before, deadline):
+    child = engine.proc
+    if child is None or child.pid != before["daemon"]["pid"] or child.poll() is not None:
+        raise ValueError("recovery daemon identity changed before interruption")
+    if time.monotonic() >= deadline:
+        raise TimeoutError("load deadline expired before the planned interruption")
+    child.kill()
+    if child.wait(timeout=max(0, deadline - time.monotonic())) != -signal.SIGKILL:
+        raise ValueError("owned daemon did not exit from the planned kill")
+    engine.proc = None
+    while time.monotonic() < deadline:
+        current = ownership.process_table().get(before["vm"]["pid"])
+        if current is None or current["start_identity"] != before["vm"]["start_identity"]:
+            return
+        time.sleep(.05)
+    raise TimeoutError("old owned VM helper did not exit after interruption")
+
+
 def trial_w10(ctx, engine: Engine, state: str,
               duration: float = 20.0, concurrency: int = 8,
               write_ratio: float = 0.3, seed: int = 1,
@@ -2265,8 +2310,11 @@ def trial_w10(ctx, engine: Engine, state: str,
             raise ValueError("W10 queue recovery requires positive duration, downtime and worker count")
         return trial_w4(ctx, engine, state, workers=(concurrency,), fixture_version=W4_LATENCY_VERSION,
                         queue_interruption=QueueInterruption(down_for, duration))
-    if interrupt_service not in ("api", "db"):
-        raise ValueError("W10 interrupt service must be api, db or queue")
+    if interrupt_service not in ("api", "db", "engine"):
+        raise ValueError("W10 interrupt service must be api, db, queue or engine")
+    crash_engine = interrupt_service == "engine"
+    if crash_engine and (engine.name != "ctrs" or getattr(engine, "recovery_root", None) is None):
+        raise ValueError("engine interruption requires a new private ctrs root")
     if (not all(math.isfinite(value) for value in (duration, kill_at, down_for, write_ratio))
             or concurrency <= 0 or not 0 <= write_ratio <= 1
             or kill_at <= 0 or down_for <= 0 or duration <= kill_at + down_for):
@@ -2282,7 +2330,17 @@ def trial_w10(ctx, engine: Engine, state: str,
     sampler = trace = None
     stop = threading.Event()
     attempts, probes, timeline = [], [], {}
+    stack_owned = False
     t0 = time.monotonic()
+    if crash_engine:
+        rec.update(measurement_valid=False, measurement_invalidation="owned ctrs engine recovery diagnostic")
+
+    def service_id(service):
+        found = engine.compose(proj, ["ps", "-q", service], timeout=30)
+        ids = found.stdout.split()
+        if found.returncode or len(ids) != 1:
+            raise ValueError(f"cannot establish the owned {service} container identity")
+        return ids[0]
 
     def load(worker, deadline):
         client = recovery_client.ProbeClient("127.0.0.1", port)
@@ -2315,8 +2373,12 @@ def trial_w10(ctx, engine: Engine, state: str,
 
     try:
         engine.ensure_up()
+        if crash_engine and (engine.proc is None or engine.proc.poll() is not None):
+            raise ValueError("initial recovery daemon was not launched by this run")
+        stack_owned = True
         compose_down(engine, proj)
-        sampler, trace = start_sampler(engine, trial_dir)
+        if not crash_engine:
+            sampler, trace = start_sampler(engine, trial_dir)
         up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
         if up.returncode:
             raise RuntimeError(f"compose up failed: {(up.stderr or up.stdout)[-300:]}")
@@ -2325,15 +2387,15 @@ def trial_w10(ctx, engine: Engine, state: str,
             raise RuntimeError("stack never became healthy")
         rec["metrics"]["setup_seconds"] = time.monotonic() - t0
 
-        services = {}
-        for service in dict.fromkeys(("db", interrupt_service)):
-            found = engine.compose(proj, ["ps", "-q", service], timeout=30)
-            ids = found.stdout.split()
-            if found.returncode or len(ids) != 1:
-                raise ValueError(f"cannot establish the owned {service} container identity")
-            services[service] = ids[0]
-        db, target = services["db"], services[interrupt_service]
-        with resource_phase(engine, rec, "recovery_workload"):
+        db = service_id("db")
+        target = db if interrupt_service == "db" else service_id("api")
+        if crash_engine:
+            binary_sha = sha256_file(CTRS_BIN)
+            before, disk_before = _w10_engine_identity(engine, binary_sha)
+            (trial_dir / "engine-before.json").write_text(json.dumps({
+                "processes": before, "disk": disk_before, "socket": engine.socket,
+            }, indent=2))
+        with nullcontext() if crash_engine else resource_phase(engine, rec, "recovery_workload"):
             with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
                 load_t0 = time.monotonic()
                 try:
@@ -2341,11 +2403,30 @@ def trial_w10(ctx, engine: Engine, state: str,
                                for worker in range(concurrency)]
                     time.sleep(max(0, load_t0 + kill_at - time.monotonic()))
                     timeline["kill_command_begin_ns"] = time.monotonic_ns()
-                    engine.sh(["kill", target], timeout=30)
+                    if crash_engine:
+                        _w10_crash_engine(engine, before, load_t0 + duration)
+                    else:
+                        engine.sh(["kill", target], timeout=30)
                     timeline["kill_command_returned_ns"] = time.monotonic_ns()
                     time.sleep(down_for)
                     timeline["start_command_begin_ns"] = time.monotonic_ns()
-                    engine.sh(["start", target], timeout=120)
+                    if crash_engine:
+                        remaining = load_t0 + duration - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("no time remains to recover the owned engine")
+                        engine.ensure_up(timeout=remaining)
+                        if engine.proc is None or engine.proc.poll() is not None:
+                            stack_owned = False
+                            raise ValueError("recovery daemon was not launched by this run")
+                        remaining = load_t0 + duration - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("owned engine did not return before the load deadline")
+                        restored = engine.compose(proj, ["up", "-d", "--no-build", "--pull", "never"],
+                                                  env_extra=cenv, timeout=remaining)
+                        if restored.returncode:
+                            raise RuntimeError(f"owned stack recovery failed: {(restored.stderr or restored.stdout)[-300:]}")
+                    else:
+                        engine.sh(["start", target], timeout=120)
                     timeline["start_command_returned_ns"] = time.monotonic_ns()
                     timeline["first_success_ns"] = wait_for_exact_read(load_t0 + duration)
                     for future in futures:
@@ -2356,6 +2437,15 @@ def trial_w10(ctx, engine: Engine, state: str,
         interrupted = timeline["kill_command_begin_ns"]
         recovered = timeline["first_success_ns"]
         failures = recovery_trace.classify_failures([*attempts, *probes], interrupted, recovered)
+        if crash_engine:
+            after, disk_after = _w10_engine_identity(engine, binary_sha)
+            (trial_dir / "engine-after.json").write_text(json.dumps({
+                "processes": after, "disk": disk_after, "socket": engine.socket,
+            }, indent=2))
+            recovery_trace.verify_ctrs_restart(before, after, disk_before, disk_after)
+            if service_id("db") != db or service_id("api") != target:
+                raise ValueError("owned stack containers were replaced during recovery")
+            checks["owned_engine_restarted"] = True
         (trial_dir / "request-validation.json").write_text(json.dumps(failures, indent=2) + "\n")
         rec["metrics"].update(expected_outage_errors=len(failures["expected_outage_errors"]),
                               unexpected_errors=len(failures["unexpected_errors"]),
@@ -2382,7 +2472,7 @@ def trial_w10(ctx, engine: Engine, state: str,
     finally:
         for label, action in (
                 ("sampler shutdown", lambda: stop_sampler(sampler) if sampler is not None else None),
-                ("owned stack cleanup", lambda: compose_down(engine, proj))):
+                ("owned stack cleanup", lambda: compose_down(engine, proj) if stack_owned else None)):
             try:
                 action()
             except Exception as exc:
@@ -2859,7 +2949,12 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
                 if parameter.default is not inspect.Parameter.empty}
     ctx.workload_id = workload_id(ctx.run_id, case_id, pair_id, ctx._seq + 1)
     ctx.workload_params = {"cold": cold, **defaults, **kw}
-    if cold:
+    if case_id == "W10" and kw.get("interrupt_service") == "engine":
+        if engine_name != "ctrs" or cold or keep_warm:
+            raise ValueError("engine interruption requires a standalone ctrs recovery run")
+        engine = Engine.for_recovery(ctx.run_id)
+        stop = True
+    elif cold:
         # Socket paths must stay under SUN_LEN (~104): keep cold engine
         # dirs short and outside the deep results tree.
         short = f"{engine_name}-cold-{ctx.run_id[-6:]}-{time.time_ns() % 100000:05d}"
@@ -3326,8 +3421,8 @@ def main() -> int:
     for command in ("run", "baseline"):
         sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
                                          help="W6 build-cache condition (default: uncached); warm primes the same context")
-        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue"),
-                                         help="W10 owned service to interrupt (default: api)")
+        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
+                                         help="W10 target (default: api); engine requires a standalone ctrs run")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
@@ -3376,6 +3471,9 @@ def main() -> int:
         ap.error("--build-cache requires W6")
     if getattr(args, "interrupt_service", None) is not None and args.case != "W10":
         ap.error("--interrupt-service requires W10")
+    if getattr(args, "interrupt_service", None) == "engine" and (
+            args.cmd != "run" or args.engine != "ctrs" or args.cold or args.state != "warm"):
+        ap.error("engine interruption requires run --case W10 --engine ctrs with a warmed private stack")
     if getattr(args, "operations", None) is not None:
         if args.case != "W2" or args.operations <= 0:
             ap.error("--operations requires W2 and a positive value")
