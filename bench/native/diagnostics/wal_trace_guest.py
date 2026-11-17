@@ -170,15 +170,15 @@ def setup(tag, pid, trace=TRACE, state=STATE):
                             'instance': str(instance)}
         marker.write_text(json.dumps(receipt, sort_keys=True))
         return {'status': 'setup', 'scope': receipt['scope'], 'filters': receipt['filters'], 'formats': formats}
-    except Exception:
+    except Exception as setup_error:
         if made_instance:
             try:
                 _rollback(trace, instance, owned_defs)
-            except OSError:
-                pass
+            except Exception as rollback_error:
+                raise RuntimeError('setup failed and owned rollback was incomplete; ownership receipt retained') from rollback_error
         if made_marker:
             marker.unlink(missing_ok=True)
-        raise
+        raise setup_error
 
 
 def start(tag, trace=TRACE, state=STATE):

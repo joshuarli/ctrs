@@ -9,7 +9,7 @@ import wal_trace_guest as wal_trace
 
 class WalTraceGuestTests(unittest.TestCase):
     def test_tag_and_explicit_global_backend_pid_are_strict(self):
-        for tag in ('npwal0123456789a', 'npwal0123456789AB', 'npwal0123456789a',
+        for tag in ('npwal0123456789a', 'npwal0123456789AB',
                     'npwal0123456789abc', 'npwal0123456789ab;id'):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 wal_trace.validate(tag, 123)
