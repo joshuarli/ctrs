@@ -10,6 +10,21 @@ import w8_benchmark as w8
 
 
 class PairedBatch(unittest.TestCase):
+    def test_cli_installs_cleanup_policy_before_batch(self):
+        import runner
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / 'ctrs'
+            binary.write_bytes(b'candidate')
+            with mock.patch('sys.argv', ['runner.py', 'w8-baseline', '--layout', temp,
+                    '--ctrs-binary', str(binary), '--pairs', '1', '--diagnostic']), \
+                 mock.patch.object(runner, 'CTRS_BIN', binary), \
+                 mock.patch.object(runner, 'DOCKER', '/docker'), \
+                 mock.patch.object(runner, 'find_docker', return_value='/docker'), \
+                 mock.patch('diagnostic_signals.install_cleanup_signals') as install, \
+                 mock.patch.object(w8, 'run_batch', side_effect=lambda args: 0 if install.called else 1):
+                self.assertEqual(runner.main(), 0)
+            install.assert_called_once_with()
+
     def test_shared_inputs_order_retention_and_reporting(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

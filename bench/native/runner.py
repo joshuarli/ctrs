@@ -2971,8 +2971,10 @@ def main() -> int:
             ap.error("--ctrs-binary must name an existing signed binary")
         sys.modules["runner"] = sys.modules[__name__]
         import w8_benchmark
+        import diagnostic_signals
         DOCKER = find_docker()
         RESULTS.mkdir(parents=True, exist_ok=True)
+        diagnostic_signals.install_cleanup_signals()
         return w8_benchmark.run_batch(args)
     if getattr(args, 'case', None) == 'W9':
         try:
