@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** default Rust build profile with frozen vendored dependencies.
+**Current action:** bounded gzip-compression screen of the default Rust build.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -22,25 +22,34 @@ parsed once. The native regression fails on baseline and passes populated,
 empty and absent labels on candidate 58f64738…; one affected Rust test passes.
 Four exact-label-owned tags were recovered separately. Original failure retained.
 
+Offline Rust job 51736a130ca44d35abe1a6cbd0337453 exits 0, owned cleanup complete:
+six real uncached builds, 132 tests each, all native version/executable assertions
+pass and all 81 input receipts remain unchanged. Raw/evidence above preserves
+the three balanced pairs and busy-host limits. Exporting layers consumes roughly
+five seconds, substantially more than the observed push status in the first pair;
+this motivates a compression screen, not a conclusion that compression alone
+causes the cost. The vendored variant does not qualify the original WAN-capable
+Rust fixture. Its 134 packages/6,333 checked files are frozen in archive
+58eae402daaf4823c6038c54386575b0c1c0c42c1b4cd92cfb2cfb8f9839067f.
+
 **Exact continuation:** inspect
-`.work/tmp/w6-rust-offline-20261116/job`, durable ID
-`51736a130ca44d35abe1a6cbd0337453`, once for identity/status/deadline. It is
+`.work/tmp/w6-compression-screen-20261116/job`, durable ID
+`dff9fcb730394c75afe0c0300bf449bb`, once for identity/status/deadline. It is
 already launched; never duplicate it. The saved `run.py` predeclares three
-balanced ctrs/OrbStack build pairs using default docker drivers, uncached real
-hyperfine 2.0.0 compile/tests, pinned Rust base, and `--network none` plus Cargo
-offline. The immutable dependency archive contains 134 packages/6,333 checked
-files; SHA-256 58eae402daaf4823c6038c54386575b0c1c0c42c1b4cd92cfb2cfb8f9839067f.
-Host candidate 58f64738…, stock guest, 17 vCPUs/45,091MiB, owned idle=0 control.
-Deadline 2,700s, cleanup grace 240s; all input receipts frozen until terminal.
-Do no competing builds, tests or native experiments. Then audit every compile
-vertex, tests, native executable/version/hash, raw export/load envelopes and
-cleanup; recheck frozen receipts. Select a product slice from the observed
-critical boundary, or change workload if this path has no avoidable loss.
-All timing remains explicitly ineligible on this shared host. The vendored
-variant is a distinct diagnostic, not qualification of the original WAN-capable
-Rust fixture. Preserve the failed first host vendoring command (workspace
-discovery); successful vendoring used `/private/tmp/ctrs-w6-vendor-20261116`
-without modifying the original source or lock. Retain this scratch for provenance.
+rotated rounds of default/level 1/level 3 gzip on ctrs only, identical per-round
+contexts and explicit docker exporters, real uncached offline Rust compile/tests,
+exact native executable/version checks, CPU/physical samples, compressed image/
+added-layer bytes and allocated new-blob bytes. Only compression-level changes;
+no forced base recompression. Host 58f64738…, stock guest, 17 vCPUs/45,091MiB,
+owned idle=0 control. Deadline 1,800s, cleanup grace 240s; inputs frozen until
+terminal. No competing builds/tests/native experiments. Audit all nine builds,
+test outputs, raw export envelopes, artifact/storage/CPU guards and cleanup;
+recheck frozen receipts. The screen requires >=5% whole-build/CPU reduction and
+<=3% added/total compressed-layer growth before considering a product-default
+candidate; exclusive confirmation is still required. Otherwise reject the
+configuration and continue another measured boundary. All timings are ineligible
+on this shared host. Keep `/private/tmp/ctrs-w6-vendor-20261116` for provenance;
+the original source/lock is unchanged. No product compression policy is promoted.
 
 Affinity diagnostics completed;
 [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.

@@ -92,3 +92,56 @@ not turn the original job's exit 1 into a pass.
 | `job/status.json` | 8eb8093ac5cc317ae58c229d884830f325fcccdb3f79be0ff4b1ce0d6bfe4f6b |
 | `analysis.json` | 2c1642d447a4b6193fb2b298c4e4892bb0b8408ee782c6bc98b105302c954154 |
 | `owned-label-recovery.json` | 94a5ddaa65f2c769cd522d5a53b4879235bce25b4d278c1fe1cef77e913d337c |
+
+## Offline Rust compilation and export profile
+
+`.work/tmp/w6-rust-offline-20261116/job`, durable ID
+`51736a130ca44d35abe1a6cbd0337453`, exits 0 with clean owned teardown.
+All three balanced pairs compile hyperfine 2.0.0 without cache, run its 132
+tests with zero failures/ignores, and execute the loaded native binary with
+the expected version. All six executable hashes equal
+`c63f2e928959ea44b58db0f341f729c327571a18950a742f34c1371e3879c49b`.
+All 81 frozen input receipts rechecked unchanged.
+
+The diagnostic uses host candidate 58f64738… and the same guest/resources and
+default-driver versions as the C case. Source and Rust base remain pinned.
+Dependencies are vendored before work, outside the parent Cargo workspace,
+without changing the source or lock. The original lock SHA-256 is
+`190e5ac0a53fb5ceb73136b275f21ac9591fddfadcdc28dd0bb4a67dd84b3d83`.
+Each of 134 registry packages matches its lock checksum and all 6,333 vendored
+files match Cargo's checksum manifest. The immutable 24,694,346-byte archive
+is 58eae402…. Both engines receive identical bytes and build with network none
+and Cargo offline. This is a new diagnostic variant; it does not qualify the
+unchanged original fixture's timed dependency-download behavior.
+
+Unqualified median (range), seconds, three builds per engine:
+
+| Boundary | ctrs | OrbStack |
+| --- | --- | --- |
+| Build command through loaded image | 38.657 (37.505–40.354) | 41.639 (39.287–42.644) |
+| Compile and test vertex | 31.737 (29.724–33.965) | 32.582 (30.912–32.768) |
+| Export vertex envelope | 5.742 (5.152–6.715) | 6.867 (6.368–7.291) |
+| Exporting-layers status | 5.289 (4.706–6.125) | 5.555 (4.935–5.635) |
+
+ctrs pushing-layers status in the first pair is 0.401 seconds versus 4.706
+seconds exporting layers. This localizes a potential export-production cost;
+it does not prove compression is the entire cost. ctrs physical peaks span
+4,494,941,648–7,532,670,568 bytes; OrbStack's shared scope remains confounded.
+No qualified speed, parity, memory or aggregate claim follows.
+
+The next screen changes only new-layer gzip compression levels through the
+existing exporter interface. The pinned [BuildKit gzip implementation](https://github.com/moby/buildkit/blob/v0.35.0/util/compression/gzip.go)
+accepts a custom level and can use a different diff-computation path for it;
+attribute support alone cannot establish an improvement. Three rotated rounds
+of default/level 1/level 3 will assert identical executable bytes/tests and
+record whole build, CPU, physical footprint, compressed layer bytes and allocated
+blob bytes. The declared screen requires at least 5% whole-build/CPU reduction
+and at most 3% growth in added and total compressed layer bytes before considering
+a default change; exclusive confirmation remains required. No force-compression
+or recompression of shared base layers, no product setting changed yet.
+
+| Artifact under the Rust-profile root | SHA-256 |
+| --- | --- |
+| `plan.json` | ce07ed439e136d1d660828b1c8213d3644b08790c28fd68cd5fd333a42b241bb |
+| `job/status.json` | 2c82cda64dd2bbb3185d0b80f24363776176385a5fe1b4433033b0ae8513a712 |
+| `analysis.json` | e24283ca97c3a981042eec24c8d56ae61742f4b358ae93fa039a8fa3442db997 |
