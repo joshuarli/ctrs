@@ -159,3 +159,21 @@ Do not probe inside the exclusive sequence and perturb its reservation.
 The cached kernel build Image has a different hash and cannot supply matching
 binary metadata. Keep the actual recorded Image authoritative. No LSE-only or
 other kernel candidate is selected before observer confirmation passes.
+
+## API affinity diagnostic
+
+The loaded stock-kernel 50k profile had 147 of 852 ctrs leaf samples at the
+`wake_up_q` task-refcount decrement, versus 20 of 582 on OrbStack. Co-locating
+actual API threads may change GIL and wake traffic; this is a profiling hypothesis,
+not a kernel or product selection. The parent pilot compares stock/all, `--api-cpus
+0`, and `--api-cpus 0,1` on both engines with the same 50k fixed work and existing
+mode and engine ordering. No affinity option preserves the inherited default.
+
+The bootstrap validates the requested IDs against its current guest affinity and
+sets them before importing Uvicorn or starting workers. Warm, phase-before and
+phase-after task status must show the requested set for every API thread. The
+plan and results record canonical requested and effective CPU lists and source
+hashes. Explicit-affinity runs have a distinct fixture version and run prefix;
+keep each CPU set separate from every other set and from historical defaults.
+Unavailable or malformed CPU sets fail rather than falling back. The pilot does
+not itself establish a performance result or select a runtime change.
