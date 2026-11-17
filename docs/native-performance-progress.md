@@ -4,43 +4,40 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** affinity diagnostics completed; see
-[`native-affinity-2026-11-16.md`](evidence/native-affinity-2026-11-16.md).
-Same-toolchain stock/LSE-only build `989c31ff8d4040deb79f6f0a3255a813` is terminal
-exit 0, cleanup complete; its labelled build container is stopped. It began only
-after affinity terminal cleanup. Private branch `experiment/np-lse-only` f7ea791
-adds only `CONFIG_ARM64_USE_LSE_ATOMICS=y`; generated configurations differ only
-by that symbol and derived `ARM64_LSE_ATOMICS`. Compiler SHA is unchanged:
-`fb051a6c58961fb6aec758acf50d7d0375eecff740d0706388092829e3fb7a41`.
-Private stock Image SHA:
-`e6a8cdb290e6bbcfeb92c810886312d4b42a2c4154041d37ba5f41128d920d54`;
-LSE Image:
-`6555028c558a8dbb786c758498f512320bae5403831f71337182902eefd8d7d2`.
-Image sizes are 18,800,648 and 19,324,936 bytes. Live guest assets are untouched.
-Build receipts/scripts: `.work/wt/np-lse-only/.work/kernel-lse/`; job status SHA
-`e52ed87f972d55f79e9af45f6e6d2a0a6128df6acab4c706e1b223693ce76ce7`.
+**Current action:** published-port versus guest-peer profiling. Affinity diagnostics
+completed; [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
+The subsequent [LSE-only experiment](evidence/native-lse-2026-11-16.md) is REJECTED
+for promotion: three complete pairs/600k correct operations and valid actual-boot
+and runtime-LSE audits, but no required API/engine CPU reduction. All 84 input
+receipts remained unchanged. Raw job `7edd9d98fb3648d38b4750e8b955801d` is terminal
+exit 0, cleanup complete. Private kernel branch/assets are retained, unmerged;
+do not repeat or expand this weak candidate into resource/full-build confirmation.
+The earlier serial-audit failure remains separate and preserved in the evidence.
 
-**Active native job:** `.work/tmp/w2-lse-explore-v2-20261116/job`, durable ID
-`7edd9d98fb3648d38b4750e8b955801d`, 3,600s fixed deadline. It runs three balanced
-stock/LSE pairs, 50k fixed operations per off/on phase, default API affinity,
-17 vCPUs, 45,091MiB and identical host binary 37bec61b…/application inputs.
-Private guest directories share unchanged initrd/template. The saved coordinator
-audits actual open kernel/initrd hashes, guest atomics advertisement and runtime
-LSE detection from the full guest kernel log; audit/workload failure stops without replacement.
-Source and assets in `inputs.json` are frozen until terminal. Hardware/console
-capture landed as d9b723b/23ede66, full ring-log repair 09fb5a0; 12 focused CPU tests and the 44-test W2 check
-pass. On resume inspect terminal status once, audit complete raw pairs and CPU/
-wall/tail guards against the preregistered private `plan.md`, retain all failures,
-then decide the next confirmation/noise investigation. Timings are deliberately
-unqualified on this busy host. No kernel change is promoted.
+**Active native job:** `.work/tmp/w2-client-path-explore-20261116/job`, durable ID
+`20c045e9e8f84ccbaf4c7fe98a4fc7a3`, fixed 5,400s deadline. Six blocks rotate host
+and guest clients over three rounds, both engines and off/on modes, 50k operations
+per phase (24 planned phases/1.2M operations). Default affinity, stock live Image,
+17 vCPUs, 45,091MiB and host binary 37bec61b… remain fixed. `inputs.json` freezes
+all source/assets; do not edit/rebuild them until terminal. Inspect terminal status
+once, audit complete raw pairs, compare API CPU and latency/profile changes by
+client location, then choose the next boundary. The guest variant includes client
+CPU in aggregate engine totals, so host-to-guest engine-CPU ratios are invalid.
+Host Python 3.14 versus guest pinned 3.13.18 and changed delivery cadence also
+prevent treating this as pure forwarding-CPU isolation. All timings are unqualified.
 
-The original LSE job `d84c65c59c2c4547b0178afe639b1ac8` is terminal exit 1 with
-cleanup complete, preserved at `.work/tmp/w2-lse-explore-20261116/`. Its first
-stock/candidate pair completed all four exact 50k phases and matched actual boot
-hashes, but the candidate feature audit failed: serial capture begins after early
-boot feature messages. The original failure remains intact and is not pooled
-into the fresh batch. Source 09fb5a0 reads the bounded full kernel ring using
-non-clearing syslog actions READ_ALL/SIZE_BUFFER; the LSE runtime check is unchanged.
+Guest-client source worker `usrw_cf2ef94c-a637-4d5a-b396-3da171e46bde` is terminal
+succeeded, original f2d394c retained in `.work/wt/np-w2-client-path`; integrated
+6b62edd with parent fixes e271003. Sixteen focused tests and bounded W2's 48 tests
+pass. Native v2 proof `w2-guest-client-cpu-20261116T195940-69a3` passes all four
+5k phases, exact payloads and cleanup on both engines. The initial v1 proof cdfc
+passes ctrs but fails OrbStack's tmpfs source-copy visibility before work; it is
+preserved, not pooled. Both engines now use live exec streams outside measurement
+for bounded tmpfs transfers; source hashes are verified and guest v2 is distinct.
+Native cancellation a41c, driver/receipt `.work/tmp/w2-guest-cancel-20261116{.py,/}`,
+waits for the actual peer load process then sends TERM to its identified child.
+Original exit -15 is preserved, cleanup has no errors and the owned VM disk is
+closed. No kernel or affinity runtime policy has been promoted.
 
 Resume steering: storage repair, pinned W8 warmup, service-resource coverage and
 fixed under-pull work are accepted below. W8 paired execution/reporting is

@@ -89,6 +89,9 @@ passes raw/decoded event coverage. It is excluded from this nine-block batch.
 
 ## Next experiment
 
+The subsequent [LSE-only experiment](native-lse-2026-11-16.md) completed and was
+rejected for promotion. The saved plan below records the original follow-up.
+
 Prepare same-toolchain stock/LSE-only kernels in private assets, then compare
 default-affinity fixed work in three balanced pairs. Keep it exploratory and
 unpromoted. Owner-requested additional experiments do not waive exclusive
