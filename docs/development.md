@@ -90,6 +90,11 @@ buildx ─────┘    Docker Engine API          owns the VM             
 
 ## Verification
 
+On native ARM64 macOS, `conformance/vm-stop.py --ctrs-binary /path/to/signed/ctrs
+--portfolio-archive /path/to/portfolio.tar` checks idle sleep, wake, injected VM
+loss and recovery, and normal daemon shutdown using an isolated engine. It
+checks the pinned common portfolio and saves results under `.work/tmp`.
+
 `conformance/smoke.sh` boots the VM with scratch roots and round-trips a
 container. `tests/e2e.sh` runs the full compatibility suite against a
 running engine (see its header). `cargo test --workspace` runs the unit

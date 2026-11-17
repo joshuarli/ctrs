@@ -487,8 +487,7 @@ pub struct Engine {
     link: Mutex<Option<Arc<VmLink>>>,
     /// Unix seconds of the last API request; drives the idle sleep.
     last_activity: std::sync::atomic::AtomicU64,
-    /// Set while the VM is being put to sleep, so its stop is not an error.
-    sleeping: std::sync::atomic::AtomicBool,
+    expected_vm_stop: std::sync::atomic::AtomicBool,
     /// Stopped from the window: the VM stays off, whatever asks for it
     /// (a build, a docker command, a share), until Start. Unlike the idle
     /// sleep, which the next request wakes. Kept across engine restarts by
@@ -586,7 +585,7 @@ impl Engine {
             volumes,
             link: Mutex::new(None),
             last_activity: std::sync::atomic::AtomicU64::new(now_secs()),
-            sleeping: std::sync::atomic::AtomicBool::new(false),
+            expected_vm_stop: std::sync::atomic::AtomicBool::new(false),
             stopped: std::sync::atomic::AtomicBool::new(stopped_marker().is_some_and(|f| f.exists())),
             networks,
             store,
@@ -677,7 +676,7 @@ impl Engine {
             Err(e) => crate::diag::warn!("kept every unpacked layer: images unreadable", error = e),
         }
         *self.memory_target.lock().unwrap_or_else(|e| e.into_inner()) = ceiling;
-        self.sleeping.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.expected_vm_stop.store(false, std::sync::atomic::Ordering::SeqCst);
         *link = Some(vm.clone());
         crate::diag::info!("VM booted", ms = t0.elapsed().as_millis(), cpus = cpus, memory_mib = ceiling >> 20);
         Ok(vm)
@@ -785,7 +784,7 @@ impl Engine {
             return false;
         }
         let Some(vm) = link.take() else { return false };
-        self.sleeping.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.expected_vm_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         self.memory_used.store(0, std::sync::atomic::Ordering::Relaxed);
         self.memory_stall.store(0, std::sync::atomic::Ordering::Relaxed);
         vm.shutdown();
@@ -1199,7 +1198,7 @@ impl Engine {
                 drop(st);
                 drop(closed);
                 self.changed.notify_all();
-                if !self.sleeping.load(std::sync::atomic::Ordering::SeqCst) {
+                if !self.expected_vm_stop.load(std::sync::atomic::Ordering::SeqCst) {
                     self.save();
                     crate::diag::error!("the VM stopped unexpectedly; the next request boots a new one");
                     if let Some(tail) = vm_console_tail(self.store.root()) {
@@ -2970,6 +2969,7 @@ impl Engine {
             self.stop_all_for_shutdown(&vm, &ids);
         }
         if let Some(vm) = self.awake() {
+            self.expected_vm_stop.store(true, std::sync::atomic::Ordering::SeqCst);
             vm.shutdown();
             if !vm.wait_stopped(Duration::from_secs(10)) {
                 crate::diag::warn!("the VM did not power off in 10 s; stopped it");
