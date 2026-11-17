@@ -1,6 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**Owner steering: 2026-11-17. RESUMED after owner-requested winddown and cleanup; not complete.** This is
+**Owner steering: 2026-11-17. WINDING DOWN at the owner's explicit request; not complete.** This is
 the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and

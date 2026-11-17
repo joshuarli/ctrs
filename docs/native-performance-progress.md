@@ -2,26 +2,17 @@
 
 ## Status
 
-**ACTIVE 2026-11-17 — resumed after owner-requested winddown and cleanup; not complete.**
-Reviewed `94f19a8` is an ancestor; newer accounting, fixtures and product work are reconciled in linked evidence.
-Accepted measurement repair ef22cc9: sampler v4 requires a current stop acknowledgment and preserves errors in phase cells.
-87 focused tests, native normal/early0/SIGKILL controls and independent correction review pass.
-Latest product remains2f37d02: readiness reuse,14 tests, seven lifecycle cases and156 correct diagnostic build/run jobs.
-Classic C caller7203a474 passes all5 cases and88 frozen inputs; no product/default changes followed.
-W8 receipt guard df1f418 passes66 component tests and two real37-layer receipts; guest cache absence remains unknown.
-Pinned W2 boundary-only/periodic controls pass two4000-operation native proofs with exact data and clean teardown.
-Review found cleanup and result-write errors could hide the original failure;76d77de/90c3bac preserve both and interruption status.
-The corrected W2 gate passes80 tests, zero skips. Each native proof retains155 unchanged frozen inputs; neither qualifies timing.
-Scoring repair d0893fe rejects incomplete/category-only resource cells and derives W2 CPU/success from raw phases and counts.
-24 reporting tests pass; bounded W2 selection now includes them and passes105 tests, zero skips.
-Accepted W11 v3 at83ba0d1/9310dbc bounds retained state and publishes correctness checks.
-Native0a89d8f8 passes20,000 API operations plus800 queue/64 build jobs;172 inputs unchanged, cleanup and review complete.
-Current action: implement W11 post-warmup growth observations and frozen-readiness admission; scoring prerequisites still block qualification.
-**Perf gate deferred: host busy**: scalar gate0 does not override hot Niceforge and the unrelated OrbStack VM.
-No scored batch or W11 is admitted. Full qualification, held-out app and resource/durability gates remain open.
-Cleanup:28 retired trees and `.work`195.3→21.0GiB allocated-size sum; completed new lane trees are retired after integration.
-Parked work: [inventory](native-performance-retained.md#after-cleanup-2026-11-17). Rejected candidates stay unpromoted.
-First resume command: `codex-campaign-closeout.py cancel` (already run); execute the current action once, never duplicate a job.
+**WINDING DOWN 2026-11-17 — explicit owner stop; campaign not complete.**
+Launch no experiments or lanes. Preserve unfinished source and finish the reboot audit.
+Accepted integration HEAD is4fc901b: reviewed W11 v3, local growth capability81e51d2 and counter-window correction.
+Latest product remains2f37d02. Default builder work stays accepted and unchanged.
+Native W11 job0a89d8f8 passes20,000 API operations,800 queue jobs and64 build/test jobs;172 inputs unchanged.
+No native job remains active. No W2 batch started after the owner accepted some background noise.
+Unfinished guard/tool-provenance changes will park on `campaign/w11-admission-20261117`; review and native v4 proof remain pending.
+Existing parked branches and retained checkouts are listed in [the inventory](native-performance-retained.md#after-cleanup-2026-11-17).
+Owner now accepts some noise: use disclosed interleaved W2 diagnostics, preserve unrelated workloads and keep invalid cells explicit.
+On resume, first run `codex-campaign-closeout.py cancel`, then read this file and inspect the parked branch.
+Prioritize normalized W2 reproduction/profiling over further qualification tooling. Full qualification remains unready.
 
 ## Accepted and verified
 
