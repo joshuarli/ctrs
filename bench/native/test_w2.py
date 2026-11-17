@@ -144,16 +144,14 @@ class FixedRateTests(unittest.TestCase):
         def sleep(seconds):
             self.assertGreater(seconds, 0)
             clock[0] += seconds + sleep_overshoot
-        wait_until = rate_load._wait_until
-        def controlled_wait(deadline):
-            wait_until(deadline, clock=lambda: clock[0], sleeper=sleep)
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'load.json'
             argv = ['v3.py', '--url', 'http://unused', '--operations', str(len(delays)),
                     '--concurrency', '1', '--request-rate', str(request_rate), '--write-ratio', '0', '--out', str(output)]
             with patch.object(rate_load.sys, 'argv', argv), \
                     patch.object(rate_load.time, 'monotonic', side_effect=lambda: clock[0]), \
-                    patch.object(rate_load, '_wait_until', side_effect=controlled_wait), \
+                    patch.object(rate_load.sys, 'platform', 'linux'), \
+                    patch.object(rate_load.time, 'sleep', side_effect=sleep), \
                     patch.object(rate_load.http.client, 'HTTPConnection', return_value=connection), \
                     contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit) as result:
@@ -192,26 +190,62 @@ class FixedRateTests(unittest.TestCase):
             def __init__(self, events):
                 self.events = events
                 self.closed = False
+                self.timeout = None
 
-            def control(self, *_):
+            def control(self, _, max_events, timeout):
+                self.timeout = timeout
+                self.assert_max_events = max_events
                 return self.events
 
             def close(self):
                 self.closed = True
 
         cases = (
-            ([type('Event', (), {'flags': select.KQ_EV_ERROR, 'data': errno.EINVAL})()],
+            ([type('Event', (), {'flags': select.KQ_EV_ERROR, 'data': errno.EINVAL,
+                                 'filter': select.KQ_FILTER_TIMER})()],
              OSError),
             ([], RuntimeError),
+            ([type('Event', (), {'flags': 0, 'data': 1,
+                                 'filter': select.KQ_FILTER_READ})()],
+             RuntimeError),
+            ([type('Event', (), {'flags': 0, 'data': 0,
+                                 'filter': select.KQ_FILTER_TIMER})()],
+             RuntimeError),
         )
         for events, error_type in cases:
             with self.subTest(error_type=error_type.__name__):
                 queue = Queue(events)
-                with self.assertRaises(error_type):
-                    rate_load._wait_until_kqueue(
-                        time.monotonic() + 1, time.monotonic,
-                        kqueue_factory=lambda: queue)
+                with patch.object(rate_load.select, 'kqueue', return_value=queue):
+                    with self.assertRaises(error_type):
+                        rate_load._wait_until_kqueue(time.monotonic() + 1)
                 self.assertTrue(queue.closed)
+                self.assertGreater(queue.timeout, 0)
+                self.assertEqual(queue.assert_max_events, 1)
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires Darwin kqueue timers')
+    def test_kqueue_timeout_is_bounded_and_elapsed_deadline_owns_no_queue(self):
+        class Queue:
+            def __init__(self):
+                self.timeout = None
+                self.closed = False
+
+            def control(self, _, __, timeout):
+                self.timeout = timeout
+                return []
+
+            def close(self):
+                self.closed = True
+
+        queue = Queue()
+        with patch.object(rate_load.time, 'monotonic', return_value=10.0), \
+                patch.object(rate_load.select, 'kqueue', return_value=queue):
+            with self.assertRaises(RuntimeError):
+                rate_load._wait_until_kqueue(10.0 + rate_load.MAX_PLANNED_SPAN_S + 100)
+        self.assertEqual(queue.timeout, rate_load.MAX_PLANNED_SPAN_S + 1)
+        self.assertTrue(queue.closed)
+        with patch.object(rate_load.time, 'monotonic', return_value=10.0), \
+                patch.object(rate_load.select, 'kqueue', side_effect=AssertionError('queue allocated')):
+            rate_load._wait_until_kqueue(10.0)
 
     def test_invalid_options_rejected_before_engine_access(self):
         import runner
