@@ -52,6 +52,58 @@ def completion_metrics(directory, intervals):
             'under_pull_p99_ms': values[round(.99 * (len(values) - 1))]}
 
 
+def validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids):
+    if (receipt.get('schema_version') != 1 or receipt.get('fixture_version') != 'w8-v3' or
+            receipt.get('source_fixture_version') != contract['fixture_version'] or
+            receipt.get('source_contract_sha256') != hashlib.sha256(registry_variant._encoded(contract)).hexdigest() or
+            receipt.get('seed_sha256') != hashlib.sha256(seed).hexdigest()):
+        raise ValueError('receipt provenance mismatch')
+    if set(receipt['images']) != set(contract['images']):
+        raise ValueError('receipt image mapping mismatch')
+    expected = {}
+    source_digests = set()
+    source_diff_ids = set()
+    for name, image in contract['images'].items():
+        manifest = registry_portfolio._json(source.routes[(name, 'manifests', image['manifest'])][2].metadata())
+        derived_image = receipt['images'][name]
+        if (derived_image['reference'] != image['layout_reference'] or
+                derived_image['source_manifest'] != image['manifest'] or
+                len(manifest['layers']) != image['layer_count'] or
+                len(image['diff_ids']) != image['layer_count'] or
+                len(derived_image['layers']) != image['layer_count'] or
+                len(derived_image['diff_ids']) != image['layer_count']):
+            raise ValueError('receipt image mapping mismatch')
+        for original, source_diff, derived, derived_diff in zip(
+                manifest['layers'], image['diff_ids'], derived_image['layers'], derived_image['diff_ids'], strict=True):
+            key = (original['digest'], source_diff)
+            value = (derived['digest'], derived_diff, derived['size'])
+            if key in expected and expected[key] != value:
+                raise ValueError('conflicting shared layer mapping')
+            expected[key] = value
+            source_digests.add(key[0])
+            source_diff_ids.add(key[1])
+    mappings = {}
+    digests = set()
+    diff_ids = set()
+    for layer in receipt['layers']:
+        key = (layer['source_digest'], layer['source_diff_id'])
+        value = (layer['digest'], layer['diff_id'], layer['size'])
+        if key in mappings or key not in expected or expected[key] != value:
+            raise ValueError('duplicate or mismatched receipt layer mapping')
+        if (not all(isinstance(item, str) and registry_portfolio.DIGEST.fullmatch(item) for item in (*key, *value[:2])) or
+                type(value[2]) is not int or value[2] < 0 or
+                value[0] in source_digests | previous_digests | digests or
+                value[1] in source_diff_ids | previous_diff_ids | diff_ids):
+            raise ValueError('invalid or reused receipt layer identity')
+        mappings[key] = value
+        digests.add(value[0])
+        diff_ids.add(value[1])
+    if mappings != expected:
+        raise ValueError('incomplete receipt layer mapping')
+    previous_digests.update(digests)
+    previous_diff_ids.update(diff_ids)
+
+
 def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=None, gate_fn=None):
     engine_factory = engine_factory or runner.Engine
     measure = measure or pilot.measure_engine
@@ -59,7 +111,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
     contract = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
-    registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
+    source = registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
     ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load,
@@ -77,6 +129,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     print(f'results: {ctx.jsonl}', flush=True)
     engines = {}
     identities = {}
+    previous_digests, previous_diff_ids = set(), set()
     previous_idle = os.environ.get('CTRS_IDLE_SECS')
     os.environ['CTRS_IDLE_SECS'] = '0'
     failed = False
@@ -89,6 +142,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
             layout = ctx.results_dir / f'pair-{pair}-layout'
             receipt = prepare(args.layout, contract, layout, seed)
+            validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids)
             portfolio = registry_portfolio.prepare_layout(layout, {name: image['reference'] for name, image in receipt['images'].items()})
             server = serve(portfolio, 0)
             thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})

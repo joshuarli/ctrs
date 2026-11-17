@@ -1,4 +1,6 @@
 import json
+import hashlib
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +11,134 @@ import reporting
 import w8_benchmark as w8
 
 
+def digest(value):
+    return 'sha256:' + hashlib.sha256(value.encode()).hexdigest()
+
+
+def source_for(contract):
+    routes = {}
+    for name, image in contract['images'].items():
+        layers = [{'digest': digest('source-' + diff_id)} for diff_id in image['diff_ids']]
+        blob = mock.Mock()
+        blob.metadata.return_value = json.dumps({'layers': layers}).encode()
+        routes[(name, 'manifests', image['manifest'])] = (None, None, blob)
+    return SimpleNamespace(routes=routes)
+
+
+def receipt_for(contract, source, seed):
+    images, layers = {}, {}
+    for name, image in contract['images'].items():
+        manifest = json.loads(source.routes[(name, 'manifests', image['manifest'])][2].metadata())
+        descriptors, diff_ids = [], []
+        for original, diff_id in zip(manifest['layers'], image['diff_ids'], strict=True):
+            key = (original['digest'], diff_id)
+            item = layers.setdefault(key, {'source_digest': key[0], 'source_diff_id': key[1],
+                'digest': digest(seed.hex() + key[0]), 'diff_id': digest(seed.hex() + key[1]),
+                'size': 123, 'marker': 'marker'})
+            descriptors.append({'digest': item['digest'], 'size': item['size']})
+            diff_ids.append(item['diff_id'])
+        images[name] = {'reference': image['layout_reference'], 'source_manifest': image['manifest'],
+                        'manifest': digest(seed.hex() + name + 'manifest'),
+                        'config': digest(seed.hex() + name + 'config'),
+                        'layers': descriptors, 'diff_ids': diff_ids}
+    return {'schema_version': 1, 'fixture_version': 'w8-v3',
+            'source_fixture_version': contract['fixture_version'],
+            'source_contract_sha256': hashlib.sha256(w8.registry_variant._encoded(contract)).hexdigest(),
+            'seed_sha256': hashlib.sha256(seed).hexdigest(), 'seed': seed.hex(),
+            'images': images, 'layers': list(layers.values())}
+
+
+def prepare_fake(source, contract, dest, seed):
+    return receipt_for(contract, source_for(contract), seed)
+
+
 class PairedBatch(unittest.TestCase):
+    def test_receipt_identity_mutations_and_shared_layers(self):
+        shared = digest('shared')
+        contract = {'fixture_version': 'source', 'images': {
+            name: {'layout_reference': name, 'manifest': digest(name), 'layer_count': 1, 'diff_ids': [shared]}
+            for name in ('a', 'b')}}
+        source = source_for(contract)
+        seed = b'first'
+        valid = receipt_for(contract, source, seed)
+        previous_digests, previous_diff_ids = set(), set()
+        w8.validate_receipt(valid, contract, source, seed, previous_digests, previous_diff_ids)
+        self.assertEqual(len(valid['layers']), 1)
+        second_seed = b'second'
+        second = receipt_for(contract, source, second_seed)
+        for mutation in ('source_digest', 'source_diff_id', 'previous_digest', 'previous_diff_id',
+                         'missing', 'duplicate', 'mismatch', 'image_missing', 'shared_conflict'):
+            altered = copy.deepcopy(second)
+            layer = altered['layers'][0]
+            if mutation in ('source_digest', 'previous_digest'):
+                layer['digest'] = layer['source_digest'] if mutation == 'source_digest' else valid['layers'][0]['digest']
+                for image in altered['images'].values(): image['layers'][0]['digest'] = layer['digest']
+            if mutation in ('source_diff_id', 'previous_diff_id'):
+                layer['diff_id'] = layer['source_diff_id'] if mutation == 'source_diff_id' else valid['layers'][0]['diff_id']
+                for image in altered['images'].values(): image['diff_ids'][0] = layer['diff_id']
+            if mutation == 'missing': altered['layers'].clear()
+            if mutation == 'duplicate': altered['layers'].append(copy.deepcopy(layer))
+            if mutation == 'mismatch': layer['source_digest'] = digest('wrong')
+            if mutation == 'image_missing': del altered['images']['a']
+            if mutation == 'shared_conflict': altered['images']['a']['diff_ids'][0] = digest('wrong')
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                w8.validate_receipt(altered, contract, source, second_seed, previous_digests, previous_diff_ids)
+        w8.validate_receipt(second, contract, source, second_seed, previous_digests, previous_diff_ids)
+
+    def test_shared_layer_receipt_passes_batch_once_per_pair(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / 'w8-v2'
+            fixture.mkdir()
+            shared = digest('shared')
+            contract = {'fixture_version': 'source', 'images': {
+                name: {'layout_reference': name, 'manifest': digest(name), 'layer_count': 1, 'diff_ids': [shared]}
+                for name in ('a', 'b')}}
+            (fixture / 'portfolio.json').write_text(json.dumps(contract))
+            engine = mock.Mock(proc=object())
+            engine.name = 'ctrs'
+            result = {'correctness': True, 'pull_to_health_s': 1, 'errors': [],
+                      'resources': {'status': 'ok', 'ownership': {'required_processes': [
+                          {'pid': 1, 'role': 'daemon', 'kernel_start_identity': 2}]}}}
+            measure = mock.Mock(return_value=result)
+            server = mock.Mock()
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=True)
+            with mock.patch.object(w8.runner, 'RESULTS', root), \
+                 mock.patch.object(w8.runner, 'FIXTURES', root), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
+                 mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
+                 mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 1, 'mem_total_bytes': 1}), \
+                 mock.patch.object(w8, 'validate_receipt', wraps=w8.validate_receipt) as validate:
+                self.assertEqual(w8.run_batch(args, engine_factory=lambda *a: engine, prepare=prepare_fake,
+                    measure=measure, serve=lambda *a: server, gate_fn=lambda *a: True), 0)
+            validate.assert_called_once()
+            self.assertEqual(len(validate.call_args.args[0]['layers']), 1)
+            self.assertEqual(measure.call_count, 2)
+
+    def test_invalid_receipt_stops_before_measurement_and_retains_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine = mock.Mock()
+            measure = mock.Mock()
+            def invalid(source, contract, dest, seed):
+                receipt = prepare_fake(source, contract, dest, seed)
+                receipt['layers'].pop()
+                return receipt
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False)
+            with mock.patch.object(w8.runner, 'RESULTS', root), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_layout') as prepare_layout:
+                with self.assertRaisesRegex(ValueError, 'incomplete receipt'):
+                    w8.run_batch(args, engine_factory=lambda *a: engine, prepare=invalid, measure=measure)
+            measure.assert_not_called()
+            prepare_layout.assert_not_called()
+            status = json.loads(next(root.glob('*/status.json')).read_text())
+            self.assertEqual(status['state'], 'failed')
+            self.assertEqual(status['completed_records'], 0)
+            self.assertIn('incomplete receipt', status['error'])
+            engine.stop.assert_called_once()
+
     def test_cli_installs_cleanup_policy_before_batch(self):
         import runner
         with tempfile.TemporaryDirectory() as temp:
@@ -64,7 +193,7 @@ class PairedBatch(unittest.TestCase):
                         stream.write(json.dumps(row) + '\n')
             contexts = []
             def prepare(source, contract, dest, seed):
-                return {'images': {'api': {'reference': 'api'}}, 'seed': seed.hex()}
+                return prepare_fake(source, contract, dest, seed)
             def measure(engine, directory, run, contract, portfolio, receipt, layout, server, under_load):
                 self.assertEqual(w8.os.environ['CTRS_IDLE_SECS'], '0')
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
@@ -75,7 +204,7 @@ class PairedBatch(unittest.TestCase):
                             {'status': 'ok', 'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
             args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False)
             with mock.patch.object(w8.runner, 'RunContext', Context), \
-                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
                  mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
                  mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 100}):
@@ -99,7 +228,7 @@ class PairedBatch(unittest.TestCase):
                 self.assertTrue(reporting.analyze(altered)['cohorts'][0]['rejections'], change)
             args.diagnostic = True
             with mock.patch.object(w8.runner, 'RunContext', Context), \
-                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
                  mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
                  mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 100}):
@@ -124,7 +253,7 @@ class PairedBatch(unittest.TestCase):
                 return result
             previous_idle = w8.os.environ.get('CTRS_IDLE_SECS')
             with mock.patch.object(w8.runner, 'RunContext', Context), \
-                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
                  mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
                  mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 100}):
@@ -150,12 +279,12 @@ class PairedBatch(unittest.TestCase):
                 def server_close(self): pass
             args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False)
             with mock.patch.object(w8.runner, 'RESULTS', root), \
-                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
                  mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
                  mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 1, 'mem_total_bytes': 1}):
                 code = w8.run_batch(args, engine_factory=Engine,
-                    prepare=lambda *a: {'images': {'api': {'reference': 'api'}}},
+                    prepare=prepare_fake,
                     serve=lambda *a: Server(), gate_fn=lambda *a: True,
                     measure=mock.Mock(side_effect=RuntimeError('failed leg')))
             records = [json.loads(line) for line in next(root.glob('*/trials.jsonl')).read_text().splitlines()]
@@ -175,11 +304,11 @@ class PairedBatch(unittest.TestCase):
                 measurement = mock.Mock(side_effect=SystemExit(143))
                 with self.subTest(scenario=scenario), \
                      mock.patch.object(w8.runner, 'RESULTS', root), \
-                     mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                     mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                      mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()):
                     def execute():
                         return w8.run_batch(args, engine_factory=FaultEngine,
-                            prepare=lambda *a: {'images': {'api': {'reference': 'api'}}},
+                            prepare=prepare_fake,
                             serve=lambda *a: Server(), gate_fn=lambda *a: scenario != 'busy', measure=measurement)
                     if scenario == 'busy':
                         self.assertEqual(execute(), 1)
