@@ -99,3 +99,53 @@ adds guest meminfo/vmstat/slab snapshots through one owned resident probe, keeps
 the same five cycles, then tests explicit cache release and normal default
 sleep/wake. That probe/cache action makes it a separate attribution fixture;
 neither forced cache dropping nor the probe is a product policy change.
+
+## Attribution and default sleep
+
+Attribution job 1b5e52c1b6e24b16b24d22cfafc831d2 under
+`.work/tmp/resource-growth-attribution-20261117/job` exits0 with clean teardown,
+all87 frozen receipts unchanged. All12 fixed-work application trials pass
+(8,000 operations total), with zero recorded guest `oom_kill` counters and no
+accounting fallback. One constant owned Python probe keeps the guest resident
+during the five attribution cycles; this is a separate fixture from the failed
+default-policy run above. It does not replace that result.
+
+The VM helper grows from729,908,736B to758,646,272B at the cycle snapshots,
+while the daemon falls from15,516,272B to9,241,224B. Guest page cache stays
+201,464KiB across the initial and cycle snapshots; slab rises by only1,836KiB.
+The current evidence therefore points to guest/VM physical residency rather
+than increasing daemon storage or comparably growing guest live allocations.
+It does not prove the underlying VZ mechanism or an unbounded leak.
+
+After an explicit guest sync/cache-drop, Cached falls201,464→12,700KiB
+(184.34MiB), but immediate native footprint falls only49,152B (48KiB).
+The subsequent30-second median is768,051,336B. This misses the predeclared
+32MiB useful-reclaim screen: no product cache-dropping policy is selected.
+
+After removing the owned probe, normal default sleep is observed, the old VM
+helper no longer exists and its dedicated disk is closed. The daemon remains
+alive at8,995,464B native footprint. That is a daemon observation, not a
+complete engine CPU interval or a zero substituted for a missing VM counter.
+The same daemon then boots a new VM identity with the exact pinned assets,
+checks API source and completes a fresh exact1,000-operation W2 stack. This
+proves functional next use, not persisted DB recovery across sleep, qualified
+wake latency or full transition CPU accounting.
+
+Result SHA-256:
+`af2aa08315b03e83353c367dc04826e119ad83d75954b69e53a33b8c86a1c6a4`;
+predeclared plan `04aee9a66ab878fb7c917b4c9eb4b08763f5dc04f6b614e5ce6eba14fae8f40f`.
+
+Native feature-admission job c8d90a4955e14f3eb42ad127d8c1e9c2 also exits0,
+owned cleanup complete, all87 inputs unchanged. The live balloon device5
+negotiates bits0/2 but neither free-page hint bit3 nor reporting bit5. The
+[Linux feature definitions](https://github.com/torvalds/linux/blob/v6.18/include/uapi/linux/virtio_balloon.h),
+[sysfs bit order](https://github.com/torvalds/linux/blob/v6.18/drivers/virtio/virtio.c),
+and [driver feature checks](https://github.com/torvalds/linux/blob/v6.18/drivers/virtio/virtio_balloon.c)
+support that interpretation. Stock guest config already enables page reporting.
+A guest-only reporting-parameter experiment is not admitted on this negotiated
+device. This does not establish what a different host device offers.
+Raw result is `.work/tmp/virtio-feature-admission-20261117/result.json`.
+SHA-256: `55266dd1fb69dc314f70c81e2ef61b2b49d7903b20f1df0154a956dd4dd29ca7`.
+After compaction, cache release and feature admission selected no resident
+reclaim remedy, move to the real W9 parallel-build boundary. Keep the failed
+resident growth and installed-default lifecycle accounting cells open.

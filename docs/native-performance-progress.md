@@ -114,17 +114,28 @@ See [resource evidence](evidence/native-resource-cycles-2026-11-17.md).
 Its pre/post simple host gate exits0, but unrelated running OrbStack Linux
 machine/exclusive qualification remains unresolved. Preserve the failed cells.
 
-**Exact continuation:** consume the registered status watch for native job
-1b5e52c1b6e24b16b24d22cfafc831d2,
-`.work/tmp/resource-growth-attribution-20261117/job`, deadline epoch1794907069.
-It attributes the failure with five identical work/reclaim/next-use cycles,
-one owned privileged resident probe, guest meminfo/vmstat/slab and native
-per-process counters. Then it tests explicit guest cache release, normal default
-sleep with closed owned disk, and verified wake/application work. This is a
-distinct attribution fixture; no product cache/idle policy changed. Check
-native/guest coverage, OOM/fallback, hashes and retained budgets before selecting
-a remedy. Never treat absent VM counters as zero or rerun until green.
-No source worker active; no other measured native job may contend.
+Attribution job1b5e52c1… is terminal exit0/clean cleanup, all87 receipts unchanged.
+All12 fixed-work trials/8,000 operations pass; guest OOM counts stay0 and no
+fallback. Constant probe distinguishes this fixture. Native VM footprint grows
+about29MB while guest cache stays flat. Explicit cache release frees184MiB guest
+cache but only48KiB native footprint: no useful reclaim. Default60s sleep closes
+the disk and removes the old helper; wake checks actual new VM/assets/API and
+passes another exact W2 stack. Transition CPU/wake timing/persisted recovery
+remain unqualified. Feature admission c8d90a49… exits0/clean; actual balloon has
+neither negotiated hinting nor reporting. No guest-only reporting experiment or
+product cache/idle change. Resource evidence above retains exact results/hashes.
+
+**Exact continuation:** consume registered status watch for native job
+18475b48d7164b2c9d725778f7edee09,
+`.work/tmp/w9-concurrency-profile-20261117/job`. It runs3 AB/BA/AB engine pairs,
+16 real Marked build/CLI jobs at each concurrency1/4/8/16 (384 jobs total),
+pinned digest/tools/lock/artifact, 17CPU/45091MiB ctrs resident control versus
+OrbStack's existing capacity. Correctness, owned cleanup, actual binary/assets,
+phase counters and <=1% capacity parity are required. Timings remain diagnostic;
+predeclared CPU loss screen is >=10% in all3 pairs at a concurrency. Review
+results/host snapshots and all frozen receipts once; preserve failures and
+profile any demonstrated contention boundary. No source worker active; no other
+measured native job may contend. Never treat absent VM counters as zero.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
