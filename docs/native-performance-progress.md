@@ -4,6 +4,25 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
+**Current action:** affinity diagnostics completed; see
+[`native-affinity-2026-11-16.md`](evidence/native-affinity-2026-11-16.md).
+An isolated same-toolchain stock/LSE-only build is now active at
+`.work/wt/np-lse-only/.work/kernel-lse/job`, durable ID
+`989c31ff8d4040deb79f6f0a3255a813`. It starts only after the affinity job's
+successful terminal cleanup; no measured workload overlaps this build.
+Private branch `experiment/np-lse-only` f7ea791 adds only
+`CONFIG_ARM64_USE_LSE_ATOMICS=y`. Source/scripts are frozen by `inputs.json`;
+two CPUs, 4GiB, 1,200s build timeout and 1,800s supervisor deadline. A private
+volume copies the unused kernel cache read-only; live guest assets are untouched.
+On resume inspect terminal status once, verify compiler hashes/config differences
+and image hashes, then audit native LSE feature/actual boot identity before the
+saved three-pair default-affinity diagnostic in
+`.work/tmp/w2-lse-explore-20261116/run.py`. It has not launched. Prepare private
+baseline/candidate guest directories with unchanged initrd/template and freeze
+their receipts first. The launcher lacks a custom TERM handler: if interrupted
+outside its normal bounded timeout, inspect and stop only its saved labelled
+container ID before considering cleanup complete. No kernel change is promoted.
+
 Resume steering: storage repair, pinned W8 warmup, service-resource coverage and
 fixed under-pull work are accepted below. W8 paired execution/reporting is
 integrated as 2769bd0 with parent repairs through 78c9145. Source worker
@@ -41,18 +60,13 @@ entry points now refuse with this replacement command. CLI/sampler footprints,
 allocated storage, sub-API guest-cache absence, frozen observer acceptance,
 installed-default comparisons and full qualification remain unproved.
 
-Current experiment: finite job
-`.work/tmp/w2-affinity-explore-20261116/job`, ID
-`1e855e77f2ed4713ad5a714e3d0e28a7`, runs nine predeclared diagnostic blocks:
-three rotated rounds of default/all, CPU0, CPU0,1 API affinity, both engines,
-50k operations per off/on phase, alternating engine/mode order. Source and
-baseline binary/guest inputs are frozen by `inputs.json`; do not edit/rebuild
-them until terminal. Only this job owns native workloads. Its plan retains
-contention and failures and stops on the first failure without replacement.
-All timings and qualification are explicitly ineligible. Inspect its terminal
-receipt once, aggregate profiles by CPU set without pooling defaults, then
-choose the next mechanism experiment. Real ten-block exclusive observer
-confirmation remains required before kernel candidate selection or speed claims.
+Completed job `.work/tmp/w2-affinity-explore-20261116/job` exits 0 with cleanup
+complete: nine blocks, 36 correct phases, 1.8 million operations, all affinities
+verified and 81 unchanged input receipts. All timings and qualification remain
+ineligible. The linked evidence preserves every round, contention and raw profile
+counts. Private kernel experiments may proceed under the owner's extra-experiment
+steering; exclusive observer confirmation and all resource/regression gates remain
+required before promotion or speed claims. Do not repeat the completed matrix.
 
 The preceding stock exploratory batch stopped on its first block
 `w2-cpu-20261116T185652-c15a`: an analyzer falsely interpreted the valid kernel
