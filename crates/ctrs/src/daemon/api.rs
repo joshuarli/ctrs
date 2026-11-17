@@ -491,7 +491,8 @@ fn images(req: &Request, engine: &Engine) -> Result<Value, Error> {
 
 fn image_inspect(engine: &Engine, name: &str) -> Result<Value, Error> {
     let i = engine.image(name)?.ok_or_else(|| Error::NotFound(format!("No such image: {name}")))?;
-    let rootfs = image_rootfs(&engine.store.read_config(&i.config_digest)?, i.layers.len())?;
+    let cfg: Value = serde_json::from_slice(&engine.store.read_config(&i.config_digest)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let rootfs = image_rootfs(&cfg, i.layers.len())?;
     Ok(json!({
         "Id": i.config_digest,
         "RepoTags": [i.name],
@@ -506,14 +507,14 @@ fn image_inspect(engine: &Engine, name: &str) -> Result<Value, Error> {
             "Entrypoint": if i.config.entrypoint.is_empty() { Value::Null } else { json!(i.config.entrypoint) },
             "WorkingDir": i.config.working_dir,
             "User": i.config.user,
-            "Healthcheck": image_healthcheck(engine, &i),
+            "Healthcheck": cfg["config"]["Healthcheck"],
+            "Labels": cfg["config"]["Labels"],
         },
         "RootFS": rootfs,
     }))
 }
 
-fn image_rootfs(config: &[u8], layer_count: usize) -> io::Result<Value> {
-    let cfg: Value = serde_json::from_slice(config).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+fn image_rootfs(cfg: &Value, layer_count: usize) -> io::Result<Value> {
     let diff_ids = cfg["rootfs"]["diff_ids"].as_array().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "image config has no rootfs.diff_ids"))?;
     if cfg["rootfs"]["type"] != "layers" || diff_ids.len() != layer_count {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "image config rootfs differs from recorded layers"));
@@ -1773,12 +1774,6 @@ fn healthcheck_from(body: &Value, image_cfg: &Value) -> Result<Option<super::hea
     Ok(super::health::merge(mine, Healthcheck::from_json(&image_cfg["config"]["Healthcheck"])))
 }
 
-/// The image's HEALTHCHECK, which Ctrs's image model does not keep.
-fn image_healthcheck(engine: &Engine, i: &ctrs_image::Image) -> Value {
-    let cfg: Value = engine.store.read_config(&i.config_digest).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
-    cfg["config"]["Healthcheck"].clone()
-}
-
 /// `docker ps`'s Status: "Up 2 minutes (healthy)" while running unpaused
 /// with a healthcheck.
 fn ps_status(c: &Container, health: Option<&super::health::Health>) -> String {
@@ -2728,12 +2723,12 @@ mod tests {
     fn image_rootfs_reports_uncompressed_diff_ids_and_rejects_missing_identity() {
         let ids = vec![format!("sha256:{}", "a".repeat(64)), format!("sha256:{}", "b".repeat(64))];
         let config = json!({"rootfs": {"type": "layers", "diff_ids": ids}});
-        assert_eq!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 2).unwrap(), json!({"Type": "layers", "Layers": ids}));
-        assert!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 1).is_err());
+        assert_eq!(image_rootfs(&config, 2).unwrap(), json!({"Type": "layers", "Layers": ids}));
+        assert!(image_rootfs(&config, 1).is_err());
         for config in [json!({}), json!({"rootfs": {"type": "layers", "diff_ids": [null]}}), json!({"rootfs": {"type": "layers", "diff_ids": ["sha256:short"]}})] {
-            assert!(image_rootfs(&serde_json::to_vec(&config).unwrap(), 1).is_err());
+            assert!(image_rootfs(&config, 1).is_err());
         }
-        assert_eq!(image_rootfs(br#"{"rootfs":{"type":"layers","diff_ids":[]}}"#, 0).unwrap(), json!({"Type": "layers", "Layers": []}));
+        assert_eq!(image_rootfs(&json!({"rootfs":{"type":"layers","diff_ids":[]}}), 0).unwrap(), json!({"Type": "layers", "Layers": []}));
     }
 
 

@@ -123,6 +123,11 @@ run ID, and fixed deadline authorized through
 Short cycles and check selections do not authorize or qualify W11. These full
 workloads are not prerequisites or fallbacks for `runner.py check`.
 
+`python3.14 conformance/image-labels.py --ctrs-binary /path/to/signed/ctrs`
+loads tiny disposable image archives and checks populated, empty and absent
+labels plus adjacent config fields through an isolated engine socket. It needs
+no registry, guest boot or containers; results stay under `.work/tmp`.
+
 On native ARM64 macOS, `conformance/vm-stop.py --ctrs-binary /path/to/signed/ctrs
 --portfolio-archive /path/to/portfolio.tar` checks idle sleep, wake, injected VM
 loss and recovery, and normal daemon shutdown using an isolated engine. It
