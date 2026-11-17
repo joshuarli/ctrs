@@ -7,7 +7,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from diagnostics import sampler_pilot as pilot
 from test_safety import FixtureContext, fake_engine
@@ -29,6 +29,7 @@ class ObserverControls(unittest.TestCase):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 ctx = FixtureContext(directory)
                 engine = fake_engine()
+                engine.measurement_identity = {}
                 engine.compose.side_effect = failure
                 with patch.object(pilot.runner, 'compose_down', side_effect=[None, RuntimeError('cleanup failed')]), \
                      patch.object(pilot.runner, 'start_sampler', return_value=(object(), None)), \
@@ -105,7 +106,7 @@ class ObserverControls(unittest.TestCase):
                      patch.object(pilot.runner, 'DOCKER', pilot.runner.DOCKER), \
                      patch.object(pilot.runner, 'RunContext', Context), \
                      patch.object(pilot.runner, 'find_docker', return_value='docker'), \
-                     patch.object(pilot.runner, 'trial_w2', return_value=failed), \
+                     patch.multiple(pilot.runner, trial_w2=Mock(return_value=failed), tool_provenance=Mock(return_value={})), \
                      patch.object(pilot.registry_portfolio, 'prepare_pinned_portfolio', return_value=portfolio), \
                      patch.object(pilot.registry_portfolio, 'serve', return_value=server), \
                      patch.object(pilot.resource_pilot, 'ResourceEngine', Engine), \

@@ -10,7 +10,7 @@ import resource_cells as cells
 
 
 BUDGETS = {
-    'version': 'w2-resource-v1',
+    'version': 'w2-resource-v2-counter-aligned-interval',
     'minimum_post_warmup_cycles': 5,
     'minimum_idle_seconds': 30,
     'minimum_reclaim_seconds': 30,

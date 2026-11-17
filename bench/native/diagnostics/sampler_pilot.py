@@ -132,6 +132,8 @@ def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operation
                     resource_pilot.verify_binary(identity, runner.sha256_file(binary))
                 resource_pilot.save(directory / 'running-engine.json', identity)
                 resource_pilot.save(directory / 'engine-info.json', runner.safe_engine_info(engine))
+                tooling = runner.tool_provenance(engine)
+                resource_pilot.save(directory / 'tools.json', tooling)
                 for pair in range(1, pairs + 1):
                     modes = [runner.SamplingMode.BOUNDARIES, runner.SamplingMode.PERIODIC]
                     if pair % 2 == 0:
@@ -145,6 +147,7 @@ def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operation
                                               operations, sampling=mode)
                         rec.update(measurement_valid=False, measurement_invalidation='observer diagnostic; host exclusivity not certified',
                                    calibration_pair=pair, sampling_mode=mode.value, engine_server_version=runner.safe_version(engine))
+                        rec['tools'] = tooling
                         ctx.write(rec)
                         resource_pilot.host_snapshot(trial, 'after')
                         row = _trial_totals(rec, operations) | {'engine': name, 'pair': pair,

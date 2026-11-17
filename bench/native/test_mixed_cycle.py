@@ -177,7 +177,13 @@ class DurationAdmission(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'boot assets differ'):
                     mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
                                     expected_boot_assets={'/unexpected/Image': {'sha256': 'wrong'}})
-                self.assertEqual(cleanup.call_count, 5)
+                budget_root = root / 'budget-mismatch'; budget_root.mkdir()
+                ctx.results_dir = budget_root
+                with patch.object(runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 8 << 30}), \
+                     self.assertRaisesRegex(ValueError, 'resource envelope differs'):
+                    mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
+                                    expected_resources={'ncpu': 2, 'mem_total_bytes': 8 << 30})
+                self.assertEqual(cleanup.call_count, 6)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
             self.assertEqual([c['explicitly_deleted_writes'] for c in result['cycles']], [1, 1])
             for index in range(2):

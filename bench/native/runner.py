@@ -28,6 +28,7 @@ import hashlib
 import inspect
 import json
 import os
+import platform
 import random
 import re
 import shlex
@@ -39,6 +40,7 @@ import socket
 import subprocess
 import sys
 import time
+import durable_job
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -215,15 +217,21 @@ W8_IMAGES = [
 
 CHECK_COMPONENTS = {
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
-    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_mixed_resources", "test_qualification", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
     "resources": ("test_resource_cells", "test_resource_cycles", "test_resource_pilot", "test_wal_trace_guest",
                   "test_collect", "test_storage_space",
-                  "test_system_df_cache", "test_reporting", "test_safety"),
+                  "test_system_df_cache", "test_mixed_resources", "test_qualification", "test_reporting", "test_safety"),
 }
 CHECK_TIMEOUT_SECONDS = 60
+TOOL_CONTRACTS = {
+    'python': {'asset_version': 'python', 'version_command': None},
+    'docker': {'asset_version': 'docker_cli', 'version_command': ('--version',)},
+    'compose': {'asset_version': 'docker_compose', 'version_command': ('compose', 'version', '--short')},
+    'buildx': {'asset_version': 'docker_buildx', 'version_command': ('buildx', 'version')},
+}
 
 HEALTH_DEADLINE_S = 240.0
 # Health/readiness polling granularity. Kept fine (0.1 s): coarser
@@ -1002,6 +1010,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         compose_down(engine, proj)
         sampler, trace = start_sampler(engine, trial_dir, sampling=sampling)
         measurement_started = True
+        rec['running_identity'] = engine.measurement_identity
         rec['resources'].update(sampling_mode=sampling.value, sampler_version=collect.SAMPLER_VERSION)
         if allocation_paths:
             rec["resources"]["disk_allocation"] = {
@@ -2591,6 +2600,27 @@ def safe_version(engine: Engine) -> str:
         return engine.server_version()
     except Exception:
         return "unreachable"
+
+
+def tool_provenance(engine: Engine) -> dict:
+    """Capture actual CLI/plugin executables and exact versions before workload phases."""
+    plugins = json.loads(engine.sh(['info', '--format', '{{json .ClientInfo.Plugins}}']).stdout)
+    if not isinstance(plugins, list):
+        raise ValueError('Docker CLI did not identify loaded plugins')
+    paths = {'python': Path(sys.executable), 'docker': Path(DOCKER)}
+    for name in ('compose', 'buildx'):
+        matches = [item for item in plugins if item.get('Name') == name]
+        if len(matches) != 1:
+            raise ValueError('cannot identify one loaded plugin: ' + name)
+        paths[name] = Path(matches[0]['Path'])
+    result = {}
+    for name, contract in TOOL_CONTRACTS.items():
+        command = contract['version_command']
+        version = engine.sh(list(command)).stdout.strip() if command else platform.python_version()
+        if not version:
+            raise ValueError('missing tool version: ' + name)
+        result[name] = {'version': version, 'artifact': durable_job.receipt(paths[name])}
+    return result
 
 
 def safe_engine_info(engine: Engine) -> dict | None:

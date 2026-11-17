@@ -10,6 +10,7 @@ import math
 import random
 import re
 import statistics
+import resource_cells
 from pathlib import Path
 
 MIN_PAIRS = 10
@@ -155,7 +156,7 @@ def _resource_mismatch(a: dict, b: dict) -> bool:
     # Large discrepancies invalidate pairs; budget parity still needs preflight.
     x, y = left.get("mem_total_bytes"), right.get("mem_total_bytes")
     return bool(_number(x) and _number(y) and x > 0 and y > 0
-                and max(x, y) / min(x, y) > 1.01)
+                and max(x, y) / min(x, y) > resource_cells.ENGINE_MEMORY_RATIO_LIMIT)
 
 
 def _analyze_cohort(identity: dict, records: list[dict],
