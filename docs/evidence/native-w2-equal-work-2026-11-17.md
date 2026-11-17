@@ -119,6 +119,40 @@ Job status SHA-256
 The source used for the primed batch is the sampler and tests committed
 in `a8c55cc`, captured before that documentation commit.
 
+## Saturation diagnostic
+
+Job `627d4248db6b46c79e65b1cf05416dde` exited 0 after five pairs with
+alternating engine order. The boundary-only workload issued requests for
+20 seconds at concurrency 8 and seed `7 + block`. All ten trials verified
+exact data with zero request errors, for 402,065 successful operations.
+Observed write fractions ranged from 29.65% to 30.35%. Native teardown
+passed and all 160 frozen inputs rechecked, including the configured initramfs.
+All 20 timing gates returned 0. The recorded OrbStack helper CPU ranged from
+0% to 792% in the adjoining snapshots.
+
+| Metric | ctrs median [range] | OrbStack median [range] | Paired ratio [95% interval] |
+| --- | ---: | ---: | ---: |
+| Successful requests/s | 2,485 [1,848–2,671] | 1,559 [1,073–2,114] | 0.631 [0.403–1.144] |
+| p99, ms | 7.54 [7.27–19.14] | 12.37 [8.74–42.38] | 0.593 [0.172–2.189] |
+| API CPU, µs/op | 348.1 [328.8–453.5] | 379.4 [310.4–486.5] | 0.918 [0.686–1.431] |
+| API user, µs/op | 271.1 [257.0–359.6] | 308.2 [256.1–403.5] | 0.880 [0.637–1.374] |
+| API system, µs/op | 77.1 [71.3–93.9] | 71.3 [54.3–83.1] | 1.082 [0.894–1.702] |
+
+Saturation leaves each listed cross-engine comparison inconclusive. Keep
+these results separate from the equal-work blocks. The raw trial SHA-256
+is `7880592ace28b7e79dc22669e8de1fb3d692a24dbba19c86994cc391a1c5b47e`.
+The job status SHA-256 is
+`da825177cf71a2985e2bb5d98ba8ad02ffd85b2c53f0dc3f6442a6e4d1fa80b6`.
+
+To reproduce saturation, prepare the same pinned registry and engines with
+`sampler_pilot._prepared_engine`. Prime the API before each trial. Run
+`runner.trial_w2(ctx, engine, 'saturation', 8, 20, .3, 7 + block,
+sampling=runner.SamplingMode.BOUNDARIES)` once per engine for each of five
+blocks, reversing the engine order in even blocks. Omitting the operation
+limit selects duration mode. Capture the guest capacity and host conditions
+before and after each trial. Normalize CPU using each trial's actual
+successful count. Keep the raw results and write fractions for each pair.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
