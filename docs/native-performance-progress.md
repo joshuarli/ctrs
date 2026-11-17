@@ -4,7 +4,8 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** test owned load-generator QoS after fixed-rate admission failures.
+**Current action:** attribute Python attach/detach and futex boundaries with
+a private diagnostic kernel and exact-count probe admission.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -165,30 +166,39 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** finite native job
-`70b5083650a94878b2641d5498a6afe9` is active under
-`.work/tmp/w2-rate-c128-cpu-20261117/job`. It owns the native workload. First stage
-requires six alternating engine admission legs at C128/2,000req/s/2,000ops; only
-zero misses/errors/incomplete work allows the second-stage six-pair CPU matrix.
-That matrix rotates closed-loop/500/2,000req/s with 10,000ops each, matching seeds
-within pairs and varying between pairs. Source and all relevant inputs are frozen.
-Do not modify them while the job runs. First invalid cell stops the matrix;
-retain partial data and never replace it. Consume terminal status once, verify
-all frozen receipts, then run prepared matrix/analyze.py and decide next cause.
+**Exact continuation:** two scoped source lanes are active; no native benchmark
+is running. Private kernel worker `usrw_f125c2f3-3030-4199-b836-739a7f4f71e2`,
+`.work/wt/np-uprobes`, branch `experiment/np-uprobes`, base2356cf0, owns only
+`guest/kernel/ctrs.config`. Its named <=6CPU/6GiB build adds UPROBE_EVENTS for
+attribution, with matching6.18.58 patches/toolchain and isolated labelled outputs
+under its `.work/kernel-uprobes`. Initial build stops before compilation on compiler-alias metadata; original
+compiler binary SHA matches. Same-session v2 uses original alias and retains
+strict generated-config checks; watch session1531. Never promote this diagnostic
+capability as a performance win or modify main guest assets. Review config/build/
+compiler receipts and actual capability before native use.
 
-Source worker 7611c2e2… is terminal succeeded. Initial/full correction diffs and
-scope reviewed; parent bounded W2 check passes56 tests/zero skips. Source integrated
-as cae881b/ab78613, original v2 unchanged. C16 native admission f569a927… exits0/
-clean with all12,000 operations on time and95 unchanged inputs. First C16 CPU
-matrix d71f8067… exits1/clean at round1 ctrs 2,000/s: all10,000 operations correct
-but52 late starts, all explained by preceding same-client response queues. It
-stops with three records, no replacement. New C64 control's32ms per-client interval
-exceeds observed21.586ms maximum service. C64 job8570347e… then fails admission
-on final OrbStack leg with1197 response-queued starts, max service47.383ms; all97
-inputs unchanged, exact application/counters/cleanup pass, larger matrix never
-launched. New C128 interval64ms is the final capacity control; no further count
-escalation on failure. All conditions share its partition.
-Canonical v3.2 is used. No product or workstation policy changes, no win claimed.
+Helper worker `usrw_3f5602d1-675a-4a92-b1f5-0da51457bf1d` is in
+`.work/wt/np-w2-uprobes`, branch `diagnostic/w2-uprobes`, same base. It owns only
+`diagnostics/w2_uprobes_guest.py`, `test_w2_uprobes.py`, `diagnostics/w2-uprobes.md`
+under bench/native. It implements pinned SaveThread/RestoreThread entry+return
+and futex correlation in an owned trace instance, complete loss/profile records,
+strict definition/cleanup guards and focused source tests; no native runs.
+Initial31783d7 full diff/scope reviewed. One correction is active: strict PID
+filter readback, stop-time clock/buffer checks and bounded library reads. Consume
+watch session15062, review only correction delta and run the exact named tests.
+See [Python attribution admission](evidence/native-python-uprobes-2026-11-17.md).
+Parent prepared C barrier-controlled exact-call probe at
+`.work/tmp/w2-uprobe-known-count-20261117/probe.c`: compile using pinned owned
+builder after kernel lane completes, admit exactN entry/return pairs on both
+engines before API attribution. Keep CPU execution and elapsed waits separate.
+
+C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
+Six admission legs pass; larger matrix stops at round1 OrbStack2,000/s with5270
+late starts despite exact10,000 successful operations. Five prior matrix cells
+pass, but no six-round CPU conclusion. Earlier C16/C64 failures remain retained.
+Stop client-count escalation; high-rate cost comparison remains unadmitted.
+Source timer fix cae881b/ab78613 is accepted with parent56-test/zero-skip check;
+original v2 unchanged. No product or workstation policy change, no win claimed.
 
 Timer-only jobs a7d66088… and bf483e8f… are terminal exit0/clean. Mach absolute
 wait retains misses. Kqueue candidate delivers all slots on time across six
@@ -646,8 +656,10 @@ Unaccepted relation-ENOSPC experiment 538e2c3 is parked after owner winddown.
 cleanup. Its supervisor job `.work/tmp/space-source-20261116T0935` exits 0.
 The zero allocation delta is an endpoint observation, not a peak bound. Review
 34112a16 found that the growth check occurs only after reservation and that a
-cleanup snapshot write can skip shutdown/result persistence. Both fixes remain
-open; the source was reverted from main and preserved on `campaign/np-storage-space`.
+cleanup snapshot write can skip shutdown/result persistence. Those fixes were
+subsequently integrated as97a6a69 after source restoration3a87d61; the retained
+inventory records the revised native allocation/relation-ENOSPC proofs. Do not
+repeat the original repair; root-reserve/host-full/power-loss cells remain open.
 The [inventory](native-performance-retained.md) records raw paths and failed or
 narrower prior cases. No root-reserve exhaustion, host-full storage, exclusive
 reclaim or power-loss claim. After review fixes, continue allocation/reclaim and

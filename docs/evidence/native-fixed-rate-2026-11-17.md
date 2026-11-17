@@ -296,3 +296,17 @@ job `70b5083650a94878b2641d5498a6afe9` under
 barrier and unchanged delivery budget. No further client-count escalation is
 planned on failure; high-rate cost comparison would remain unadmitted while a
 different performance boundary is investigated. No invalid observation is replaced.
+
+
+C128 job 70b50836… exits 1/clean after passing all six admission legs. Its matrix
+stops on round1 OrbStack 2,000/s: all10,000 operations correct, 5,270 late starts,
+and the unchanged delivery validation fails. All96 frozen receipts remain
+unchanged. The other five cells pass exact10,000 operations each; all six use
+identical6,987 reads/3,013 writes. First-round ctrs API CPU microseconds/op are
+349.0701 closed-loop,340.838 at500/s and261.8231 at2,000/s. OrbStack values are
+321.1907,751.1315,336.8165 respectively; its last value is delivery-invalid.
+These are partial diagnostic records, not a paired six-round CPU conclusion.
+The500/s ctrs contrast is about2.4%, below the declared10% screen. The2,000/s
+relative comparison remains unadmitted. No runtime optimization follows and
+client-count escalation ends here. The next boundary is user-space attribution,
+with explicit native capability and known-count admission before API traces.
