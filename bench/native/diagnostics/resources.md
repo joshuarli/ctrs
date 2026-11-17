@@ -1,8 +1,8 @@
 # W2 resource-cycle pilot
 
 This functional diagnostic consumes the existing fixed-work W2 fixture. It does
-not qualify performance. The W2 service tags and application assets are not yet
-frozen, runs currently use engine blocks rather than interleaved pairs, and host
+not qualify performance. Service images and workload inputs use the frozen
+portfolio pins. Runs use engine blocks rather than interleaved pairs, and host
 exclusivity must be reviewed separately. Historical proxy scores remain unchanged.
 
 Before collection, `resource_cycles.BUDGETS` version w2-resource-v1 declares:
@@ -45,11 +45,20 @@ next cycle. This is a post-reclamation application journey, not a warm HTTP ping
 
 ```sh
 TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/resource_pilot.py \
+  --image-refs /Users/josh/repos/ctrs/.work/native-perf/results/w11-mixed-20261116T063716-8565/ctrs-host/refs.json \
+  --ctrs-binary /path/to/signed/ctrs \
   --orbstack-storage-file '/actual/open/data.img.raw' \
   --orbstack-storage-file '/actual/open/swap.img'
 ```
 
-The supplied files must be nonsymlink regular files open by an identified engine
+Both options are required. The refs file must contain the five mixed-portfolio
+references; the three W2 images must already be installed with matching ARM64
+digests and DiffIDs. The API source and running ctrs daemon binary are checked.
+Compose cannot build or pull images, and warmup cannot pull. The plan records
+the pins and source hashes. These checks have not yet been proved by a native
+resource run and do not establish qualification.
+
+The supplied storage files must be nonsymlink regular files open by an identified engine
 process. Duplicate inodes are rejected. ctrs uses its owned active data disk. The
 command refuses active containers without stopping them, saves pre/post host gate,
 process, power and thermal diagnostics, verifies unchanged running identity and
