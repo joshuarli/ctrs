@@ -11,10 +11,12 @@ The original v2 loader remains immutable for the mixed-workload portfolio pin.
 
 import argparse
 import concurrent.futures
+import errno
 import http.client
 import json
 import math
 import random
+import select
 import sys
 import threading
 import time
@@ -28,9 +30,48 @@ def pct(sorted_vals, q):
     return sorted_vals[idx]
 
 
-FIXTURE_VERSION = "w2-v3.1-fixed-rate"
+FIXTURE_VERSION = "w2-v3.2-fixed-rate"
 SCHEDULE_LAG_BUDGET_MS = 10.0
 MAX_PLANNED_SPAN_S = 3600.0
+_NOTE_NSECONDS = 0x4
+_NOTE_CRITICAL = 0x20
+
+
+def _wait_until_kqueue(deadline, clock, kqueue_factory=None):
+    """Wait for a monotonic deadline with minimally coalesced Darwin timers."""
+    queue = (kqueue_factory or select.kqueue)()
+    try:
+        while True:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                return
+            timeout_ns = max(1, math.ceil(remaining * 1_000_000_000))
+            timer = select.kevent(
+                ident=1, filter=select.KQ_FILTER_TIMER,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                fflags=_NOTE_NSECONDS | _NOTE_CRITICAL, data=timeout_ns)
+            events = queue.control([timer], 1, None)
+            if not events:
+                raise RuntimeError("kqueue timer returned no event")
+            for event in events:
+                if event.flags & select.KQ_EV_ERROR:
+                    code = event.data or errno.EIO
+                    raise OSError(code, "kqueue timer registration failed")
+    finally:
+        queue.close()
+
+
+def _wait_until(deadline, *, clock=None, sleeper=None, kqueue_factory=None):
+    """Wait until an absolute monotonic deadline, rechecking after every wake."""
+    clock = clock or time.monotonic
+    if sys.platform == "darwin" and sleeper is None:
+        return _wait_until_kqueue(deadline, clock, kqueue_factory)
+    sleeper = sleeper or time.sleep
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return
+        sleeper(remaining)
 
 
 def planned_span(operations, request_rate):
@@ -60,9 +101,7 @@ def worker(wid, base, duration, write_ratio, rng_seed, latencies, counts, stop,
         if request_rate is not None:
             slot = (seq - 1) * concurrency + wid
             scheduled = t_start + slot / request_rate
-            delay = scheduled - time.monotonic()
-            if delay > 0:
-                time.sleep(delay)
+            _wait_until(scheduled)
         t0 = time.monotonic()
         try:
             if write:
