@@ -96,6 +96,21 @@ class WalTraceGuestTests(unittest.TestCase):
                         action(tag, trace=trace, state=state)
                     write.assert_not_called()
 
+    def test_stock_kernel_block_format_accepts_ten_character_flags(self):
+        captured = ('field:dev_t dev; offset:8; size:4; signed:0;\n'
+                    'field:char rwbs[10]; offset:34; size:10; signed:0;\n')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'format'
+            path.write_text(captured)
+            self.assertEqual(wal_trace._format(path), captured)
+            for bad in (captured.replace('dev_t dev', 'dev_t other'),
+                        captured.replace('size:4;', 'size:8;'),
+                        captured.replace('rwbs[10]', 'rwbs[0]'),
+                        captured.replace('size:10;', 'size:8;')):
+                with self.subTest(bad=bad), self.assertRaises(RuntimeError):
+                    path.write_text(bad)
+                    wal_trace._format(path)
+
 
 if __name__ == '__main__':
     unittest.main()

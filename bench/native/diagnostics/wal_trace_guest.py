@@ -105,7 +105,9 @@ def _device(path=Path('/dev/vda')):
 
 def _format(path):
     value = path.read_text()
-    if 'dev_t dev;' not in value or 'rwbs[8]' not in value:
+    device = re.search(r'field:dev_t dev;\s*offset:[0-9]+;\s*size:4;\s*signed:0;', value)
+    flags = re.search(r'field:char rwbs\[([0-9]+)\];\s*offset:[0-9]+;\s*size:([0-9]+);', value)
+    if not device or not flags or not 1 <= int(flags[1]) <= 64 or flags[1] != flags[2]:
         raise RuntimeError(f'required block event fields absent: {path}')
     return value
 
