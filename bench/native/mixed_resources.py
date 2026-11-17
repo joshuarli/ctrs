@@ -119,7 +119,7 @@ def observe(plan_value, cycle, directory):
     manifest = plan_value['manifest']
     row = {'cycle': cycle, 'version': VERSION}
     try:
-        row['interval'] = resource_cycles.idle_interval(manifest, plan_value['seconds'] + 1, directory / 'resource-interval.jsonl')
+        row['interval'] = resource_cycles.idle_interval(manifest, plan_value['seconds'], directory / 'resource-interval.jsonl')
     except Exception as exc:
         row['interval'] = {'status': 'unknown', 'errors': [repr(exc)]}
     try:

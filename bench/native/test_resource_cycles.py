@@ -1,5 +1,8 @@
 import copy
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import resource_cycles as cycles
 
@@ -19,6 +22,19 @@ def manifest_and_boundary():
 
 
 class ResourceCycleTests(unittest.TestCase):
+    def test_idle_window_spans_the_requested_counter_interval(self):
+        manifest, before = manifest_and_boundary()
+        boundaries = [copy.deepcopy(before) for _ in range(3)]
+        for boundary, stamp in zip(boundaries, (10., 39.5, 40.)):
+            boundary.update(started_monotonic=stamp, ended_monotonic=stamp + .0001)
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(cycles.collect, 'cpu_boundary', side_effect=boundaries), \
+             patch.object(cycles.time, 'monotonic', side_effect=(0., 10., 39.5, 40.)), \
+             patch.object(cycles.time, 'sleep'):
+            result = cycles.idle_interval(manifest, 30, Path(tmp) / 'idle.jsonl')
+        self.assertEqual(result['sample_count'], 3)
+        self.assertGreaterEqual(result['elapsed_s'], result['requested_seconds'])
+
     def test_fixture_service_is_included_and_cannot_silently_disappear(self):
         manifest, phase = self.phase()
         fixture = copy.deepcopy(phase['before']['procs'][0])

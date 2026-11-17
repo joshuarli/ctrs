@@ -61,14 +61,13 @@ def idle_interval(manifest, seconds, output, interval=.2):
         raise ValueError('positive interval and duration required')
     samples = []
     observer_start = time.process_time()
-    started = time.monotonic()
     with Path(output).open('w') as out:
         while True:
             sample = boundary_sample(manifest, collect.cpu_boundary(manifest))
             samples.append(sample)
             out.write(json.dumps(sample) + '\n')
             out.flush()
-            elapsed = time.monotonic() - started
+            elapsed = sample['monotonic'] - samples[0]['monotonic']
             if elapsed >= seconds:
                 break
             time.sleep(min(interval, seconds - elapsed))
