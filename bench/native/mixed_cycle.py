@@ -1,4 +1,4 @@
-"""Finite mixed application/queue/build cycles with exact cumulative persisted state."""
+"""Finite mixed cycles with verified transient data and a persistent committed witness."""
 import concurrent.futures
 from contextlib import nullcontext
 import hashlib
@@ -19,7 +19,7 @@ import runner
 
 PIN = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
 WORKER = json.loads((runner.FIXTURES / 'w11-v2/worker-pin.json').read_text())
-VERSION = 'w11-v2-mixed-fixed-cycles'
+VERSION = 'w11-v3-bounded-working-set'
 OPERATIONS = 5000
 CONCURRENCY = 4
 
@@ -107,6 +107,21 @@ def worker_failures(futures):
     return errors
 
 
+def cleanup_cycle_items(engine, db, writes, directory):
+    query = ('WITH deleted AS (DELETE FROM items WHERE id > 500 RETURNING name,payload) '
+             'SELECT COALESCE(json_agg(json_build_array(name,payload)),\'[]\'::json) FROM deleted')
+    removed = json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c', query],
+                                   timeout=30).stdout)
+    save(directory / 'explicitly-deleted-items.json', removed)
+    if sorted(removed) != sorted([[row['name'], row['payload']] for row in writes]):
+        raise ValueError('explicit item cleanup differs from acknowledged writes')
+    remaining = json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c',
+        'SELECT json_agg(json_build_array(name,payload)) FROM items'], timeout=30).stdout)
+    save(directory / 'retained-items.json', remaining)
+    if not runner.exact_w2_items(remaining, []):
+        raise ValueError('explicit item cleanup changed seed rows or retained transient data')
+
+
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
         cleanup_deadline=None, expected_boot_assets=None):
     validate_refs(refs)
@@ -119,9 +134,9 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         raise ValueError('cleanup deadline must follow drain deadline')
     directory = ctx.results_dir / engine.name
     directory.mkdir()
-    rec = ctx.new_record(engine, 'W11', 'mixed-v2', directory)
+    rec = ctx.new_record(engine, 'W11', 'mixed-v3', directory)
     rec.update(fixture_version=VERSION, qualification_eligible=False, cycles=[])
-    rec['notes'].append('Functional finite pilot. API/queue/build tasks start together; actual intervals recorded. Boot warmup precedes accounting. No reliability duration, growth or performance verdict.')
+    rec['notes'].append('Functional finite pilot. API/queue/build tasks start together. Each cycle verifies all writes before explicit transient-row cleanup; 500 seed rows and the committed record persist. No reliability duration, growth or performance verdict.')
     project = runner.project_name(ctx.run_id, engine.name, 'mixed')
     warmup = 'np-mixed-' + hashlib.sha256(project.encode()).hexdigest()[:16]
     override = directory / 'compose.json'
@@ -137,7 +152,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         return json.loads(engine.sh(['exec', db, 'psql', '-U', 'app', '-d', 'app', '-At', '-c',
             'SELECT json_agg(json_build_array(name,payload)) FROM items'], timeout=30).stdout)
     sampler = trace = None
-    cumulative = []
+    total_writes = 0
     original_sh = engine.sh
     def cleanup_sh(args, env_extra=None, timeout=120, check=True):
         if cleanup_deadline is not None:
@@ -194,7 +209,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             volume = project + '_dbdata'
             volume_before = json.loads(engine.sh(['volume', 'inspect', volume]).stdout)
             save(directory / 'volume-before.json', volume_before)
-            status, _ = runner.http_json_write(base + '/records', {'key': 'mixed-committed', 'value': 'exact-v2'})
+            status, _ = runner.http_json_write(base + '/records', {'key': 'mixed-committed', 'value': 'exact-v3'})
             if status != 200 or not runner.exact_w2_items(rows(ids['db']), []):
                 raise ValueError('initial exact database state failed')
         cycle = 0
@@ -253,14 +268,13 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     raise RuntimeError('mixed worker outcomes failed: ' + repr(errors))
                 if drain_deadline is not None and sys.exc_info()[0] is None:
                     signal.setitimer(signal.ITIMER_REAL, max(.001, drain_deadline - time.monotonic()))
-            cumulative.extend(api_writes)
             with runner.resource_phase(engine, rec, f'cycle_{cycle}_verify'):
                 actual = rows(ids['db'])
                 save(cycle_dir / 'persisted-items.json', actual)
-                if len({write['name'] for write in cumulative}) != len(cumulative) or not runner.exact_w2_items(actual, cumulative):
-                    raise ValueError('cumulative writes lost, duplicated or corrupted')
+                if len({write['name'] for write in api_writes}) != len(api_writes) or not runner.exact_w2_items(actual, api_writes):
+                    raise ValueError('cycle writes lost, duplicated or corrupted')
                 status, body = runner.http_json(base + '/records/mixed-committed')
-                if status != 200 or body != {'key': 'mixed-committed', 'value': 'exact-v2', 'cache_match': True}:
+                if status != 200 or body != {'key': 'mixed-committed', 'value': 'exact-v3', 'cache_match': True}:
                     raise ValueError('committed DB/cache data changed')
                 if json.loads(engine.sh(['volume', 'inspect', volume]).stdout) != volume_before:
                     raise ValueError('persistent named-volume identity changed')
@@ -268,11 +282,20 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 save(cycle_dir / 'running-engine.json', after)
                 if after != identity:
                     raise ValueError('engine identity changed during mixed cycles')
+            with runner.resource_phase(engine, rec, f'cycle_{cycle}_data_cleanup'):
+                cleanup_cycle_items(engine, ids['db'], api_writes, cycle_dir)
+                status, body = runner.http_json(base + '/records/mixed-committed')
+                if status != 200 or body != {'key': 'mixed-committed', 'value': 'exact-v3', 'cache_match': True}:
+                    raise ValueError('committed DB/cache witness changed after item cleanup')
+                if json.loads(engine.sh(['volume', 'inspect', volume]).stdout) != volume_before:
+                    raise ValueError('persistent named-volume identity changed after item cleanup')
             current_ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ('api', 'db', 'cache')}
             if current_ids != ids:
                 raise ValueError('persistent service identities changed')
+            total_writes += len(api_writes)
             rec['cycles'].append({'cycle': cycle, 'successful_operations': OPERATIONS,
-                'acknowledged_writes': len(api_writes), 'cumulative_writes': len(cumulative),
+                'acknowledged_writes': len(api_writes), 'cumulative_writes': total_writes,
+                'explicitly_deleted_writes': len(api_writes), 'retained_seed_rows': 500,
                 'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
             cycle += 1
         if not rec['cycles']:
@@ -302,10 +325,23 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             if primary_failure is None:
                 raise
         finally:
-            if sampler is not None:
-                runner.stop_sampler(sampler)
-            rec['resources'].update(runner.summarize_trace(trace) if trace else {})
-            if trace:
-                rec['resources']['trace'] = runner._trace_ref(trace)
-            save(directory / 'result.json', rec)
+            pending = sys.exc_info()[1]
+            try:
+                if sampler is not None:
+                    runner.stop_sampler(sampler)
+                rec['resources'].update(runner.summarize_trace(trace) if trace else {})
+                if trace:
+                    rec['resources']['trace'] = runner._trace_ref(trace)
+            except BaseException as exc:
+                rec['correctness']['ok'] = False
+                rec['validation_errors'].append('sampler finalization: ' + repr(exc))
+                if pending is None:
+                    raise
+            finally:
+                pending = sys.exc_info()[1]
+                try:
+                    save(directory / 'result.json', rec)
+                except OSError:
+                    if pending is None:
+                        raise
     return rec

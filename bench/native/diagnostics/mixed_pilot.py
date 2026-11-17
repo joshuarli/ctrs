@@ -32,7 +32,7 @@ def main():
     parser.add_argument('--engines', default='ctrs,orbstack')
     args = parser.parse_args()
     if args.qualification:
-        parser.error('qualification refused: frozen candidate, assets, workload, final matrix and readiness evidence schema/proof are missing; 12-hour qualification is not authorized')
+        parser.error('qualification refused: frozen candidate, assets, workload, final matrix and readiness evidence schema/proof are missing')
     if args.work_deadline_epoch is not None:
         if args.drain_deadline_epoch is None or args.cleanup_deadline_epoch is None or not time.time() < args.work_deadline_epoch < args.drain_deadline_epoch < args.cleanup_deadline_epoch:
             parser.error('duration requires future work and later drain deadlines')
@@ -83,6 +83,9 @@ def main():
     mixed_cycle.save(root / 'plan.json', {'fixture_version': mixed_cycle.VERSION, 'cycles': args.cycles,
         'work_deadline_epoch': args.work_deadline_epoch, 'drain_deadline_epoch': args.drain_deadline_epoch,
         'operations_per_cycle': mixed_cycle.OPERATIONS, 'source_sha256': hashes,
+        'retention': {'seed_rows': 500, 'persistent_record': 'mixed-committed=exact-v3',
+                      'transient_rows': 'verify all acknowledged writes, explicitly delete them, verify exact seed',
+                      'volume': 'same named volume throughout; removed only during final owned cleanup'},
         'qualification_eligible': False, 'reason': 'short functional diagnostic; no frozen candidate, exclusivity or growth verdict',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted', 'manifests': portfolio.manifests,
         'resources': {'ctrs_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_memory_mib': os.environ.get('CTRS_MEMORY_MIB')}})
@@ -95,7 +98,7 @@ def main():
         refs['worker'] = f'127.0.0.1:{server.server_port}/{pin["repository"]}@{pin["manifest"]}'
         mixed_cycle.validate_refs(refs)
         for name in engines:
-            engine = runner.Engine(name, run_id, fresh_dir=args.ctrs_root) if name == 'ctrs' and work_deadline is not None else runner.Engine(name, run_id)
+            engine = runner.Engine(name, run_id, fresh_dir=args.ctrs_root) if name == 'ctrs' else runner.Engine(name, run_id)
             before = root / (name + '-host'); before.mkdir()
             host_snapshot(before, 'before')
             try:

@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import mixed_cycle
 import runner
@@ -93,7 +93,11 @@ class DurationAdmission(unittest.TestCase):
                 elif args[:2] == ['exec', 'api-id']:
                     out = json.dumps(mixed_cycle.PIN['api_files_sha256'])
                 elif args[:2] == ['exec', 'db-id']:
-                    out = json.dumps(cumulative)
+                    if 'DELETE FROM items' in args[-1]:
+                        out = json.dumps([[row['name'], row['payload']] for row in cumulative])
+                        cumulative.clear()
+                    else:
+                        out = json.dumps(cumulative)
                 else:
                     out = ''
                 return SimpleNamespace(stdout=out, stderr='', returncode=0)
@@ -114,7 +118,7 @@ class DurationAdmission(unittest.TestCase):
                  patch.object(runner, 'resource_phase', side_effect=lambda *a: nullcontext()), \
                  patch.object(runner, 'wait_health', return_value=(200, {})), \
                  patch.object(runner, 'http_json_write', return_value=(200, {})), \
-                 patch.object(runner, 'http_json', return_value=(200, {'key': 'mixed-committed', 'value': 'exact-v2', 'cache_match': True})), \
+                 patch.object(runner, 'http_json', return_value=(200, {'key': 'mixed-committed', 'value': 'exact-v3', 'cache_match': True})), \
                  patch.object(runner, 'exact_w2_items', side_effect=lambda actual, expected: actual == expected), \
                  patch.object(runner, 'trial_w4', return_value={'correctness': {'ok': True}}), \
                  patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=lambda base, cycle, directory, deadline: load(base, cycle, directory)), \
@@ -126,12 +130,14 @@ class DurationAdmission(unittest.TestCase):
                 clock[0] = 0
                 failure_root = root / 'failure'; failure_root.mkdir()
                 ctx.results_dir = failure_root
-                with patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=RuntimeError('injected workload failure')):
+                with patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=RuntimeError('injected workload failure')), \
+                     patch.object(runner, 'stop_sampler', side_effect=RuntimeError('sampler stop failed')):
                     with self.assertRaisesRegex(RuntimeError, 'injected workload failure'):
                         mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10)
                 failure = json.loads((failure_root / 'orbstack/result.json').read_text())
                 self.assertFalse(failure['correctness']['ok'])
                 self.assertTrue(any('injected workload failure' in e for e in failure['validation_errors']))
+                self.assertTrue(any('sampler stop failed' in e for e in failure['validation_errors']))
                 boot_root = root / 'boot-mismatch'; boot_root.mkdir()
                 ctx.results_dir = boot_root
                 with self.assertRaisesRegex(ValueError, 'boot assets differ'):
@@ -139,8 +145,38 @@ class DurationAdmission(unittest.TestCase):
                                     expected_boot_assets={'/unexpected/Image': {'sha256': 'wrong'}})
                 self.assertEqual(cleanup.call_count, 3)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
+            self.assertEqual([c['explicitly_deleted_writes'] for c in result['cycles']], [1, 1])
+            for index in range(2):
+                directory = root / 'orbstack' / f'cycle-{index}'
+                self.assertEqual(len(json.loads((directory / 'persisted-items.json').read_text())), 1)
+                self.assertEqual(json.loads((directory / 'retained-items.json').read_text()), [])
             self.assertEqual([c['service_ids'] for c in result['cycles']], [ids, ids])
             self.assertEqual(len(result['cycles']), 2)
+
+
+class CycleRetention(unittest.TestCase):
+    def test_cleanup_checks_every_deleted_payload_and_retained_seed(self):
+        import hashlib
+        from types import SimpleNamespace
+        seed = [[f'item-{i}', hashlib.md5(str(i).encode()).hexdigest()] for i in range(1, 501)]
+        writes = [{'name': 'write-0', 'payload': 'one'}, {'name': 'write-1', 'payload': 'two'}]
+        expected = [[row['name'], row['payload']] for row in writes]
+        for removed, remaining, valid in ((expected, seed, True),
+                (expected[:-1], seed, False),
+                (expected + [expected[0]], seed, False),
+                ([['write-0', 'corrupt'], expected[1]], seed, False),
+                (expected, seed[:-1], False),
+                (expected, seed + [expected[0]], False)):
+            with self.subTest(removed=removed, valid=valid), tempfile.TemporaryDirectory() as tmp:
+                engine = SimpleNamespace(sh=Mock(side_effect=[
+                    SimpleNamespace(stdout=json.dumps(removed)),
+                    SimpleNamespace(stdout=json.dumps(remaining))]))
+                if valid:
+                    mixed_cycle.cleanup_cycle_items(engine, 'owned-db', writes, Path(tmp))
+                    self.assertEqual(json.loads((Path(tmp) / 'retained-items.json').read_text()), seed)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'cleanup'):
+                        mixed_cycle.cleanup_cycle_items(engine, 'owned-db', writes, Path(tmp))
 
 
 class DurationLoadBound(unittest.TestCase):
