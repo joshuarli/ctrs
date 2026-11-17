@@ -11,8 +11,9 @@ on ctrs in all five boundary-only pairs.
 [W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
 The separate saturation batch verified 402,065 successful operations in
 ten cells. Its workload and CPU comparisons are inconclusive under the
-recorded conditions. On-CPU profile job `f713778b52b548e4bb817da8d0d32647`
-owns the measured host.
+recorded conditions. On-CPU profile job `e8b1976509aa4a94843dc16e1100c570`
+owns the measured host. An earlier profile launch failed before creating
+workloads because its import path omitted the diagnostics directory.
 
 ## Accepted and verified
 
@@ -44,8 +45,8 @@ owns the measured host.
 ## Exact next action
 
 Read the terminal status for profile job
-`f713778b52b548e4bb817da8d0d32647` at
-`.work/tmp/w2-system-cpu-20261117/job/status.json`. It replays seed 8 from
+`e8b1976509aa4a94843dc16e1100c570` at
+`.work/tmp/w2-system-cpu-import-fixed-20261117/job/status.json`. It replays seed 8 from
 equal-work block 1 at concurrency 8, with 1,000 warmup reads and 50,000
 measured operations per cell. Engine order is ctrs then OrbStack, with
 observer-off before observer-on. The existing 49 Hz CPU sampler runs only
