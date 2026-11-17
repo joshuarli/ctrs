@@ -807,11 +807,15 @@ def compose_down(engine: Engine, project: str,
                  compose_file: Path = COMPOSE_FILE) -> None:
     engine.sh(["compose", "-f", str(compose_file), "-p", project,
                "down", "-v", "--remove-orphans"], timeout=90, check=False)
-    # Belt and braces: remove anything the project prefix left behind.
-    for args in (["ps", "-aq", "--no-trunc", f"--filter", f"name={project}"],):
-        cp = engine.sh(args, check=False, timeout=30)
-        for cid in cp.stdout.split():
-            engine.sh(["rm", "-f", cid], check=False, timeout=30)
+    cp = engine.sh(["ps", "-aq", "--no-trunc", "--filter",
+                    f"label=com.docker.compose.project={project}"], check=False, timeout=30)
+    for cid in cp.stdout.split():
+        inspected = json.loads(engine.sh(["inspect", "--", cid], timeout=30).stdout)
+        if (not isinstance(inspected, list) or len(inspected) != 1
+                or not isinstance(inspected[0], dict) or inspected[0].get("Id") != cid
+                or ((inspected[0].get("Config") or {}).get("Labels") or {}).get("com.docker.compose.project") != project):
+            raise RuntimeError(f"refusing cleanup without exact project ownership: {cid}")
+        engine.sh(["rm", "-f", "--", cid], check=False, timeout=30)
 
 
 def wait_health(base: str, deadline_s: float):

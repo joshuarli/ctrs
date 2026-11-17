@@ -52,6 +52,24 @@ def fake_engine(name="orbstack"):
     return engine
 
 
+class CleanupOwnershipTests(unittest.TestCase):
+    def test_project_orphans_require_matching_label_and_identity(self):
+        for label, identity, allowed in (("owned", "abc", True), ("other", "abc", False), ("owned", "other", False)):
+            with self.subTest(label=label, identity=identity):
+                engine = fake_engine()
+                engine.sh.side_effect = [completed(), completed("abc\n"), completed(json.dumps([
+                    {"Id": identity, "Config": {"Labels": {"com.docker.compose.project": label}}}]))] + ([completed()] if allowed else [])
+                if allowed:
+                    runner.compose_down(engine, "owned")
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "exact project ownership"):
+                        runner.compose_down(engine, "owned")
+                commands = [call.args[0] for call in engine.sh.call_args_list]
+                self.assertIn("label=com.docker.compose.project=owned", commands[1])
+                self.assertFalse(any(arg.startswith("name=") for cmd in commands for arg in cmd))
+                self.assertEqual([cmd for cmd in commands if cmd[0] == "rm"], [["rm", "-f", "--", "abc"]] if allowed else [])
+
+
 class ManifestTests(unittest.TestCase):
     def test_validation_needs_no_docker_or_path(self):
         env = {**os.environ, "PATH": ""}
