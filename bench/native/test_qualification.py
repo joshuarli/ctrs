@@ -165,14 +165,26 @@ class CompletedLeg(unittest.TestCase):
         fixture = growth_examples.Growth(); fixture.setUp()
         manifest, _ = resource_examples.manifest_and_boundary()
         fixture.plan['manifest'] = manifest
+        deadline = 10 + gate.MINIMUM_WORK_SECONDS
+        cycles = []
+        phases = {}
+        for index, row in enumerate(fixture.rows):
+            start = 10. + index * 7200
+            cycles.append({'cycle': row['cycle'], 'successful_operations': 5000, 'exact_state': True})
+            phases[f'cycle_{index}_mixed_work'] = {
+                'operation_started_monotonic': start, 'operation_ended_monotonic': start + 7150,
+            }
+            phases[f'cycle_{index}_observation'] = {
+                'operation_started_monotonic': start + 7160, 'operation_ended_monotonic': start + 7200,
+            }
         return {'fixture_version': gate.mixed_resources.VERSION, 'validation_errors': [], 'engine': 'ctrs',
-            'running_identity': manifest,
+            'running_identity': manifest, 'cycles': cycles, 'work_loop_ended_monotonic': deadline,
             'correctness': {'ok': True, 'checks': {'exact_state_every_cycle': True, 'bounded_retained_items': True}},
             'resources': {'ownership_verified': True, 'cpu_counters_complete': True,
                 'resource_errors': [], 'footprint_field': 'phys_footprint', 'peak_phys_footprint_bytes': 100,
                 'cpu_seconds_est': 20.,
                 'sampler_version': gate.mixed_resources.collect.SAMPLER_VERSION,
-                'phases': {'cycle_0_mixed_work': {'operation_started_monotonic': 10.}},
+                'phases': phases,
                 'cycle_growth': gate.mixed_resources.summarize(fixture.plan, fixture.rows)}}
 
     def test_short_incomplete_or_over_budget_leg_never_passes(self):
@@ -193,6 +205,28 @@ class CompletedLeg(unittest.TestCase):
             if fault == 'missing-vm': bad['running_identity']['required_processes'].pop()
             with self.subTest(fault=fault):
                 self.assertTrue(gate.leg_issues(bad, work_deadline=deadline, completed_monotonic=deadline + 1))
+
+    def test_completed_work_and_observations_are_bound_to_the_work_loop(self):
+        deadline = 10 + gate.MINIMUM_WORK_SECONDS
+        faults = (
+            lambda r: r.pop('cycles'),
+            lambda r: r.update(cycles=[]),
+            lambda r: r['cycles'].pop(),
+            lambda r: r['cycles'][1].update(cycle=0),
+            lambda r: r['cycles'][1].update(successful_operations=4999),
+            lambda r: r['cycles'][1].update(exact_state=False),
+            lambda r: r['resources']['phases'].pop('cycle_1_mixed_work'),
+            lambda r: r['resources']['phases'].pop('cycle_1_observation'),
+            lambda r: r['resources']['phases']['cycle_1_observation'].update(operation_started_monotonic=11.),
+            lambda r: r.pop('work_loop_ended_monotonic'),
+            lambda r: r.update(work_loop_ended_monotonic=deadline - 1),
+        )
+        for index, mutate in enumerate(faults):
+            with self.subTest(fault=index):
+                record = self.record()
+                mutate(record)
+                issues = gate.leg_issues(record, work_deadline=deadline, completed_monotonic=deadline + 1)
+                self.assertTrue(issues)
 
 
 class ToolIdentity(unittest.TestCase):
