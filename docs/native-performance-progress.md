@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** bounded gzip-compression screen of the default Rust build.
+**Current action:** native balloon/physical-reclaim calibration after the build profiles.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -32,24 +32,38 @@ causes the cost. The vendored variant does not qualify the original WAN-capable
 Rust fixture. Its 134 packages/6,333 checked files are frozen in archive
 58eae402daaf4823c6038c54386575b0c1c0c42c1b4cd92cfb2cfb8f9839067f.
 
+Compression v2 job 3b197f66… is terminal exit 0, all nine builds/132 tests each
+and identical executable assertions pass, cleanup complete, all 83 inputs
+unchanged. Both lower gzip levels are REJECTED for the default: added layer
+bytes grow 10.13% (level 1) and 4.53% (level 3), above the declared 3% budget.
+CPU/wall signals are also noisy. No compression default changed. See the linked
+build evidence for every round, raw sizes, physical growth and hashes.
+The first screen dff9fcb… stopped after its default build on a scratch-accounting
+KeyError: store layers have digest/size/media_type, not diff_id. It exits 1 with
+clean owned teardown and remains separate. v2 verifies the base diff-ID prefix
+through inspect, then counts following store layers; the saved accounting-repair
+receipt recomputes the first run's added bytes from its retained records.
+
 **Exact continuation:** inspect
-`.work/tmp/w6-compression-screen-20261116/job`, durable ID
-`dff9fcb730394c75afe0c0300bf449bb`, once for identity/status/deadline. It is
-already launched; never duplicate it. The saved `run.py` predeclares three
-rotated rounds of default/level 1/level 3 gzip on ctrs only, identical per-round
-contexts and explicit docker exporters, real uncached offline Rust compile/tests,
-exact native executable/version checks, CPU/physical samples, compressed image/
-added-layer bytes and allocated new-blob bytes. Only compression-level changes;
-no forced base recompression. Host 58f64738…, stock guest, 17 vCPUs/45,091MiB,
-owned idle=0 control. Deadline 1,800s, cleanup grace 240s; inputs frozen until
-terminal. No competing builds/tests/native experiments. Audit all nine builds,
-test outputs, raw export envelopes, artifact/storage/CPU guards and cleanup;
-recheck frozen receipts. The screen requires >=5% whole-build/CPU reduction and
-<=3% added/total compressed-layer growth before considering a product-default
-candidate; exclusive confirmation is still required. Otherwise reject the
-configuration and continue another measured boundary. All timings are ineligible
-on this shared host. Keep `/private/tmp/ctrs-w6-vendor-20261116` for provenance;
-the original source/lock is unchanged. No product compression policy is promoted.
+`.work/tmp/vz-balloon-reclaim-20261116/job`, durable ID
+`e07ad19c53fd462d9db66d7b80d36074`, once for identity/status/deadline. It is
+already launched; never duplicate it. Six scenarios rotate inflate/hold, hold/
+inflate, inflate/hold. Each writes/fsyncs a bounded 2GiB zero file in a uniquely
+owned volume, observes 60 seconds idle with native physical counters, then reads
+and hashes every byte. Existing quiet thresholds 20s versus 86400s exercise
+inflation versus held ceiling while preserving memory-stat collection. This is
+a mechanism calibration, not an application speed benchmark or default-policy
+qualification. Source/default quiet=120 and sleep behavior are unchanged.
+Host 58f64738…, stock guest, 2 vCPUs/8192MiB, owned resident idle=0 control;
+deadline 1800s, cleanup grace 240s. Inputs frozen; no competing native work.
+Audit all six payload/hash checks, actual target movement, guest cache/available
+memory, native physical footprint, idle CPU and next-read CPU/cost, plus owned
+volume cleanup and frozen receipts. If inflation evicts cache without useful
+native reclaim, select a private policy candidate and confirm on real W2/W6 and
+next-use cases before promotion. Otherwise pursue the demonstrated retention
+boundary. Missing target movement or confounded samples remain inconclusive.
+Keep `/private/tmp/ctrs-w6-vendor-20261116` for vendoring provenance; source/lock
+unchanged. All timings remain ineligible on this shared host.
 
 Affinity diagnostics completed;
 [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.

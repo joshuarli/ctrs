@@ -145,3 +145,49 @@ or recompression of shared base layers, no product setting changed yet.
 | `plan.json` | ce07ed439e136d1d660828b1c8213d3644b08790c28fd68cd5fd333a42b241bb |
 | `job/status.json` | 2c82cda64dd2bbb3185d0b80f24363776176385a5fe1b4433033b0ae8513a712 |
 | `analysis.json` | e24283ca97c3a981042eec24c8d56ae61742f4b358ae93fa039a8fa3442db997 |
+
+## Lower gzip levels rejected
+
+The original screen dff9fcb… exits 1 after its first default build, with clean
+owned teardown. A scratch accounting lookup assumed a `diff_id` field in store
+layer records. Actual records have digest, size and media type. The corrected
+v2 checks the base's uncompressed diff-ID prefix through image inspection, then
+counts the following store layers. The original failure is preserved separately.
+
+Fresh v2 job `.work/tmp/w6-compression-screen-v2-20261116/job`, ID
+`3b197f66b44242799a7c1f0de83379b3`, exits 0 with clean owned teardown. All nine
+planned builds execute compile/tests without cache, each passes 132 tests, and
+every executable equals c63f2e92…. All 83 frozen receipts remain unchanged.
+Three rounds rotate default/level 1/level 3 through the same per-round context;
+the default builder and explicit docker exporter are common to all conditions.
+
+Unqualified medians (ranges), three builds per condition:
+
+| Condition | Whole build, seconds | Export envelope, seconds | Added compressed layer bytes |
+| --- | --- | --- | --- |
+| Default | 31.730 (30.396–32.487) | 4.622 (4.487–5.350) | 147,603,185 (147,601,327–147,604,030) |
+| Level 1 | 28.489 (28.076–32.922) | 1.979 (1.973–2.037) | 162,550,009 (162,549,626–162,550,016) |
+| Level 3 | 29.551 (29.359–30.034) | 2.585 (2.564–2.663) | 154,284,522 (154,284,244–154,284,882) |
+
+Both configurations are **rejected for the default**. Added compressed bytes
+grow about 10.13% and 4.53%, respectively, exceeding the predeclared 3% budget in
+every round. Total-image ratios hide this cost behind a common large base and
+cannot override the added-layer guard. Allocated new-blob bytes independently
+follow the same growth. Level 1's third whole-build/CPU ratios exceed 1.0; level
+3 also misses the 5% median CPU screen. No timing or CPU speed claim is qualified,
+and no compression default changed. The profile identifies a real export tradeoff,
+without establishing an acceptable default optimization.
+
+Native sampled physical footprint grows from about 4.6GB to 15.7GB over the
+sequence. The resident control deliberately disables VM sleep, keeps all result
+images until final ownership cleanup, and preserves builder caches. This is not
+evidence of a leak or an installed-default resource regression. Source also
+delays balloon shrink for 120 seconds to protect next-use latency. The next
+experiment isolates whether inflation returns native physical memory or mainly
+evicts guest cache before selecting any reclamation change.
+
+| Artifact under the v2 screen root | SHA-256 |
+| --- | --- |
+| `plan.json` | baaa4b07c63d6a6d235a8f27baacd32d5167573cd0ccd6eaf06e0072b75186bf |
+| `job/status.json` | 695faf5944e5a46d080cff14cbee55d0cb26c94fe707d1c1c414bfb4c2b3f056 |
+| `analysis.json` | c7f517dd09accc58b80323adc2bfabc4d41f60236aae9c67a8fe631b7665557f |
