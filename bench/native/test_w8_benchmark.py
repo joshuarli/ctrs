@@ -20,6 +20,7 @@ class PairedBatch(unittest.TestCase):
                  mock.patch.object(runner, 'CTRS_BIN', binary), \
                  mock.patch.object(runner, 'DOCKER', '/docker'), \
                  mock.patch.object(runner, 'find_docker', return_value='/docker'), \
+                 mock.patch.object(runner.os, 'uname', return_value=SimpleNamespace(sysname='Darwin', machine='arm64')), \
                  mock.patch('diagnostic_signals.install_cleanup_signals') as install, \
                  mock.patch.object(w8, 'run_batch', side_effect=lambda args: 0 if install.called else 1):
                 self.assertEqual(runner.main(), 0)
@@ -136,6 +137,40 @@ class PairedBatch(unittest.TestCase):
             self.assertTrue(all('failed leg' in ''.join(r['validation_errors']) for r in records))
             self.assertTrue(reporting.analyze(records)['cohorts'][0]['rejections'])
             self.assertEqual((instances['ctrs'].stops, instances['orbstack'].stops), (1, 0))
+
+            for scenario in ('busy', 'signal', 'signal-cleanup'):
+                previous = set(root.glob('*/trials.jsonl'))
+                class FaultEngine(Engine):
+                    def stop(self):
+                        super().stop()
+                        if scenario == 'signal-cleanup' and self.name == 'ctrs':
+                            raise OSError('shutdown fault')
+                measurement = mock.Mock(side_effect=SystemExit(143))
+                with self.subTest(scenario=scenario), \
+                     mock.patch.object(w8.runner, 'RESULTS', root), \
+                     mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                     mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()):
+                    def execute():
+                        return w8.run_batch(args, engine_factory=FaultEngine,
+                            prepare=lambda *a: {'images': {'api': {'reference': 'api'}}},
+                            serve=lambda *a: Server(), gate_fn=lambda *a: scenario != 'busy', measure=measurement)
+                    if scenario == 'busy':
+                        self.assertEqual(execute(), 1)
+                        measurement.assert_not_called()
+                    else:
+                        with self.assertRaises(SystemExit) as interrupted:
+                            execute()
+                        self.assertEqual(interrupted.exception.code, 143)
+                path = (set(root.glob('*/trials.jsonl')) - previous).pop()
+                status = json.loads((path.parent / 'status.json').read_text())
+                self.assertEqual(status['completed_records'], 1)
+                self.assertEqual(status['planned_records'], 2)
+                self.assertEqual(status['state'], 'failed' if scenario == 'busy' else 'interrupted')
+                if scenario == 'busy':
+                    self.assertEqual(status['stopped_reason'], 'initial-host-busy')
+                if scenario == 'signal-cleanup':
+                    self.assertIn('shutdown fault', status['cleanup_error'])
+                self.assertEqual((instances['ctrs'].stops, instances['orbstack'].stops), (1, 0))
 
     def test_measurement_does_not_swallow_cancellation(self):
         engine = mock.Mock(name='engine')

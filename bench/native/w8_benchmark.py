@@ -139,13 +139,20 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         finished = True
         return int(failed)
     finally:
+        primary = sys.exc_info()[1]
+        cleanup_error = None
         try:
             engines['ctrs'].stop()
-        except BaseException:
+        except Exception as exc:
             finished = False
-            raise
+            cleanup_error = repr(exc)
+            if primary is None:
+                raise
         finally:
-            pilot.save(ctx.results_dir / 'status.json', {'state': 'complete' if finished and not failed else 'failed',
+            termination = sys.exc_info()[1] or primary
+            interrupted = isinstance(termination, (SystemExit, KeyboardInterrupt))
+            pilot.save(ctx.results_dir / 'status.json', {'state': 'interrupted' if interrupted else 'complete' if finished and not failed else 'failed',
                 'completed_records': completed, 'planned_records': args.pairs * 2,
-                'stopped_reason': stopped_reason, 'error': repr(sys.exc_info()[1]) if sys.exc_info()[1] else None,
+                'stopped_reason': stopped_reason, 'error': repr(termination) if termination else None,
+                'cleanup_error': cleanup_error,
                 'timing_eligible': not args.diagnostic, 'qualification_eligible': False})

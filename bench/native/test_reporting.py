@@ -57,6 +57,14 @@ def metric_result(report, metric="wall_seconds", cohort=0):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_legacy_w8_without_parameters_is_historical_and_does_not_crash(self):
+        records = pair(case='W8', metric='pull_wall_seconds')
+        for record in records:
+            record.pop('workload_params')
+        report = reporting.analyze(records)
+        self.assertIn('workload_params', report['cohorts'][0]['metadata_gaps'])
+        self.assertTrue(all(m['assessment'] == 'historical-only' for m in report['cohorts'][0]['metrics']))
+
     def test_partial_provenance_and_empty_parameters_expose_missing_metadata(self):
         records = pair()
         for record in records:
