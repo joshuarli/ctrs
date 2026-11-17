@@ -4,29 +4,43 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** canonical observer confirmation, using the newly quiet host.
-Client-path and host-accounting probes are complete; see
-[the boundary evidence](evidence/native-w2-boundaries-2026-11-16.md).
-The client-path screen found no consistent 10% API CPU contrast; native V6
-observations put the ctrs VM above 95% performance-core time, without a credible
-QoS deficit. No forwarding or priority policy is selected. Host preflight now
-returns exit 0 with empty stderr and OrbStack has no running containers.
+**Current action:** default Rust build profile with frozen vendored dependencies.
+The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
+block on the strict host gate. The attribution probe found active guest rustc
+processes; OrbStack also reports a running unrelated Linux machine. An empty
+Docker container list did not establish exclusivity. Preserve that work and
+the original deferred job; do not restart or replace its failed blocks.
+Client-path and native core/QoS investigations selected no policy change; see
+[the W2 boundary evidence](evidence/native-w2-boundaries-2026-11-16.md).
 
-**Exact continuation:** `TMPDIR=$PWD/.work/tmp python3.14 .work/tmp/w2-observer-clean-20261116/launch.py`.
-First inspect `.work/tmp/w2-observer-clean-20261116/job`: if it exists, inspect its
-spec/terminal receipt once and never duplicate the job. The saved coordinator
-predeclares ten 50k blocks, both engines/off-on with alternating engine/mode order,
-canonical 49Hz profiling, and strict external pre/post gates. It stops at the
-first invalid gate or workload failure, retaining partial/failed blocks without
-replacement. Deadline 3,600s, workload budget 3,300s, cleanup grace 240s.
-All source/assets in `inputs.json` are frozen until terminal. No V6 subprocess
-probe is added to this confirmation. Avoid local builds, tests and other loads.
-Then inspect every trial's host snapshots for unrelated work, require all ten
-valid whole pairs, and compute per-engine median on/off API CPU, engine CPU and
-wall ratios with paired 95% intervals against the 5% observer budget. This can
-qualify the observer only; it cannot qualify the full performance matrix.
-If host load or unresolved observer noise prevents selection, profile the
-default-build zlib boundary rather than repeat rejected kernel/client/QoS guesses.
+The [build boundary evidence](evidence/native-build-boundaries-2026-11-16.md)
+records three complete C build pairs with identical artifacts and no export/load
+loss to pursue in this diagnostic. Its job exits 1 because ownership cleanup
+correctly refused four images whose labels were omitted by ctrs inspection.
+Fix 241c4c9 is pushed: stored labels are now projected and the config is read/
+parsed once. The native regression fails on baseline and passes populated,
+empty and absent labels on candidate 58f64738…; one affected Rust test passes.
+Four exact-label-owned tags were recovered separately. Original failure retained.
+
+**Exact continuation:** inspect
+`.work/tmp/w6-rust-offline-20261116/job`, durable ID
+`51736a130ca44d35abe1a6cbd0337453`, once for identity/status/deadline. It is
+already launched; never duplicate it. The saved `run.py` predeclares three
+balanced ctrs/OrbStack build pairs using default docker drivers, uncached real
+hyperfine 2.0.0 compile/tests, pinned Rust base, and `--network none` plus Cargo
+offline. The immutable dependency archive contains 134 packages/6,333 checked
+files; SHA-256 58eae402daaf4823c6038c54386575b0c1c0c42c1b4cd92cfb2cfb8f9839067f.
+Host candidate 58f64738…, stock guest, 17 vCPUs/45,091MiB, owned idle=0 control.
+Deadline 2,700s, cleanup grace 240s; all input receipts frozen until terminal.
+Do no competing builds, tests or native experiments. Then audit every compile
+vertex, tests, native executable/version/hash, raw export/load envelopes and
+cleanup; recheck frozen receipts. Select a product slice from the observed
+critical boundary, or change workload if this path has no avoidable loss.
+All timing remains explicitly ineligible on this shared host. The vendored
+variant is a distinct diagnostic, not qualification of the original WAN-capable
+Rust fixture. Preserve the failed first host vendoring command (workspace
+discovery); successful vendoring used `/private/tmp/ctrs-w6-vendor-20261116`
+without modifying the original source or lock. Retain this scratch for provenance.
 
 Affinity diagnostics completed;
 [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
