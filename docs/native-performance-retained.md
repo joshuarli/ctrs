@@ -1,16 +1,18 @@
 # Retained native performance work
 
 This inventory records the owner-requested winddown on 2026-11-16.
-All listed lanes are terminal. Checkouts remain clean and preserve source or
-qualification evidence. The campaign status and resume command live in
+The campaign resumed later the same day. Original winddown lanes are terminal;
+the storage repair lane is also terminal and integrated. Checkouts preserve source or
+qualification evidence. The current campaign status and next action live in
 [native-performance-progress.md](native-performance-progress.md).
 
 ## Parked work
 
 | Branch | Revision | Cause and retry condition |
 | --- | --- | --- |
-| `campaign/np-storage-space` | `538e2c3` | Native relation ENOSPC proofs pass, but review found a post-reservation-only host growth check and a cleanup receipt write that can skip shutdown. Fix both before reapplying this commit. The source is absent from accepted main. |
-| `campaign/np-w8-content` | `bc6625f` | Five source tests pass. Parent source review, real portfolio generation, native transfer and content-absence proof remain unrun. Review before integration. |
+| `campaign/np-storage-space` | `538e2c3` | Restored on resumed main as 3a87d61 with repair 97a6a69. Revised native allocation and relation-ENOSPC proofs pass; retain original failed/narrower evidence separately. |
+| `campaign/np-space-fix` | `34a0c39` | Integrated as 97a6a69 after parent review, six focused tests, full harness suite and both native storage stages. Retained checkout `np-space-fix` preserves repair provenance. |
+| `campaign/np-w8-content` | `bc6625f` | Reviewed and integrated as 00ac842. Real four-image generation reproduces 37 layer identities. Native full-transfer/marker proofs pass; sub-API guest cache absence and scored qualification remain open. |
 | `campaign/np-full-sync` | `f536b6e` | Full synchronization candidate remains unpromoted. Complete resource and performance confirmations in an exclusive window. |
 | `campaign/np-refusal-ttl` | `54c6a00` | Recovery candidate remains parked. Re-establish the v2 exclusive baseline and preserve the failed prior confirmation. |
 | `campaign/np-sched-mc` | `1bea138` | Rejected scheduler configuration snapshot. Do not deploy it. Reconsider only with a new causal profile. |

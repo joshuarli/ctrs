@@ -25,3 +25,29 @@ comparison; generation alone proves neither guest content absence nor an empty
 store or cold engine. Native content-absence and retained-state verification,
 matched transfer phases, and qualification remain pending. Never pool w8-v3
 results with v2 or other fixture histories.
+
+For native functional validation, generate a portfolio with an explicit fresh
+seed, then run the diagnostic with that same artifact for both engines:
+
+```sh
+TMPDIR=$PWD/.work/tmp PYTHONPATH=bench/native python3.14 - <<'PY'
+import json
+from pathlib import Path
+from registry_variant import prepare_variant
+prepare_variant('.work/native-perf/inputs/w8-portfolio-v2/layout',
+    json.loads(Path('bench/native/fixtures/w8-v2/portfolio.json').read_text()),
+    '.work/native-perf/inputs/w8-new-variant', b'explicit-fresh-comparison-seed')
+PY
+TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_variant_pilot.py \
+  --layout .work/native-perf/inputs/w8-new-variant \
+  --ctrs-binary .work/tmp/disk-expand-target/release/ctrs
+```
+
+The diagnostic requires each derived config to be absent through the image API,
+complete GET bodies for every distinct layer, exact installed marker payloads,
+the existing service/Marked integrity checks and unchanged retained image IDs.
+Shared layers count once per engine. Incomplete downloads and HEAD responses
+cannot establish transfer. The labelled marker containers and application stack
+have owned cleanup. Derived images remain installed; use a new seed and new
+destination for a subsequent unseen-image trial. API absence does not prove
+absence from every guest content cache, and this command does not score timings.

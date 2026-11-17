@@ -4,9 +4,10 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-Resume steering: repair the two demonstrated storage diagnostic review defects
-in isolated `campaign/np-space-fix`; parent owns the Mac for the predeclared W2
-ten-block 50k observer confirmation. No runtime policy change is accepted.
+Resume steering: storage review repairs and real W8 content-unique validation
+are accepted below. Measurement exclusivity limits W2 acceptance. Continue with
+W8 scored phase/resource integration while foreign host work prevents timing.
+No runtime policy change is accepted.
 Read the [contract](campaign-native-performance.md), then inspect
 `git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
 Resumed source milestones: W8 bc6625f reviewed and integrated as 00ac842;
@@ -14,7 +15,8 @@ storage source restored as 3a87d61 with review fixes 97a6a69. Host guard now
 checks between bounded 64MiB allocation attempts; snapshot failure cannot skip
 shutdown, log closure or the result write attempt. Six focused storage tests
 and all 173 harness tests pass. Native revised storage proof passes;
-real W8 artifact generation and native absence proofs remain unrun.
+real W8 artifact generation and native full-transfer proofs pass below;
+guest cache absence below the image API remains unqualified.
 Other parked branches, retained trees and consumers are recorded in the
 [retained-work inventory](native-performance-retained.md).
 Storage worker `usrw_58efedef-31f1-4f36-be14-30c5c008481b` is terminal succeeded;
@@ -39,9 +41,30 @@ filesystem/volume identities remain unchanged and cleanup reports no errors.
 Reproduce both commands in `bench/native/diagnostics/storage-space.md` on main.
 Raw receipts remain `.work/tmp/<run>/{fsync,full}/`. Zero endpoint host growth
 is not a peak bound, exclusive allocation/reclaim or host-full/power-loss proof.
-Full remains an unpromoted candidate. W8 real artifact reproduction is running
-from `.work/tmp/w8-variant-proof.py`; destination
-`.work/native-perf/inputs/w8-portfolio-v3-resume-20261116/`. Do not duplicate it.
+Full remains an unpromoted candidate. No campaign measurement job remains.
+
+W8 real reproduction `.work/native-perf/inputs/w8-portfolio-v3-resume-20261116/`
+produces identical receipts and verified compressed digests on two generations:
+four images, 37 distinct layers. Native exploratory run
+`w8-unique-20261116T164214-6676` passes on both engines. The reusable diagnostic
+`bench/native/diagnostics/registry_variant_pilot.py` then passes fresh-source run
+`w8-unique-20261116T164609-001c` with seed
+`ctrs-w8-v3-integrated-source-20261116-1`, derived layout
+`.work/native-perf/inputs/w8-portfolio-v3-source-20261116/`.
+Each engine transfers every distinct layer completely, verifies every installed
+marker payload, performs exactly 1,000 operations (688 reads/312 writes),
+checks exact DB/cache state after API restart and the pinned Marked artifact,
+and preserves all four original image IDs. Both exit 0, no errors, owned fixture
+cleanup. Eight focused variant/transfer tests pass. The source diagnostic adds
+strict missing-image error classification and labelled marker-container cleanup;
+it rejects partial/HEAD transfers. Reproduction commands are in
+`bench/native/fixtures/w8-v3/README.md`; use a fresh seed and destination because
+derived images remain installed. No cold-store, sub-API guest absence, timing or
+resource acceptance is implied. Do not repeat these completed functional proofs.
+Next executable source action: inspect `runner.trial_w8` and connect this validated
+single-artifact W8 path to complete setup/pull/install/healthy/load/cleanup resource
+phases, preserving unique per-pair inputs shared by both engines. Keep v2 history
+separate and require a new exclusive paired baseline before scoring v3.
 
 ## Accepted and verified
 
@@ -254,10 +277,10 @@ No measured Mac job is active.
 3. Interleave resource cycles, freeze inputs and collect declared five-cycle/
    30s minima with exclusive host use. Command and budgets:
    `bench/native/diagnostics/resources.md`. Unknown cache/allocation stays unknown.
-4. W8 content-unique preparation is parked at bc6625f on campaign/np-w8-content.
-   Parent-review its three-file diff and five-test proof before integrating that
-   commit. Real portfolio reproduction, native content absence and scored phase
-   integration remain open. No history is pooled with the common portfolio.
+4. W8 content-unique preparation is integrated at 00ac842 and the real generation,
+   full-transfer/marker/application proofs pass above. Next: scored phase/resource
+   integration and guest pre-content-state accounting. No history is pooled with
+   the common portfolio; API image absence is not complete guest-cache absence.
 5. Existing-disk expansion is proved/integrated. Audit Cached+Fsync, guest flush,
    Full synchronization and
    promised failure guarantees. Normal restart/upgrade proof is not power-loss
