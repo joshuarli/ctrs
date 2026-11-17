@@ -4,11 +4,11 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** screen gzip levels4 and5 on the existing offline W6 build,
-with unchanged3% layer-size and5% whole-build/CPU guards. Levels1 and3 remain
-rejected. Full preemption and earlier balloon inflation are also rejected.
-Native job8a43dade68654a0fa700ffad3afd8f5f is active under
-`.work/tmp/w6-compression-mid-20261117/job`. Full qualification remains unproved.
+**Current action:** run the bounded default/zstd3 offline W6 journey screen.
+Job1ac9f565cf7c410fa79c574eece63458 is active under
+`.work/tmp/w6-zstd-journey-20261117/job`. Gzip4/5 are rejected after18 correct
+builds: their size guards pass but their5% CPU guards fail. Product default is
+unchanged. Full qualification remains unproved.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -169,15 +169,16 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** consume job8a43dade68654a0fa700ffad3afd8f5f, then run
-`.work/tmp/w6-compression-mid-20261117/analyze.py` only on its terminal result.
-Recheck frozen inputs before editing any Python module. This screen derives from
-`.work/tmp/w6-compression-screen-v2-20261116/`, using the accepted fda62467 host
-and stock35087713/6ae4d3ab assets. Rotate default/level4/level5 across six
-rounds with fresh per-round contexts. Keep exact132-test/executable checks,
-new-layer and total-size budgets, CPU/physical counters, and owned teardown.
-Predeclare the unchanged5% whole-build/CPU and3% layer-byte guards. No force
-compression, shared-base recompression or product default change before proof.
+**Exact continuation:** consume job1ac9f565cf7c410fa79c574eece63458, then run
+`.work/tmp/w6-zstd-journey-20261117/analyze.py` only on its terminal result.
+Recheck frozen inputs before editing Python modules. Six balanced default/zstd3
+pairs measure compile/test through first correct container use. Verify132 tests
+per build, frozen c63f2e92 executable, unchanged compressed base descriptors,
+fresh compile-layer codec, resource coverage and owned teardown. Keep the3%
+added/total-byte and5% whole-journey/CPU guards. A mechanism lead requires a
+fresh2CPU/8192MiB resource/first-use confirmation before a product candidate.
+Do not rerun lower or mid-level gzip grids. See the
+[build evidence](evidence/native-build-boundaries-2026-11-16.md).
 
 Python capability admission and API capture are complete. The integrated
 uprobes gate passes43 tests with zero skips in0.375s. See
@@ -194,7 +195,7 @@ active, but both conditions fail the unchanged16MiB native return budget.
 All100 preemption and93 resource receipts pass before further source edits.
 Default quiet120/sleep60 and all product policies remain unchanged.
 The timer/uprobe checkouts are retired; branches and private/live assets remain.
-All workers are terminal. No W11 soak is running. The compression job owns
+All workers are terminal. No W11 soak is running. The zstd journey job owns
 the native measurement lane.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
@@ -674,7 +675,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. Complete the bounded default/level4/level5 offline W6 compression screen.
+1. Complete the bounded default/zstd3 offline W6 journey screen.
    Keep W2 CPU attribution and observer controls open after the completed count
    capture. Do not repeat rejected scheduling, pacing or quiet-policy matrices.
 2. W11 duration/cleanup integration is accepted. Freeze actual qualification

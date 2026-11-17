@@ -231,3 +231,40 @@ cannot establish pressure-dependent reclaim without further evidence.
 | `plan.json` | b390cf1617f837fbdb70529aae68ea723d716567cd654e66f234fb75ba04fb7f |
 | `job/status.json` | b77ac41fa7f80961bea04dea1b85407e8139fce06936aa9c4d4e8032741835cc |
 | `analysis.json` | cbabe48d680d4ea75820ca877a167efb95676a5042458eeae260a6a90dd7a6b7 |
+
+
+## Mid-level gzip screen, 2026-11-17
+
+Job8a43dade68654a0fa700ffad3afd8f5f under
+`.work/tmp/w6-compression-mid-20261117/` exits0, owned cleanup complete.
+All90 receipts recheck after completion. Six balanced default/level4/level5
+rounds complete18 uncached builds,132 tests each and identical c63f2e92
+executables. Host fda62467 and actual stock35087713/6ae4d3ab boot assets match.
+The17CPU/45091MiB resident control and common existing cache remain explicit.
+No product compression setting changed.
+
+| Condition | Build seconds, median (range) | Engine CPU seconds, median (range) | Added layer bytes, median |
+| --- | ---: | ---: | ---: |
+|Default|29.795 (29.373–30.139)|69.458 (68.069–70.249)|147,603,450|
+|Level4|27.866 (27.324–28.234)|66.327 (64.808–67.611)|150,507,711|
+|Level5|28.587 (28.074–29.192)|67.186 (66.186–69.626)|148,246,873|
+
+The authoritative exact values are in `analysis.json`. Both pass the3% added
+and total layer-byte guard but fail the unchanged5% median paired CPU reduction.
+Reject both default changes. Do not repeat the gzip-level grid. These are shared-
+host diagnostic timings, not qualified speedups. Native sampled footprint rises
+from4.6GB to26.9GB while results and builder caches remain resident. Sequence
+peaks do not isolate a codec's memory cost or establish a leak.
+
+Plan SHA-256:573f8ecc6d9b783cb4c86c0bcc60b4996c60dd1fcc0e1a9d0b27934c677acd7f.
+Terminal SHA-256:aa86b052dd93166a745c01414ab81fe67a0ed93e3ea431d06b177f2eaf46647a.
+Analysis SHA-256:046850b894e44ef4550c03f95d206fc35bc95f85c861231c448240ff4c86331f.
+
+The next bounded comparison changes codec rather than gzip level. Existing
+BuildKit supports zstd and ctrs already decodes it. Job1ac9f565cf7c410fa79c574eece63458
+under `.work/tmp/w6-zstd-journey-20261117/` measures six balanced default/zstd3
+pairs through first correct container use. It preserves the base descriptors,
+checks the fresh compile layer's codec and the frozen executable, and retains
+separate build and first-use times. The same3% byte and5% CPU/journey guards
+apply. A lead still requires fresh default-resource memory and first-use
+confirmation. No dependency or product default changed.
