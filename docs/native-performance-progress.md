@@ -163,18 +163,29 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** implement fixed offered-load coverage for W2 before
-another CPU comparison. Current loader offers only closed-loop fixed work or
-duration saturation; neither establishes identical request cadence. Hypothesis:
-the apparent API CPU/futex contrast may depend on different delivery cadence.
-Keep old modes/version unchanged; add separately versioned bounded fixed-rate
-work with absolute scheduled slots, schedule-lag/missed delivery accounting and
-scheduled-to-completion latency. Late backlog must not silently become a valid
-offered-load pass. Extend existing loader/runner and actual HTTP component tests,
-not a new scheduling framework. Then a small pinned native functional proof and
-a predeclared3-pair host-client CPU screen at500/2,000 offered requests per second,
-10,000 operations each, concurrency4, unchanged write mix and exact persisted
-data. Timings stay diagnostic without exclusive host/observer qualification.
+**Exact continuation:** consume registered watch for source worker
+`usrw_f628bac1-b206-46e4-bc41-87380bbfeb03`, tree`.work/wt/np-w2-rate`,
+branch`experiment/w2-fixed-rate`, base`1f9f78a376c9dd98e214d62065ee66b151c30755`.
+It owns only `bench/native/fixtures/w2/load.py`, `bench/native/runner.py`, and
+`bench/native/test_w2.py`. It adds bounded fixed offered-rate work to investigate
+the cadence hypothesis: old closed-loop fixed work/saturation do not establish
+identical delivery cadence. Require absolute slots, schedule-lag/missed delivery
+and scheduled-to-completion latency. Late backlog cannot become a healthy rate
+pass. Preserve old modes/oracles; reject invalid options before engine access.
+No native/full suites/builds authorized for the worker. Review its full committed
+diff, scope and narrow actual-HTTP/bounded-W2 proof once before integration.
+
+Parent prepared `.work/tmp/w2-fixed-rate-proof-20261117/{run,launch}.py`:
+one 500-operation/500req/s native functional leg per engine,17CPU/45091MiB,
+same candidate/pins, exact data and complete counters. Adapt to accepted fields,
+freeze source/inputs and launch after acceptance. No native job active.
+Then test cadence with6 alternating engine pairs and rotating closed-loop,
+500 and2,000req/s conditions,10,000 operations each, concurrency4, same write mix.
+Match seeds within each pair/condition and vary between pairs. Seek consistent
+>=10% API cgroup CPU-per-operation contrast from pacing across all6 rounds,
+without missed delivery or failed data. Preserve invalid conditions and stop
+the fixed batch on failure, no replacements. Distinct fixture versions cannot
+pool. Timings stay diagnostic without exclusive host/observer qualification.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
