@@ -8,6 +8,13 @@ On every resume read `AGENTS.md`, this document, and
 The progress file is the single work queue and continuation checkpoint;
 `docs/evidence/native-performance.md` is the historical experiment log.
 
+The owner subsequently accepts some background noise for continued experiments.
+After resume, use interleaved W2 work and observer controls with disclosed host
+activity, paired uncertainty and preserved failures. Do not wait for a perfectly
+quiet host before investigating W2. Keep correctness, durability and numerical
+budgets unchanged. Unattributable whole-engine resources remain inconclusive.
+This steering supersedes older blanket exclusivity requirements for diagnostics.
+
 ## Objective and current position
 
 Make normal headless ctrs workflows on **Apple Silicon macOS** meet and

@@ -5,6 +5,13 @@ is a read-only export of the verified W4 image. `worker-pin.json` records its
 manifest, config, diff IDs and application hash. Preparation preserves both
 engines' existing images and shared daemons.
 
+If scratch was deleted, `worker-pin.json` retains the exact `source_image_id`.
+Export that image from the shared store under a new owned tag whose suffix is
+the recorded `layout_reference`. Extract its OCI archive with the data filter.
+`registry_portfolio.prepare_layout(layout, {repository: layout_reference})` must
+recover the pinned worker manifest, config and DiffIDs before a run. Missing
+source bytes remain a preparation blocker or require a new version and baselines.
+
 ```sh
 TMPDIR=$PWD/.work/tmp CTRS_CPUS=2 CTRS_MEMORY_MIB=4096 \
 python3.14 bench/native/diagnostics/mixed_pilot.py \
@@ -21,13 +28,15 @@ The pilot accepts one to three cycles. Each cycle starts three activities:
 
 The API, PostgreSQL and Redis containers persist across cycles. The unchanged
 pinned W2 client uses disjoint worker IDs each cycle, producing unique write
-names. Verification checks the exact cumulative multiset of seeded and
-acknowledged values, the committed DB/cache record and named-volume identity.
-Queue and build cleanup run each cycle; persistent stack cleanup runs at the end.
+names. The current v3 fixture verifies every acknowledged value before explicit
+transient-item deletion, then checks all500 exact seed rows remain. The committed
+DB/cache witness and named-volume identity persist across cycles. Queue and build
+cleanup run each cycle; persistent stack cleanup runs at the end. Historical
+cumulative v2 results remain separate.
 A timed-out queue verifier retains its owned name for explicit cleanup.
 
 Results preserve each activity's actual begin/end, exact job outputs, cumulative
-rows, native resource phases, required process/start identity and loaded artifacts.
+counts, per-cycle exact rows, native resource phases, required process/start identity and loaded artifacts.
 Image digests, diff IDs, application inputs and tools match the common portfolio.
 The sampler includes setup, mixed work, verification and cleanup after a disclosed
 boot warmup. API work has a 60-second deadline; child engine commands are bounded.

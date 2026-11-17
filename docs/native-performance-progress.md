@@ -43,15 +43,26 @@ Prioritize normalized W2 reproduction/profiling over further qualification tooli
 
 ## Exact next action
 
-Implement the missing W11 growth observations and readiness admission using
-the bounded v3 working set. Reuse existing native counters and explicit backing-
-file allocation helpers. Declare observation points, warmup exclusion, numerical
-budgets and minimum coverage before running. Keep unknown allocation/cache
-scope and incomplete data unknown. Never infer bounded growth from a short
-cycle count or a successful process exit. Then require a frozen candidate/input
-identity and a complete per-cell prerequisite matrix before `--qualification`
-can admit the owner-requested12-hour jobs. Existing refusal cites missing
-prerequisites, not missing owner authority.
+After an explicit resume, run `codex-campaign-closeout.py cancel` and inspect
+`git show --stat 5bcf48a`. That unaccepted source is preserved on
+`campaign/w11-admission-20261117`, not main. Its122-test W2 component check
+passes, but independent review and native v4 observation proof remain pending.
+Do not make that whole admission patch a prerequisite for W2 investigation.
+
+Prioritize a bounded interleaved W2 equal-work/observer batch under the owner's
+explicit acceptance of some background noise. Use the existing pinned common
+portfolio, accepted binary/boot assets and `runner.trial_w2` through
+`diagnostics.resource_pilot.ResourceEngine`. Predeclare five blocks of50,000
+operations at concurrency8 and write ratio0.3, matching each block's seed and
+read/write mix across engines and periodic-on/boundary-only controls. Alternate
+engine and observer order. Keep setup, work and cleanup separate. Preserve all
+failures and derive CPU per successful operation from each raw workload phase.
+Report API cgroup usage/user/system costs, spread and paired uncertainty.
+Record actual resource envelopes and tools. Keep installed-default and matched
+default-driver cohorts separate. Whole-OrbStack-process CPU may include its
+unrelated VM; do not relabel that aggregate as isolated application efficiency.
+Run a separate declared saturation batch and profile actual API work if the
+normalized deficit persists. Do not repeat rejected microbench matrices.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
@@ -64,13 +75,12 @@ CPU and both periodic traces. Teardown is verified and all155 inputs rechecked.
 Later failure-path corrections use offline regressions, not another identical
 normal-path run. [Exact command and scope](evidence/native-sampler-lifecycle-2026-11-17.md).
 
-After functional acceptance, the first timed action is a separately predeclared
-exclusive W2 observer/equal-work batch. Require scalar gates AND actual saved
-process/guest snapshots. Ordinary gate0 has coexisted with hot Niceforge work;
-the unrelated `bctl-r7-qualify` VM also prevents attribution of OrbStack's helper.
-Do not stop unrelated work. The `-s` swap advisory is lane admission, not a
-performance gate. If exclusivity is absent, continue the next independent queue
-item; do not rerun neutral matrices or poll counters to fill turns.
+Save pre/post gates and actual process, guest, power and thermal snapshots.
+Ordinary gate0 has coexisted with hot Niceforge work. The owner subsequently
+accepted some noise; a perfectly quiet window is no longer a prerequisite for
+diagnostic W2 progress. Preserve unrelated work and disclose interference.
+Keep inconclusive or structurally contaminated resource cells explicit. The
+`-s` swap advisory is lane admission, not a performance gate.
 
 W8 receipt validation is integrated at df1f418. Its source investigation and
 remaining [content-state limits](evidence/native-w8-content-state-2026-11-17.md)
@@ -119,14 +129,14 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Add W11 post-warmup resource-growth observations and fail-closed frozen-
-   readiness admission. Keep bounded v3 state, exact-data oracles and explicit
-   unknown cells. Short functional proofs never substitute for qualification.
-2. In a genuinely exclusive window, confirm W2 CPU/success at equal useful work
-   and observer budgets, then profile actual API user/system CPU, synchronization,
-   scheduling and network costs. Separate fixed work/offered load, saturation,
-   on-CPU samples and off-CPU/wake latency. Commands/budgets:
+1. Resume normalized W2 under disclosed background noise, following the exact
+   next action above. Separate fixed work/offered load, saturation, on-CPU samples
+   and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
+2. Review parked5bcf48a separately. Main already contains the optional growth
+   capability81e51d2 and counter-window fix4fc901b. The parked patch adds CLI
+   wiring, frozen-evidence admission, actual tool receipts and resource-envelope
+   checks. Native v4 proof, real frozen evidence and review remain missing.
 3. W8: strengthen comparable retained/content-absent evidence and complete
    exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
    AB/BA order, actual transfer/deployment and source-state unknowns explicit.
