@@ -73,9 +73,12 @@ exit and SIGKILL preserve their observed terminal statuses and invalidate totals
 
 The original 20-trial v3 sampler-on/off diagnostic remains in the historical
 [measurement evidence](native-performance.md#native-sampler-v3-short-calibration-accepted-for-diagnostic-iteration).
-It is not a fresh observer-overhead confirmation for this candidate. Current
-`perf-gate-ready -s` exits75 due to swap use above its threshold. **Perf gate
-deferred: host busy.** This short read-only proof explicitly sets timing and
+It is not a fresh observer-overhead confirmation for this candidate. The ordinary
+`perf-gate-ready` exits0; this does not establish exclusivity. A saved snapshot
+finds unrelated Niceforge smolvm at98.8% CPU and the unrelated
+`bctl-r7-qualify` VM still running. The separate `-s` lane-admission advisory
+exits75 on swap use and explicitly says it is not a timing-gate result.
+**Perf gate deferred: host busy.** This short read-only proof explicitly sets timing and
 qualification eligibility false and does not measure application observer cost.
 No unrelated workload or shared daemon was stopped. Clean equal-work W2 and
 observer confirmation remain next; original contaminated batches stay invalid.
@@ -163,3 +166,17 @@ Frozen source receipts from the final native pilot:
   "qualification_eligible": false
 }
 ```
+
+## Independent completion review
+
+Reviewer `usrw_67e419fc-9656-407e-ba02-8c1a768c28ad` identified the first repair's
+liveness/signal race, then reviewed `bf9582f..ef22cc9` and all relevant callers.
+The correction review found no additional demonstrated defect. It left the
+checkout unchanged. Its54 tests ran on the earlier bf9582f tree; they do not
+substitute for the parent's87 correction tests and final native proof. The
+reviewer assessed forced-stop and receipt edge cases from source. The empty
+ignored review directory was inspected and discarded when retiring its checkout.
+
+The bounded measurement source repair is accepted. Fresh application observer
+confirmation and all performance/resource qualification remain open. The normal
+timing gate's exit0 did not override the independently observed foreign load.

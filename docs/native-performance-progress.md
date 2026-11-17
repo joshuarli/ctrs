@@ -4,16 +4,16 @@
 
 **ACTIVE 2026-11-17 — owner requested resume after completed winddown and cleanup.**
 Reviewed `94f19a8` is an ancestor of HEAD; subsequent measurement, fixture and product work is reconciled below.
-Current slice: sampler exit repair passes focused/native checks; review and commit it before another application comparison.
+Accepted measurement repair: sampler v4 correction ef22cc9; independent delta review reports no additional demonstrated defect.
 43 existing tests pass; baseline crash reproduction retains falsely valid partial totals. The affected87-test selection passes after correction.
 Sampler v4 requires a current stop acknowledgment; native normal/early0/SIGKILL and phase-cell cases pass. See [evidence](evidence/native-sampler-lifecycle-2026-11-17.md).
 Last accepted product remains `2f37d02`: readiness reuse, 14 tests, seven lifecycle cases and156 correct diagnostic jobs.
 No product, guest or build-driver default is being changed by this measurement repair.
-**Perf gate deferred: host busy** (current gate exit75: swap threshold); no scored batch or W11 is running.
+**Perf gate deferred: host busy**: ordinary gate exits0 but Niceforge is hot and an unrelated OrbStack VM is running; no scored batch or W11 runs.
 Cleanup is complete:28 retired checkouts, `.work`195.3→21.0GiB allocated-size sum; [resource record](evidence/native-cleanup-resources-2026-11-17.md).
 Parked source and remaining trees: [inventory](native-performance-retained.md#after-cleanup-2026-11-17); no rejected candidate is promoted.
-Next action: finish narrow lifecycle/native validation, then exclusive equal-work W2 observer/application confirmation; keep saturation separate.
-Classic-builder C proof remains queued after measurement repair; it has not started.
+Next action: prepare clean W2 confirmation; while exclusivity is unavailable, execute the queued bounded classic-builder C caller proof.
+Classic-builder C proof is the first independent ready item; no application timing batch is admitted.
 Full qualification waits for frozen representative inputs, resource/durability gates and a complete per-cell matrix.
 Resume first command is `codex-campaign-closeout.py cancel` (already run); execute the first ready queue item.
 
@@ -78,7 +78,7 @@ establish observer overhead or product performance.
 
 After the repair, admit the predeclared exclusive equal-work W2 confirmation
 only when both scalar gate and saved process/guest snapshots establish a clean
-window. Current gate exit75 defers scoring. Prior v3 sampler-on/off calibration,
+window. The ordinary scalar gate exits0, but saved snapshots show hot unrelated Niceforge work and the unrelated `bctl-r7-qualify` VM. The separate `-s` lane-admission advisory exits75 on its swap threshold; it is not the timing gate. Host exclusivity remains unestablished. Prior v3 sampler-on/off calibration,
 fixed-work implementations, pinned wake controls, real W4/W5/W8/W9 and short
 representative W11 proofs are already complete; do not rebuild these as if absent.
 Preserve all original failed/invalid batches. Investigate a new causal application
@@ -131,10 +131,11 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Complete and land the bounded sampler lifecycle repair and native functional
-   validation. Reuse the existing native-v3 accounting and ownership work; no
-   harness replacement or observability system. Confirm observer overhead in a
-   genuinely exclusive window; keep invalid runs visible.
+1. Sampler v4 lifecycle/phase repair is accepted at ef22cc9 with87 parent tests,
+   native requested/early0/kill controls and independent correction review.
+   Confirm application observer overhead in a genuinely exclusive window; keep
+   invalid runs visible. Until then, execute the independent C caller proof
+   in item3, without performance claims.
 2. Confirm equal useful W2 work and CPU/success on a clean host, then profile the
    actual API user/system CPU, synchronization, scheduling and network boundary.
    Fixed-work/offered-load and saturation stay separate. Use raw paired records;
