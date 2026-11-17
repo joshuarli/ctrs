@@ -136,3 +136,50 @@ root's pinned GCC image (empty container index, no open-file/process consumer),
 not a previous build result. The five contexts and app checks are unchanged.
 Version2 has its own inputs/job under `.work/tmp/classic-builder-c-v2-20261117/`;
 never pool or replace the version1 receipt.
+
+## Classic C caller result
+
+Version2 job `7203a474ee4a4acf8b6f4d68eb126340` exits0 with clean owned teardown
+and verified native daemon/VM termination. All88 frozen receipts recheck before
+any subsequent source edit. All five cases build and execute zlib1.3.1 correctly
+through `DOCKER_BUILDKIT=0 docker build`, including a genuine first compile and
+`make check`. Every resulting image has config ID
+`bc580c4ae387b6665f10e21b0c83701157cc46e899ce20e49b6e6aacfe88888c`.
+Every static library SHA256 is
+`6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b`.
+Native probes return exact identical `aarch64`, library hash and zlib example
+outputs, including decompression, streaming, large-inflate and dictionary tests.
+
+| Case | Builder process and result |
+| --- | --- |
+| Cold | Builder created; PID78; native app correct |
+| Warm | Same ID/PID/start; native app and digest unchanged |
+| Paused | Paused state observed before build; active afterward; app correct |
+| External resume | Pause/unpause preserves original ID/PID/start; app correct |
+| Restarted | New PID/start required and observed; same app and digest |
+
+Sampler v4 covers82 records with both required native processes, no resource
+errors and a matching requested-stop receipt. These are completeness observations,
+not resource acceptance: no performance or observer-overhead claim is admitted
+under foreign load. The public API does not expose hidden internal readiness
+exec events; this proof does not invent probe counts. The earlier private audit
+remains the evidence for warm reuse and pause-generation invalidation counts.
+The signed host and actual booted assets match the earlier accepted fingerprints.
+
+To reproduce from the repository, copy the tracked W6 Dockerfile and the archive
+whose SHA256 is9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+into a new owned context with a fixed stamp. Add one exact ownership label. Use
+a fresh isolated engine with the accepted signed host and boot assets, pull the
+pinned GCC manifest, then first run an owned `uname -m` container to boot the VM.
+Set `DOCKER_BUILDKIT=0` for each `docker build --network none -t <owned-tag> <context>`.
+Run `sh -c 'set -e; uname -m; sha256sum /src/libz.a; /src/example'` from each
+result with an owned, automatically removed container. Record and verify the
+builder's ownership, immutable image, ID/PID/start around each of the five cases;
+use explicit pause, unpause and restart on that owned builder only. Remove exact
+label-owned outputs and stop the isolated engine. Keep any failure unchanged.
+
+Raw version2 receipts remain optional under
+`.work/tmp/classic-builder-c-v2-20261117/`; version1 remains a failed preparation
+record. This closes the affected classic C caller proof and changes no product
+source or default. Full W6/W7 qualification and installed-default coverage remain
+open.

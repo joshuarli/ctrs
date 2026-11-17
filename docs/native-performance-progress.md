@@ -12,8 +12,8 @@ No product, guest or build-driver default is being changed by this measurement r
 **Perf gate deferred: host busy**: ordinary gate exits0 but Niceforge is hot and an unrelated OrbStack VM is running; no scored batch or W11 runs.
 Cleanup is complete:28 retired checkouts, `.work`195.3→21.0GiB allocated-size sum; [resource record](evidence/native-cleanup-resources-2026-11-17.md).
 Parked source and remaining trees: [inventory](native-performance-retained.md#after-cleanup-2026-11-17); no rejected candidate is promoted.
-Next action: prepare clean W2 confirmation; while exclusivity is unavailable, execute the queued bounded classic-builder C caller proof.
-Classic-builder C proof is admitted as a finite5-case functional job; no application timing batch is admitted.
+Next action: prepare a reproducible fixed-work sampler-on/off command for W2; keep scored confirmation deferred until exclusivity is established.
+Classic C proof7203a474 passes all5 cases with exact native artifacts, clean teardown and88 unchanged inputs; no application timing batch is admitted.
 Full qualification waits for frozen representative inputs, resource/durability gates and a complete per-cell matrix.
 Resume first command is `codex-campaign-closeout.py cancel` (already run); execute the first ready queue item.
 
@@ -69,13 +69,15 @@ The sampler v4 repair is accepted at ef22cc9 after87 parent tests, native
 lifecycle/phase controls and independent correction review. Its [evidence](evidence/native-sampler-lifecycle-2026-11-17.md)
 preserves the original defect, race correction and measurement limitations.
 
-Execute the bounded classic-builder C caller proof in
-`.work/tmp/classic-builder-c-v2-20261117/job`: one frozen W6 zlib context, five
-cold/warm/pause/external-resume/restart cases, exact native artifacts, owned
-cleanup. Inspect its identity/status once after launch and retain the terminal
-exit, rather than starting another copy. The [readiness evidence](evidence/native-builder-readiness-2026-11-17.md)
-contains admission and reproduction inputs. Version1 ca5e3b0c exits1 before any build because pulling does not boot the VM; v2 adds an owned native bootstrap. Preserve that failure. This is functional validation only;
-no timing or resource acceptance is implied.
+The classic C caller proof7203a474 is complete: five cases, exact native zlib
+artifacts, clean teardown and88 unchanged input receipts. The original v1 lazy-boot
+failure remains separate in [readiness evidence](evidence/native-builder-readiness-2026-11-17.md).
+Do not rerun this unchanged proof. Next, replace the scratch-only sampler-on/off
+driver with a bounded, pinned fixed-work command using the existing W2 runner
+and immutable common services. Retain explicit workload CPU boundaries with
+periodic sampling off; collect the same exact operations with it on. Validate
+control selection and cleanup narrowly. Host-busy functional execution cannot
+pass observer budgets or product timing gates.
 
 After the repair, admit the predeclared exclusive equal-work W2 confirmation
 only when both scalar gate and saved process/guest snapshots establish a clean
@@ -136,7 +138,7 @@ next-action paragraphs from that historical revision.
    native requested/early0/kill controls and independent correction review.
    Confirm application observer overhead in a genuinely exclusive window; keep
    invalid runs visible. Until then, execute the independent C caller proof
-   in item3, without performance claims.
+   in other independent ready items, without performance claims.
 2. Confirm equal useful W2 work and CPU/success on a clean host, then profile the
    actual API user/system CPU, synchronization, scheduling and network boundary.
    Fixed-work/offered-load and saturation stay separate. Use raw paired records;
