@@ -4,12 +4,11 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** admit the zstd lead at product resources.
-Jobf289743d32884a6fbcd34aa32d0c81e7 is active under
-`.work/tmp/w6-zstd-default-resources-20261117/job`. The earlier six-pair journey
-screen1ac9f565… passes its CPU, journey and byte guards, with91 unchanged inputs. Gzip4/5 are rejected after18 correct
-builds: their size guards pass but their5% CPU guards fail. Product default is
-unchanged. Full qualification remains unproved.
+**Current action:** investigate the guest gzip decoder while preserving format
+and extraction limits. The global zstd default is REJECTED by native expansion
+admissiondc9b256585ad4196b90a1685f887cda4: gzip loads the exact2GiB payload,
+zstd fails under the unchanged1GiB expansion floor. Main defaults are unchanged.
+No native job or worker is active. Full qualification remains unproved.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -170,25 +169,30 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** consume jobf289743d32884a6fbcd34aa32d0c81e7, then run
-`.work/tmp/w6-zstd-default-resources-20261117/analyze.py` on its terminal result.
-Recheck frozen inputs before edits. This is six balanced pairs, fresh VM perleg,
-2CPU/8192MiB, default sleep/quiet, exact132 tests/executable/codec/base checks,
-no OOM delta, <=3% paired peak footprint, and next-use increase<=max(10ms,3%).
-The same5% CPU/journey and3% byte guards remain. Do not weaken failed guards.
+**Exact continuation:** prepare an isolated guest gzip-backend experiment.
+Current `cargo tree -p ctrs-init --target aarch64-unknown-linux-musl -e features
+-i flate2 --offline` proves miniz_oxide is selected. Existing lockedzlib-rs0.6.8
+is cached, Zlib-licensed and already listed in third-party.md, with no active
+normal Rust dependencies. Inspect its exact feature graph before use.
+Create `.work/wt/np-gzip-backend`, build only the baseline guest component with
+`CARGO_ENCODED_RUSTFLAGS="" CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=4 cargo xtask guest`,
+preserve its initrd and compiler/source/size receipts, then change only the guest
+flate2 declaration to disable defaults and enablezlib-rs. Build the same named
+component into separate preserved assets. Do not touch host backend or main assets.
+Compare native gzip deployment/first-use CPU, wall, memory and identical bytes
+with unchanged bounds before selecting it. A macro profile must establish useful
+application cost; a decoder micro result alone cannot promote the backend.
 
-Private source candidatebd35436de01ee849b85bc412a17cbc633ff792df is committed on
-`perf/zstd-load` in `.work/wt/np-zstd-load`, not main. Only builder.rs/buildgrpc.rs
-change. It uses shared zstd3 defaults for mirror image loads and preserves
-explicit compression/media controls. Component tests/build/native candidate proof
-are PENDING until the native resource job completes. Do not run them concurrently.
-Independent read-only workerusrw_a9e10b21-cc7f-47cf-bcbb-0b9fcd51b3d9 is active
-in `.work/wt/np-zstd-review`, branchreview/np-zstd-load, same pinned source.
-Consume its returned watch, verify zero edits and inspect supported findings.
-If resource admission fails, park candidate without integration. If it passes,
-run only named component tests, build/sign the host component, then compare the
-actual implicit default with unchanged fda baseline and explicit controls.
-See [build evidence](evidence/native-build-boundaries-2026-11-16.md).
+Zstd candidatebd35436 remains clean/private in `.work/wt/np-zstd-load`, branch
+perf/zstd-load, never integrated. Reviewerusrw_a9e10b21… is terminal, zero edits,
+no demonstrated source defect, same HEAD in `.work/wt/np-zstd-review`.
+The resource batchf289743d… completes all12 exact native legs and guards but
+retains original exit1 due duplicate cleanup after daemon stop. A separate live
+inspection proves all12 probes/24 image tags absent. `analysis-recovered.json`
+preserves that failure and recovery audit hash. All91 inputs pass. Do not rerun.
+The expansion admission remains exit1/clean, all96 inputs pass, and blocks the
+global zstd default despite the W6 lead. See
+[build evidence](evidence/native-build-boundaries-2026-11-16.md).
 
 Python capability admission and API capture are complete. The integrated
 uprobes gate passes43 tests with zero skips in0.375s. See
@@ -205,8 +209,7 @@ active, but both conditions fail the unchanged16MiB native return budget.
 All100 preemption and93 resource receipts pass before further source edits.
 Default quiet120/sleep60 and all product policies remain unchanged.
 The timer/uprobe checkouts are retired; branches and private/live assets remain.
-One source reviewer is active. No W11 soak is running. The zstd resource job owns
-the native measurement lane.
+All workers are terminal. No W11 soak or native measurement job is running.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
 Six admission legs pass; larger matrix stops at round1 OrbStack2,000/s with5270
@@ -685,7 +688,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. Complete zstd default-resource admission and the private candidate review.
+1. Profile native gzip deployment/first-use and evaluate the guest decoder backend.
    Keep W2 CPU attribution and observer controls open after the completed count
    capture. Do not repeat rejected scheduling, pacing or quiet-policy matrices.
 2. W11 duration/cleanup integration is accepted. Freeze actual qualification

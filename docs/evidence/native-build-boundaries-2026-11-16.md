@@ -295,3 +295,45 @@ unchanged until resource admission, component checks and actual candidate proof.
 Plan SHA-256:fdec86a280558a3bc36148d24c94824775c6c2888f2aa38eaa76b49203e2d78f.
 Terminal SHA-256:bc768b76bf87b0e25988b1a208c7d721ae3e8230c3655823152bd01fb7cd2f9a.
 Analysis SHA-256:0e91512dc141f497cd29fdce8eab357b65881ac17f40dbfbfd8809db8fe647a1.
+
+
+## Zstd default rejected by expansion admission
+
+The fresh2CPU/8192MiB batchf289743d32884a6fbcd34aa32d0c81e7 completes all12
+uncached builds,132 tests each, exact executables and zero OOM deltas.
+All91 inputs recheck. Every paired peak footprint stays within3%, and every
+first-use leg stays within its max(10ms,3%) budget. Its coordinator incorrectly
+queries already-removed probes after stopping the final daemon, so the original
+job remains exit1 with12 cleanup inspection errors. No workload leg was rerun.
+The subsequent live-daemon audit proves all12 exact probe names and24 exact
+image tags absent. Receipt:
+`.work/tmp/zstd-expansion-admission-20261117/previous-cleanup-audit.json`.
+`analysis-recovered.json` under the resource root preserves the original failure
+and this audit hash. It verifies all raw build tests, native closure and resources.
+The perleg data clear the fixed CPU, journey, byte, footprint and first-use
+screen, without qualifying shared-host timing or changing the failed job status.
+Before any reuse, remove this private coordinator's duplicate post-stop cleanup
+in a new version. Do not edit its frozen inputs or repeat the completed batch.
+
+Independent source reviewerusrw_a9e10b21… completes with no demonstrated defect,
+zero edits and pinned HEADbd35436. It identifies highly compressible layers as
+an unproved compatibility case. The next admission establishes that case.
+
+Jobdc9b256585ad4196b90a1685f887cda4 under
+`.work/tmp/zstd-expansion-admission-20261117/` exits1 with clean teardown.
+All96 frozen receipts recheck. A fixed C generator repeats one deterministic
+64KiB high-entropy block32768 times. Both codecs build the same2,147,483,648-byte
+payload with the same pinned Rust base and compiler. Gzip loads successfully and
+returns the exact independent SHA256. Its final layer is2,148,142,839B and receives
+the existing64GiB expansion ceiling. Zstd's final layer is298,209B, receives the
+existing1GiB floor and fails first use with Docker exit125 while unpacking payload.
+Source `layers.rs:186–214` caps decoded bytes at max(1GiB,min(64GiB,256*compressed)).
+No bound is weakened. The fixture C source, Dockerfile, exact errors and both
+layer descriptors remain under the job root.
+
+**Reject the global default change.** Useful W6 signals cannot override this
+compatibility failure. Privatebd35436 stays unmerged on perf/zstd-load. It was
+not built or tested after rejection. Main compression defaults and guest assets
+remain unchanged. Do not promote or restart its performance matrix.
+The next boundary is guest gzip decoding, retaining the gzip format and all
+expansion limits, rather than changing the default output codec again.
