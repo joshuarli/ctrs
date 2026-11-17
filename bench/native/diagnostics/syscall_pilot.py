@@ -70,14 +70,14 @@ def task_affinities(tasks, requested):
     return effective
 
 
-def load_command(location, base, label, count, write_ratio, directory):
+def load_command(location, base, label, count, write_ratio, directory, *, concurrency=4, seed=7):
     out = str(directory / (label + '.json')) if location == 'host' else '/work/' + label + '.json'
-    return ['--url', base if location == 'host' else 'http://api:8000', '--concurrency', '4',
-            '--operations', str(count), '--write-ratio', str(write_ratio), '--seed', '7', '--out', out]
+    return ['--url', base if location == 'host' else 'http://api:8000', '--concurrency', str(concurrency),
+            '--operations', str(count), '--write-ratio', str(write_ratio), '--seed', str(seed), '--out', out]
 
 
-def load(engine, location, client, base, directory, label, count, write_ratio):
-    args = load_command(location, base, label, count, write_ratio, directory)
+def load(engine, location, client, base, directory, label, count, write_ratio, *, concurrency=4, seed=7):
+    args = load_command(location, base, label, count, write_ratio, directory, concurrency=concurrency, seed=seed)
     if location == 'host':
         cp = subprocess.run([sys.executable, str(runner.LOAD_PY), *args], capture_output=True, text=True, timeout=90)
     else:
@@ -119,7 +119,8 @@ def cleanup_project(engine, compose, project):
             raise RuntimeError('owned compose resources remain: ' + remaining)
 
 
-def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None, client_location='host'):
+def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None,
+          client_location='host', *, concurrency=4, seed=7):
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -140,6 +141,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     if client_location == 'guest':
         version += GUEST_CLIENT_SUFFIX
     result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
+    result.update(concurrency=concurrency, seed=seed)
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -192,7 +194,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             if digest != PIN['w2_load_sha256']:
                 raise ValueError('guest client source differs from pin')
         result['effective_client_location'] = client_location
-        load(engine, client_location, client, base, directory, 'warmup', 1000, 0)
+        load(engine, client_location, client, base, directory, 'warmup', 1000, 0,
+             concurrency=concurrency, seed=seed)
         if client_location == 'guest':
             read_load(engine, client_location, client, directory, 'warmup', 1000)
         snapshot = "import pathlib,json;print(json.dumps({p.name:{f:(p/f).read_text() for f in ['comm','stat','status']} for p in pathlib.Path('/proc/1/task').iterdir()}))"
@@ -233,7 +236,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
         started = time.monotonic()
-        summary = load(engine, client_location, client, base, directory, 'work', operations, .3)
+        summary = load(engine, client_location, client, base, directory, 'work', operations, .3,
+                       concurrency=concurrency, seed=seed)
         ended = time.monotonic()
         host_after = collect.cpu_boundary(identity)
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()

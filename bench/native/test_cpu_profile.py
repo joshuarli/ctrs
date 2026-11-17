@@ -172,6 +172,15 @@ class ClientLocation(unittest.TestCase):
         self.assertEqual(host[2:-1], guest[2:-1])
         self.assertEqual(guest[-1], '/work/work.json')
 
+    def test_profile_load_uses_requested_concurrency_and_seed(self):
+        for location in ('host', 'guest'):
+            with self.subTest(location=location):
+                arguments = syscall_pilot.load_command(location, 'http://127.0.0.1:1234', 'work',
+                                                       50000, .3, Path('/out'), concurrency=8, seed=8)
+                options = dict(zip(arguments[::2], arguments[1::2], strict=True))
+                self.assertEqual(options['--concurrency'], '8')
+                self.assertEqual(options['--seed'], '8')
+
     def test_guest_command_failure_and_summary_copy_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
