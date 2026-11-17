@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** native balloon/physical-reclaim calibration after the build profiles.
+**Current action:** repair guest memory accounting after native headroom failure.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -44,26 +44,46 @@ clean owned teardown and remains separate. v2 verifies the base diff-ID prefix
 through inspect, then counts following store layers; the saved accounting-repair
 receipt recomputes the first run's added bytes from its retained records.
 
-**Exact continuation:** inspect
-`.work/tmp/vz-balloon-reclaim-20261116/job`, durable ID
-`e07ad19c53fd462d9db66d7b80d36074`, once for identity/status/deadline. It is
-already launched; never duplicate it. Six scenarios rotate inflate/hold, hold/
-inflate, inflate/hold. Each writes/fsyncs a bounded 2GiB zero file in a uniquely
-owned volume, observes 60 seconds idle with native physical counters, then reads
-and hashes every byte. Existing quiet thresholds 20s versus 86400s exercise
-inflation versus held ceiling while preserving memory-stat collection. This is
-a mechanism calibration, not an application speed benchmark or default-policy
-qualification. Source/default quiet=120 and sleep behavior are unchanged.
-Host 58f64738…, stock guest, 2 vCPUs/8192MiB, owned resident idle=0 control;
-deadline 1800s, cleanup grace 240s. Inputs frozen; no competing native work.
-Audit all six payload/hash checks, actual target movement, guest cache/available
-memory, native physical footprint, idle CPU and next-read CPU/cost, plus owned
-volume cleanup and frozen receipts. If inflation evicts cache without useful
-native reclaim, select a private policy candidate and confirm on real W2/W6 and
-next-use cases before promotion. Otherwise pursue the demonstrated retention
-boundary. Missing target movement or confounded samples remain inconclusive.
-Keep `/private/tmp/ctrs-w6-vendor-20261116` for vendoring provenance; source/lock
-unchanged. All timings remain ineligible on this shared host.
+The [balloon evidence](evidence/native-balloon-2026-11-16.md) records completed
+six-scenario calibration e07ad19c… and actual-inflation follow-up 78dffe92…:
+all admitted payloads/hash checks and owned cleanup pass. Net balloon pages
+confirm about 8.26GB inflation and cache eviction before reread, while native
+physical footprint does not fall. Host-pressure response remains unknown; do
+not disable ballooning from these observations. Both mechanism/source reviews
+are terminal with no source edits, retained in the named review trees below.
+
+Private host-only arithmetic fix 4ecd599, branch `fix/np-balloon-reserve`, tree
+`.work/wt/np-balloon-reserve`, signed candidate fda62467… (6,613,968 bytes),
+adds boot reserve and MiB rounding to preserve the intended usable headroom.
+The old-arithmetic regression fails; all three selected tests pass corrected.
+Independent source review 9a3a8456 is terminal, no demonstrated defects.
+Nevertheless native job 34664b99… (`.work/tmp/balloon-reserve-paired-20261116/job`)
+exits 1 at its first candidate practical-headroom check: calculated headroom
+270.5MB but actual guest available only 44,544,000 bytes, below the declared
+128MiB floor. Clean owned teardown; no replacement pairs. Candidate remains
+private/unmerged. Do not weaken the failed check or claim source review qualifies it.
+
+**Exact continuation:** inspect source worker
+`usrw_93e0cd44-f157-4b0c-b999-6e6d9e86b24f` once with bridge status; its background
+watch is already launched. Tree `.work/wt/np-balloon-used`, branch
+`fix/np-balloon-used`, base 4ecd599914b95b94dd69de7042e31b7ab9b99b53. It owns only
+the guest memory snapshot/accounting in `ctrs-init/src/linux/{mod,agent,cgroup}.rs`
+and an optional cohesive `memory.rs`. Deliver a same-snapshot unavailable-use
+calculation excluding actual balloon pages, meaningful parser/calculation tests,
+and bounded offline aarch64 guest `cargo check`; preserve wire formats and native
+Linux-host container accounting. The failed candidate snapshot's total minus
+available minus balloon is 226,048KiB, versus about 5MB root-cgroup held use.
+Watermark/nonavailable protection differs from cgroup-held physical memory.
+No measured native job is active. Worker may run bounded source checks; do not
+overlap native measurements. Review its complete diff/status/proof, integrate
+only into the private candidate, build the affected guest asset with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask guest` in that isolated tree (not `all`),
+preserve main guest assets, and run a fresh frozen baseline/full-accounting
+candidate comparison with the unchanged practical-headroom oracle. Audit actual
+binary/boot hashes and cleanup. Then relevant real W2/W6/next-use proof before
+promotion; do not repeat unchanged short W11 or failed compression experiments.
+Keep `/private/tmp/ctrs-w6-vendor-20261116` for provenance. All timing qualification
+remains deferred; no balloon policy/default changed on main.
 
 Affinity diagnostics completed;
 [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
