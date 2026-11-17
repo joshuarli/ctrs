@@ -214,7 +214,7 @@ CHECK_COMPONENTS = {
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
-    "resources": ("test_resource_cells", "test_resource_cycles",
+    "resources": ("test_resource_cells", "test_resource_cycles", "test_resource_pilot",
                   "test_collect", "test_storage_space",
                   "test_system_df_cache", "test_safety"),
 }
