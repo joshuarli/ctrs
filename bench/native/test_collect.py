@@ -100,6 +100,27 @@ class BoundaryTests(unittest.TestCase):
 
 
 class SamplerLifecycleTests(unittest.TestCase):
+    def test_boundary_control_keeps_ownership_without_spawning_observer(self):
+        identity = {'required_processes': [{'pid': 101, 'kernel_start_identity': 123}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
+            with patch.object(runner.ownership, 'discover', return_value=identity), \
+                    patch.object(runner.subprocess, 'Popen') as spawn:
+                self.assertEqual(runner.start_sampler(engine, root, sampling=runner.SamplingMode.BOUNDARIES), (None, None))
+            spawn.assert_not_called()
+            self.assertEqual(engine.measurement_identity, identity)
+            self.assertEqual(json.loads((root / 'ownership.json').read_text()), identity)
+            self.assertFalse((root / 'resources.jsonl').exists())
+
+    def test_invalid_sampling_mode_fails_before_discovery_or_spawn(self):
+        with patch.object(runner.ownership, 'discover') as discover, \
+                patch.object(runner.subprocess, 'Popen') as spawn:
+            with self.assertRaisesRegex(ValueError, 'SamplingMode'):
+                runner.start_sampler(None, Path('/unused'), sampling='off')
+        discover.assert_not_called()
+        spawn.assert_not_called()
+
     def test_early_collector_exit_invalidates_partial_resource_trace(self):
         fixture = ResourceTests()
         samples = ''.join(json.dumps(row) + '\n' for row in

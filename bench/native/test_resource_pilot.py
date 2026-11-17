@@ -17,6 +17,12 @@ def refs():
 
 
 class ResourcePins(unittest.TestCase):
+    def test_explicit_owned_root_is_forwarded_to_engine(self):
+        with patch.object(pilot.runner.Engine, '__init__', return_value=None) as init, \
+                patch.object(pilot, 'save'):
+            pilot.ResourceEngine('ctrs', 'run', refs(), Path('/results'), fresh_dir=Path('/owned-root'))
+        init.assert_called_once_with('ctrs', 'run', fresh_dir=Path('/owned-root'))
+
     def test_missing_arguments_and_invalid_refs_fail_before_engine_access(self):
         with patch('sys.argv', ['resource_pilot']), contextlib.redirect_stderr(io.StringIO()), \
              patch.object(pilot.runner, 'find_docker') as docker:

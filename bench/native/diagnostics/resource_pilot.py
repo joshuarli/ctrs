@@ -70,8 +70,8 @@ def verify_binary(identity, binary_hash):
 
 
 class ResourceEngine(runner.Engine):
-    def __init__(self, name, run_id, refs, directory):
-        super().__init__(name, run_id)
+    def __init__(self, name, run_id, refs, directory, *, fresh_dir=None):
+        super().__init__(name, run_id, fresh_dir=fresh_dir)
         self.override = directory / 'compose-override.json'
         save(self.override, {'services': {service: {'image': refs[image]} for service, image in
              (('api', 'api'), ('db', 'postgres'), ('cache', 'redis'))}})

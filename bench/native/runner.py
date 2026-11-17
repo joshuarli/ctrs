@@ -43,6 +43,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 try:
@@ -214,7 +215,7 @@ W8_IMAGES = [
 
 CHECK_COMPONENTS = {
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
-    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
@@ -685,7 +686,15 @@ class Sampler:
     stderr: Path
 
 
-def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=()):
+class SamplingMode(Enum):
+    PERIODIC = 'periodic'
+    BOUNDARIES = 'boundaries'
+
+
+def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=(),
+                  sampling=SamplingMode.PERIODIC):
+    if not isinstance(sampling, SamplingMode):
+        raise ValueError('require a SamplingMode')
     trace = trial_dir / "resources.jsonl"
     identity_path = trial_dir / "ownership.json"
     try:
@@ -703,6 +712,8 @@ def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=()):
         identity['method'] = identity.get('method', '') + '; explicit owned fixture process identities'
     identity_path.write_text(json.dumps(identity, indent=2) + "\n")
     engine.measurement_identity = identity
+    if sampling is SamplingMode.BOUNDARIES:
+        return None, None
     stderr = trial_dir / "sampler.stderr"
     with stderr.open("wb") as errors:
         proc = subprocess.Popen(
@@ -965,7 +976,8 @@ def exact_w2_items(actual, writes):
 def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
              duration: float, write_ratio: float, seed: int,
              operations: int | None = None, *, request_rate: float | None = None,
-             allocation_paths: tuple[Path, ...] = ()) -> dict:
+             allocation_paths: tuple[Path, ...] = (),
+             sampling=SamplingMode.PERIODIC) -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
     span = planned_span(operations, request_rate) if request_rate is not None else None
     client_source = RATE_LOAD_PY if request_rate is not None else LOAD_PY
@@ -983,11 +995,14 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         rec.setdefault("inputs", {})["load_client"] = {
             "path": str(client_source.relative_to(REPO)), "sha256": sha256_file(client_source)}
     sampler = trace = None
+    measurement_started = False
     t0 = time.monotonic()
     try:
         engine.ensure_up()
         compose_down(engine, proj)
-        sampler, trace = start_sampler(engine, trial_dir)
+        sampler, trace = start_sampler(engine, trial_dir, sampling=sampling)
+        measurement_started = True
+        rec['resources'].update(sampling_mode=sampling.value, sampler_version=collect.SAMPLER_VERSION)
         if allocation_paths:
             rec["resources"]["disk_allocation"] = {
                 "before_setup": resource_cells.allocation_snapshot(allocation_paths)}
@@ -1095,7 +1110,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         try:
             if allocation_paths:
                 rec["resources"].setdefault("disk_allocation", {})["after_work"] = resource_cells.allocation_snapshot(allocation_paths)
-            if sampler is not None:
+            if measurement_started:
                 with resource_phase(engine, rec, "cleanup"):
                     compose_down(engine, proj)
             else:
