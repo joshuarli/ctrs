@@ -69,8 +69,10 @@ class UnderPull(unittest.TestCase):
         writes = [{'name': 'load-0-1', 'payload': 'x' * 64}]
         rows = [[f'item-{i}', hashlib.md5(str(i).encode()).hexdigest()] for i in range(1, 501)] + [[writes[0]['name'], writes[0]['payload']]]
         client = {'counts': {'reads': 49999, 'writes': 1, 'errors': 0}, 'errors': [], 'writes': writes}
-        events = [{'completion_monotonic': 1, 'latency_ms': 2}] * 50000
+        events = [{'sequence': i, 'completion_monotonic': 1 + i / 50000, 'latency_ms': 2} for i in range(50000)]
         under.verify_payload(rows, client, events)
+        with self.assertRaisesRegex(ValueError, 'payload'):
+            under.verify_payload(rows, client, [events[0]] * 50000)
         rows[-1][1] = 'wrong'
         with self.assertRaisesRegex(ValueError, 'payload'):
             under.verify_payload(rows, client, events)
@@ -81,13 +83,14 @@ class UnderPull(unittest.TestCase):
     def test_failed_health_after_compose_up_cleans_project(self):
         contract = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
         engine = mock.Mock()
-        engine.name = 'ctrs'
+        engine.name = 'orbstack'
         def command(args, **kwargs):
             if args[:2] == ['image', 'inspect']:
                 ref = args[-1]
-                name = 'api' if ref.startswith('np-fixture') else 'postgres' if ref.startswith('postgres') else 'redis'
+                name = next(name for name in ('api', 'postgres', 'redis')
+                            if contract['images']['np-v2/' + name]['manifest'] == ref)
                 pin = contract['images']['np-v2/' + name]
-                return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': pin['config'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}]), '')
+                return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': pin['manifest'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}]), '')
             return subprocess.CompletedProcess(args, 0, '', '')
         engine.sh.side_effect = command
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(under.runner, 'wait_health', return_value=(None, None)):
@@ -105,7 +108,8 @@ class UnderPull(unittest.TestCase):
         def command(args, **kwargs):
             if args[:2] == ['image', 'inspect']:
                 ref = args[-1]
-                name = 'api' if ref.startswith('np-fixture') else 'postgres' if ref.startswith('postgres') else 'redis'
+                name = next(name for name in ('api', 'postgres', 'redis')
+                            if contract['images']['np-v2/' + name]['config'] == ref)
                 pin = contract['images']['np-v2/' + name]
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': pin['config'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}]), '')
             if args[:1] == ['exec']:
@@ -117,6 +121,7 @@ class UnderPull(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(under.runner, 'wait_health', return_value=(200, {})), mock.patch.object(under.subprocess, 'Popen', return_value=process):
             directory = Path(tmp)
             (directory / 'readiness.json').write_text('{"completion_monotonic": 1}')
+            (directory / 'completions.jsonl').write_text('{"truncated":')
             with self.assertRaisesRegex(RuntimeError, 'pull fault'):
                 with under.baseline(engine, directory, 'run', contract, lambda name: nullcontext()):
                     raise RuntimeError('pull fault')
@@ -124,6 +129,7 @@ class UnderPull(unittest.TestCase):
         process.terminate.assert_called_once()
         process.wait.assert_called_once()
         self.assertEqual(receipt['cleanup'], 'complete')
+        self.assertIn('JSONDecodeError', receipt['receipt_error'])
         self.assertTrue(any('down' in call.args[0] for call in engine.sh.call_args_list))
 
 

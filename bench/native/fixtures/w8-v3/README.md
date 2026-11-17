@@ -76,7 +76,10 @@ the run, which remains ineligible for qualification and makes no timing claim.
 
 `--under-load` selects the separate `w8-v4-under-pull` instrumented history.
 It starts an independent project from the original v2 API, PostgreSQL and Redis
-config IDs and checks their DiffIDs, application hashes and workload inputs.
+immutable IDs and checks their DiffIDs, application hashes and workload inputs.
+ctrs resolves the contract's config digest; OrbStack's current containerd image
+store resolves its manifest digest. The selected kind and exact inspection are
+recorded. Legacy tags do not select the background stack.
 The project uses its own network and volume; images are never built or pulled
 for this stack. A separate client runs the pinned W2 worker for 50,000 attempts,
 four workers, write ratio 0.3 and seed 7. Its first successful completion admits
@@ -90,3 +93,7 @@ requests observed completing during a pull; callback time does not establish an
 exact request start. The sampler covers baseline setup, pulls, verification and
 cleanup. Waited-child CPU remains diagnostic and does not cover all client work.
 This fixture is not a qualification or all-client footprint claim.
+Add `--under-load` to the command above to select it. The pinned common images
+must already be installed on both engines; prepare them with the W8 v2 common
+registry pilot before generating the unseen variant. Warmup still depends on
+the legacy API tag, so a fresh-host qualification is not yet supported.

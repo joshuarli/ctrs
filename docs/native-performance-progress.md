@@ -94,9 +94,40 @@ sampler overhead and allocated storage remain outside coverage. Both runs exit
 0, exact app/marker/retained-image checks and clean fixture teardown.
 Layout `.work/native-perf/inputs/w8-portfolio-v3-service-20261116/`, seed
 `ctrs-w8-v3-service-proof-20261116-1`; all 187 harness tests pass.
-Next executable source action: add fixed application load during pulls with
-proven overlap, exact accepted payloads and complete teardown. Keep the pinned
-W2 driver unchanged; use a distinct instrumented W8 fixture version for traces.
+W8 under-pull source e59d6f9 plus parent fixes passes native
+`w8-unique-20261116T172543-a4b5` on both engines. Fixture version
+`w8-v4-under-pull` uses the unchanged pinned W2 worker in a separate instrumented
+client: 50,000 operations (35,159 reads/14,841 writes) each, zero errors, all
+accepted DB payloads exact, every pull interval contains successful completion
+callbacks, all 23 engine+fixture resource phases complete. Full variant transfer,
+markers, foreground application, Marked artifact and retained image checks pass.
+Both legs exit 0 and fixtures clean up. Client sequence numbers reject duplicate
+completion records; truncated journals cannot skip cancellation ownership receipts.
+Source worker `usrw_cb21055c-727d-4113-aa37-a48adb70df80` is terminal succeeded;
+its scoped diff was parent-reviewed. Four local HTTP/fault regressions, 16 variant
+tests and all 191 harness tests pass. Layout
+`.work/native-perf/inputs/w8-portfolio-v4-pinned-20261116/`, seed
+`ctrs-w8-v4-pinned-proof-20261116-1`. Parent/native helper hashes match the recorded
+client/controller receipts. No timing or tail-latency performance claim.
+
+Retain failed `w8-unique-20261116T172040-cd89` (legacy API tag correctly rejected,
+zero pulls) and partial `172130-2195` (ctrs passed, OrbStack rejected config-ID
+lookup). Small metadata probes proved the current stores resolve different
+immutable IDs: config on ctrs, manifest on OrbStack, with identical pinned DiffIDs.
+The background stack now selects those exact IDs and records the kind; identity
+checks were not weakened. These failed/partial runs are not pooled or replaced.
+Native SIGTERM proofs `w8-cancel-20261116T172850-ctrs` and
+`w8-cancel-20261116T172854-orbstack` each preserve child/parent signal 15, report
+complete cleanup, no receipt error and zero remaining project containers. Driver
+`.work/tmp/w8-underpull-cancel.py` enters the real baseline context, signals itself
+after readiness, then verifies the saved project filter before stopping its engine.
+
+Next executable source action: remove the remaining legacy API-tag dependency in
+`prepare_warm_engine`; select the same pinned store-specific image ID used by the
+background stack, verify a clean/common-only root and keep startup outside warm
+cells. Then connect the v3/v4 path to the canonical W8 pair/scorecard route with
+immutable per-pair shared artifacts and explicit engine order. Keep the pinned
+W2 driver unchanged and histories separate.
 Preserve unique per-pair inputs shared by both engines. Keep v2 history separate
 and require a new exclusive paired baseline before scoring v3. An async request
 for a quiet host window is pending; this does not block independent source work.

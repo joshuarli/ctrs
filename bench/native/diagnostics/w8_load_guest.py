@@ -16,15 +16,17 @@ class Recorder:
         self.output = output
         self.directory = directory
         self.lock = threading.Lock()
+        self.sequence = 0
 
     def append(self, latency):
         with self.lock:
             now = time.monotonic()
-            self.output.write(json.dumps({'completion_monotonic': now, 'latency_ms': latency}) + '\n')
-            if not (self.directory / 'readiness.json').exists():
+            self.output.write(json.dumps({'sequence': self.sequence, 'completion_monotonic': now, 'latency_ms': latency}) + '\n')
+            if self.sequence == 0:
                 temporary = self.directory / 'readiness.tmp'
                 temporary.write_text(json.dumps({'completion_monotonic': now}) + '\n')
                 os.replace(temporary, self.directory / 'readiness.json')
+            self.sequence += 1
 
 
 def main():

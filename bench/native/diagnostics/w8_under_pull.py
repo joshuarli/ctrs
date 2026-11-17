@@ -1,6 +1,7 @@
 """Owned fixed-work baseline application during W8 pulls."""
 from contextlib import contextmanager
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -35,8 +36,15 @@ def require_coverage(intervals, completions):
 def verify_payload(rows, client, completions):
     counts = client['counts']
     writes = client['writes']
+    valid_trace = (len(completions) == 50000 and
+        all(row.get('sequence') == index and
+            all(isinstance(row.get(k), (int, float)) and math.isfinite(row[k]) and row[k] >= 0
+                for k in ('completion_monotonic', 'latency_ms'))
+            for index, row in enumerate(completions)) and
+        all(a['completion_monotonic'] <= b['completion_monotonic']
+            for a, b in zip(completions, completions[1:])))
     if (counts['errors'] or client['errors'] or counts['reads'] + counts['writes'] != 50000
-            or len(completions) != 50000 or len(writes) != counts['writes']
+            or not valid_trace or len(writes) != counts['writes']
             or len({item['name'] for item in writes}) != len(writes)
             or not runner.exact_w2_items(rows, writes)):
         raise ValueError('fixed client work or exact persisted payload mismatch')
@@ -67,12 +75,14 @@ def baseline(engine, directory, run, contract, phase):
                 'client': runner.sha256_file(CLIENT), 'controller': runner.sha256_file(Path(__file__)),
                 'contract': runner.sha256_file(runner.FIXTURES / 'w8-v2/portfolio.json'),
                 'compose': runner.sha256_file(runner.COMPOSE_FILE)}
-            refs = {'api': 'np-fixture-api:' + runner.API_TAG, 'postgres': 'postgres:17-alpine', 'redis': 'redis:7-alpine'}
+            identity_kind = {'ctrs': 'config', 'orbstack': 'manifest'}[engine.name]
+            state['baseline_image_id_kind'] = identity_kind
+            refs = {name: contract['images']['np-v2/' + name][identity_kind] for name in ('api', 'postgres', 'redis')}
             images = {}
             for name, ref in refs.items():
                 image = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
                 pin = contract['images']['np-v2/' + name]
-                if image['Id'] != pin['config'] or image['RootFS']['Layers'] != pin['diff_ids'] or image['Architecture'] != 'arm64':
+                if image['Id'] != ref or image['RootFS']['Layers'] != pin['diff_ids'] or image['Architecture'] != 'arm64':
                     raise ValueError('baseline image differs from pin: ' + name)
                 images[name] = image
             state['images'] = images
@@ -148,9 +158,13 @@ def baseline(engine, directory, run, contract, phase):
                     state['cleanup'] = 'complete'
             finally:
                 state.pop('process', None)
-                completion_path = directory / 'completions.jsonl'
-                if completion_path.exists():
-                    completions = [json.loads(line) for line in completion_path.read_text().splitlines()]
-                    state['coverage'] = coverage(intervals, completions)
-                    save(directory / 'under-pull-coverage.json', state['coverage'])
-                save(directory / 'under-pull-ownership.json', state)
+                try:
+                    completion_path = directory / 'completions.jsonl'
+                    if completion_path.exists():
+                        completions = [json.loads(line) for line in completion_path.read_text().splitlines()]
+                        state['coverage'] = coverage(intervals, completions)
+                        save(directory / 'under-pull-coverage.json', state['coverage'])
+                except Exception as exc:
+                    state['receipt_error'] = repr(exc)
+                finally:
+                    save(directory / 'under-pull-ownership.json', state)
