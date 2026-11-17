@@ -39,6 +39,11 @@ class Readiness(unittest.TestCase):
             'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': 'W1-v-test'} for key in gate.DIMENSIONS}
         contract.update({key: {'workload': key, 'dimension': 'application', 'metric': 'test-metric',
             'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': key + '-v-test'} for key in gate.CASES})
+        for dimension in gate.W11_REQUIRED_DIMENSIONS:
+            contract[f'w11-{dimension}'] = {
+                'workload': 'W11', 'dimension': dimension, 'metric': f'w11-{dimension}',
+                'state': 'warm', 'load': 'mixed', 'unit': 'test-unit', 'fixture_version': 'W11-v-test',
+            }
         review = root / 'review.json'
         review.write_text(json.dumps({'kind': 'native-cell-contract-review', 'reviewer': 'test-reviewer',
             'conclusion': 'complete', 'cell_contract_sha256': hashlib.sha256(
@@ -76,6 +81,21 @@ class Readiness(unittest.TestCase):
         self.assertEqual(result['matrix']['cpu_efficiency']['status'], 'unmeasured')
         self.doc['matrix']['cpu_efficiency'] = {'status': 'loss', 'evidence': self.doc['inputs'][0]}
         self.assertEqual(self.check()['matrix']['cpu_efficiency']['status'], 'loss')
+
+    def test_reliability_dimensions_on_other_workloads_cannot_cover_w11(self):
+        contract = self.doc['cell_contract']
+        for cell in contract.values():
+            if cell['workload'] == 'W11' and cell['dimension'] != 'application':
+                cell.update(workload='W1', fixture_version=self.doc['fixtures']['W1']['version'])
+        proof = self.doc['prerequisites']['complete_cell_contract']
+        path = Path(proof['evidence']['path'])
+        review = json.loads(path.read_text())
+        review['cell_contract_sha256'] = hashlib.sha256(
+            json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        path.write_text(json.dumps(review))
+        proof['evidence'] = durable_job.receipt(path)
+        with self.assertRaisesRegex(gate.ReadinessError, 'W11 is missing required dimensions'):
+            self.check()
 
     def test_unfrozen_assets_fail_before_receipt_verification(self):
         self.assets.write_text('[freeze]\nstatus="pilot"\n')
