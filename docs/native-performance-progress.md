@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** profile default W7 multi-stage builds after the accepted memory repair.
+**Current action:** test whether guest compaction improves native balloon reclamation.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -73,26 +73,36 @@ host `.work/tmp/balloon-reserve-target/release/ctrs` is fda6246703f48c42a126fb0b
 Main guest assets were not overwritten. Source integration has identical tested
 files; deployment/release and final fresh-build reproducibility remain separate.
 
-**Exact continuation:** run
-`TMPDIR=$PWD/.work/tmp python3.14 .work/tmp/w7-offline-rust-profile-20261117/launch.py`
-only if its `job` directory does not exist. Otherwise inspect that receipt once
-and never duplicate it. The saved source predeclares three balanced ctrs/OrbStack
-pairs, each with uncached, warm and one-file incremental multi-stage hyperfine
-builds (18 total). Frozen vendored dependencies remove timed Cargo downloads;
-assert compile executes only in uncached mode, exact executable/version/note,
-actual native architecture, default docker driver and owned cleanup. Raw BuildKit
-vertices separate compile, export/load and runnable-image probe boundaries.
-Resource-matched resident control: 17 vCPUs/45,091MiB; candidate fda62467… and
-private 6ae4d3ab… initrd, normal balloon quiet threshold. Deadline 2700s, cleanup
-240s; no competing native work while active. All timing is explicitly ineligible,
-no replacement builds. Inspect host snapshots, every failed cell, actual running
-hashes and frozen receipts before selecting a product boundary. No version change
-is credited to ctrs; BuildKit defaults differ. Keep installed-default acceptance
-separate. Canonical observer confirmation remains deferred: the latest preflight
-reported an unrelated hot Niceforge runner, and the separate OrbStack Linux
-machine remains running. Preserve user work; do not repeat monitoring-only turns.
-After the W7 result, select its demonstrated cost or the next ready resource/
-W8 cell; continue until the campaign gates pass. Keep vendoring scratch at
+The combined accounting repair is pushed as **42b2b7d**, with the identical
+source tested in the private branches above. W7 offline multi-stage profile
+`.work/tmp/w7-offline-rust-profile-20261117/job`, ID
+`f371a2bb92c04d2ea2128b9ad6b14ae3`, is terminal exit 0: all 18 builds/probes,
+correct compile cache states, exact executable/version/note and owned cleanup
+pass. Its shared-host timings remain ineligible and select no avoidable ctrs
+export/load loss. Do not repeat this completed matrix or claim default parity.
+Raw `analysis.json` separates build and verified-run commands; it is not an
+inclusive command-to-run latency metric. See build evidence for limitations.
+
+**Exact continuation:** inspect
+`.work/tmp/balloon-compaction-20261117/job`, durable ID
+`f2313a753f744fca90698cd4ddb646c3`, once for identity/status/deadline. It is
+already launched; never duplicate it. The saved coordinator tests SDK-recommended
+pre-inflation guest compaction versus a privileged no-op in two AB/BA pairs.
+Each scenario writes/fsyncs 2GiB, includes compaction CPU in the idle counter
+window, idles 60s, then reads/hashes all bytes. Actual inflate/deflate/cache,
+native physical/RSS/peak, host pressure/vmmap and next-read costs are retained.
+Both use the complete accounting candidate, stock kernel, 2vCPU/8GiB, resident
+idle=0 and diagnostic quiet=20. Only the owned guest receives the compaction
+write; no workstation setting or product default changes. Deadline1800s,
+cleanup240s, all inputs frozen until terminal; no competing native work.
+Require at least512MiB additional native reclaim in both compact cases, no >3%
+peak increase, pre-read available>=128MiB, exact data, no OOM kills/fallback and
+clean owned teardown before considering any product mechanism. Otherwise reject
+this hypothesis and take the ready pinned-resource/W8 acceptance work; do not
+expand weak kernel/reclaim guesses. All timing remains diagnostic. Latest
+preflight reported unrelated hot Niceforge work; the OrbStack Linux machine
+also remains running. Canonical observer confirmation is deferred, and no user
+jobs may be stopped. Keep vendoring scratch at
 `/private/tmp/ctrs-w6-vendor-20261116` for provenance.
 
 Affinity diagnostics completed;

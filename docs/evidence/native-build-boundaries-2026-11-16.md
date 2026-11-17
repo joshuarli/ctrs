@@ -191,3 +191,43 @@ evicts guest cache before selecting any reclamation change.
 | `plan.json` | baaa4b07c63d6a6d235a8f27baacd32d5167573cd0ccd6eaf06e0072b75186bf |
 | `job/status.json` | 695faf5944e5a46d080cff14cbee55d0cb26c94fe707d1c1c414bfb4c2b3f056 |
 | `analysis.json` | c7f517dd09accc58b80323adc2bfabc4d41f60236aae9c67a8fe631b7665557f |
+
+## Default multi-stage W7 profile, 2026-11-17
+
+`.work/tmp/w7-offline-rust-profile-20261117/job`, ID
+`f371a2bb92c04d2ea2128b9ad6b14ae3`, exits 0 with clean owned teardown.
+All 18 builds and executable/version/note probes pass across three balanced
+engine pairs and uncached, warm and one-file incremental states. Compilation
+executes in every uncached case and is cached in every warm/incremental case.
+All 99 frozen input receipts remain unchanged. The existing multi-stage
+hyperfine fixture gains the same frozen vendored archive used above; Cargo runs
+offline with network disabled. Runtime ships the binary and note on pinned
+Debian, rather than exporting the compiler workspace.
+
+The ctrs side uses tested host fda62467… and actual initrd 6ae4d3ab… with stock
+kernel, 17vCPU/45,091MiB and resident control. Default docker drivers and their
+different BuildKit versions remain disclosed. All timing is ineligible: host
+activity and shared OrbStack CPU scopes prevent a comparative verdict. No
+avoidable ctrs export/load loss was selected from this screen.
+
+For trace inspection only, ctrs build-command medians (ranges), three per state,
+are 15.378s (15.173–15.663) uncached, 0.376s (0.319–0.377) warm and 0.461s
+(0.345–0.493) incremental. Its separately bracketed verified-run command spans
+0.029–0.044s. The first incremental export envelope is 0.061s; the compile and
+binary-copy vertices are cached, while the changed note layer executes. These
+numbers establish neither qualified speed nor parity. Build and run commands
+are separated by diagnostic inspection; their published medians must not be
+summed into a command-to-run metric. Raw records retain both boundaries and
+all OrbStack samples, including contaminated large CPU totals.
+
+The next experiment returns to demonstrated native memory retention: the VZ
+SDK recommends guest compaction before ballooning. A bounded AB/BA probe tests
+that recommendation in the owned guest, with actual balloon/cache/native memory,
+peak/idle CPU and exact next-read checks. It changes no product default and
+cannot establish pressure-dependent reclaim without further evidence.
+
+| Artifact under the W7 profile root | SHA-256 |
+| --- | --- |
+| `plan.json` | b390cf1617f837fbdb70529aae68ea723d716567cd654e66f234fb75ba04fb7f |
+| `job/status.json` | b77ac41fa7f80961bea04dea1b85407e8139fce06936aa9c4d4e8032741835cc |
+| `analysis.json` | cbabe48d680d4ea75820ca877a167efb95676a5042458eeae260a6a90dd7a6b7 |
