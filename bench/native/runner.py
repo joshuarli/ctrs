@@ -209,11 +209,8 @@ W8_IMAGES = [
      "expect": "PostgreSQL"},
 ]
 
-# Small ownership map for the native component gate. Tests remain natively
-# discovered by unittest from these exact modules; shared harness behavior is
-# covered by test_safety in every component selection.
 CHECK_COMPONENTS = {
-    "w2": ("test_w2", "test_mixed_cycle", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
