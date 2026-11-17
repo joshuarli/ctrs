@@ -4,8 +4,11 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** attribute Python attach/detach and futex boundaries with
-a private diagnostic kernel and exact-count probe admission.
+**Current action:** screen gzip levels4 and5 on the existing offline W6 build,
+with unchanged3% layer-size and5% whole-build/CPU guards. Levels1 and3 remain
+rejected. Full preemption and earlier balloon inflation are also rejected.
+Native job8a43dade68654a0fa700ffad3afd8f5f is active under
+`.work/tmp/w6-compression-mid-20261117/job`. Full qualification remains unproved.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -166,31 +169,33 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** two scoped source lanes are active; no native benchmark
-is running. Private kernel worker `usrw_f125c2f3-3030-4199-b836-739a7f4f71e2`,
-`.work/wt/np-uprobes`, branch `experiment/np-uprobes`, base2356cf0, owns only
-`guest/kernel/ctrs.config`. Its named <=6CPU/6GiB build adds UPROBE_EVENTS for
-attribution, with matching6.18.58 patches/toolchain and isolated labelled outputs
-under its `.work/kernel-uprobes`. Initial build stops before compilation on compiler-alias metadata; original
-compiler binary SHA matches. Same-session v2 uses original alias and retains
-strict generated-config checks; watch session1531. Never promote this diagnostic
-capability as a performance win or modify main guest assets. Review config/build/
-compiler receipts and actual capability before native use.
+**Exact continuation:** consume job8a43dade68654a0fa700ffad3afd8f5f, then run
+`.work/tmp/w6-compression-mid-20261117/analyze.py` only on its terminal result.
+Recheck frozen inputs before editing any Python module. This screen derives from
+`.work/tmp/w6-compression-screen-v2-20261116/`, using the accepted fda62467 host
+and stock35087713/6ae4d3ab assets. Rotate default/level4/level5 across six
+rounds with fresh per-round contexts. Keep exact132-test/executable checks,
+new-layer and total-size budgets, CPU/physical counters, and owned teardown.
+Predeclare the unchanged5% whole-build/CPU and3% layer-byte guards. No force
+compression, shared-base recompression or product default change before proof.
 
-Helper worker `usrw_3f5602d1-675a-4a92-b1f5-0da51457bf1d` is in
-`.work/wt/np-w2-uprobes`, branch `diagnostic/w2-uprobes`, same base. It owns only
-`diagnostics/w2_uprobes_guest.py`, `test_w2_uprobes.py`, `diagnostics/w2-uprobes.md`
-under bench/native. It implements pinned SaveThread/RestoreThread entry+return
-and futex correlation in an owned trace instance, complete loss/profile records,
-strict definition/cleanup guards and focused source tests; no native runs.
-Initial31783d7 full diff/scope reviewed. One correction is active: strict PID
-filter readback, stop-time clock/buffer checks and bounded library reads. Consume
-watch session15062, review only correction delta and run the exact named tests.
-See [Python attribution admission](evidence/native-python-uprobes-2026-11-17.md).
-Parent prepared C barrier-controlled exact-call probe at
-`.work/tmp/w2-uprobe-known-count-20261117/probe.c`: compile using pinned owned
-builder after kernel lane completes, admit exactN entry/return pairs on both
-engines before API attribution. Keep CPU execution and elapsed waits separate.
+Python capability admission and API capture are complete. The integrated
+uprobes gate passes43 tests with zero skips in0.375s. See
+[Python attribution evidence](evidence/native-python-uprobes-2026-11-17.md) for
+OrbStack trace-PID discovery, all preserved failures and the API counts.
+Futex count correlation is not CPU attribution. Before any future fault run,
+fix private coordinator cleanup ordering in a new version, preserving old inputs.
+
+[Full-preemption evidence](evidence/native-preemption-2026-11-17.md) rejects
+631d704 after six exact pairs/60k operations. No pair meets10% API CPU reduction.
+Its kernel stays private. [Resource evidence](evidence/native-resource-cycles-2026-11-17.md)
+rejects quiet10 after five cycles per condition/14k operations: inflation is
+active, but both conditions fail the unchanged16MiB native return budget.
+All100 preemption and93 resource receipts pass before further source edits.
+Default quiet120/sleep60 and all product policies remain unchanged.
+The timer/uprobe checkouts are retired; branches and private/live assets remain.
+All workers are terminal. No W11 soak is running. The compression job owns
+the native measurement lane.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
 Six admission legs pass; larger matrix stops at round1 OrbStack2,000/s with5270
@@ -669,8 +674,9 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. W2 larger application profile and balanced observer controls above.
-   Representative fixture upgrades no longer block this investigation.
+1. Complete the bounded default/level4/level5 offline W6 compression screen.
+   Keep W2 CPU attribution and observer controls open after the completed count
+   capture. Do not repeat rejected scheduling, pacing or quiet-policy matrices.
 2. W11 duration/cleanup integration is accepted. Freeze actual qualification
    readiness and resource-growth evidence with the final matrix/candidate; no
    12h launch yet. Do not repeat unchanged short cycles.
@@ -707,7 +713,8 @@ Other integrated W4/W5/resource/W8/source-fix worktrees retain provenance; retir
 only after preserving useful artifacts and proving integration. The two completed
 mount-guard trees were already retired. No measured Mac job is active.
 
-Regression: `TMPDIR=$PWD/.work/tmp python3.14 -m unittest discover -s bench/native -p 'test_*.py'`.
+Affected gate: `PYTHONDONTWRITEBYTECODE=1 python3.14 bench/native/runner.py check uprobes`.
+Comprehensive discovery and full qualification remain manual-only.
 Before scored work, remove only verified campaign-owned diagnostics and certify
 exclusivity. Gate exit 0 is insufficient: saved snapshots show hot Niceforge/fz
 jobs despite aggregate-load success. Do not stop unrelated work. Installed-default,

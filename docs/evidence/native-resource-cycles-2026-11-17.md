@@ -149,3 +149,29 @@ SHA-256: `55266dd1fb69dc314f70c81e2ef61b2b49d7903b20f1df0154a956dd4dd29ca7`.
 After compaction, cache release and feature admission selected no resident
 reclaim remedy, move to the real W9 parallel-build boundary. Keep the failed
 resident growth and installed-default lifecycle accounting cells open.
+
+
+## Earlier balloon inflation rejected
+
+Job11622c7c9a6c4e92902fb3f95040e890 under
+`.work/tmp/resource-quiet-policy-20261117/` exits0 with clean teardown.
+All93 receipts recheck after completion. It compares quiet120s then10s, with
+2CPUs,8192MiB and the accepted fda62467 host, stock35087713 kernel and6ae4d3ab
+initrd. A constant sleeping probe keeps the VM resident. This is a diagnostic,
+not installed-default sleep acceptance. Each condition has a fixed45s settle,
+30s initial idle and five cycles of1000 operations,30s reclaim and200 next-use
+operations. All14,000 operations, resource counters and ownership checks pass.
+No OOM or fallback occurs. Initial warmup precedes probe creation in both legs.
+
+| Quiet | Initial footprint, B | Post-warmup growth, B | Return difference, B | Active-disk growth, B |
+| --- | ---: | ---: | ---: | ---: |
+|120s|685,377,528|10,321,992|59,310,200|294,912|
+|10s|745,196,160|7,782,448|78,971,144|16,384|
+
+Both pass the16MiB post-warmup growth budget and fail the unchanged16MiB return
+budget. Quiet10 actually inflates7,667,712KiB while retaining positive guest
+headroom, but native footprint is higher. Reject it as a footprint remedy.
+Product quiet120 and sleep60 remain unchanged. Do not tune the warmup or weaken
+the return budget to erase the first-cycle cost. Its cause remains unproved.
+Next-use times span3.042–3.083s and remain unqualified on the shared host.
+Exclusive APFS allocation and build-cache size remain unknown.
