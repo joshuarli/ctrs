@@ -25,6 +25,7 @@ from w2_scheduler_app import parse_api_cpus
 
 PIN = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
 TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
+GUEST_CLIENT_SUFFIX = '-guest-client-v2'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
 BOOTSTRAP = Path(__file__).with_name('w2_scheduler_app.py')
 
@@ -95,9 +96,15 @@ def read_load(engine, location, client, directory, label, count):
     out = directory / (label + '.json')
     if location == 'guest':
         for suffix in ('', '.writes.jsonl', '.errors.jsonl'):
-            engine.sh(['cp', client + ':/work/' + label + '.json' + suffix, str(out) + suffix])
+            cp = engine.sh(['exec', client, 'python', '-c',
+                "import pathlib,sys;sys.stdout.write(pathlib.Path(sys.argv[1]).read_bytes().decode('utf-8'))",
+                '/work/' + label + '.json' + suffix])
+            Path(str(out) + suffix).write_bytes(cp.stdout.encode('utf-8'))
         for stream in ('stdout', 'stderr'):
-            engine.sh(['cp', client + ':/work/' + label + '.' + stream, str(directory / (label + '.' + stream))])
+            cp = engine.sh(['exec', client, 'python', '-c',
+                "import pathlib,sys;sys.stdout.write(pathlib.Path(sys.argv[1]).read_bytes().decode('utf-8'))",
+                '/work/' + label + '.' + stream])
+            (directory / (label + '.' + stream)).write_bytes(cp.stdout.encode('utf-8'))
     summary = json.loads(out.read_text())
     if summary['errors'] or summary['requests_ok'] != count:
         raise RuntimeError('fixed application work failed: ' + label)
@@ -131,7 +138,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     if api_cpus is not None:
         version += '-api-affinity-v1'
     if client_location == 'guest':
-        version += '-guest-client-v1'
+        version += GUEST_CLIENT_SUFFIX
     result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
@@ -169,14 +176,17 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             (directory / 'guest-console.log').write_bytes((engine.dir / 'data/vm-console.log').read_bytes())
         engine.sh(['exec', '--privileged', api, 'mount', '-t', 'tracefs', 'tracefs', '/sys/kernel/tracing'])
         if client_location == 'guest':
-            engine.sh(['create', '--name', client, '--label', 'dev.ctrs.campaign.run=' + run,
+            engine.sh(['create', '--pull', 'never', '--name', client, '--label', 'dev.ctrs.campaign.run=' + run,
                 '--network', project + '_appnet', '--tmpfs', '/work:size=64m', '--entrypoint', 'python',
                 refs['api'], '-c', 'import time; time.sleep(86400)'])
             engine.sh(['start', client])
             info = json.loads(engine.sh(['inspect', client]).stdout)[0]
             if info['Config']['Image'] != refs['api'] or info['Id'] == api:
                 raise ValueError('guest client identity differs from pinned peer')
-            engine.sh(['cp', str(root.parent / 'source' / runner.LOAD_PY.name), client + ':/work/load.py'])
+            save(directory / 'guest-client.json', info)
+            engine.sh(['exec', client, 'python', '-c',
+                "import pathlib,sys;pathlib.Path('/work/load.py').write_bytes(sys.argv[1].encode('utf-8'))",
+                (root.parent / 'source' / runner.LOAD_PY.name).read_bytes().decode('utf-8')])
             digest = engine.sh(['exec', client, 'python', '-c',
                 "import hashlib;print(hashlib.sha256(open('/work/load.py','rb').read()).hexdigest())"]).stdout.strip()
             if digest != PIN['w2_load_sha256']:
@@ -338,8 +348,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if result['cleanup_errors']:
             result['correctness'] = False
         save(directory / 'result.json', result)
-        if result['cleanup_errors']:
-            raise RuntimeError('owned diagnostic cleanup failed: ' + repr(result['cleanup_errors']))
+    if result['cleanup_errors']:
+        raise RuntimeError('owned diagnostic cleanup failed: ' + repr(result['cleanup_errors']))
     return result
 
 
@@ -377,9 +387,9 @@ def main():
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
-    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
+    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    guest_suffix = '-guest-client-v1' if args.client_location == 'guest' else ''
+    guest_suffix = GUEST_CLIENT_SUFFIX if args.client_location == 'guest' else ''
     save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix,
         'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
         'profile_identity': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix + ('-' + ','.join(map(str, args.api_cpus)) if args.api_cpus is not None else ''),

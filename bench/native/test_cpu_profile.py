@@ -229,11 +229,11 @@ class ClientLocation(unittest.TestCase):
                     return subprocess.CompletedProcess(args, 0, json.dumps({'1': {'comm': 'nptag', 'status': 'Cpus_allowed_list:\t0', 'stat': 'x'}}), '')
                 if args[0] == 'exec' and args[1].endswith('-client') and '-c' in args and 'hashlib' in args[4]:
                     return subprocess.CompletedProcess(args, 0, syscall_pilot.PIN['w2_load_sha256'], '')
+                if args[0] == 'exec' and args[1].endswith('-client') and '-c' in args and 'read_bytes' in args[4]:
+                    content = json.dumps({'errors': 0, 'requests_ok': 1000 if 'warmup' in args[-1] else 10, 'reads_ok': 7, 'writes_ok': 3}) if args[-1].endswith('.json') else ''
+                    return subprocess.CompletedProcess(args, 0, content, '')
                 if args[:2] == ['exec', 'db-id']:
                     return subprocess.CompletedProcess(args, 0, '[]', '')
-                if args[0] == 'cp' and ':/work/' in args[1]:
-                    target = Path(args[2])
-                    target.write_text(json.dumps({'errors': 0, 'requests_ok': 1000 if 'warmup' in str(target) else 10, 'reads_ok': 7, 'writes_ok': 3}) if target.suffix == '.json' else '')
                 return subprocess.CompletedProcess(args, 0, '', '')
         class Phase:
             stdin = mock.Mock(closed=False)
@@ -263,7 +263,7 @@ class ClientLocation(unittest.TestCase):
                 result = syscall_pilot.trial(Engine(), {'api': 'api-ref', 'postgres': 'db-ref', 'redis': 'cache-ref'}, Path('/archive'), engine_root, 'off', 10, 'owned-run', client_location='guest')
                 cleanup_mock.side_effect = RuntimeError('owned cleanup failed')
                 with mock.patch.object(syscall_pilot, 'load', side_effect=RuntimeError('command failed')):
-                    with self.assertRaisesRegex(RuntimeError, 'owned diagnostic cleanup failed'):
+                    with self.assertRaisesRegex(RuntimeError, 'command failed'):
                         syscall_pilot.trial(Engine(), {'api': 'api-ref', 'postgres': 'db-ref', 'redis': 'cache-ref'}, Path('/archive'), engine_root, 'failed', 10, 'owned-run', client_location='guest')
                 failed = json.loads((engine_root / 'failed' / 'result.json').read_text())
                 self.assertIn('command failed', failed['errors'][0])
@@ -277,7 +277,7 @@ class ClientLocation(unittest.TestCase):
             self.assertIn('dev.ctrs.campaign.run=owned-run', created)
             self.assertIn('api-ref', created)
             self.assertIn('--network', created)
-            copy = next(i for i, e in enumerate(events) if e[0] == 'cp' and ':/work/work.json' in e[1])
+            copy = next(i for i, e in enumerate(events) if e[0] == 'exec' and e[-1] == '/work/work.json' and 'read_bytes' in e[4])
             self.assertGreater(copy, max(i for i, e in enumerate(events) if e[0] in ('boundary', 'phase-wait')))
             self.assertTrue(any(e[0] == 'cleanup-client' for e in events))
             self.assertEqual(result['effective_client_location'], 'guest')

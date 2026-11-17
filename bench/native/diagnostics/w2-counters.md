@@ -185,8 +185,14 @@ in a distinct container from the pinned API image, using `http://api:8000` on
 the Compose bridge. The default remains `host`, through the published port.
 Guest results have a distinct fixture/profile identity and run prefix; do not
 pool them with host-client history. The plan records the client image and source
-hash, and each trial records requested and effective location. The copied load
-source and output live in a bounded guest tmpfs; output is copied after the
+hash, and each trial records requested and effective location. The load
+source and output live in a bounded guest tmpfs; output is transferred after the
 measured phase and host CPU boundaries. Application CPU remains API-thread CPU;
 aggregate engine CPU includes the guest client. Native execution and comparison
 are required before drawing any performance conclusion.
+
+Guest-client v2 uses Python exec streams for file transfer on both engines.
+Native v1 proof `w2-guest-client-cpu-20261116T195713-cdfc` passed ctrs but
+OrbStack archive copy reported success without populating the peer's tmpfs.
+The source-hash check rejected it before measured work. Replacing exec transfer
+requires an equivalent tmpfs copy proof on both engines and a new fixture version.
