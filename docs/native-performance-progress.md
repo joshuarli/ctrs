@@ -26,11 +26,14 @@ observer overhead is unresolved. Main's W2 component suite passes 108
 tests with zero skips. The 49 Hz comparison completed all 40 exact
 trials. In all ten blocks an unrelated VM was active and the observer
 intervals exceeded the 5% acceptance band. W8 retained pin checks are
-integrated at `4c07c4e`. The parked W11 gate at `d82e3db` now requires
-complete API, queue, artifact and build counts for every cycle.
+integrated at `4c07c4e`. The parked W11 gate at `f41ba83` now requires
+seven concrete W11 cells and admits frozen legs through the finite
+supervisor. Complete mixed-work counts remain mandatory in each cycle.
 The 19 Hz comparison completed all 12 exact trials and captured all API
 threads. Its lower rate did not reduce observed API CPU or wall in the
-four matched rate comparisons. Both observer validations remain open.
+four matched rate comparisons. `4bf9107` prepares a separate 49 Hz
+leaf-only observer. The diagnostic passed offline checks and awaits
+native sample and overhead validation.
 No campaign-owned measured job is active.
 
 ## Accepted and verified
@@ -67,20 +70,17 @@ snapshots before the next scored run. The previous ten-block W2 observer
 run was shared with a Niceforge VM despite successful readiness exits.
 The 19 Hz comparison is complete and the lower-rate code stays parked.
 
-In a suitable host window, test the next distinct W2 instrumentation
-hypothesis in the smallest practical control. Collect 49 Hz leaf PCs
-without DWARF stacks and bind the same 50,000 exact C8 operations, seed,
-matched capacity and API task counters to off/on cells. Require every
-API thread, valid native samples and zero loss. Keep leaf-only identity
-separate from the existing call-stack record and require fresh paired
-observer acceptance before using any resulting profile for product
-selection. If the Mac stays shared, continue the W8 retained/derived
-content scopes or the W11 frozen cell plan without scoring timing.
-For the next offline W11 slice, draft the `w11-v4-post-cleanup-resources`
-cells listed in the [mixed retention evidence](evidence/native-mixed-retention-2026-11-17.md#w11-cell-plan)
-as part of the full qualification matrix. Use the pushed parked gate as
-the starting point. Keep `assets.lock` in pilot status until the complete
-contract and its evidence are ready for review.
+In a suitable host window, use the [leaf-only command and paired plan](evidence/native-w2-equal-work-2026-11-17.md#leaf-only-observer-preparation)
+from `experiment/w2-leaf-49hz` at `4bf9107`. First validate the guest
+capture in one matched block using 50,000 exact C8 operations per cell.
+Require every API thread, valid native samples and zero loss. Collect a
+fresh paired overhead batch before using the profile for product selection.
+
+If the Mac stays shared, continue the W8 retained/derived content scopes or
+extend the parked W11 contract with the remaining W1–W10 cells. The
+[W11 cell and launch evidence](evidence/native-mixed-retention-2026-11-17.md#finite-frozen-launcher)
+records the executable W11 subset and prerequisites. Keep `assets.lock`
+in pilot status until the full contract and its evidence are ready for review.
 
 The reduced observer proof is complete. Source `7184d42` remains on
 `experiment/w2-wake-entry-only`. Use the evidence record for its verified
@@ -161,10 +161,10 @@ next-action paragraphs from that historical revision.
    observation per cycle. The archived
    [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
    passed on both engines, with 181 frozen receipts unchanged. Complete
-   the canonical cell contract and frozen readiness. Wire the parked
-   qualification path through the finite supervisor in `mixed_job.py`,
-   which still refuses qualification. Launch the two 12-hour legs only
-   after their admission requirements are satisfied.
+   the canonical cell contract and frozen readiness. The parked
+   `mixed_job.py` uses the finite supervisor for admitted qualification
+   legs. Launch the two 12-hour legs after their admission requirements
+   are satisfied.
 3. W8: retained-image pin checks are integrated and pass 68 component
    tests. The eight archived native inspections agree with the pins.
    Complete exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,

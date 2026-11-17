@@ -171,8 +171,10 @@ test_w4_lifecycle test_ci_jobs`. All 43 tests passed without starting an engine.
 ## W11 cell plan
 
 Use `w11-v4-post-cleanup-resources` with a warm persistent stack, a four-worker
-queue and build concurrency four. Plan the following cells for each engine.
-The admissions review must still account for the rest of the W1–W11 matrix.
+queue and build concurrency four. `bench/native/w11-cells.json` on
+`campaign/w11-bind-completed-cycles` defines the seven cells below in the
+readiness validator's format. The admissions review must still account
+for the rest of the W1–W11 matrix.
 
 | Dimension | Metric and required evidence |
 | --- | --- |
@@ -181,3 +183,39 @@ The admissions review must still account for the rest of the W1–W11 matrix.
 | Durability | Zero lost acknowledged durable writes under the comparable failure model declared at freeze. The short retention proof leaves this cell unmeasured. |
 | Resource growth | Separate post-cleanup cells for physical footprint, file descriptors and active backing-file allocation. Use one baseline cycle and at least five subsequent observations of at least 30 seconds each. Their respective growth and return budgets are 16 MiB, 16 descriptors and 16 MiB. OrbStack allocation needs a stable backing-file scope verified against owned open descriptors. |
 | Reliability | At least 12 hours of mixed-cycle exposure per engine with zero unexplained deaths or unexpected errors, exact durable data and passing resource-growth cells. |
+
+## Finite frozen launcher
+
+Parked revision `f41ba83` checks the seven W11 cells before admission and
+requires the matrix to name each one. The growth cells have distinct identities
+for footprint, descriptor count and allocated bytes. The launcher and child
+validate the same declared artifacts, pinned tools and workload inputs. The
+launcher passes the readiness receipt to the finite supervisor, which checks it
+before starting the child. The child rechecks readiness after the work.
+
+From the parked checkout, run the focused offline checks:
+
+```sh
+PYTHONPATH=bench/native python3.14 -m unittest \
+  test_mixed_job test_qualification test_mixed_cycle test_mixed_resources test_durable_job
+```
+
+All 45 tests passed. They exercise the supervisor handoff and rejection before
+launch when readiness fails. A native 12-hour leg still needs frozen assets,
+the full reviewed matrix, comparable durability evidence and an admissible
+host window. For OrbStack, identify and verify each owned backing file before
+admission. The launcher takes one engine per invocation and adds separate drain
+and cleanup deadlines. Example for the eventual ctrs leg, with 30 minutes of
+setup allowance in the work cutoff:
+
+```sh
+python3.14 bench/native/mixed_job.py --qualification --readiness "$READINESS" \
+  --job "$JOB" --duration 45000 --engine ctrs --ctrs-binary "$CTRS_BINARY" \
+  --portfolio-layout "$PORTFOLIO_LAYOUT" --worker-layout "$WORKER_LAYOUT" \
+  --compose-plugin "$COMPOSE_PLUGIN"
+```
+
+Use the configured `CTRS_GUEST_DIR` and keep the job directory short enough for
+its private Unix socket. For OrbStack, choose `--engine orbstack` and repeat
+`--orbstack-storage-file` for the covered backing files. Admit each leg with
+its own fresh host-conditions review and a new job directory.

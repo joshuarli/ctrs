@@ -447,6 +447,34 @@ requirements match the primary profiler comparison.
 Terminal status SHA-256
 `84ea6f0fb70210ab7b11505a853233530c874a4155c4c700d7b4e1c07b7edd8c`.
 
+## Leaf-only observer preparation
+
+`experiment/w2-leaf-49hz` at `4bf9107` keeps the 49 Hz nominal CPU-clock
+period and omits DWARF recording. The hypothesis is that avoiding stack
+copies and stack records reduces the API CPU and wall-time cost of the
+observer while preserving per-thread leaf attribution. The mode has its
+own result identity and requires every API thread to have samples, a
+matching raw event count, and zero loss or throttle records. The W2
+component check passed 111 offline tests with zero skips. Guest capture
+and observer overhead remain unmeasured.
+
+After verifying the pinned inputs and matched guest capacity, use this
+single-block command from the leaf checkout to validate guest capture:
+
+```sh
+python3.14 bench/native/diagnostics/syscall_pilot.py \
+  --tools-archive "$TOOLS_ARCHIVE" --image-refs "$IMAGE_REFS" \
+  --ctrs-binary "$CTRS_BINARY" --profile-kind cpu-leaf \
+  --engines ctrs,orbstack --mode-order off,on \
+  --operations 50000 --concurrency 8 --seed 7
+```
+
+For overhead acceptance, use the ten-block recipe above with
+`profile_kind='cpu-leaf'` and distinct output directories. Compare on/off
+within each engine with matched seeds, exact persisted writes, guest
+capacity checks, and actual host snapshots. Apply the same paired CPU and
+wall-time budgets before using the leaf profiles for product selection.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
