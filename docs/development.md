@@ -90,6 +90,39 @@ buildx ─────┘    Docker Engine API          owns the VM             
 
 ## Verification
 
+For native performance iteration, use the explicit offline component checks
+before broad suites:
+
+```sh
+python3.14 bench/native/runner.py check w2
+python3.14 bench/native/runner.py check w8
+python3.14 bench/native/runner.py check resources
+python3.14 -m unittest discover -s bench/native -p test_checks.py -v
+```
+
+Choose only the component whose contracts changed, and run changed test modules
+directly with native `unittest`. `runner.py check` rejects missing, unknown, or
+`full` components. Each selection includes its component modules and the shared
+`test_safety` boundary, requires a nonempty run with zero skips, and fails on
+imports/discovery errors, test failures, or a 60-second timeout (maximum 300).
+The gate does no build or engine setup. Full discovery previously took 13.477
+seconds for 201 tests. The first W2 selection ran 32 tests in 1.630 seconds;
+W8/resources costs and timeout adequacy remain unmeasured.
+
+Verification ceilings: **Edit** is a changed module plus `test_checks.py`;
+**Change** is one explicit component check plus changed tests (60 seconds,
+maximum 300); **Scenario** requires a named benchmark workload and separate
+input/engine/resource authorization; **Full** requires explicit authorization
+for the particular full workload. Full Python discovery, `cargo test
+--workspace`, `CARGO_ENCODED_RUSTFLAGS="" cargo xtask all`,
+`conformance/run.sh`, and the `tests/arm64-build.sh` qualification matrix stay
+manual-only. W11 means the full 12-hour qualification per named engine after
+candidate freeze, with an exact command, immutable inputs and binary receipts,
+run ID, and fixed deadline authorized through
+[`bench/native/diagnostics/durable-job.md`](../bench/native/diagnostics/durable-job.md).
+Short cycles and check selections do not authorize or qualify W11. These full
+workloads are not prerequisites or fallbacks for `runner.py check`.
+
 `conformance/smoke.sh` boots the VM with scratch roots and round-trips a
 container. `tests/e2e.sh` runs the full compatibility suite against a
 running engine (see its header). `cargo test --workspace` runs the unit
