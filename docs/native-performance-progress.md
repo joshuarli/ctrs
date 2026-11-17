@@ -4,11 +4,12 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** evaluate the guest gzip decoder while preserving format
-and extraction limits. Native jobf6f723a3470549188d05c302f7c41883 is active under
-`.work/tmp/gzip-decoder-pilot-20261117/job`. Only the initrd decoder changes.
-The global zstd default is rejected and remains unmerged. Main defaults remain
-unchanged. All qualified performance and reliability gates remain open.
+**Current action:** verify the integrated readiness slice through the classic
+builder caller with a bounded second-language proof.
+The [readiness evidence](evidence/native-builder-readiness-2026-11-17.md) records
+14 integrated component tests, seven native lifecycle cases and156 correct
+uninstrumented build/run jobs. The diagnostic screen passes. No native job is
+active. Qualified timing and all campaign-wide gates remain open.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -169,35 +170,33 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** consume jobf6f723a3470549188d05c302f7c41883, verify all
-frozen inputs, and analyze the fixed six alternating pairs without replacements.
-It imports one frozen real132-test Rust build archive into12 new roots/VMs,
-warms only the common base, then measures first use through exact c63f2e92
-executable/version checks. Use actual native CPU, sampled physical peak and
-owned process closure. Require>=10% median paired engine CPU and>=5% first-use
-improvement, every paired peak<=1.03, unchanged image bytes and all data checks.
-Busy-host timing remains unqualified. No builds or other native work until exit.
+**Exact continuation:** build/sign the named main host component and run a
+bounded classic-API C
+build/probe. Do not run full suites or qualification implicitly. Source matches
+private c484fa80011c1c0a81e20d4ece68536bfd870ac0 in `.work/wt/np-ready-cache`.
+Candidate db20b210… is6,615,920B, within3% of baseline. It retains readiness only
+for the verified live ID/PID/start/pause generation and rechecks idle decisions
+under the ensure boundary. The parent14-test selector passes on main.
 
-Private manifest-only candidate d0b2a72d136ab1128b5816aa46b242301f1b1db1 is on
-experiment/np-gzip-backend in `.work/wt/np-gzip-backend`. Baseline named guest build
-reproduces accepted6ae4d3ab exactly,4,349,700B. Candidate zlib-rs initrd is
-271c01e81c2ab8a02cc386d3e06fdbcb0019202798cb655db4afa5968236801e,
-4,341,244B (8,456B smaller). Cargo.lock unchanged. Feature graph confirms miniz
-removed from the guest and existing locked zlib-rs0.6.8 selected. Source/SBOM
-already includes its Zlib license. Same compiler version and guest sources.
-Assets under `.work/tmp/gzip-backend-assets/{baseline,zlib}` point at preserved
-copies in the private tree. Do not rebuild or overwrite them during the job.
-Source image prep038763a4279a4bc592e2e27a9bc62137 exits0/clean,132 tests and exact
-artifact pass, all90 receipts recheck. Archive/result under
-`.work/tmp/gzip-decoder-image-prep-20261117/`. Pilot creates short owned roots
-`.work/tmp/gzd-<pair>-<condition>`, retains their contents, and cleans containers
-before stopping each daemon. No global prune or user state modification.
+Native lifecycle012ade9c… passes cold/warm/pause/external-resume/restart cases
+using a private two-log audit binary. Uninstrumented comparison2884e235… passes
+all declared CPU, journey, footprint, artifact and cache guards across six pairs
+atC1/4/8. All97 receipts recheck. Both jobs are terminal and clean. All workers
+are terminal. No W11 soak is running. Perf gate deferred: host busy.
+Read-only reviewer b4ec14c1 first identifies a pause/resume gap, then clears the
+parent epoch correction after source review. Its checkout remains unchanged.
 
-After native lead, run only affected Linux guest layer/decoder contract checks
-and independent source review before integration, plus representative W8 proof.
-If the source or native guards fail, discard the manifest change. Keep the
-rejected output-codec defaultbd35436 unmerged. See
-[build evidence](evidence/native-build-boundaries-2026-11-16.md).
+The single-build profile misses10% and remains a non-advancing observation.
+The distinct parallel profilev2 clears10% atC4/C8 after78 correct builds. Its
+first version's cache-oracle failure remains separate. Do not pool these cases
+or promote either diagnostic binary. Raw paths and complete findings are in the
+linked readiness evidence. Source profiler `.work/wt/np-builder-readiness` and
+audit `.work/wt/np-ready-audit` stay private.
+
+Guest decoder d0b2a72 is REJECTED by six native pairs: CPU ratio0.9446 misses0.90.
+Its assets remain private. Global zstd defaultbd35436 remains REJECTED by the
+2GiB expansion admission. Main gzip format, backend and extraction limits stay
+unchanged. Both rejected source trees and all failed evidence remain preserved.
 
 Python capability admission and API capture are complete. The integrated
 uprobes gate passes43 tests with zero skips in0.375s. See
@@ -214,8 +213,7 @@ active, but both conditions fail the unchanged16MiB native return budget.
 All100 preemption and93 resource receipts pass before further source edits.
 Default quiet120/sleep60 and all product policies remain unchanged.
 The timer/uprobe checkouts are retired; branches and private/live assets remain.
-All workers are terminal. No W11 soak is running. The gzip decoder pilot owns
-the native lane.
+All workers are terminal. No W11 soak or native measurement job is running.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
 Six admission legs pass; larger matrix stops at round1 OrbStack2,000/s with5270
@@ -694,7 +692,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. Profile native gzip deployment/first-use and evaluate the guest decoder backend.
+1. Complete the bounded affected classic-builder caller proof for readiness reuse.
    Keep W2 CPU attribution and observer controls open after the completed count
    capture. Do not repeat rejected scheduling, pacing or quiet-policy matrices.
 2. W11 duration/cleanup integration is accepted. Freeze actual qualification

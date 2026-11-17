@@ -337,3 +337,17 @@ not built or tested after rejection. Main compression defaults and guest assets
 remain unchanged. Do not promote or restart its performance matrix.
 The next boundary is guest gzip decoding, retaining the gzip format and all
 expansion limits, rather than changing the default output codec again.
+
+
+## Guest gzip backend screen
+
+Private d0b2a72 selects existing locked zlib-rs0.6.8 for the guest only. The
+baseline named guest build exactly reproduces6ae4d3ab. Candidate271c01e8… is
+4,341,244B,8,456B smaller. Cargo.lock and layer formats remain unchanged.
+Native jobf6f723a3470549188d05c302f7c41883 exits0/clean: six balanced pairs in
+fresh owned VM/store roots load one frozen real Rust image and verify its exact
+executable/version. All95 receipts recheck. Median paired CPU ratio0.9446 misses
+the declared0.90 threshold. The journey ratio is0.9297, with two slower candidate
+legs, and all paired footprint checks pass. Reject the backend change for this
+screen. It remains private and inactive on main. No SBOM change is required.
+Raw root: `.work/tmp/gzip-decoder-pilot-20261117/`.
