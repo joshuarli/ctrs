@@ -145,15 +145,16 @@ note = "jobs.json owns fixed work and concurrency. --image-ref must name the pin
 [[case]]
 id = "W10"
 family = "failure-recovery"
-title = "kill API container mid-load, restart after 3 s, verify recovery + no lost committed writes"
-fixture = "fixtures/w1 + fixtures/w2/load.py"
+title = "interrupt the owned API or database during mixed load, restart, and verify exact persisted writes"
+fixture = "fixtures/w1 + recovery_client.py"
+fixture_version = "w10-v3-exact-recovery"
 status = "implemented"
-metrics = ["recovery_s", "load_errors", "load_rps", "load_p95_ms", "load_p99_ms", "items_got"]
+metrics = ["recovery_s", "recovered_p99_ms", "recovered_requests_ok", "retries_until_recovery",
+           "expected_outage_errors", "unexpected_errors", "acknowledged_writes", "persisted_uncertain_writes"]
 states = ["warm"]
-params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3 }
-correctness = ["api_found", "kill_rc", "start_rc", "recovered",
-               "no_lost_writes (items >= 500 + acked writes)"]
-note = "PILOT: API-container interruption only; engine/VM recovery remains unqualified and shared OrbStack must not be restarted. load_rps now counts successful responses, unlike historical attempted throughput; the historical reporter excludes W10 throughput. Expected outage errors and recovered tails need explicit attribution. Lost committed writes or failed recovery always fail."
+params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3, interrupt_service = ["api", "db"] }
+correctness = ["exact seed and acknowledged writes", "only exact attempted writes may persist after an uncertain acknowledgement", "successful load before and after recovery", "zero unexplained errors", "owned cleanup"]
+note = "Queue and engine interruptions remain open. API and database conditions have separate identities. Report recovery from the start command through the first exact read and p99 from successful load requests that start after that read."
 
 [[case]]
 id = "W11"

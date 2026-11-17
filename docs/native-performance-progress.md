@@ -78,14 +78,13 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, repair the W10 runner next. The normal
-`trial_w10` still uses total row count to infer that no acknowledged
-write was lost. Use exact persisted records, retain expected outage
-errors separately from unexpected errors, and compute p99 only from
-successful requests after verified recovery. Reuse the persistent client
-and outage classifier from the existing diagnostic. Extend the recovered
-state oracle to database and queue interruption before attempting the
-engine-level cell on disposable owned engines.
+If the Mac stays shared, implement W10 queue-service interruption next.
+Use an owned Redis instance with explicit persistence on a named volume.
+Retain the exact accepted job identities across the Redis interruption,
+then require W4's worker and artifact verification to complete the
+same accepted jobs. The [W10 API and database fixture](../bench/native/diagnostics/recovery-client.md#exact-api-and-database-recovery)
+now verifies exact acknowledged writes and post-recovery p99.
+Engine interruption still requires a disposable owned engine.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)

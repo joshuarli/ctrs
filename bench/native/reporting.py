@@ -34,7 +34,7 @@ CASE_METRICS = {
            for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",
                           f"job_completion_p95_ms_at_{concurrency}")],
     # Legacy load_rps counts failed attempts during downtime, not useful work.
-    "W10": ["recovery_s"],
+    "W10": ["recovery_s", "recovered_p99_ms"],
     # Soak windows/requests/churn counts are reliability observations.
     "W11": [],
 }

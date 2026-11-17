@@ -30,3 +30,35 @@ Old fresh-connection traces remain v1 diagnostics, including the failed 149-erro
 stress run. Do not pool versions or reinterpret it as a product failure or a
 passed comparison. v2 baseline functional proof must precede any resumed TTL
 candidate comparison; the 250ms product default is unchanged.
+
+## Exact API and database recovery
+
+`runner.py run` and `baseline` accept `--interrupt-service api|db` for
+`w10-v3-exact-recovery`. The default interrupts the owned API container.
+The database condition interrupts only the database container from the
+trial's Compose project. Both conditions use the same persistent read and
+write workload. Use `--duration` greater than the planned outage and warmup.
+
+```sh
+python3.14 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
+  --interrupt-service db --pairs 10
+```
+
+Each write has a unique name and deterministic payload. The verifier checks
+every seed row and each acknowledged write's ID, name, and payload directly
+in PostgreSQL. If a write intersects the outage and its acknowledgement is
+lost, its exact row may still appear. Missing acknowledged writes, unexpected
+rows, duplicate identities and wrong payloads fail verification.
+
+The runner retains every attempt and its outage classification. Malformed
+success responses and client address exhaustion fail the trial even during
+the outage. Recovery includes the start command and ends with the first
+exact read. Only successful load requests started after that read enter
+the recovered p99. Read and write coverage is required on both sides when
+the configured workload includes both.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
+test_recovery_trace test_safety test_reporting`. All 64 tests passed,
+including a local HTTP server with simulated database interruption and
+negative persisted-state and response checks. Native API and database
+trials, queue interruption, and owned-engine interruption remain open.

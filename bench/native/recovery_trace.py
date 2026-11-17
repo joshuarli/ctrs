@@ -1,5 +1,7 @@
 """Pure interpretation of bounded W10 host probes and guest clock brackets."""
 import errno
+import hashlib
+import math
 import urllib.error
 
 
@@ -15,13 +17,48 @@ def classify_failures(attempts, interrupted_ns, recovered_ns):
             continue
         if attempt.get('error_errno') == errno.EADDRNOTAVAIL:
             host_address_errors.append(attempt)
-        if attempt['ended_ns'] >= interrupted_ns and attempt['started_ns'] <= recovered_ns:
+        if (not attempt.get('invalid_response')
+                and attempt['ended_ns'] >= interrupted_ns and attempt['started_ns'] <= recovered_ns):
             expected.append(attempt)
         else:
             unexpected.append(attempt)
     return {'expected_outage_errors': expected, 'unexpected_errors': unexpected,
             'host_address_errors': host_address_errors,
             'host_client_valid': not host_address_errors}
+
+
+def workload_metrics(attempts, interrupted_ns, recovered_ns, *, require_reads, require_writes):
+    healthy = [attempt for attempt in attempts if attempt['ok'] and attempt['ended_ns'] < interrupted_ns]
+    recovered = [attempt for attempt in attempts if attempt['ok'] and attempt['started_ns'] >= recovered_ns]
+    for phase in (healthy, recovered):
+        kinds = {attempt['kind'] for attempt in phase}
+        if (require_reads and 'read' not in kinds) or (require_writes and 'write' not in kinds):
+            raise ValueError('W10 needs completed load before interruption and after recovery')
+    elapsed = sorted(attempt['ended_ns'] - attempt['started_ns'] for attempt in recovered)
+    return {'recovered_p99_ms': elapsed[math.ceil(.99 * len(elapsed)) - 1] / 1e6,
+            'recovered_requests_ok': len(recovered)}
+
+
+def verify_persisted_items(rows, acknowledged, uncertain):
+    original = {f'item-{i}': (i, hashlib.md5(str(i).encode()).hexdigest()) for i in range(1, 501)}
+    allowed = {item['name']: item['payload'] for item in uncertain}
+    required = original | {item['name']: (item['id'], item['payload']) for item in acknowledged}
+    if len(required) != len(original) + len(acknowledged) or len(allowed) != len(uncertain) or allowed.keys() & required.keys():
+        raise ValueError('duplicate attempted write identity')
+    seen_names, seen_ids = set(), set()
+    for identity, name, payload in rows:
+        if type(identity) is not int or identity <= 0 or identity in seen_ids or name in seen_names:
+            raise ValueError('duplicate or invalid persisted item identity')
+        seen_names.add(name)
+        seen_ids.add(identity)
+        if name in required:
+            if required[name] != (identity, payload):
+                raise ValueError(f'persisted acknowledged item differs: {name}')
+        elif name not in allowed or identity <= 500 or allowed[name] != payload:
+            raise ValueError(f'unexpected persisted item: {name}')
+    if required.keys() - seen_names:
+        raise ValueError('persisted acknowledged items are missing')
+    return len(seen_names & allowed.keys())
 
 
 def clock_bracket(samples):

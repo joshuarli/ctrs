@@ -19,6 +19,8 @@ import ownership
 import watch_loop
 import collect
 import resource_cells
+import recovery_client
+import recovery_trace
 import ci_jobs
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
@@ -37,6 +39,7 @@ import shutil
 import signal
 import statistics
 import tempfile
+import threading
 import socket
 import subprocess
 import sys
@@ -2175,118 +2178,140 @@ def trial_w5(ctx, engine: Engine, state: str,
 def trial_w10(ctx, engine: Engine, state: str,
               duration: float = 20.0, concurrency: int = 8,
               write_ratio: float = 0.3, seed: int = 1,
-              kill_at: float = 6.0, down_for: float = 3.0) -> dict:
-    """W10 (pilot): kill the API container mid-load, restart it, and
-    verify the stack recovers with no lost committed writes. Metrics:
-    recovery time, errors in the kill window, and post-restart health.
-    Engine-level kill is out of scope for this cell (OrbStack's shared
-    daemon makes an engine restart non-comparable)."""
-    case_id = "W10"
-    proj = project_name(ctx.run_id, engine.name, case_id)
+              kill_at: float = 6.0, down_for: float = 3.0, *,
+              interrupt_service: str = "api") -> dict:
+    """Interrupt one owned service during persistent load and verify recovery."""
+    if interrupt_service not in ("api", "db"):
+        raise ValueError("W10 interrupt service must be api or db")
+    if (not all(math.isfinite(value) for value in (duration, kill_at, down_for, write_ratio))
+            or concurrency <= 0 or not 0 <= write_ratio <= 1
+            or kill_at <= 0 or down_for <= 0 or duration <= kill_at + down_for):
+        raise ValueError("W10 load must cover both sides of a positive outage")
+    proj = project_name(ctx.run_id, engine.name, "W10")
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
-    trial_dir = ctx.trial_dir(engine.name, case_id, state)
-    trial_dir.mkdir(parents=True, exist_ok=True)
-    load_out = trial_dir / "load.json"
-    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    trial_dir = ctx.trial_dir(engine.name, "W10", state)
+    rec = ctx.new_record(engine, "W10", state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    rec["metrics"].update(fixture_version="w10-v3-exact-recovery", interrupt_service=interrupt_service)
     sampler = trace = None
-    load_proc = None
+    stop = threading.Event()
+    attempts, probes, timeline = [], [], {}
     t0 = time.monotonic()
+
+    def load(worker, deadline):
+        client = recovery_client.ProbeClient("127.0.0.1", port)
+        rng = random.Random(seed * 1000 + worker)
+        sequence = 0
+        try:
+            while not stop.is_set() and time.monotonic() < deadline:
+                if rng.random() < write_ratio:
+                    name = f"w10-{seed}-{worker}-{sequence}"
+                    attempt = client.write(name, hashlib.sha256(name.encode()).hexdigest())
+                else:
+                    attempt = client.query("read")
+                attempts.append(attempt)
+                sequence += 1
+        finally:
+            client.close()
+
+    def wait_for_exact_read(deadline):
+        client = recovery_client.ProbeClient("127.0.0.1", port)
+        try:
+            while time.monotonic() < deadline:
+                attempt = client.query("read")
+                probes.append(attempt)
+                if attempt["ok"]:
+                    return attempt["ended_ns"]
+                time.sleep(.01)
+        finally:
+            client.close()
+        raise TimeoutError("W10 did not recover before the load deadline")
+
     try:
         engine.ensure_up()
         compose_down(engine, proj)
         sampler, trace = start_sampler(engine, trial_dir)
         up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
-        if up.returncode != 0:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append(
-                f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
-            return rec
-        t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
-        if t_ready is None:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append("stack never became healthy")
-            return rec
-        rec["metrics"]["setup_seconds"] = round(time.monotonic() - t0, 3)
+        if up.returncode:
+            raise RuntimeError(f"compose up failed: {(up.stderr or up.stdout)[-300:]}")
+        ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+        if ready is None:
+            raise RuntimeError("stack never became healthy")
+        rec["metrics"]["setup_seconds"] = time.monotonic() - t0
 
-        load_t0 = time.monotonic()
-        load_proc = subprocess.Popen(
-            [sys.executable, str(LOAD_PY), "--url", base,
-             "--concurrency", str(concurrency), "--duration", str(duration),
-             "--write-ratio", str(write_ratio), "--seed", str(seed),
-             "--out", str(load_out)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        services = {}
+        for service in dict.fromkeys(("db", interrupt_service)):
+            found = engine.compose(proj, ["ps", "-q", service], timeout=30)
+            ids = found.stdout.split()
+            if found.returncode or len(ids) != 1:
+                raise ValueError(f"cannot establish the owned {service} container identity")
+            services[service] = ids[0]
+        db, target = services["db"], services[interrupt_service]
+        with resource_phase(engine, rec, "recovery_workload"):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+                load_t0 = time.monotonic()
+                try:
+                    futures = [pool.submit(load, worker, load_t0 + duration)
+                               for worker in range(concurrency)]
+                    time.sleep(max(0, load_t0 + kill_at - time.monotonic()))
+                    timeline["kill_command_begin_ns"] = time.monotonic_ns()
+                    engine.sh(["kill", target], timeout=30)
+                    timeline["kill_command_returned_ns"] = time.monotonic_ns()
+                    time.sleep(down_for)
+                    timeline["start_command_begin_ns"] = time.monotonic_ns()
+                    engine.sh(["start", target], timeout=120)
+                    timeline["start_command_returned_ns"] = time.monotonic_ns()
+                    timeline["first_success_ns"] = wait_for_exact_read(load_t0 + duration)
+                    for future in futures:
+                        future.result()
+                finally:
+                    stop.set()
 
-        # Let load reach steady state, then kill the API container.
-        time.sleep(kill_at - (time.monotonic() - load_t0))
-        api_id = engine.compose(proj, ["ps", "-q", "api"],
-                                timeout=30).stdout.strip()
-        checks = rec["correctness"]["checks"]
-        checks["api_found"] = bool(api_id)
-        tk = time.monotonic()
-        kill = engine.sh(["kill", api_id], timeout=30, check=False) \
-            if api_id else None
-        checks["kill_rc"] = kill is not None and kill.returncode == 0
-        rec["metrics"]["kill_at_load_s"] = round(
-            time.monotonic() - load_t0, 3)
-
-        time.sleep(down_for)
-        ts = time.monotonic()
-        start = engine.sh(["start", api_id], timeout=120, check=False) \
-            if api_id else None
-        checks["start_rc"] = start is not None and start.returncode == 0
-        # Recovery = docker start returned -> /health ok again.
-        t_rec, _ = wait_health(base, HEALTH_DEADLINE_S)
-        rec["metrics"]["recovery_s"] = (
-            round(t_rec - ts, 3) if t_rec is not None else None)
-        checks["recovered"] = t_rec is not None
-
-        try:
-            load_proc.wait(timeout=duration + 120)
-        except subprocess.TimeoutExpired:
-            load_proc.kill()
-            load_proc.wait(timeout=10)
-        if load_out.exists():
-            summary = json.loads(load_out.read_text())
-            rec["metrics"].update({
-                "load_duration_s": summary["duration_s"],
-                "load_rps": summary["rps"],
-                "load_requests": summary["requests"],
-                "load_errors": summary["errors"],
-                "load_writes_ok": summary["writes_ok"],
-                "load_p95_ms": summary["latency_ms"]["p95"],
-                "load_p99_ms": summary["latency_ms"]["p99"],
-            })
-            # Errors clustered in the kill window are expected; what
-            # matters is that the stack came back and no committed write
-            # was lost (got >= 500 + acked writes).
-            status, stats = http_json(f"{base}/stats", timeout=10)
-            expected = 500 + summary["writes_ok"]
-            got = stats.get("items") if isinstance(stats, dict) else None
-            rec["metrics"]["items_expected_min"] = expected
-            rec["metrics"]["items_got"] = got
-            checks["no_lost_writes"] = (
-                isinstance(got, int) and got >= expected)
-        rec["correctness"]["ok"] = all(
-            checks.get(k) for k in
-            ("api_found", "kill_rc", "start_rc", "recovered",
-             "no_lost_writes"))
-        return rec
+        interrupted = timeline["kill_command_begin_ns"]
+        recovered = timeline["first_success_ns"]
+        failures = recovery_trace.classify_failures([*attempts, *probes], interrupted, recovered)
+        (trial_dir / "request-validation.json").write_text(json.dumps(failures, indent=2) + "\n")
+        rec["metrics"].update(expected_outage_errors=len(failures["expected_outage_errors"]),
+                              unexpected_errors=len(failures["unexpected_errors"]),
+                              retries_until_recovery=len(probes) - 1)
+        checks["request_failures_explained"] = failures["host_client_valid"] and not failures["unexpected_errors"]
+        acknowledged = [attempt["write"] for attempt in attempts if attempt["kind"] == "write" and attempt["ok"]]
+        uncertain = [attempt["write"] for attempt in failures["expected_outage_errors"] if attempt["kind"] == "write"]
+        result = engine.sh(["exec", db, "psql", "-X", "-U", "app", "-d", "app", "-At", "-c",
+            "SELECT coalesce(json_agg(json_build_array(id,name,payload) ORDER BY id),'[]'::json) FROM items"],
+            timeout=60)
+        (trial_dir / "persisted-items.json").write_text(result.stdout)
+        persisted_uncertain = recovery_trace.verify_persisted_items(json.loads(result.stdout), acknowledged, uncertain)
+        checks["exact_persisted_items"] = True
+        rec["metrics"].update(acknowledged_writes=len(acknowledged), persisted_uncertain_writes=persisted_uncertain)
+        tails = recovery_trace.workload_metrics(attempts, interrupted, recovered,
+                                               require_reads=write_ratio < 1, require_writes=write_ratio > 0)
+        checks["complete_load_phases"] = True
+        if checks["request_failures_explained"]:
+            rec["metrics"].update(recovery_s=recovery_trace.recovery_intervals(timeline)["command_and_ready_s"], **tails)
+        rec["correctness"]["ok"] = all(checks.values())
     except Exception as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(str(exc))
     finally:
-        if load_proc is not None and load_proc.poll() is None:
-            load_proc.kill()
-            load_proc.wait(timeout=10)
-        compose_down(engine, proj)
-        if sampler is not None:
-            stop_sampler(sampler)
+        for label, action in (
+                ("sampler shutdown", lambda: stop_sampler(sampler) if sampler is not None else None),
+                ("owned stack cleanup", lambda: compose_down(engine, proj))):
+            try:
+                action()
+            except Exception as exc:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(f"{label}: {exc}")
+        (trial_dir / "timeline.json").write_text(json.dumps(timeline, indent=2) + "\n")
+        with (trial_dir / "attempts.jsonl").open("w") as output:
+            for attempt in sorted([*attempts, *probes], key=lambda value: value["started_ns"]):
+                output.write(json.dumps(attempt) + "\n")
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
+    return rec
 
 
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
@@ -2973,6 +2998,8 @@ def cmd_run(args) -> int:
     if args.case == "W2":
         kw["operations"] = getattr(args, "operations", None)
         kw["request_rate"] = getattr(args, "request_rate", None)
+    if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
+        kw["interrupt_service"] = args.interrupt_service
     if args.case in ("W6", "W7"):
         kw = {"driver": getattr(args, "driver", "default")}
     if args.case == "W6" and getattr(args, "build_cache", None) is not None:
@@ -3017,6 +3044,8 @@ def cmd_baseline(args) -> int:
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
                     kw["request_rate"] = getattr(args, "request_rate", None)
+                if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
+                    kw["interrupt_service"] = args.interrupt_service
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
                 if args.case == "W6" and getattr(args, "build_cache", None) is not None:
@@ -3213,6 +3242,8 @@ def main() -> int:
     for command in ("run", "baseline"):
         sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
                                          help="W6 build-cache condition (default: uncached); warm primes the same context")
+        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db"),
+                                         help="W10 owned service to interrupt (default: api)")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
@@ -3259,6 +3290,8 @@ def main() -> int:
     args = ap.parse_args()
     if getattr(args, "build_cache", None) is not None and args.case != "W6":
         ap.error("--build-cache requires W6")
+    if getattr(args, "interrupt_service", None) is not None and args.case != "W10":
+        ap.error("--interrupt-service requires W10")
     if getattr(args, "operations", None) is not None:
         if args.case != "W2" or args.operations <= 0:
             ap.error("--operations requires W2 and a positive value")
