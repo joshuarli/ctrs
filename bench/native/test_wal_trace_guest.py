@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent / 'diagnostics'))
 import wal_trace_guest as wal_trace
@@ -68,6 +70,31 @@ class WalTraceGuestTests(unittest.TestCase):
         self.assertEqual(wal_trace.probe_profile_summary(missed, tag)['status'], 'loss')
         self.assertEqual(wal_trace.probe_profile_summary(f'{tag}_fdatasync 8 0', tag)['status'], 'unknown')
         self.assertEqual(wal_trace.probe_profile_summary(f'{tag}_fdatasync malformed', tag)['status'], 'unknown')
+
+    def test_changed_probe_is_never_disabled_or_removed(self):
+        tag = 'npwal0123456789ab'
+        with tempfile.TemporaryDirectory() as directory:
+            trace, state = Path(directory) / 'trace', Path(directory) / 'state'
+            instance = trace / 'instances' / tag
+            instance.mkdir(parents=True)
+            state.mkdir()
+            definitions = wal_trace.event_definitions(tag)
+            flush = 'dev == 266338304 && rwbs ~ "*F*"'
+            wal_trace.marker_path(tag, state).write_text(json.dumps({
+                'schema': wal_trace.SCHEMA, 'tag': tag, 'pid': 274,
+                'instance': str(instance), 'definitions': definitions, 'device': '254:0',
+                'device_filter_value': 266338304,
+                'filters': {'fdatasync': 'common_pid == 274', 'fdatasync_ret': 'common_pid == 274',
+                            'block_rq_issue': flush, 'block_rq_complete': flush},
+                'scope': {'backend_pid': 274, 'device': '/dev/vda', 'device_major_minor': '254:0',
+                          'device_filter_value': 266338304, 'instance': str(instance)}}))
+            (trace / 'kprobe_events').write_text('\n'.join(definitions).replace(
+                '__arm64_sys_fdatasync', '__arm64_sys_fsync', 1))
+            for action in (wal_trace.start, wal_trace.stop, wal_trace.cleanup):
+                with self.subTest(action=action.__name__), patch.object(wal_trace, '_write') as write:
+                    with self.assertRaisesRegex(RuntimeError, 'definition changed'):
+                        action(tag, trace=trace, state=state)
+                    write.assert_not_called()
 
 
 if __name__ == '__main__':

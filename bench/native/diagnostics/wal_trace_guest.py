@@ -135,6 +135,11 @@ def _owned(tag, trace=TRACE, state=STATE):
         raise RuntimeError('ownership receipt scope or filters mismatch')
     if not instance.is_dir():
         raise RuntimeError('owned tracefs instance is missing')
+    lines = _global_definitions(trace)
+    for definition in expected_defs:
+        name = definition.split(' ', 1)[0]
+        if [line for line in lines if line.split(' ', 1)[0] == name] != [definition]:
+            raise RuntimeError('owned kprobe definition changed; refuse trace mutation')
     return receipt, instance, marker
 
 
