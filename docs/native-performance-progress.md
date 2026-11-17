@@ -20,8 +20,10 @@ reproduced the wake leaf concentration at 17 vCPUs. W11 v4 native
 observation passed bounded functional checks on both engines.
 The wake-count diagnostic completed cleanly. Counter-on wake calls per
 success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
-the counters leaves ordinary wake frequency unresolved.
-Main's W2 component suite passes 108 tests with zero skips.
+the counters leaves ordinary wake frequency unresolved. The reduced
+wake-entry observer also completed exact work and remains parked because
+observer overhead is unresolved. Main's W2 component suite passes 108
+tests with zero skips. No campaign-owned measured job is active.
 
 ## Accepted and verified
 
@@ -65,12 +67,12 @@ On the last check it returned 0 while a separate Niceforge VM consumed
 about one CPU. Preserve that workload. If the host stays shared, work
 the open admission and W8 source items without scoring timing.
 
-The less-intrusive follow-up for W2 counts is a separate control using
-only wake-entry and `sched_waking` selectors, with zero-miss and explicit
-thread-coverage checks. Compare against profiler-off task CPU before
-interpreting it. Use the existing selector and owned-probe paths.
-The completed profiles do not establish exclusive-store retry counts
-and give no basis for repeating the rejected LSE or affinity candidates.
+The reduced observer proof is complete. Source `7184d42` remains on
+`experiment/w2-wake-entry-only`. Use the evidence record for its verified
+probe coverage, scope and perturbation. A new run requires a distinct
+observer policy or an exclusive confirmation window. The completed profiles
+do not establish exclusive-store retry counts and give no basis for
+repeating the rejected LSE or affinity candidates.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).

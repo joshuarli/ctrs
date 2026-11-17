@@ -334,6 +334,39 @@ Keep off before on and 2 before 17 vCPUs within each mode. Use the
 Job status SHA-256
 `03a2fc5db9149283336d4a86b2f0ba8837cfe079bb67314bb3246404611a0086`.
 
+## Wake-entry observer feasibility
+
+Private source `7184d42` on `experiment/w2-wake-entry-only` reduces
+the instrumentation to `FUTEX_WAKE` entry and `sched_waking`.
+It installs one owned entry probe and uses the existing API thread
+coverage checks. All 24 focused counter and profile tests pass.
+
+Job `f202af4b1a184da98d5848a0ed26532c` exited 0 with 200,000 exact
+operations, equal acknowledged writes, verified probe removal and both
+native engines stopped. Both counters-on phases recorded all 18 required
+selector cells and zero misses. All 161 frozen receipts rechecked.
+The earlier wrapper job `b6726d2ea9154ddd8946570d43cfeae4` exited 1
+before creating a result directory or engine because its output parent
+was missing. The replacement creates the parent first. The original
+161 frozen receipts also rechecked.
+
+| vCPUs | `FUTEX_WAKE` calls/op | `sched_waking` events/op | Total API CPU off → on, s | System API CPU off → on, s | Wall off → on, s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 20.565 | 16.410 | 15.81 → 15.97 | 3.33 → 3.93 | 18.28 → 17.94 |
+| 17 | 31.301 | 20.929 | 19.81 → 18.74 | 5.78 → 5.97 | 20.82 → 18.81 |
+
+The direction of the wake-count difference recurred under the reduced
+probe set. The 2-vCPU system CPU observation still moved by 18%. The
+17-vCPU wall difference was 9.6%. This single block cannot establish
+ordinary uninstrumented wake frequency or certify the observer budget.
+Keep the source parked and the two recorder versions separate.
+
+Reproduce from `7184d42` using the topology-profile recipe with
+`profile_kind='wake-counters'`. Create the results parent in the source
+worktree first. Bind all runtime and image paths to the accepted assets.
+Job status SHA-256
+`79b76c74125d35ef4c87d2dc59e9261610a27fe5363d32a6c1c4db0b87ed4b16`.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
