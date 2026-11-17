@@ -152,3 +152,32 @@ In the parked checkout, run `PYTHONPATH=bench/native python3.14 -m unittest
 test_qualification test_mixed_cycle test_mixed_resources`. All 26
 tests pass. The actual asset lock remains a pilot. A complete frozen
 cell contract and both native qualification legs remain open.
+
+## Complete workload counts
+
+Parked `campaign/w11-bind-completed-cycles` at `d82e3db` now requires every
+cycle to report 5,000 successful API operations, 200 queue jobs, 12,800 queue
+events, 400 exact artifacts and 16 build/test jobs. Queue totals come from
+the verified W4 runner and the expected build count comes from the W9 job
+specification. The earlier gate admitted all 12 counterexamples with a
+missing, zero or boolean queue, event, artifact or build count. The updated
+gate rejects each with the cycle index and field. Both archived native v4
+records pass the resulting count and phase checks for all four cycles.
+
+From the parked checkout, run `PYTHONPATH=bench/native python3.14 -m unittest
+test_qualification test_mixed_cycle test_mixed_resources test_w4
+test_w4_lifecycle test_ci_jobs`. All 43 tests passed without starting an engine.
+
+## W11 cell plan
+
+Use `w11-v4-post-cleanup-resources` with a warm persistent stack, a four-worker
+queue and build concurrency four. Plan the following cells for each engine.
+The admissions review must still account for the rest of the W1–W11 matrix.
+
+| Dimension | Metric and required evidence |
+| --- | --- |
+| Correctness | Zero incomplete or incorrect mixed cycles. Each cycle verifies the complete workload counts and exact outputs. |
+| Persistence | Zero losses or changes to the 500 seed rows, the committed database/cache witness or the named volume identity across cycles. |
+| Durability | Zero lost acknowledged durable writes under the comparable failure model declared at freeze. The short retention proof leaves this cell unmeasured. |
+| Resource growth | Separate post-cleanup cells for physical footprint, file descriptors and active backing-file allocation. Use one baseline cycle and at least five subsequent observations of at least 30 seconds each. Their respective growth and return budgets are 16 MiB, 16 descriptors and 16 MiB. OrbStack allocation needs a stable backing-file scope verified against owned open descriptors. |
+| Reliability | At least 12 hours of mixed-cycle exposure per engine with zero unexplained deaths or unexpected errors, exact durable data and passing resource-growth cells. |

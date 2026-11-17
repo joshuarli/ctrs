@@ -26,7 +26,8 @@ observer overhead is unresolved. Main's W2 component suite passes 108
 tests with zero skips. The 49 Hz comparison completed all 40 exact
 trials. In all ten blocks an unrelated VM was active and the observer
 intervals exceeded the 5% acceptance band. W8 retained pin checks are
-integrated at `4c07c4e`; W11 evidence binding remains parked.
+integrated at `4c07c4e`. The parked W11 gate at `d82e3db` now requires
+complete API, queue, artifact and build counts for every cycle.
 The 19 Hz comparison completed all 12 exact trials and captured all API
 threads. Its lower rate did not reduce observed API CPU or wall in the
 four matched rate comparisons. Both observer validations remain open.
@@ -75,6 +76,11 @@ separate from the existing call-stack record and require fresh paired
 observer acceptance before using any resulting profile for product
 selection. If the Mac stays shared, continue the W8 retained/derived
 content scopes or the W11 frozen cell plan without scoring timing.
+For the next offline W11 slice, draft the `w11-v4-post-cleanup-resources`
+cells listed in the [mixed retention evidence](evidence/native-mixed-retention-2026-11-17.md#w11-cell-plan)
+as part of the full qualification matrix. Use the pushed parked gate as
+the starting point. Keep `assets.lock` in pilot status until the complete
+contract and its evidence are ready for review.
 
 The reduced observer proof is complete. Source `7184d42` remains on
 `experiment/w2-wake-entry-only`. Use the evidence record for its verified
@@ -150,19 +156,15 @@ next-action paragraphs from that historical revision.
 1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
-2. Parked admission `5bcf48a` still needs a canonical cell contract and native
-   v4 proof. The separate review confirmed that `qualification.require_readiness`
-   checks workload and dimension sets independently. Its own
-   `test_frozen_receipts_admit_readiness_without_promoting_unknown_cells`
-   passes with only an application cell for W11. Local commit `0c0e10a`
-   on `campaign/w11-required-cells-20261117` now requires correctness,
-   persistence, durability, growth and reliability on W11 itself. Its
-   regression fails on the parked validator and passes after the fix.
-   The [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
-   passed on both engines, with 181 frozen receipts unchanged. The complete
-   cell contract, frozen readiness and 12-hour legs remain open.
-   Growth capability
-   `81e51d2` and counter-window fix `4fc901b` are already integrated.
+2. Parked `campaign/w11-bind-completed-cycles` binds the contract digest to
+   `assets.lock` and validates the complete mixed workload and resource
+   observation per cycle. The archived
+   [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
+   passed on both engines, with 181 frozen receipts unchanged. Complete
+   the canonical cell contract and frozen readiness. Wire the parked
+   qualification path through the finite supervisor in `mixed_job.py`,
+   which still refuses qualification. Launch the two 12-hour legs only
+   after their admission requirements are satisfied.
 3. W8: retained-image pin checks are integrated and pass 68 component
    tests. The eight archived native inspections agree with the pins.
    Complete exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
