@@ -7,9 +7,17 @@ import sched_trace
 
 VERSION = 'w2-cpu-v1-native-dwarf'
 FREQUENCY = 49
-PERIOD_NS = round(1_000_000_000 / FREQUENCY)
 HEADER = re.compile(r'^\s*(\S+)\s+(\d+)/(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+cpu-clock:\s*(.*)$')
 FRAME = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+?)\s+\((.*)\)\s*$')
+
+
+def period_for_frequency(frequency):
+    if type(frequency) is not int or not 1 <= frequency <= FREQUENCY:
+        raise ValueError(f'sample frequency must be an integer between 1 and {FREQUENCY} Hz')
+    return round(1_000_000_000 / frequency)
+
+
+PERIOD_NS = period_for_frequency(FREQUENCY)
 
 
 def check_attachment(attached_tasks, phase_tasks, clock_ticks):
@@ -18,7 +26,8 @@ def check_attachment(attached_tasks, phase_tasks, clock_ticks):
         raise ValueError('profiler attachment task identity changed: ' + repr(delta['errors']))
 
 
-def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations, diagnostics='', raw_events=''):
+def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations, diagnostics='', raw_events='', frequency=FREQUENCY):
+    period = period_for_frequency(frequency)
     errors, samples = [], []
     current = None
     if re.search(r'lost|throttl', diagnostics, re.IGNORECASE):
@@ -79,8 +88,8 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
             'cost_per_success_estimates': None if not selected or delta['status'] != 'ok' or successful_operations <= 0 else
                 {name: delta['cpu_seconds'] * count / len(selected) / successful_operations for name, count in leaves.most_common()}}
     return {'status': 'unknown' if errors else 'ok', 'errors': errors,
-        'fixture_version': VERSION, 'sample_count': len(samples), 'nominal_sampling_hz': FREQUENCY,
-        'fixed_cpu_clock_period_ns': PERIOD_NS, 'raw_event_coverage_checked': bool(raw_events),
+        'fixture_version': VERSION, 'sample_count': len(samples), 'nominal_sampling_hz': frequency,
+        'fixed_cpu_clock_period_ns': period, 'raw_event_coverage_checked': bool(raw_events),
         'successful_operations': successful_operations, 'application_cpu': application_cpu,
         'per_thread': None if errors else per_thread,
         'qualification_eligible': False,
