@@ -61,3 +61,41 @@ All 87 frozen input receipts were rechecked unchanged after completion.
 Receipts: summary SHA-256
 `ad1ca2b6881539eaefbb1f2b3e326b6469cebd2a79aecbc2c43503ab3b50428a`;
 plan `dcb8ebe3fb9536b28bc66b668f072aca92a2cc721873920e66be71f2c93d7045`.
+
+## Five-cycle growth failure
+
+Job bc957b41bea04c02b46620b63b3f54f8 under
+`.work/tmp/resource-five-cycles-20261117/job` exits 0, local cleanup complete.
+Run `w2-resources-20261117T005046` uses the same pins/candidate/settings and
+operation counts above, with five cycles and 30-second initial/reclaim intervals.
+Application assertions, complete counters, unchanged running identity, empty
+final container inventory and all 87 frozen input receipts pass. Both host
+timing pre/post tools exit 0; independent machine exclusivity is not established,
+so this engine-block diagnostic still establishes no performance qualification.
+
+The physical-footprint budget **fails**; a successful diagnostic exit does not
+override that result. Initial steady physical footprint is 696,059,896 bytes.
+Every steady reclaim observation is retained:
+
+| Cycle | Physical footprint, bytes | Active disk allocated, bytes |
+| --- | ---: | ---: |
+| 0 | 720,504,872 | 56,986,320,896 |
+| 1 | 736,036,904 | 56,986,320,896 |
+| 2 | 735,725,632 | 56,986,419,200 |
+| 3 | 742,246,464 | 56,986,419,200 |
+| 4 | 740,345,920 | 56,986,419,200 |
+
+Maximum minus first post-warmup cycle is 21,741,592 bytes; maximum minus initial
+is 46,186,568 bytes. Both exceed their unchanged 16MiB budgets. Active-disk
+growth/return is only 98,304 bytes and passes. Exclusive allocation and isolated
+build-cache size remain unknown. Final native samples attribute roughly 730MB
+to the VM helper and 10MB to the daemon, so guest/VM attribution comes next;
+these observations alone do not establish a leak or a cache-reclamation remedy.
+
+Summary SHA-256:
+`da2d0b301b894f160162a4b1a33b2146a0caecb45fe89f4ad3c1031259706e53`.
+Do not repeat this run to erase the failed cell. The next bounded diagnostic
+adds guest meminfo/vmstat/slab snapshots through one owned resident probe, keeps
+the same five cycles, then tests explicit cache release and normal default
+sleep/wake. That probe/cache action makes it a separate attribution fixture;
+neither forced cache dropping nor the probe is a product policy change.

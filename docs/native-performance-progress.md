@@ -106,14 +106,25 @@ It deliberately leaves growth unknown below five cycles. Explicit 2CPU/8192MiB
 and default sleep/quiet settings use candidate host fda62467/initrd6ae4d3ab;
 the existing isolated image/build cache is retained and disclosed.
 
+Five-cycle job bc957b41… is terminal exit0/clean cleanup, complete counters/data
+and all87 inputs unchanged. Run `w2-resources-20261117T005046` FAILS unchanged
+footprint budgets: post-warmup growth21,741,592B, return difference46,186,568B,
+each over16MiB. Active-disk growth98,304B passes; exclusive/cache size unknown.
+See [resource evidence](evidence/native-resource-cycles-2026-11-17.md).
+Its pre/post simple host gate exits0, but unrelated running OrbStack Linux
+machine/exclusive qualification remains unresolved. Preserve the failed cells.
+
 **Exact continuation:** consume the registered status watch for native job
-bc957b41bea04c02b46620b63b3f54f8, `.work/tmp/resource-five-cycles-20261117/job`.
-It runs the same frozen candidate/inputs with five cycles, 1,000 work and 200
-next-use operations, 30-second initial/reclaim intervals. It is diagnostic,
-not full qualification. Review summary/budget outcomes, counter completeness,
-actual running artifacts, pre/post host validity and all input receipts once.
-Keep any failed cell; do not rerun until green. Pursue demonstrated resource
-growth or installed-default sleep/wake accounting next. No source worker active.
+1b5e52c1b6e24b16b24d22cfafc831d2,
+`.work/tmp/resource-growth-attribution-20261117/job`, deadline epoch1794907069.
+It attributes the failure with five identical work/reclaim/next-use cycles,
+one owned privileged resident probe, guest meminfo/vmstat/slab and native
+per-process counters. Then it tests explicit guest cache release, normal default
+sleep with closed owned disk, and verified wake/application work. This is a
+distinct attribution fixture; no product cache/idle policy changed. Check
+native/guest coverage, OOM/fallback, hashes and retained budgets before selecting
+a remedy. Never treat absent VM counters as zero or rerun until green.
+No source worker active; no other measured native job may contend.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
