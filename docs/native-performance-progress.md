@@ -4,10 +4,12 @@
 
 **Active 2026-11-17 after owner resume.** Closeout cancellation succeeded.
 The product baseline remains `2f37d02`; parked `5bcf48a` stays separate.
-The first W2 batch stopped after six exact trials when the idle ctrs VM
-slept before observation. The primed five-block diagnostic owns the measured
-host. Job `4587075d90bc49baa5f7cebf9297cbb6` is admitted.
+The primed W2 batch completed all 20 trials and one million successful
+requests, with matching payloads and complete CPU boundaries. Total API CPU
+did not reproduce a consistent ctrs deficit. The system component was higher
+on ctrs in all five boundary-only pairs.
 [W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
+Saturation job `627d4248db6b46c79e65b1cf05416dde` owns the measured host.
 
 ## Accepted and verified
 
@@ -38,19 +40,20 @@ host. Job `4587075d90bc49baa5f7cebf9297cbb6` is admitted.
 
 ## Exact next action
 
-Read the terminal status for job `4587075d90bc49baa5f7cebf9297cbb6` under
-`.work/tmp/w2-equal-work-primed-20261117/job/status.json`. Until terminal status is
-available, keep that job's frozen inputs in place and launch no other measured
-host workload. The durable job has a 40-minute deadline. Records go to
-`.work/native-perf/results/w2-equal-work-primed-20261117`.
+Read the terminal status for saturation job
+`627d4248db6b46c79e65b1cf05416dde` at
+`.work/tmp/w2-saturation-20261117/job/status.json`. Its 40-minute deadline
+and receipts cover five alternating pairs at 20 seconds, concurrency 8,
+write probability 0.3, and seed `7 + block`. It uses the same pinned
+portfolio and resource cohort. Keep saturation and fixed work separate.
+Compare successful throughput and tails, and normalize API cgroup CPU by
+the actual successes. Verify exact persisted payloads and all receipts.
 
-After the job exits, check frozen receipts, exact persisted data and paired
-read/write counts. Compute API cgroup usage, user and system cost per successful
-operation from raw trial records. Report whole-block uncertainty and separate
-observer modes. Keep the default-size ctrs configuration separate from the
-matched-resource cohort. Whole OrbStack helper CPU includes unrelated VM work.
-Record failures and unattempted cells. Run a separate declared saturation batch
-and profile the actual API workload if the normalized deficit persists.
+After saturation, profile the guest API's system CPU with the existing
+49 Hz on-CPU observer. Match the fixed-work workload at concurrency 8.
+Keep observer-off and observer-on cells distinct. Treat foreign activity
+and unmatched guest capacities as diagnostic limits. An old unpinned
+futex or isolated kernel sample cannot select a runtime change.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
