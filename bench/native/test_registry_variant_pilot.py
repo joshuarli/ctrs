@@ -37,6 +37,21 @@ class VariantTransferProof(unittest.TestCase):
 
 
 class PhaseAccounting(unittest.TestCase):
+    def test_warm_engine_executes_and_checks_guest_work_before_sampling(self):
+        engine = mock.Mock(name='engine')
+        engine.name = 'ctrs'
+        engine.sh.return_value = subprocess.CompletedProcess([], 0, 'np-w8-warm\n', '')
+        with mock.patch.object(pilot.ci_jobs, 'cleanup') as cleanup:
+            pilot.prepare_warm_engine(engine, 'run')
+        engine.ensure_up.assert_called_once_with()
+        self.assertIn('--pull=never', engine.sh.call_args.args[0])
+        cleanup.assert_called_once()
+        engine.sh.return_value = subprocess.CompletedProcess([], 0, '', '')
+        with mock.patch.object(pilot.ci_jobs, 'cleanup') as cleanup, \
+             self.assertRaisesRegex(RuntimeError, 'preconditioning did not complete'):
+            pilot.prepare_warm_engine(engine, 'run')
+        cleanup.assert_called_once()
+
     def test_failed_phase_records_boundary_and_unknown_missing_counters(self):
         engine = mock.Mock()
         engine.measurement_identity = {'required_processes': []}
@@ -104,6 +119,26 @@ class PhaseAccounting(unittest.TestCase):
                 cleaned = True
         self.assertTrue(cleaned)
         pilot.summarize_resources(result, engine, None)
+        self.assertEqual(result['resources']['status'], 'unknown')
+
+    def test_summary_failure_stops_engine_persists_failure_and_rejects_result(self):
+        engine = mock.Mock()
+        result = {'correctness': True, 'errors': [], 'resources': {'phases': {}}, 'phase_status': {}}
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(pilot, 'summarize_resources', side_effect=OSError('damaged trace')), \
+             mock.patch.object(pilot, 'host_snapshot'):
+            pilot.finish_engine(result, engine, None, None, Path(directory))
+            saved = json.loads((Path(directory) / 'result.json').read_text())
+        engine.stop.assert_called_once_with()
+        self.assertFalse(saved['correctness'])
+        self.assertEqual(saved['resources']['status'], 'unknown')
+        self.assertIn('damaged trace', ''.join(saved['errors']))
+        with self.assertRaisesRegex(RuntimeError, 'resource coverage failed'):
+            pilot.require_valid_result(saved)
+
+    def test_empty_phase_set_cannot_pass_resource_coverage(self):
+        result = {'resources': {'phases': {}}, 'phase_status': {}}
+        pilot.summarize_resources(result, mock.Mock(measurement_identity={}), None)
         self.assertEqual(result['resources']['status'], 'unknown')
 
 

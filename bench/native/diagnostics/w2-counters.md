@@ -144,3 +144,18 @@ per engine with the median CPU/wall ratio and a paired 95% interval; sparse
 samples or an inconclusive 5% budget cannot select a runtime change.
 Reverse-order 5k proof `w2-cpu-20261116T083838-d073` verifies controls are keyed
 by actual mode and both phases retain exact data. Its timing is unqualified.
+
+The contaminated 50k block `w2-cpu-20261116T163545-94e4` has 147 ctrs leaf
+samples at `wake_up_q+0x64`, IP `ffff800080078fe4`. Its recorded raw kernel
+mapping and loaded Image SHA `35087713fd7b1b152b1ac0333e42edbcee482c82c6e695f27a8f126c271eee43`
+locate this instruction at Image offset `0x78fe4`. The surrounding bytes at
+`0x78fe0` are `017c5f882200144b02fc0388a3ffff35`: `ldxr w1,[x0]`,
+`sub w2,w1,w20`, `stlxr w3,w2,[x0]`, `cbnz w3,<ldxr>`.
+The decoded function calls wakeup before this decrement; the local 6.18.58
+`wake_up_q`/`put_task_struct` source identifies the task-usage refcount boundary.
+This narrows the investigation to that atomic operation; sampled IPs establish
+neither exclusive-store retries nor instruction latency or causal CPU cost.
+Do not probe inside the exclusive sequence and perturb its reservation.
+The cached kernel build Image has a different hash and cannot supply matching
+binary metadata. Keep the actual recorded Image authoritative. No LSE-only or
+other kernel candidate is selected before observer confirmation passes.

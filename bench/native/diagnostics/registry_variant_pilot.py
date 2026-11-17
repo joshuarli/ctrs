@@ -88,8 +88,63 @@ def summarize_resources(result, engine, trace):
         resources['phase_summaries'].setdefault(name, {'status': 'unknown', 'cpu_seconds': None,
             'steady_phys_footprint_bytes': None, 'peak_phys_footprint_bytes': None,
             'errors': ['resource summary unavailable']})
-    resources['status'] = ('ok' if all(v['status'] == 'ok' for v in resources['phase_summaries'].values())
+    resources['status'] = ('ok' if result['phase_status'] and all(v['status'] == 'ok' for v in resources['phase_summaries'].values())
                            and all(v['status'] == 'complete' for v in result['phase_status'].values()) else 'unknown')
+
+
+def finish_engine(result, engine, sampler, trace, directory):
+    try:
+        try:
+            if sampler is not None:
+                runner.stop_sampler(sampler)
+        except Exception:
+            result['errors'].append(traceback.format_exc())
+            result['resources']['sampler_error'] = traceback.format_exc()
+        try:
+            summarize_resources(result, engine, trace)
+        except Exception:
+            result['errors'].append(traceback.format_exc())
+            result['resources']['status'] = 'unknown'
+        if result['resources'].get('sampler_error'):
+            result['resources']['status'] = 'unknown'
+            for raw in result['resources']['phases'].values():
+                raw['cpu_seconds'] = None
+            for cell in result['resources'].get('phase_summaries', {}).values():
+                cell.update(status='unknown', cpu_seconds=None, user_cpu_seconds=None,
+                    system_cpu_seconds=None, cpu_cores=None, steady_phys_footprint_bytes=None,
+                    peak_phys_footprint_bytes=None)
+        if result['resources'].get('status') != 'ok':
+            result['correctness'] = False
+    finally:
+        try:
+            engine.stop()
+        except BaseException:
+            result['errors'].append(traceback.format_exc())
+            result['correctness'] = False
+            raise
+        finally:
+            try:
+                host_snapshot(directory, 'after')
+            finally:
+                save(directory / 'result.json', result)
+
+
+def require_valid_result(result):
+    if not result['correctness'] or result['resources'].get('status') != 'ok':
+        raise RuntimeError('W8 integrity or resource coverage failed; retain the failed run')
+
+
+def prepare_warm_engine(engine, run):
+    engine.ensure_up()
+    container = runner.project_name(run, engine.name, 'warm')
+    try:
+        cp = engine.sh(['run', '--rm', '--pull=never', '--name', container,
+            '--label', 'dev.ctrs.campaign.run=' + run,
+            'np-fixture-api:' + runner.API_TAG, 'python', '-c', "print('np-w8-warm')"], timeout=90)
+        if cp.stdout.strip() != 'np-w8-warm':
+            raise RuntimeError('warm-engine preconditioning did not complete')
+    finally:
+        ci_jobs.cleanup(engine, container, run)
 
 
 def main():
@@ -112,7 +167,7 @@ def main():
     root.mkdir()
     save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v3',
         'receipt': receipt, 'reason': 'functional resource diagnostic; timing and guest pre-content absence unqualified',
-        'resource_scope': 'owned engine processes only; excludes host registry, coordinator, CLI and active backing allocation'})
+        'resource_scope': 'warm owned engine processes only; excludes boot/preconditioning, host registry, coordinator, CLI and active backing allocation'})
     (root / 'driver.py').write_bytes(Path(__file__).read_bytes())
     server = registry_portfolio.serve(portfolio, 0)
     thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
@@ -134,7 +189,7 @@ def main():
             result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
             try:
                 host_snapshot(directory, 'before')
-                engine.ensure_up()
+                prepare_warm_engine(engine, run)
                 sampler, trace = runner.start_sampler(engine, directory)
                 phase = lambda phase_name: measured_phase(engine, result, phase_name)
                 refs = {}
@@ -188,36 +243,9 @@ def main():
                 result['errors'].append(traceback.format_exc())
                 raise
             finally:
-                try:
-                    if sampler is not None:
-                        try:
-                            runner.stop_sampler(sampler)
-                        except BaseException:
-                            result['errors'].append(traceback.format_exc())
-                            result['correctness'] = False
-                            result['resources']['sampler_error'] = traceback.format_exc()
-                    summarize_resources(result, engine, trace)
-                    if result['resources'].get('sampler_error'):
-                        result['resources']['status'] = 'unknown'
-                        for raw in result['resources']['phases'].values():
-                            raw['cpu_seconds'] = None
-                        for cell in result['resources']['phase_summaries'].values():
-                            cell.update(status='unknown', cpu_seconds=None, user_cpu_seconds=None,
-                                system_cpu_seconds=None, cpu_cores=None, steady_phys_footprint_bytes=None,
-                                peak_phys_footprint_bytes=None)
-                    if result['resources']['status'] != 'ok':
-                        result['correctness'] = False
-                    try:
-                        engine.stop()
-                    except BaseException:
-                        result['errors'].append(traceback.format_exc())
-                        result['correctness'] = False
-                        raise
-                finally:
-                    try:
-                        host_snapshot(directory, 'after')
-                    finally:
-                        save(directory / 'result.json', result)
+                finish_engine(result, engine, sampler, trace, directory)
+            require_valid_result(result)
+            print(name, 'PASS full transfers, exact data and engine resource phases', flush=True)
     finally:
         if thread.ident is not None:
             server.shutdown()

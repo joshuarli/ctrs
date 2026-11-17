@@ -4,9 +4,10 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-Resume steering: storage review repairs and real W8 content-unique validation
-are accepted below. Measurement exclusivity limits W2 acceptance. Continue with
-W8 scored phase/resource integration while foreign host work prevents timing.
+Resume steering: storage review repairs, real W8 content-unique validation and
+20-phase native engine-resource accounting are accepted below. Measurement
+exclusivity limits W2 acceptance. Continue W8 fixture-service resource accounting
+and under-pull application-load coverage while foreign host work prevents timing.
 No runtime policy change is accepted.
 Read the [contract](campaign-native-performance.md), then inspect
 `git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
@@ -61,10 +62,31 @@ it rejects partial/HEAD transfers. Reproduction commands are in
 `bench/native/fixtures/w8-v3/README.md`; use a fresh seed and destination because
 derived images remain installed. No cold-store, sub-API guest absence, timing or
 resource acceptance is implied. Do not repeat these completed functional proofs.
-Next executable source action: inspect `runner.trial_w8` and connect this validated
-single-artifact W8 path to complete setup/pull/install/healthy/load/cleanup resource
-phases, preserving unique per-pair inputs shared by both engines. Keep v2 history
-separate and require a new exclusive paired baseline before scoring v3.
+W8 phase integration 9b9f94b and parent repairs now pass native run
+`w8-unique-20261116T165722-509c`: both engines, all 20 declared phases have
+complete CPU/native sampled-footprint coverage, exact application/marker/retained
+image checks, exit 0 and clean teardown. Source worker
+`usrw_e60a38ea-7f97-4091-8fee-a5494e87b5e1` is terminal succeeded; parent reviewed
+the diff and fixed resource-failure exit status, summary-failure shutdown, empty
+coverage and lazy-boot preconditioning. Fifteen focused tests and all 183 harness
+tests pass. The earlier `w8-unique-20261116T165508-08e9` remains FAILED: its app
+checks passed but sampling began before the lazy ctrs VM booted; it has no valid
+resource cells and exit 1. It is not pooled with the corrected proof.
+
+The fixture now verifies an owned no-pull Python container on both engines before
+sampling the declared warm-engine phases. Boot/preconditioning is explicitly
+outside those cells; cold-engine/startup acceptance remains separate. Corrected
+layout `.work/native-perf/inputs/w8-portfolio-v3-warm-phases-20261116/`, seed
+`ctrs-w8-v3-warm-phase-proof-20261116-1`. Native traces, raw phase boundaries and
+host snapshots are under the run's engine directories. All verdicts remain
+functional: excludes registry/coordinator/CLI and active backing allocation;
+sampled footprint is not a continuous peak. No timing claim under foreign load.
+Next executable source action: extend the W8 sampler with verified coordinator/
+registry process identity and separately disclosed client costs, then add fixed
+application load during pulls with exact accepted payloads and complete teardown.
+Preserve unique per-pair inputs shared by both engines. Keep v2 history separate
+and require a new exclusive paired baseline before scoring v3. An async request
+for a quiet host window is pending; this does not block independent source work.
 
 ## Accepted and verified
 

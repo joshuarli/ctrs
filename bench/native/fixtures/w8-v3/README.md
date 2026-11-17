@@ -52,6 +52,11 @@ have owned cleanup. Derived images remain installed; use a new seed and new
 destination for a subsequent unseen-image trial. API absence does not prove
 absence from every guest content cache, and this command does not score timings.
 
+Before resource sampling, both engines execute and verify an owned no-pull Python
+container to establish the declared warm-engine state. Daemon readiness alone
+does not establish a booted ctrs VM. Boot and preconditioning are outside the
+warm-phase resource scope and remain separate acceptance cells.
+
 The functional diagnostic records native owned-engine process CPU and sampled
 physical footprint for setup and image inspection, each pull/install and marker
 check, image identity, stack health, fixed load, persistence recovery, Marked
