@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import mixed_cycle
+import reporting
 import runner
 
 
@@ -77,7 +78,7 @@ class DurationAdmission(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=runner.REPO / '.work/tmp') as scratch:
             root = Path(scratch)
             ctx = SimpleNamespace(results_dir=root, run_id='run', new_record=lambda *a: {
-                'notes': [], 'cycles': [], 'correctness': {}, 'validation_errors': [], 'resources': {}})
+                'notes': [], 'cycles': [], 'correctness': {'checks': {}}, 'validation_errors': [], 'resources': {}})
             engine = SimpleNamespace(name='ctrs', socket='unix:///socket', dir=root, ensure_up=lambda: None)
             ids = {'api': 'api-id', 'db': 'db-id', 'cache': 'cache-id'}
             cumulative = []
@@ -152,6 +153,7 @@ class DurationAdmission(unittest.TestCase):
                 self.assertEqual(json.loads((directory / 'retained-items.json').read_text()), [])
             self.assertEqual([c['service_ids'] for c in result['cycles']], [ids, ids])
             self.assertEqual(len(result['cycles']), 2)
+            self.assertTrue(reporting._correct(result))
 
 
 class CycleRetention(unittest.TestCase):

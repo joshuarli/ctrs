@@ -300,6 +300,10 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             cycle += 1
         if not rec['cycles']:
             raise RuntimeError('work deadline expired before a complete cycle')
+        rec['correctness']['checks'].update(
+            exact_state_every_cycle=all(row['exact_state'] for row in rec['cycles']),
+            bounded_retained_items=all(row['explicitly_deleted_writes'] == row['acknowledged_writes']
+                                      and row['retained_seed_rows'] == 500 for row in rec['cycles']))
         rec['correctness']['ok'] = True
     except BaseException as exc:
         rec['correctness']['ok'] = False
