@@ -99,3 +99,20 @@ registry pilot before generating the unseen variant. Warmup uses the same
 store-specific pinned API ID. An isolated ctrs root with only the common API
 manifest installed and no legacy tag passes warmup; this does not qualify the
 remaining fresh-host matrix.
+
+The canonical paired pilot starts from the original pinned v2 layout:
+
+```sh
+python3.14 bench/native/runner.py w8-baseline \
+  --layout .work/native-perf/inputs/w8-portfolio-v2/layout \
+  --ctrs-binary /path/to/signed/ctrs --pairs 10
+```
+
+Add `--under-load` for fixed background work or `--diagnostic` for functional
+checks with invalid timing. Each pair shares one newly derived artifact and
+alternates order. Original pinned common images must already be installed on
+both engines. Startup and warm preconditioning are outside the whole-workflow
+resource interval. Nested phases are diagnostic and must not be added to it.
+The sampled footprint is not a continuous peak; CLI and sampler resources,
+active storage allocation, metadata qualification and the full matrix remain
+open. This is a pilot, not qualification.

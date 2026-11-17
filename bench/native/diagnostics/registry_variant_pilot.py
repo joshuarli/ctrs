@@ -61,6 +61,7 @@ def measured_phase(engine, result, name):
         else:
             phase['status'] = 'complete'
     finally:
+        phase['ended_monotonic'] = time.monotonic()
         phase['waited_child_cpu_seconds'] = None
         try:
             if children_before is not None:
@@ -109,7 +110,7 @@ def summarize_resources(result, engine, trace):
                            and all(v['status'] == 'complete' for v in result['phase_status'].values()) else 'unknown')
 
 
-def finish_engine(result, engine, sampler, trace, directory):
+def finish_engine(result, engine, sampler, trace, directory, *, stop=True):
     try:
         try:
             if sampler is not None:
@@ -134,7 +135,8 @@ def finish_engine(result, engine, sampler, trace, directory):
             result['correctness'] = False
     finally:
         try:
-            engine.stop()
+            if stop:
+                engine.stop()
         except BaseException:
             result['errors'].append(traceback.format_exc())
             result['correctness'] = False
@@ -162,6 +164,100 @@ def prepare_warm_engine(engine, run, *, api_image):
             raise RuntimeError('warm-engine preconditioning did not complete')
     finally:
         ci_jobs.cleanup(engine, container, run)
+
+
+def measure_engine(engine, directory, run, contract, portfolio, receipt, layout, server, under_load=False):
+    result = {'correctness': False, 'qualification_eligible': False, 'errors': [], 'pulls': [],
+              'resources': {'phases': {}}, 'phase_status': {},
+              'pre_content_state': 'unknown below image API; no cache purge'}
+    sampler = trace = None
+    names = ['pre_pull_setup'] + [f'{kind}_{repository.rsplit("/", 1)[1]}'
+        for repository in portfolio.manifests for kind in ('pre_pull_inspection', 'pull_install', 'markers')] + [
+        'identity_verification', 'stack_health', 'load_1000', 'persistence_recovery',
+        'marked_verification', 'owned_cleanup', 'retained_identity']
+    if under_load:
+        names += ['under_pull_setup', 'under_pull_verification', 'under_pull_cleanup']
+    result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
+    try:
+        _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v2/api'])
+        prepare_warm_engine(engine, run, api_image=api_image)
+        coordinator = ownership.current_coordinator()
+        coordinator['owned_service'] = {'kind': 'local-fixture-registry',
+            'address': server.server_address, 'fd': server.fileno()}
+        sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
+        phase = lambda phase_name: measured_phase(engine, result, phase_name)
+        with phase('whole_workflow'):
+            refs = {}
+            with phase('pre_pull_setup'):
+                engine_transfer_start = len(portfolio.transfers)
+                old_refs = [w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v2/' + name])[1]
+                            for name in ('api', 'postgres', 'redis', 'marked')]
+                retained_before = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
+                save(directory / 'retained-before.json', retained_before)
+            context = w8_under_pull.baseline(engine, directory, run, contract, phase) if under_load else nullcontext(None)
+            with context as load:
+                for repository, digest in portfolio.manifests.items():
+                    short = repository.rsplit('/', 1)[1]
+                    image = receipt['images'][repository]
+                    ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
+                    with phase('pre_pull_inspection_' + short):
+                        missing = engine.sh(['image', 'inspect', image['config']], check=False)
+                        save(directory / (short + '-pre-image.json'), {
+                            'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
+                        require_missing_image(missing)
+                    with phase('pull_install_' + short):
+                        begin = len(portfolio.transfers)
+                        if load is not None and load['process'].poll() is not None:
+                            raise RuntimeError('client finished before pull')
+                        interval = {'name': short}
+                        try:
+                            remaining = load['deadline_monotonic'] - time.monotonic() if load is not None else 240
+                            if remaining <= 0:
+                                raise TimeoutError('client deadline expired before pull')
+                            interval['begin_monotonic'] = time.monotonic()
+                            result.setdefault('first_pull_monotonic', interval['begin_monotonic'])
+                            cp = engine.sh(['pull', ref], timeout=min(240, remaining), check=False)
+                        finally:
+                            interval['end_monotonic'] = time.monotonic()
+                            if load is not None and 'begin_monotonic' in interval:
+                                load['intervals'].append(interval)
+                        transfers = portfolio.transfers[begin:]
+                        result['pulls'].append({'ref': ref, 'exit': cp.returncode,
+                            'stdout': cp.stdout, 'stderr': cp.stderr, 'transfers': transfers})
+                        if cp.returncode:
+                            raise ValueError('pull failed')
+                        require_layers_transferred(image['layers'], portfolio.transfers[engine_transfer_start:])
+                    with phase('markers_' + short):
+                        markers = {item['digest']: item for item in receipt['layers']}
+                        selected = [markers[layer['digest']] for layer in image['layers']]
+                        container = runner.project_name(run, engine.name, 'marker-' + short)
+                        try:
+                            marker_output = engine.sh(['run', '--rm', '--name', container, '--pull=never',
+                                '--label', 'dev.ctrs.campaign.run=' + run, '--entrypoint', 'cat', ref,
+                                *['/' + item['marker'] for item in selected]], timeout=90).stdout
+                            if marker_output != ''.join(receipt['seed_sha256'] + '\n' +
+                                    item['source_diff_id'] + '\n' for item in selected):
+                                raise ValueError('installed marker contents differ')
+                        finally:
+                            ci_jobs.cleanup(engine, container, run)
+                    refs[short] = ref
+                    save(directory / 'result.json', result)
+                result['deployment'] = deploy(engine, refs, layout, directory, run, contract, phase=phase)
+            result['pull_to_health_s'] = result['phase_status']['stack_health']['ended_monotonic'] - result['first_pull_monotonic']
+            if load is not None:
+                result['under_pull_intervals'] = load['intervals']
+            with phase('retained_identity'):
+                retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
+                save(directory / 'retained-after.json', retained_after)
+                if [i['Id'] for i in retained_before] != [i['Id'] for i in retained_after]:
+                    raise ValueError('retained image identity changed')
+            result['correctness'] = True
+    except BaseException:
+        result['errors'].append(traceback.format_exc())
+    finally:
+        finish_engine(result, engine, sampler, trace, directory, stop=False)
+
+    return result
 
 
 def main():
@@ -197,91 +293,11 @@ def main():
             directory = root / name
             directory.mkdir()
             engine = runner.Engine(name, run)
-            result = {'correctness': False, 'qualification_eligible': False, 'errors': [], 'pulls': [],
-                      'resources': {'phases': {}}, 'phase_status': {},
-                      'pre_content_state': 'unknown below image API; no cache purge'}
-            sampler = trace = None
-            names = ['pre_pull_setup'] + [f'{kind}_{repository.rsplit("/", 1)[1]}'
-                for repository in portfolio.manifests for kind in ('pre_pull_inspection', 'pull_install', 'markers')] + [
-                'identity_verification', 'stack_health', 'load_1000', 'persistence_recovery',
-                'marked_verification', 'owned_cleanup', 'retained_identity']
-            if args.under_load:
-                names += ['under_pull_setup', 'under_pull_verification', 'under_pull_cleanup']
-            result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
             try:
                 host_snapshot(directory, 'before')
-                _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v2/api'])
-                prepare_warm_engine(engine, run, api_image=api_image)
-                coordinator = ownership.current_coordinator()
-                coordinator['owned_service'] = {'kind': 'local-fixture-registry',
-                    'address': server.server_address, 'fd': server.fileno()}
-                sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
-                phase = lambda phase_name: measured_phase(engine, result, phase_name)
-                refs = {}
-                with phase('pre_pull_setup'):
-                    engine_transfer_start = len(portfolio.transfers)
-                    old_refs = ['np-fixture-api:' + runner.API_TAG, 'postgres:17-alpine',
-                                'redis:7-alpine', 'np-w5-marked:v2']
-                    retained_before = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
-                    save(directory / 'retained-before.json', retained_before)
-                context = w8_under_pull.baseline(engine, directory, run, contract, phase) if args.under_load else nullcontext(None)
-                with context as load:
-                    for repository, digest in portfolio.manifests.items():
-                        short = repository.rsplit('/', 1)[1]
-                        image = receipt['images'][repository]
-                        ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
-                        with phase('pre_pull_inspection_' + short):
-                            missing = engine.sh(['image', 'inspect', image['config']], check=False)
-                            save(directory / (short + '-pre-image.json'), {
-                                'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
-                            require_missing_image(missing)
-                        with phase('pull_install_' + short):
-                            begin = len(portfolio.transfers)
-                            if load is not None and load['process'].poll() is not None:
-                                raise RuntimeError('client finished before pull')
-                            interval = {'name': short, 'begin_monotonic': time.monotonic()}
-                            try:
-                                remaining = load['deadline_monotonic'] - time.monotonic() if load is not None else 240
-                                if remaining <= 0:
-                                    raise TimeoutError('client deadline expired before pull')
-                                cp = engine.sh(['pull', ref], timeout=min(240, remaining), check=False)
-                            finally:
-                                interval['end_monotonic'] = time.monotonic()
-                                if load is not None:
-                                    load['intervals'].append(interval)
-                            transfers = portfolio.transfers[begin:]
-                            result['pulls'].append({'ref': ref, 'exit': cp.returncode,
-                                'stdout': cp.stdout, 'stderr': cp.stderr, 'transfers': transfers})
-                            if cp.returncode:
-                                raise ValueError('pull failed')
-                            require_layers_transferred(image['layers'], portfolio.transfers[engine_transfer_start:])
-                        with phase('markers_' + short):
-                            markers = {item['digest']: item for item in receipt['layers']}
-                            selected = [markers[layer['digest']] for layer in image['layers']]
-                            container = runner.project_name(run, name, 'marker-' + short)
-                            try:
-                                marker_output = engine.sh(['run', '--rm', '--name', container, '--pull=never',
-                                    '--label', 'dev.ctrs.campaign.run=' + run, '--entrypoint', 'cat', ref,
-                                    *['/' + item['marker'] for item in selected]], timeout=90).stdout
-                                if marker_output != ''.join(receipt['seed_sha256'] + '\n' +
-                                        item['source_diff_id'] + '\n' for item in selected):
-                                    raise ValueError('installed marker contents differ')
-                            finally:
-                                ci_jobs.cleanup(engine, container, run)
-                        refs[short] = ref
-                        save(directory / 'result.json', result)
-                result['deployment'] = deploy(engine, refs, layout, directory, run, contract, phase=phase)
-                with phase('retained_identity'):
-                    retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
-                    save(directory / 'retained-after.json', retained_after)
-                    if [i['Id'] for i in retained_before] != [i['Id'] for i in retained_after]:
-                        raise ValueError('retained image identity changed')
-                result['correctness'] = True
-            except BaseException:
-                result['errors'].append(traceback.format_exc())
-                raise
+                result = measure_engine(engine, directory, run, contract, portfolio, receipt, layout, server, args.under_load)
             finally:
-                finish_engine(result, engine, sampler, trace, directory)
+                engine.stop()
             require_valid_result(result)
             print(name, 'PASS full transfers, exact data and engine resource phases', flush=True)
     finally:
