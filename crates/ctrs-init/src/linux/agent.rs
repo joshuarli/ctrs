@@ -12,7 +12,7 @@ use ctrs_proto::{Exited, LayerStored, MAX_OUTPUT_CHUNK, Msg, Stats, Stream};
 
 use super::container::{self, NetCtx, Paths, Process};
 use super::net::{self, Bridges, Dhcp};
-use super::{layers, meminfo, sys};
+use super::{layers, memory, sys};
 
 /// Input held for a process that is not reading yet. The host sends at most
 /// `INPUT_WINDOW` bytes beyond what `InputConsumed` acknowledged, so a
@@ -707,10 +707,12 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                     return Ok(());
                 }
                 Ok(Msg::StatsRequest) => {
-                    let (mem_total_kib, mem_available_kib) = meminfo();
+                    let memory = memory::Snapshot::read();
+                    let mem_total_kib = memory.total_kib();
+                    let mem_available_kib = memory.available_kib();
                     let agent_rss_kib = self_rss_kib();
                     let (mem_stall, oom_kills) = super::cgroup::memory_trouble();
-                    Msg::Stats(Stats { uptime_ns: sys::boottime_ns(), mem_total_kib, mem_available_kib, agent_rss_kib, mem_used_kib: held_kib(paths, agent_rss_kib), mem_stall, oom_kills })
+                    Msg::Stats(Stats { uptime_ns: sys::boottime_ns(), mem_total_kib, mem_available_kib, agent_rss_kib, mem_used_kib: held_kib(paths, agent_rss_kib, &memory), mem_stall, oom_kills })
                         .encode(&mut out)
                 }
                 Ok(Msg::LayerQuery(digest)) => Msg::LayerStatus(layers::present(&paths.layers, digest)).encode(&mut out),
@@ -1125,13 +1127,15 @@ fn flush_input(procs: &mut HashMap<libc::pid_t, Proc>, fd: RawFd, conn: &mut Fil
     Ok(())
 }
 
-/// This process's resident memory, from /proc/self/statm (in pages).
-/// What ctrs's Linux holds, in KiB. In the VM, where this process is init,
-/// it is the root cgroup: the whole guest. On a Linux host it is the
-/// containers' cgroup and this process; the daemon adds itself.
-fn held_kib(paths: &Paths, agent_rss_kib: u64) -> u64 {
+fn held_kib(paths: &Paths, agent_rss_kib: u64, memory: &memory::Snapshot) -> u64 {
     if std::process::id() == 1 {
-        return super::cgroup::held(std::path::Path::new("/sys/fs/cgroup")).unwrap_or(0) >> 10;
+        return match memory.target_used_kib() {
+            Ok(used) => used,
+            Err(error) => {
+                eprintln!("ctrs-init: {error}; falling back to root cgroup memory accounting");
+                super::cgroup::held(std::path::Path::new("/sys/fs/cgroup")).unwrap_or(0) >> 10
+            }
+        };
     }
     match super::cgroup::held(&paths.cgroup) {
         Some(b) => (b >> 10) + agent_rss_kib,
