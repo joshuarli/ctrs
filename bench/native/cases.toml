@@ -145,16 +145,16 @@ note = "jobs.json owns fixed work and concurrency. --image-ref must name the pin
 [[case]]
 id = "W10"
 family = "failure-recovery"
-title = "interrupt the owned API or database during mixed load, restart, and verify exact persisted writes"
-fixture = "fixtures/w1 + recovery_client.py"
+title = "interrupt the owned API, database, or queue and verify exact recovered work"
+fixture = "fixtures/w1 + recovery_client.py for API/database; fixtures/w4 for queue"
 fixture_version = "w10-v3-exact-recovery"
 status = "implemented"
 metrics = ["recovery_s", "recovered_p99_ms", "recovered_requests_ok", "retries_until_recovery",
            "expected_outage_errors", "unexpected_errors", "acknowledged_writes", "persisted_uncertain_writes"]
 states = ["warm"]
-params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3, interrupt_service = ["api", "db"] }
+params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3, interrupt_service = ["api", "db", "queue"] }
 correctness = ["exact seed and acknowledged writes", "only exact attempted writes may persist after an uncertain acknowledgement", "successful load before and after recovery", "zero unexplained errors", "owned cleanup"]
-note = "Queue and engine interruptions remain open. API and database conditions have separate identities. Report recovery from the start command through the first exact read and p99 from successful load requests that start after that read."
+note = "API and database recovery ends on the first exact read. Queue recovery ends when the persisted FIFO backlog matches the original and its p99 uses a fresh verified batch. Each target has a separate identity. Engine interruption remains open."
 
 [[case]]
 id = "W11"

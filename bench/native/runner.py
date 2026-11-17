@@ -1834,18 +1834,65 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
             rec['resources']['trace'] = _trace_ref(trace)
 
 
+@dataclass(frozen=True)
+class QueueInterruption:
+    down_seconds: float
+    recovery_timeout: float
+
+
+def _recover_queue(engine, queue_id, queue, app, directory, outage):
+    def snapshot(stage, timeout):
+        result = engine.sh(["exec", app, "python", "/app/latency.py", "pending", "--redis-host", queue],
+                           timeout=timeout, check=False)
+        (directory / f"queue-{stage}.json").write_text(result.stdout)
+        if result.returncode:
+            raise ValueError(f"queue snapshot {stage} failed: {(result.stderr or result.stdout)[-400:]}")
+        return json.loads(result.stdout)
+
+    before = snapshot("before", 15)
+    engine.sh(["kill", queue_id], timeout=30)
+    time.sleep(outage.down_seconds)
+    started = time.monotonic()
+    engine.sh(["start", queue_id], timeout=outage.recovery_timeout)
+    retries = 0
+
+    def recovery_remaining():
+        remaining = outage.recovery_timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("W10 queue recovery deadline")
+        return remaining
+
+    while True:
+        remaining = recovery_remaining()
+        ready = engine.sh(["exec", queue_id, "redis-cli", "PING"], timeout=min(5, remaining), check=False)
+        if ready.returncode == 0 and ready.stdout.strip() == "PONG":
+            break
+        retries += 1
+        time.sleep(min(.05, remaining))
+    if snapshot("after", min(15, recovery_remaining())) != before:
+        raise ValueError("recovered queue differs from the acknowledged backlog")
+    elapsed = time.monotonic() - started
+    if elapsed > outage.recovery_timeout:
+        raise TimeoutError("W10 queue recovery deadline")
+    return before, {"recovery_s": elapsed, "retries_until_recovery": retries}
+
+
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
              image_ref: str | None = None, redis_ref: str = W4_IMAGE,
-             cleanup_command=None) -> dict:
+             cleanup_command=None, queue_interruption: QueueInterruption | None = None) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
-    case_id = "W4"
+    case_id = "W10" if queue_interruption is not None else "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
+    if queue_interruption is not None:
+        proj += "-" + os.urandom(4).hex()
     net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
     timed = fixture_version == W4_LATENCY_VERSION
+    if queue_interruption is not None and (not timed or len(workers) != 1):
+        raise ValueError("queue interruption requires one timed W4 worker condition")
     image = image_ref or (W4_LATENCY_IMAGE if timed else "np-w4-events:v2")
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
@@ -1854,9 +1901,19 @@ def trial_w4(ctx, engine: Engine, state: str,
         engine.ensure_up()
         engine.sh(["image", "inspect", image])
         engine.sh(["network", "create", "--label", label, net])
+        mounts = []
+        persistence = ["--appendonly", "no"]
+        if queue_interruption is not None:
+            queue_volume = f"{proj}-redis-data"
+            engine.sh(["volume", "create", "--label", label, queue_volume])
+            owned_volumes.append(queue_volume)
+            mounts = ["-v", f"{queue_volume}:/data"]
+            persistence = ["--appendonly", "yes", "--appendfsync", "always", "--aof-load-truncated", "no"]
         owned_containers.append(queue)
-        engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
-                   redis_ref, "redis-server", "--save", "", "--appendonly", "no"])
+        queue_id = engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
+                              *mounts, redis_ref, "redis-server", "--save", "", *persistence]).stdout.strip()
+        if queue_interruption is not None and not re.fullmatch(r"[0-9a-f]{64}", queue_id):
+            raise ValueError("cannot establish the owned queue container identity")
         owned_containers.append(app)
         engine.sh(["run", "-d", "--name", app, "--label", label, "--network", net,
                    image, "serve", "--redis-host", queue])
@@ -1881,16 +1938,22 @@ def trial_w4(ctx, engine: Engine, state: str,
                 raise TimeoutError("W4 Redis-backed ingest readiness")
             time.sleep(.1)
         sampler, trace = start_sampler(engine, trial_dir)
-        for count in workers:
-            volume = f"{proj}-artifacts-{count}"
+        conditions = ([(workers[0], "backlog"), (workers[0], "recovered")] if queue_interruption is not None
+                      else [(count, str(count)) for count in workers])
+        backlog = recovery = None
+        for count, condition in conditions:
+            volume = f"{proj}-artifacts-{condition}"
             engine.sh(["volume", "create", "--label", label, volume])
             owned_volumes.append(volume)
-            engine.sh(["exec", queue, "redis-cli", "FLUSHALL"])
-            with resource_phase(engine, rec, f"workers_{count}"):
+            if queue_interruption is None:
+                engine.sh(["exec", queue, "redis-cli", "FLUSHALL"])
+            with resource_phase(engine, rec, f"workers_{condition}"):
                 started = time.monotonic()
                 engine.sh(["exec", app, "python", "/app/app.py", "submit", "--url", "http://127.0.0.1:8080"], timeout=120)
                 ingested = time.monotonic()
-                names = [f"{proj}-worker-{count}-{i}" for i in range(count)]
+                if condition == "backlog":
+                    backlog, recovery = _recover_queue(engine, queue_id, queue, app, trial_dir, queue_interruption)
+                names = [f"{proj}-worker-{condition}-{i}" for i in range(count)]
                 owned_containers.extend(names)
                 def work(name):
                     return engine.sh(["run", "--name", name, "--label", label, "--network", net,
@@ -1899,34 +1962,50 @@ def trial_w4(ctx, engine: Engine, state: str,
                 with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
                     outcomes = list(pool.map(work, names))
                 completed = time.monotonic()
-            rec["metrics"][f"workers_{count}_s"] = completed - started
-            rec["metrics"][f"ingest_{count}_s"] = ingested - started
-            rec["metrics"][f"drain_{count}_s"] = completed - ingested
-            verifier = f"{proj}-verify-{count}"
+            rec["metrics"][f"workers_{condition}_s"] = completed - started
+            rec["metrics"][f"ingest_{condition}_s"] = ingested - started
+            rec["metrics"][f"drain_{condition}_s"] = completed - ingested
+            verifier = f"{proj}-verify-{condition}"
             owned_containers.append(verifier)
             verify = engine.sh(["run", "--rm", "--name", verifier, "--label", label, "--network", net,
                                 "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], timeout=180, check=False)
-            (trial_dir / f"workers-{count}.json").write_text(json.dumps({
+            (trial_dir / f"workers-{condition}.json").write_text(json.dumps({
                 "workers": [{"exit": cp.returncode, "stderr": cp.stderr} for cp in outcomes],
                 "verification_exit": verify.returncode, "verification": verify.stdout + verify.stderr}))
             verified = all(cp.returncode == 0 for cp in outcomes) and verify.returncode == 0
             if verified and timed:
-                latencies = sorted(w4_latency.completed_latencies(json.loads(verify.stdout)))
+                receipt = json.loads(verify.stdout)
+                latencies = sorted(w4_latency.completed_latencies(receipt))
+                if condition == "backlog":
+                    consumed = [{key: row[key] for key in ("job", "clock", "enqueued_ns")}
+                                for row in receipt["timings"]]
+                    if consumed != backlog:
+                        raise ValueError("workers did not consume the recovered backlog")
                 for percentile in (95, 99):
                     rank = math.ceil(percentile * len(latencies) / 100)
-                    rec["metrics"][f"queue_p{percentile}_ms_at_{count}"] = latencies[rank - 1] / 1_000_000
-            checks[f"workers_{count}"] = verified and (timed or verify.stdout.strip() == f"verified {w4_fixture.JOBS}")
+                    rec["metrics"][f"queue_p{percentile}_ms_at_{condition}"] = latencies[rank - 1] / 1_000_000
+            checks[f"workers_{condition}"] = verified and (timed or verify.stdout.strip() == f"verified {w4_fixture.JOBS}")
+            if queue_interruption is not None and not checks[f"workers_{condition}"]:
+                raise ValueError(f"W10 {condition} queue work failed verification")
         rec["metrics"].update(W4_FIXED_WORK, fixture_version=fixture_version)
-        rec["correctness"]["ok"] = all(checks.get(f"workers_{n}") for n in workers)
+        if queue_interruption is not None:
+            rec["metrics"].update({key: value * len(conditions) for key, value in W4_FIXED_WORK.items()})
+            rec["metrics"].update(recovery, fixture_version="w10-v3-exact-recovery", interrupt_service="queue",
+                                  recovered_p99_ms=rec["metrics"]["queue_p99_ms_at_recovered"])
+        rec["correctness"]["ok"] = all(checks.values())
     except Exception as exc:
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(str(exc))
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+        try:
+            if sampler is not None:
+                stop_sampler(sampler)
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        except Exception as exc:
+            rec["validation_errors"].append(f"sampler shutdown or receipt: {exc}")
+            rec["correctness"]["ok"] = False
         def cleanup(kind, name, remove):
             try:
                 command = engine.sh if cleanup_command is None else cleanup_command
@@ -2181,8 +2260,13 @@ def trial_w10(ctx, engine: Engine, state: str,
               kill_at: float = 6.0, down_for: float = 3.0, *,
               interrupt_service: str = "api") -> dict:
     """Interrupt one owned service during persistent load and verify recovery."""
+    if interrupt_service == "queue":
+        if not all(math.isfinite(value) and value > 0 for value in (duration, down_for)) or concurrency <= 0:
+            raise ValueError("W10 queue recovery requires positive duration, downtime and worker count")
+        return trial_w4(ctx, engine, state, workers=(concurrency,), fixture_version=W4_LATENCY_VERSION,
+                        queue_interruption=QueueInterruption(down_for, duration))
     if interrupt_service not in ("api", "db"):
-        raise ValueError("W10 interrupt service must be api or db")
+        raise ValueError("W10 interrupt service must be api, db or queue")
     if (not all(math.isfinite(value) for value in (duration, kill_at, down_for, write_ratio))
             or concurrency <= 0 or not 0 <= write_ratio <= 1
             or kill_at <= 0 or down_for <= 0 or duration <= kill_at + down_for):
@@ -3242,7 +3326,7 @@ def main() -> int:
     for command in ("run", "baseline"):
         sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
                                          help="W6 build-cache condition (default: uncached); warm primes the same context")
-        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db"),
+        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue"),
                                          help="W10 owned service to interrupt (default: api)")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")

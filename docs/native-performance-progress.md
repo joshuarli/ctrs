@@ -78,13 +78,13 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, implement W10 queue-service interruption next.
-Use an owned Redis instance with explicit persistence on a named volume.
-Retain the exact accepted job identities across the Redis interruption,
-then require W4's worker and artifact verification to complete the
-same accepted jobs. The [W10 API and database fixture](../bench/native/diagnostics/recovery-client.md#exact-api-and-database-recovery)
-now verifies exact acknowledged writes and post-recovery p99.
-Engine interruption still requires a disposable owned engine.
+If the Mac stays shared, prepare the W10 owned-engine interruption case.
+Use a private ctrs root and keep acknowledged state across engine restart.
+Bind the old and new daemon and VM identities to the same owned artifacts
+and verify exact state after recovery. Leave comparative engine interruption
+open until an isolated OrbStack target is available. The
+[W10 service fixtures](../bench/native/diagnostics/recovery-client.md#queue-service-recovery)
+now cover API, database and persistent queue recovery offline.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)

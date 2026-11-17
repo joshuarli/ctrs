@@ -107,9 +107,26 @@ def completed_latencies(receipt):
     return latencies
 
 
+def pending(host, port, clock_id):
+    redis = app.Redis(host, port)
+    try:
+        items = redis.command('LRANGE', app.QUEUE, 0, app.JOBS)
+    finally:
+        redis.close()
+    records = [json.loads(item) for item in items]
+    if len(records) != app.JOBS:
+        raise ValueError('queued job count differs from submitted work')
+    for job, row in enumerate(records):
+        if (app.validate_batch(row['batch']) != app.batch(job) or row['clock'] != clock_id
+                or type(row['enqueued_ns']) is not int or row['enqueued_ns'] < 0):
+            raise ValueError(f'queued job {job} differs from submitted work')
+    return [{'job': job, 'clock': row['clock'], 'enqueued_ns': row['enqueued_ns']}
+            for job, row in enumerate(records)]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('serve', 'submit', 'worker', 'verify'))
+    parser.add_argument('command', choices=('serve', 'submit', 'worker', 'verify', 'pending'))
     parser.add_argument('--redis-host', default='redis')
     parser.add_argument('--redis-port', type=int, default=6379)
     parser.add_argument('--url', default='http://app:8080')
@@ -124,6 +141,8 @@ def main():
             args.redis_host, args.redis_port, clock_id)).serve_forever()
     elif args.command == 'worker':
         worker(args.redis_host, args.redis_port, args.output_dir, clock_id)
+    elif args.command == 'pending':
+        print(json.dumps(pending(args.redis_host, args.redis_port, clock_id)))
     else:
         print(json.dumps(verify(args.redis_host, args.redis_port, args.output_dir, clock_id)))
 

@@ -61,6 +61,10 @@ class RedisHandler(socketserver.StreamRequestHandler):
                         response = b'$-1\r\n' if item is None else b'$%d\r\n' % len(item) + item + b'\r\n'
                     elif cmd == b'LLEN':
                         response = b':%d\r\n' % len(values)
+                    elif cmd == b'LRANGE':
+                        selected = values[int(args[2]):int(args[3]) + 1]
+                        response = b'*%d\r\n' % len(selected) + b''.join(
+                            b'$%d\r\n' % len(item) + item + b'\r\n' for item in selected)
                     else:
                         response = b'-ERR unsupported\r\n'
             self.wfile.write(response)
@@ -274,6 +278,16 @@ class QueueLatencyTests(unittest.TestCase):
                         http.shutdown()
                         http_thread.join()
                 output = Path(directory)
+                pending = latency.pending(host, port, clock)
+                self.assertEqual([row['job'] for row in pending], list(range(w4.JOBS)))
+                self.assertEqual({row['enqueued_ns'] for row in pending}, {100})
+                with redis.lock:
+                    original = redis.lists[b'npw4:jobs'][0]
+                    redis.lists[b'npw4:jobs'][0] = redis.lists[b'npw4:jobs'][1]
+                with self.assertRaisesRegex(ValueError, 'queued job 0 differs'):
+                    latency.pending(host, port, clock)
+                with redis.lock:
+                    redis.lists[b'npw4:jobs'][0] = original
                 with ThreadPoolExecutor(max_workers=4) as executor:
                     list(executor.map(lambda _: latency.worker(host, port, output, clock, now=lambda: 500), range(4)))
                 receipt = latency.verify(host, port, output, clock)

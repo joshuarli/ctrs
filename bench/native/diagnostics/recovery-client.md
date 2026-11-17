@@ -61,4 +61,33 @@ Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
 test_recovery_trace test_safety test_reporting`. All 64 tests passed,
 including a local HTTP server with simulated database interruption and
 negative persisted-state and response checks. Native API and database
-trials, queue interruption, and owned-engine interruption remain open.
+trials and owned-engine interruption remain open.
+
+## Queue-service recovery
+
+`runner.py run` and `baseline` also accept `--interrupt-service queue`.
+Run `prepare` to build the W4 v3 image. Queue mode uses `--concurrency`
+workers. Here `--duration` is the restart verification deadline in seconds
+and the planned Redis downtime is three seconds. The API/database workload
+mix options apply to those two conditions.
+
+```sh
+python3.14 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
+  --interrupt-service queue --concurrency 4 --pairs 10
+```
+
+The fixture enables Redis AOF with `appendfsync always` and a fresh named
+volume. It accepts all 200 jobs before interrupting the owned Redis
+container. After restart it requires the same FIFO contents, including every
+job payload and enqueue timestamp. Workers then process the recovered jobs.
+Verification checks all 400 artifacts and binds each completion receipt
+to the original backlog. A fresh 200-job batch on the recovered service
+supplies post-recovery p99. The recovered backlog latency is retained
+separately because it includes the outage.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4_lifecycle
+test_w4 test_mixed_cycle test_recovery_client test_recovery_trace
+test_reporting`. All 53 focused tests passed. They include the local RESP
+snapshot, a simulated Redis restart, a corrupted backlog, and owned-volume
+cleanup. Native AOF restart validation and the owned-engine interruption
+condition remain open.
