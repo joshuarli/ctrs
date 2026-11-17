@@ -165,25 +165,30 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** source worker
-`usrw_7611c2e2-6b0f-4dfd-acd0-0a4d58d6de94` is running one scoped correction in
-`.work/wt/np-w2-timer`, branch `perf/w2-timer`, base
-fcf5468d70630609cc4a1ed26849f03afb3cabc7. Initial a0b24b5 is reviewed; consume
-watch session31900, review only correction delta and scope, then independently
-run bounded W2 selection before integrating. Correction bounds queue wait,
-validates events and removes unnecessary test injection parameters. Only v3,
-focused W2 tests and fixture instructions are owned; original v2 is immutable.
+**Exact continuation:** finite native job
+`70b5083650a94878b2641d5498a6afe9` is active under
+`.work/tmp/w2-rate-c128-cpu-20261117/job`. It owns the native workload. First stage
+requires six alternating engine admission legs at C128/2,000req/s/2,000ops; only
+zero misses/errors/incomplete work allows the second-stage six-pair CPU matrix.
+That matrix rotates closed-loop/500/2,000req/s with 10,000ops each, matching seeds
+within pairs and varying between pairs. Source and all relevant inputs are frozen.
+Do not modify them while the job runs. First invalid cell stops the matrix;
+retain partial data and never replace it. Consume terminal status once, verify
+all frozen receipts, then run prepared matrix/analyze.py and decide next cause.
 
-Native timer admission f569a927… is terminal exit0/clean, all95 inputs unchanged.
-All six observations/12,000 exact operations deliver on time with complete
-counters/assets/resource checks. Initial dc8bf1fd… exits1/clean before work on a
-Python kqueue context-manager assumption; preserved separately. No native job
-active. After source acceptance, freeze/launch prepared six-pair C16 CPU matrix
-`.work/tmp/w2-rate-cadence-cpu-20261117/{run,launch}.py`; audit actual config once
-before launch. Three conditions rotate: closed-loop/500/2,000req/s, 10,000ops
-with matching seeds and actual native controls. First invalid cell stops the
-fixed matrix, no replacements. Canonical fixture acceptance remains distinct
-from the private experimental client SHA/version.
+Source worker 7611c2e2… is terminal succeeded. Initial/full correction diffs and
+scope reviewed; parent bounded W2 check passes56 tests/zero skips. Source integrated
+as cae881b/ab78613, original v2 unchanged. C16 native admission f569a927… exits0/
+clean with all12,000 operations on time and95 unchanged inputs. First C16 CPU
+matrix d71f8067… exits1/clean at round1 ctrs 2,000/s: all10,000 operations correct
+but52 late starts, all explained by preceding same-client response queues. It
+stops with three records, no replacement. New C64 control's32ms per-client interval
+exceeds observed21.586ms maximum service. C64 job8570347e… then fails admission
+on final OrbStack leg with1197 response-queued starts, max service47.383ms; all97
+inputs unchanged, exact application/counters/cleanup pass, larger matrix never
+launched. New C128 interval64ms is the final capacity control; no further count
+escalation on failure. All conditions share its partition.
+Canonical v3.2 is used. No product or workstation policy changes, no win claimed.
 
 Timer-only jobs a7d66088… and bf483e8f… are terminal exit0/clean. Mach absolute
 wait retains misses. Kqueue candidate delivers all slots on time across six

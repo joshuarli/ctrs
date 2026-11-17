@@ -229,3 +229,70 @@ matrix with partial data retained and no replacement.
 plan.json SHA-256: `187792107d3447380ea85a658dfab37f47537136fedd8d67b9f1a62867a9b666`.
 
 result.json SHA-256: `7e069604c3da38773e396220d901db0ddf2b65c953fd1546353ad3523b226b41`.
+
+
+## Accepted v3.2 source and native admission
+
+Source worker `usrw_7611c2e2-6b0f-4dfd-acd0-0a4d58d6de94` is terminal succeeded.
+Parent reviewed initial a0b24b5 and one correction, independently ran the bounded
+W2 selection: 56 tests pass/zero skips, including real HTTP work, absolute-slot
+backlog recovery, actual Darwin no-early-return, bounded timer error handling,
+owned queue closure and existing portfolio boundaries. Source is integrated as
+cae881b/ab78613. Original v2 remains unchanged. The only policy change is v3.2's
+Darwin load-generator timer; no product scheduler, wire/disk or VM policy changes.
+Other platforms retain sleep waits. Fixture versions remain separate.
+
+Private native admission `f569a92727cc4e319baacfeda40475e1` under
+`.work/tmp/w2-rate-kqueue-admission-v2-20261117/job` exits 0/clean. All six legs,
+12,000 operations and exact data/counters pass with zero late starts; all 95
+receipts remain unchanged. Initial dc8bf1fd… failed before HTTP on an incorrect
+Python kqueue context-manager assumption. v2 uses explicit close handling; both
+attempts remain preserved. The final source uses try/finally closure, additionally
+checking timer kind, expiration and bounded timeout. Native proof is a separate
+private client SHA/version; canonical v3.2 confirmation follows below.
+
+## First C16 CPU matrix stops on response queues
+
+Job `d71f80674d884b57a98138356379b596` under
+`.work/tmp/w2-rate-cadence-cpu-20261117/job` exits 1/clean after three ctrs cells
+in round 1; no OrbStack or later cells were run, replaced or inferred. All
+30,000 operations are useful, exact and error-free with complete native counters.
+Closed-loop and 500/s cells pass, but 2,000/s has 52 starts beyond 10ms. The
+canonical v3.2 client preserves every deadline/miss and invalidates delivery.
+
+Analysis subtracts the previous same-client scheduled completion from the
+8ms C16 interval: all 52 late starts are explained by response queues, without
+additional unexplained lag. Maximum start lag is 17.140ms, maximum service time
+21.586ms. The first two API cgroup costs are 3,365,976 and 3,109,376 microseconds
+for 10,000 operations. This single unpaired round selects no CPU remedy or win;
+the declared six-round comparison did not complete. Do not treat the invalid
+2,000/s cell as timing evidence or retry the same fixed matrix.
+
+A new predeclared C64 control gives each client a 32ms interval at 2,000/s,
+exceeding the observed maximum service time. It changes the seeded worker
+partition, so all three cadence conditions and both engines use C64; no cross-
+concurrency CPU ratio is a pure engine improvement. One finite two-stage job
+under `.work/tmp/w2-rate-c64-cpu-20261117/` first requires six alternating-engine
+2,000-operation admission legs at 2,000/s. Only a complete zero-miss result can
+start a fresh six-pair matrix, rotating closed-loop/500/2,000/s, 10,000 operations
+each. Seeds match within pairs and vary across pairs. Any first invalid cell
+stops the fixed matrix and remains retained. No threshold is weakened.
+
+
+C64 job `8570347ec95a4cdbae7b4003526bcb76` exits 1/clean at its admission barrier;
+no larger matrix was launched. All six observations/12,000 exact operations and
+counters pass, all 97 frozen inputs remain unchanged. The first five rate legs
+have zero late starts; final OrbStack leg has 1,197, each explained by preceding
+same-client response queues. Its service median/max are 31.366/47.383ms against
+a 32ms strand interval. This does not establish a client timer regression or an
+engine CPU win. The before snapshot captures unrelated Niceforge import work and
+the shared OrbStack helper; simple gate exit0 does not certify exclusivity.
+Perf gate deferred: host busy.
+
+New C128 admission uses a 64ms strand interval against the observed 47.383ms
+maximum service time, with all conditions re-partitioned consistently. Finite
+job `70b5083650a94878b2641d5498a6afe9` under
+`.work/tmp/w2-rate-c128-cpu-20261117/job` preserves the same admission-before-matrix
+barrier and unchanged delivery budget. No further client-count escalation is
+planned on failure; high-rate cost comparison would remain unadmitted while a
+different performance boundary is investigated. No invalid observation is replaced.
