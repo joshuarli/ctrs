@@ -28,6 +28,16 @@ and prevent a pass. Never pool v2 closed-loop or v3 paced records.
 Version v3.1 removes v3's re-pacing after lateness: one delayed response plus
 timer overshoot otherwise permanently shifted later requests. The regression
 fails on v3 (four late slots) and passes on v3.1 (one late slot, still invalid).
+Version v3.2 keeps those absolute slots and uses a Darwin `select.kqueue`
+one-shot `EVFILT_TIMER` wait with `NOTE_NSECONDS` (`0x4`) and `NOTE_CRITICAL`
+(`0x20`). The critical flag requests minimal timer coalescing; it does not
+guarantee a wake time or qualify a speedup. The timer is armed for the remaining
+monotonic interval and the deadline is rechecked after the event. The SDK
+documents `NOTE_ABSOLUTE` deadlines in the `gettimeofday` clock domain, so v3.2
+does not use that flag for monotonic scheduled slots. Other platforms retain
+standard-library sleep waits. v3.1 and v3.2 records are separate fixture
+versions and must not be pooled. The native timer experiment is diagnostic
+evidence only; no speedup is qualified by it.
 
 Example exploratory command, using the runner's existing prepared engine inputs:
 
@@ -43,7 +53,10 @@ inputs, checked API sources, actual signed binary/boot hashes and explicit
 resource settings, as the resource-cycle pilot does. Host timing qualification
 also requires pre/post readiness and genuine exclusivity.
 
-`runner.py check w2` now passes 52 tests with zero skips. Actual local HTTP checks
-verify exact writes/counts and a deliberately delayed server's visible backlog;
-controlled-clock work verifies healthy rate admission without assuming the host
-can always schedule a test within 10ms. The first native proof remains pending.
+`runner.py check w2` covers actual local HTTP counts and exact writes, a
+deliberately delayed server's visible backlog, and controlled-clock pacing that
+verifies later slots retain their absolute deadlines. A Darwin timer check
+asserts only that the wait does not return early; it has no tight upper-time
+assertion. Queue error and empty-result paths verify that owned queues close.
+The native application proof remains separate, and this diagnostic fixture does
+not establish a qualified speedup.

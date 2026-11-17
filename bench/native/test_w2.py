@@ -4,7 +4,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import io
 import json
+import errno
 from pathlib import Path
+import select
+import sys
 import tempfile
 import time
 import threading
@@ -107,7 +110,7 @@ class FixedRateTests(unittest.TestCase):
     def test_paced_exact_work_and_late_backlog(self):
         code, healthy, writes = self.run_load(0)
         self.assertEqual(code, 0 if healthy['offered_rate_valid'] else 1)
-        self.assertEqual(healthy['fixture_version'], 'w2-v3.1-fixed-rate')
+        self.assertEqual(healthy['fixture_version'], 'w2-v3.2-fixed-rate')
         self.assertEqual(healthy['mode'], 'fixed-rate')
         self.assertEqual(healthy['errors'], 0)
         self.assertEqual((healthy['planned_requests'], healthy['offered_requests'],
@@ -141,13 +144,16 @@ class FixedRateTests(unittest.TestCase):
         def sleep(seconds):
             self.assertGreater(seconds, 0)
             clock[0] += seconds + sleep_overshoot
+        wait_until = rate_load._wait_until
+        def controlled_wait(deadline):
+            wait_until(deadline, clock=lambda: clock[0], sleeper=sleep)
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'load.json'
             argv = ['v3.py', '--url', 'http://unused', '--operations', str(len(delays)),
                     '--concurrency', '1', '--request-rate', str(request_rate), '--write-ratio', '0', '--out', str(output)]
             with patch.object(rate_load.sys, 'argv', argv), \
                     patch.object(rate_load.time, 'monotonic', side_effect=lambda: clock[0]), \
-                    patch.object(rate_load.time, 'sleep', side_effect=sleep), \
+                    patch.object(rate_load, '_wait_until', side_effect=controlled_wait), \
                     patch.object(rate_load.http.client, 'HTTPConnection', return_value=connection), \
                     contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit) as result:
@@ -173,6 +179,39 @@ class FixedRateTests(unittest.TestCase):
         self.assertEqual(summary['late_requests'], 1)
         self.assertGreater(summary['slots'][1]['start_lag_ms'], 10)
         self.assertLess(summary['slots'][-1]['start_lag_ms'], 2)
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires Darwin kqueue timers')
+    def test_darwin_timer_waits_until_deadline(self):
+        deadline = time.monotonic() + 0.02
+        rate_load._wait_until(deadline)
+        self.assertGreaterEqual(time.monotonic(), deadline)
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires Darwin kqueue timers')
+    def test_kqueue_timer_errors_and_empty_results_close_queue(self):
+        class Queue:
+            def __init__(self, events):
+                self.events = events
+                self.closed = False
+
+            def control(self, *_):
+                return self.events
+
+            def close(self):
+                self.closed = True
+
+        cases = (
+            ([type('Event', (), {'flags': select.KQ_EV_ERROR, 'data': errno.EINVAL})()],
+             OSError),
+            ([], RuntimeError),
+        )
+        for events, error_type in cases:
+            with self.subTest(error_type=error_type.__name__):
+                queue = Queue(events)
+                with self.assertRaises(error_type):
+                    rate_load._wait_until_kqueue(
+                        time.monotonic() + 1, time.monotonic,
+                        kqueue_factory=lambda: queue)
+                self.assertTrue(queue.closed)
 
     def test_invalid_options_rejected_before_engine_access(self):
         import runner
