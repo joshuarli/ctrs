@@ -2,10 +2,10 @@
 
 ## Status
 
-**ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
+**WINDING DOWN 2026-11-17 — owner requested campaign-winddown. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** verify the integrated readiness slice through the classic
-builder caller with a bounded second-language proof.
+**Current action:** freeze new work, audit owned resources and preserve the
+classic-builder proof as the next slice. No new experiment is authorized during winddown.
 The [readiness evidence](evidence/native-builder-readiness-2026-11-17.md) records
 14 integrated component tests, seven native lifecycle cases and156 correct
 uninstrumented build/run jobs. The diagnostic screen passes. No native job is
