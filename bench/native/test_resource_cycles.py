@@ -84,6 +84,17 @@ class ResourceCycleTests(unittest.TestCase):
                 self.assertIsNone(result['peak_phys_footprint_bytes'])
                 self.assertIsNone(result['cpu_seconds'])
 
+    def test_sampler_failure_invalidates_each_phase_without_losing_its_error(self):
+        manifest, phase = self.phase()
+        error = 'sampler exited before requested stop: exit 7'
+        result = cycles.phase_summary(manifest, phase, [
+            {'record_type': 'sampler_exit', 'error': error, 'exit_status': 7}])
+        self.assertEqual(result['status'], 'unknown')
+        self.assertIn(error, result['errors'])
+        self.assertIsNone(result['cpu_seconds'])
+        self.assertIsNone(result['peak_phys_footprint_bytes'])
+        self.assertEqual(result['interior_sample_count'], 0)
+
     def test_growth_needs_five_cycles_and_keeps_unknown_disk_unknown(self):
         initial = dict(steady_phys_footprint_bytes=1008, allocated_bytes=4096)
         cycle = dict(reclaimed=dict(status='ok', steady_phys_footprint_bytes=1008),

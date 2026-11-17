@@ -732,6 +732,7 @@ def resource_phase(engine, rec, name):
 
 def stop_sampler(sampler: Sampler) -> None:
     proc = sampler.process
+    requested = time.monotonic()
     running = proc.poll() is None
     forced = False
     proc.send_signal(signal.SIGTERM)
@@ -741,10 +742,23 @@ def stop_sampler(sampler: Sampler) -> None:
         forced = True
         proc.kill()
         proc.wait(timeout=5)
-    if not running or proc.returncode != 0 or forced:
-        error = ("sampler exited before requested stop" if not running else
-                 "sampler required forced termination" if forced else
-                 "sampler failed during requested stop")
+    error = None
+    if not running:
+        error = "sampler exited before requested stop"
+    elif forced:
+        error = "sampler required forced termination"
+    elif proc.returncode != 0:
+        error = "sampler failed during requested stop"
+    else:
+        try:
+            receipt = json.loads(collect.stop_receipt_path(sampler.trace).read_text())
+            received = receipt.get('stop_requested_monotonic')
+            if (receipt.get('pid') != proc.pid or receipt.get('sampler_version') != collect.SAMPLER_VERSION
+                    or type(received) not in (int, float) or not requested <= received <= time.monotonic()):
+                raise ValueError('stop receipt does not acknowledge this request')
+        except (OSError, ValueError, AttributeError) as exc:
+            error = f"sampler did not acknowledge requested stop: {exc}"
+    if error is not None:
         with sampler.trace.open("a") as trace:
             trace.write(json.dumps({"record_type": "sampler_exit",
                 "error": f"{error}: exit {proc.returncode}",

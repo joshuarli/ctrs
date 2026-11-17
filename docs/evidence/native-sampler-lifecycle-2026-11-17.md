@@ -21,8 +21,11 @@ that the collector was still running, exited successfully after the request,
 and did not require forced termination. Otherwise it appends the actual terminal
 status/error to the trace. Existing summarization invalidates CPU and physical
 acceptance cells while preserving original samples. Stderr is retained in the
-trial directory. App/VM state, native counter ABI, collector version3, sampling
-period, resource budgets and default builder are unchanged. The runner source
+trial directory. App/VM state, native counter ABI, sampling period, resource budgets and default builder are
+unchanged. Collector version4 adds a stop acknowledgment with its own PID,
+version and signal-receipt monotonic time. The parent requires that receipt
+to match the current stop request. This closes a liveness-check/signal race
+identified by independent review; an observed exit0 alone is insufficient. The runner source
 hash identifies this validation revision; do not pool it with unchecked prefixes.
 
 The expected benefit is rejection of incomplete measurements. No runtime speedup
@@ -32,22 +35,30 @@ even an unexpected early exit0 is incomplete and must fail the resource cells.
 ## Verification
 
 The existing 43 collector/native-counter/ownership/reporter tests pass before
-the change. After the repair, the affected 66-test selection passes with zero
+the change. After the correction, the affected 87-test selection passes with zero
 failures or skips:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=bench/native python3.14 -m unittest \
   test_collect test_macos_counters test_ownership test_reporting \
-  test_mixed_cycle test_w4_lifecycle
+  test_mixed_cycle test_w4_lifecycle test_resource_cycles test_resource_cells \
+  test_registry_variant_pilot test_resource_pilot
 ```
 
 The new lifecycle cases use real short-lived child processes: early exit0,
 early exit7 and graceful requested stop. Partial samples are valid-looking before
 shutdown validation; afterward both early-exit resource cells are unknown and
 the stderr message survives. The graceful control retains both resource totals.
+The deterministic race regression supplies an observed running result followed
+by a successfully exited child; a missing current acknowledgment invalidates
+the prefix. Resource-phase consumers also retain the sampler error and return
+unknown cells, rather than raising a missing-timestamp error or accepting just
+the independent boundaries. The final native proof checks these phase cells.
 No comprehensive suite, application sweep, release build or W11 was run.
 
-Native collection-only proof `sampler-lifecycle-20261117-7dacf707` performs
+Initial collection-only proof `sampler-lifecycle-20261117-7dacf707` uses the
+first repair and remains separate. Final v4 proof
+`sampler-lifecycle-20261117-be72920f` performs
 read-only server-version calls on the existing OrbStack socket. Every case
 identifies both actual processes by PID/kernel start identity and hashes their
 loaded executables. Short operation CPU boundaries are complete. The normal
@@ -82,7 +93,7 @@ import hashlib, json, signal, subprocess, sys, time, uuid
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0, 'bench/native')
-import runner, collect
+import runner, collect, resource_cycles
 root = runner.RESULTS / ('sampler-lifecycle-20261117-' + uuid.uuid4().hex[:8])
 root.mkdir(parents=True)
 def save(path, value):
@@ -122,7 +133,9 @@ for mode in ['requested-stop', 'early-zero', 'early-kill']:
             assert result['cpu_seconds_est'] is not None and result['peak_phys_footprint_bytes'] > 0 and not result['resource_errors'], result
         else:
             assert result['cpu_seconds_est'] is None and result['peak_phys_footprint_bytes'] is None and result['resource_errors'], result
-        row = {'mode': mode, 'sampler_exit': sampler.process.returncode, 'required_processes': len(engine.measurement_identity['required_processes']), 'summary': result, 'phase': phase, 'server_version': json.loads(cp.stdout)}
+        phase_cells = resource_cycles.phase_summary(engine.measurement_identity, phase, [json.loads(line) for line in trace.read_text().splitlines()])
+        assert phase_cells['status'] == ('ok' if mode == 'requested-stop' else 'unknown'), phase_cells
+        row = {'phase_cells': phase_cells, 'mode': mode, 'sampler_exit': sampler.process.returncode, 'required_processes': len(engine.measurement_identity['required_processes']), 'summary': result, 'phase': phase, 'server_version': json.loads(cp.stdout)}
         save(directory / 'result.json', row)
         records.append(row)
         print(mode, 'passed', 'samples=', result['samples'], flush=True)
@@ -134,18 +147,18 @@ save(root / 'result.json', {'status': 'passed', 'records': records, 'timing_elig
 print(root, flush=True)
 ```
 
-Frozen source receipts from the native pilot:
+Frozen source receipts from the final native pilot:
 
 ```json
 {
   "kind": "native read-only sampler lifecycle proof",
   "source_hashes": {
-    "bench/native/runner.py": "660fa7b0466be0a36b9885994d379c881d873c404163303bb6fa96ac8b5f59d0",
-    "bench/native/collect.py": "5312f8cb051bb20a031d1f59fd8e03314c29ecc7f79b5885694db30b151f150c",
+    "bench/native/runner.py": "c8616fac1c63705301e80d7f785d40bc84b48004ec7f5a8d1193a123f96038a7",
+    "bench/native/collect.py": "2d0a3b4f491dee15566405d24f1a9eb40639637de9e3707198aba256691d9fdf",
     "bench/native/macos_counters.py": "aeae97ef33bcb3f86a9f5898967bb8400ee2374c5eac1b8d5a81f74fe0949373",
     "bench/native/ownership.py": "e4bec89a1d9623e72fe6dbb5842942a1284c23ec04360b5817774a682ce11326"
   },
-  "sampler_version": "3-native-rusage",
+  "sampler_version": "4-native-rusage",
   "timing_eligible": false,
   "qualification_eligible": false
 }

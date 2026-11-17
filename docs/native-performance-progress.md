@@ -5,8 +5,8 @@
 **ACTIVE 2026-11-17 — owner requested resume after completed winddown and cleanup.**
 Reviewed `94f19a8` is an ancestor of HEAD; subsequent measurement, fixture and product work is reconciled below.
 Current slice: sampler exit repair passes focused/native checks; review and commit it before another application comparison.
-43 existing tests pass; baseline crash reproduction retains falsely valid partial totals. The affected66-test selection passes after repair.
-The repair invalidates early/forced exits and retains stderr; native normal/early0/SIGKILL cases pass. See [evidence](evidence/native-sampler-lifecycle-2026-11-17.md).
+43 existing tests pass; baseline crash reproduction retains falsely valid partial totals. The affected87-test selection passes after correction.
+Sampler v4 requires a current stop acknowledgment; native normal/early0/SIGKILL and phase-cell cases pass. See [evidence](evidence/native-sampler-lifecycle-2026-11-17.md).
 Last accepted product remains `2f37d02`: readiness reuse, 14 tests, seven lifecycle cases and156 correct diagnostic jobs.
 No product, guest or build-driver default is being changed by this measurement repair.
 **Perf gate deferred: host busy** (current gate exit75: swap threshold); no scored batch or W11 is running.

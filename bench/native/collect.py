@@ -22,7 +22,11 @@ from macos_counters import Counters
 
 FP_PID_RE = re.compile(r"^.*\[(-?\d+)\]:\s+(?:(?:32|64)-bit\s+)?Footprint:")
 FP_PHYS_RE = re.compile(r"^\s*phys_footprint:\s+(\d+)\s*B")
-SAMPLER_VERSION = "3-native-rusage"
+SAMPLER_VERSION = "4-native-rusage"
+
+
+def stop_receipt_path(trace):
+    return Path(trace).with_suffix('.stop.json')
 
 
 def parse_footprint(output: str) -> dict[int, int]:
@@ -151,9 +155,12 @@ def main():
     ownership = json.loads(Path(args.ownership).read_text()) if args.ownership else {}
     required = {p["pid"]: p for p in ownership.get("required_processes", [])}
     stop = False
+    stop_requested = None
 
     def _term(*_):
-        nonlocal stop
+        nonlocal stop, stop_requested
+        if stop_requested is None:
+            stop_requested = time.monotonic()
         stop = True
 
     signal.signal(signal.SIGTERM, _term)
@@ -187,6 +194,9 @@ def main():
             out.write(json.dumps(rec) + "\n")
             out.flush()
             time.sleep(max(0.0, args.interval - (time.monotonic() - tick)))
+    stop_receipt_path(args.out).write_text(json.dumps({
+        "sampler_version": SAMPLER_VERSION, "pid": os.getpid(),
+        "stop_requested_monotonic": stop_requested}) + "\n")
 
 
 if __name__ == "__main__":

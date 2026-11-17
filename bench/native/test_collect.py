@@ -126,6 +126,23 @@ class SamplerLifecycleTests(unittest.TestCase):
                 self.assertTrue(any('before requested stop' in error for error in summary['resource_errors']))
                 self.assertIn('collector ended early', sampler.stderr.read_text())
 
+    def test_exit_between_liveness_check_and_signal_cannot_keep_partial_totals(self):
+        fixture = ResourceTests()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace = root / 'resources.jsonl'
+            trace.write_text(''.join(json.dumps(row) + '\n' for row in
+                                    [fixture.sample(), fixture.sample(3, 12)]))
+            process = runner.subprocess.Popen([runner.sys.executable, '-c', 'raise SystemExit(0)'])
+            self.assertEqual(process.wait(timeout=5), 0)
+            sampler = runner.Sampler(process, trace, root / 'sampler.stderr')
+            with patch.object(process, 'poll', return_value=None):
+                runner.stop_sampler(sampler)
+            summary = runner.summarize_trace(trace)
+            self.assertIsNone(summary['cpu_seconds_est'])
+            self.assertIsNone(summary['peak_phys_footprint_bytes'])
+            self.assertTrue(any('did not acknowledge' in error for error in summary['resource_errors']))
+
     def test_requested_stop_keeps_complete_collector_samples(self):
         fixture = ResourceTests()
         samples = ''.join(json.dumps(row) + '\n' for row in
@@ -135,8 +152,11 @@ class SamplerLifecycleTests(unittest.TestCase):
             collector = root / 'collector.py'
             ready = root / 'ready'
             collector.write_text(
-                'import signal, sys\nfrom pathlib import Path\n'
-                'signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n'
+                'import json, os, signal, sys, time\nfrom pathlib import Path\n'
+                'def stop(*_):\n'
+                f'    Path({str(collect.stop_receipt_path(root / "resources.jsonl"))!r}).write_text(json.dumps({{"pid":os.getpid(),"sampler_version":{collect.SAMPLER_VERSION!r},"stop_requested_monotonic":time.monotonic()}}))\n'
+                '    sys.exit(0)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
                 f'Path(sys.argv[sys.argv.index("--out") + 1]).write_text({samples!r})\n'
                 f'Path({str(ready)!r}).touch()\n'
                 'signal.pause()\n')

@@ -42,8 +42,10 @@ def boundary_sample(manifest, boundary):
 
 def phase_summary(manifest, phase, samples):
     before, after = phase['before'], phase['after']
-    interior = [s for s in samples if before['ended_monotonic'] < s['monotonic'] < after['started_monotonic']]
-    result = cells.interval_summary(manifest, [boundary_sample(manifest, before), *interior,
+    failures = [s for s in samples if s.get('record_type') == 'sampler_exit']
+    interior = [s for s in samples if s.get('record_type') != 'sampler_exit'
+                and before['ended_monotonic'] < s['monotonic'] < after['started_monotonic']]
+    result = cells.interval_summary(manifest, [boundary_sample(manifest, before), *interior, *failures,
                                               boundary_sample(manifest, after)])
     result.update(operation_started_monotonic=phase['operation_started_monotonic'],
                   operation_ended_monotonic=phase['operation_ended_monotonic'],

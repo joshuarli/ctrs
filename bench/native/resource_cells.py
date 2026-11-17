@@ -30,6 +30,8 @@ def interval_summary(manifest, samples):
     records = []
     times = []
     for index, sample in enumerate(samples):
+        if sample.get('error'):
+            errors.append(str(sample['error']))
         t = sample.get('monotonic')
         if not _number(t) or (times and t <= times[-1]):
             errors.append(f'invalid sample time: {index}')
