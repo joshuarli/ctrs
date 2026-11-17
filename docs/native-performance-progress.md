@@ -4,11 +4,11 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** investigate the guest gzip decoder while preserving format
-and extraction limits. The global zstd default is REJECTED by native expansion
-admissiondc9b256585ad4196b90a1685f887cda4: gzip loads the exact2GiB payload,
-zstd fails under the unchanged1GiB expansion floor. Main defaults are unchanged.
-No native job or worker is active. Full qualification remains unproved.
+**Current action:** evaluate the guest gzip decoder while preserving format
+and extraction limits. Native jobf6f723a3470549188d05c302f7c41883 is active under
+`.work/tmp/gzip-decoder-pilot-20261117/job`. Only the initrd decoder changes.
+The global zstd default is rejected and remains unmerged. Main defaults remain
+unchanged. All qualified performance and reliability gates remain open.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
 source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
@@ -169,29 +169,34 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** prepare an isolated guest gzip-backend experiment.
-Current `cargo tree -p ctrs-init --target aarch64-unknown-linux-musl -e features
--i flate2 --offline` proves miniz_oxide is selected. Existing lockedzlib-rs0.6.8
-is cached, Zlib-licensed and already listed in third-party.md, with no active
-normal Rust dependencies. Inspect its exact feature graph before use.
-Create `.work/wt/np-gzip-backend`, build only the baseline guest component with
-`CARGO_ENCODED_RUSTFLAGS="" CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=4 cargo xtask guest`,
-preserve its initrd and compiler/source/size receipts, then change only the guest
-flate2 declaration to disable defaults and enablezlib-rs. Build the same named
-component into separate preserved assets. Do not touch host backend or main assets.
-Compare native gzip deployment/first-use CPU, wall, memory and identical bytes
-with unchanged bounds before selecting it. A macro profile must establish useful
-application cost; a decoder micro result alone cannot promote the backend.
+**Exact continuation:** consume jobf6f723a3470549188d05c302f7c41883, verify all
+frozen inputs, and analyze the fixed six alternating pairs without replacements.
+It imports one frozen real132-test Rust build archive into12 new roots/VMs,
+warms only the common base, then measures first use through exact c63f2e92
+executable/version checks. Use actual native CPU, sampled physical peak and
+owned process closure. Require>=10% median paired engine CPU and>=5% first-use
+improvement, every paired peak<=1.03, unchanged image bytes and all data checks.
+Busy-host timing remains unqualified. No builds or other native work until exit.
 
-Zstd candidatebd35436 remains clean/private in `.work/wt/np-zstd-load`, branch
-perf/zstd-load, never integrated. Reviewerusrw_a9e10b21… is terminal, zero edits,
-no demonstrated source defect, same HEAD in `.work/wt/np-zstd-review`.
-The resource batchf289743d… completes all12 exact native legs and guards but
-retains original exit1 due duplicate cleanup after daemon stop. A separate live
-inspection proves all12 probes/24 image tags absent. `analysis-recovered.json`
-preserves that failure and recovery audit hash. All91 inputs pass. Do not rerun.
-The expansion admission remains exit1/clean, all96 inputs pass, and blocks the
-global zstd default despite the W6 lead. See
+Private manifest-only candidate d0b2a72d136ab1128b5816aa46b242301f1b1db1 is on
+experiment/np-gzip-backend in `.work/wt/np-gzip-backend`. Baseline named guest build
+reproduces accepted6ae4d3ab exactly,4,349,700B. Candidate zlib-rs initrd is
+271c01e81c2ab8a02cc386d3e06fdbcb0019202798cb655db4afa5968236801e,
+4,341,244B (8,456B smaller). Cargo.lock unchanged. Feature graph confirms miniz
+removed from the guest and existing locked zlib-rs0.6.8 selected. Source/SBOM
+already includes its Zlib license. Same compiler version and guest sources.
+Assets under `.work/tmp/gzip-backend-assets/{baseline,zlib}` point at preserved
+copies in the private tree. Do not rebuild or overwrite them during the job.
+Source image prep038763a4279a4bc592e2e27a9bc62137 exits0/clean,132 tests and exact
+artifact pass, all90 receipts recheck. Archive/result under
+`.work/tmp/gzip-decoder-image-prep-20261117/`. Pilot creates short owned roots
+`.work/tmp/gzd-<pair>-<condition>`, retains their contents, and cleans containers
+before stopping each daemon. No global prune or user state modification.
+
+After native lead, run only affected Linux guest layer/decoder contract checks
+and independent source review before integration, plus representative W8 proof.
+If the source or native guards fail, discard the manifest change. Keep the
+rejected output-codec defaultbd35436 unmerged. See
 [build evidence](evidence/native-build-boundaries-2026-11-16.md).
 
 Python capability admission and API capture are complete. The integrated
@@ -209,7 +214,8 @@ active, but both conditions fail the unchanged16MiB native return budget.
 All100 preemption and93 resource receipts pass before further source edits.
 Default quiet120/sleep60 and all product policies remain unchanged.
 The timer/uprobe checkouts are retired; branches and private/live assets remain.
-All workers are terminal. No W11 soak or native measurement job is running.
+All workers are terminal. No W11 soak is running. The gzip decoder pilot owns
+the native lane.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
 Six admission legs pass; larger matrix stops at round1 OrbStack2,000/s with5270
