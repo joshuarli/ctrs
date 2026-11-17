@@ -8,6 +8,18 @@ import time
 
 COUNTERS = ('cputime_s', 'user_cpu_s', 'system_cpu_s', 'pkg_idle_wakeups',
             'interrupt_wakeups', 'footprint_bytes')
+ENGINE_MEMORY_RATIO_LIMIT = 1.01
+
+
+def engine_budget_matches(expected, actual):
+    """Require known equal CPU counts and guest MemTotal within the declared 1% ratio."""
+    if any(not isinstance(value, dict) for value in (expected, actual)):
+        return False
+    if any(type(value.get(key)) is not int or value[key] <= 0
+           for value in (expected, actual) for key in ('ncpu', 'mem_total_bytes')):
+        return False
+    memory = [value['mem_total_bytes'] for value in (expected, actual)]
+    return expected['ncpu'] == actual['ncpu'] and max(memory) / min(memory) <= ENGINE_MEMORY_RATIO_LIMIT
 
 
 def _number(value):

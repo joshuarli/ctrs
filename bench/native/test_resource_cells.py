@@ -8,6 +8,15 @@ import resource_cells as cells
 
 
 class IntervalTests(unittest.TestCase):
+    def test_resource_match_requires_known_cpu_and_memory_envelopes(self):
+        expected = {'ncpu': 2, 'mem_total_bytes': 10000}
+        self.assertTrue(cells.engine_budget_matches(expected, expected))
+        self.assertTrue(cells.engine_budget_matches(expected, expected | {'mem_total_bytes': 10100}))
+        for actual in (None, {}, expected | {'ncpu': 3}, expected | {'ncpu': True},
+                       expected | {'mem_total_bytes': 10101}, expected | {'mem_total_bytes': 0}):
+            with self.subTest(actual=actual):
+                self.assertFalse(cells.engine_budget_matches(expected, actual))
+
     def setUp(self):
         self.manifest = {'engine': 'ctrs', 'method': 'owned socket and disk',
                          'required_processes': [

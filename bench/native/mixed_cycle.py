@@ -124,7 +124,7 @@ def cleanup_cycle_items(engine, db, writes, directory):
 
 
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
-        cleanup_deadline=None, expected_boot_assets=None, observation=None):
+        cleanup_deadline=None, expected_boot_assets=None, observation=None, expected_resources=None):
     validate_refs(refs)
     if observation is not None:
         mixed_resources.plan(observation, {})
@@ -188,6 +188,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                    '--entrypoint', 'node', refs['marked'], '-e', 'process.exit(0)'], timeout=90)
         identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
         save(directory / 'running-engine-before.json', identity)
+        rec['running_identity'] = identity
         if observation is not None:
             observation_plan = mixed_resources.plan(observation, identity)
             save(directory / 'resource-plan.json', observation_plan)
@@ -198,6 +199,9 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                       for process in identity['required_processes'] if process['role'] == 'vm' for asset in process['boot_assets']}
             if actual != expected_boot_assets:
                 raise ValueError('running VM boot assets differ from frozen inputs')
+        rec['resources']['engine'] = runner.safe_engine_info(engine)
+        if expected_resources is not None and not runner.resource_cells.engine_budget_matches(expected_resources, rec['resources']['engine']):
+            raise ValueError('running engine resource envelope differs from the freeze or is unknown')
         for name, ref in refs.items():
             info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
             pin = WORKER['worker'] if name == 'worker' else PIN['images']['np-v5/' + name]
@@ -205,6 +209,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 raise ValueError('running image identity differs from pin: ' + name)
             save(directory / (name + '-image.json'), info)
         sampler, trace = runner.start_sampler(engine, directory)
+        rec['resources']['sampler_version'] = runner.collect.SAMPLER_VERSION
         with runner.resource_phase(engine, rec, 'setup'):
             compose(['up', '-d', '--no-build', '--pull', 'never'])
             if runner.wait_health(base, 60)[0] is None:
