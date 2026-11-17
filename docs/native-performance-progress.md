@@ -14,8 +14,9 @@ inconclusive. The profile reproduced the `wake_up_q+0x64` concentration
 with no validity errors, while its profiler overhead remained unresolved.
 Capacity-matched fixed work verified all 500,000 operations. The median
 paired API system CPU ratio was 2.020 at 17 vCPUs on both sides.
-The ctrs-only vCPU diagnostic `92611768ac9d4895ae440ce893cf05df`
-owns the measured host.
+The ctrs-only comparison verified all 500,000 operations and put the
+17-vCPU versus 2-vCPU API system CPU ratio at 1.736. Topology profile
+`69619497509b458d9ce16c406dbfcaa2` owns the measured host.
 
 ## Accepted and verified
 
@@ -46,17 +47,16 @@ owns the measured host.
 
 ## Exact next action
 
-Read the terminal status for job `92611768ac9d4895ae440ce893cf05df`
-at `.work/tmp/w2-ctrs-vcpu-20261117/job/status.json`. Estimate the effect of
-2 versus 17 vCPUs on guest API system CPU per successful request. The
-comparison uses separate private ctrs roots with the same signed executable,
-boot assets, 8,192 MiB configured memory, common pinned portfolio and
-boundary-only measurements. Predeclared work is five alternating pairs
-of 50,000 operations at concurrency 8, write probability 0.3 and seed
-`7 + block`. Confirm guest envelopes and matching exact writes. A
-17-vCPU versus 2-vCPU paired 95% lower bound above 1.10 for system CPU
-will motivate a separate topology profile. Preserve total API CPU and tails.
-Use matched-generation profiling before attributing cost to a kernel leaf.
+Read the terminal status for profile `69619497509b458d9ce16c406dbfcaa2`
+at `.work/tmp/w2-vcpu-profile-20261117/job/status.json`. It compares ctrs
+at 2 and 17 vCPUs at the same 8,192 MiB ceiling, replaying 50,000 requests
+at concurrency 8 and seed 8 in each profiler-off and profiler-on cell.
+Recheck frozen inputs, exact writes, actual guest capacity, loaded boot
+assets and both profile traces. Compare API system task ticks and the
+`wake_up_q` leaf by instruction. Keep timer overhead and busy-host limits
+with the result. Then run the parked W11 v4 native observation proof in
+ready queue item 2. A separate W2 invocation-count experiment can test
+whether wake-call frequency changed without probing the exclusive sequence.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).

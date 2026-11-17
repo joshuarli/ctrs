@@ -237,6 +237,41 @@ ceiling from observed OrbStack MemTotal shifted by 20, plus
 Require matching reported vCPU counts and MemTotal within 1% both before
 and after each workload.
 
+## ctrs vCPU count
+
+Job `92611768ac9d4895ae440ce893cf05df` exited 0 and verified both private
+engines stopped. All 160 frozen inputs rechecked. Five alternating
+boundary-only pairs each verified 50,000 requests per cell and identical
+acknowledged writes. Both sides used the same ctrs executable, boot assets,
+images and 8,192 MiB configured memory. The 2-vCPU guest reported
+8,408,772,608 bytes of MemTotal and the 17-vCPU guest 8,407,035,904 bytes.
+
+| Metric | 17 vCPUs median [range] | 2 vCPUs median [range] | Paired cost ratio [95% interval] |
+| --- | ---: | ---: | ---: |
+| API CPU, µs/op | 376.1 [356.0–403.3] | 279.4 [268.9–359.2] | 1.301 [1.086–1.500] |
+| API user, µs/op | 271.0 [254.4–289.5] | 218.8 [210.2–282.9] | 1.199 [0.996–1.377] |
+| API system, µs/op | 106.5 [101.6–113.8] | 60.6 [58.6–76.3] | 1.736 [1.422–1.942] |
+| Successful requests/s | 2,549 [2,332–2,718] | 3,180 [2,421–3,327] | 1.224 [0.979–1.426] |
+| p99, ms | 6.49 [5.77–9.41] | 5.56 [4.92–8.57] | 1.110 [0.757–1.913] |
+
+Ratios divide 17 vCPUs by 2 vCPUs for costs, and reverse for throughput.
+The predeclared 1.10 lower bound for system CPU passed. This associates
+the additional API system CPU with higher guest vCPU count in this
+cohort. Host throughput and tail inference remain inconclusive.
+The CPU result motivates an aligned profile to distinguish observed
+wake-path changes from other scheduler and kernel work.
+
+Reproduce using two fresh ctrs roots and the same pinned assets. Set
+`CTRS_MEMORY_MIB=8192` for both private daemons. Set `CTRS_CPUS=2` and
+`CTRS_CPUS=17` respectively before spawning them. Use the capacity-matched
+five-block fixed-work recipe, substituting the two ctrs daemons and
+checking their vCPU counts before and after each trial.
+
+Raw trial SHA-256
+`7b88cbfc71d9ea724ff831ab8b83f1a54617b2c2f3acd863aa6df9e0f8f105b7`.
+Job status SHA-256
+`88588bda0251cb8251a7602cc5c31439a20bc85dc3e072cb2753022169b5cb2d`.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
