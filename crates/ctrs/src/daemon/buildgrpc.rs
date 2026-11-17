@@ -684,8 +684,14 @@ fn rewrite_solve(msg: &[u8], engine: &Arc<Engine>) -> Option<(Vec<u8>, String, V
     let repo = super::mirror::push_repo()?;
     let push_ref = super::mirror::push_ref(engine, &repo)?;
 
-    // New Exporter: type=image, name=<push ref>, push=true, plus the
-    // harmless carry-over attrs.
+    let em = mirror_exporter(&push_ref, &attrs);
+
+    let ei = fields.iter().position(|f| std::ptr::eq(f, e))?;
+    Some((rebuild_solve(msg, &fields, ei, &em)?, repo, tags))
+}
+
+fn mirror_exporter(push_ref: &str, attrs: &[(String, String)]) -> Vec<u8> {
+    let get = |key: &str| attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     let mut em = Vec::new();
     put_bytes(&mut em, 1, b"image");
     let mut am = Vec::new();
@@ -695,18 +701,20 @@ fn rewrite_solve(msg: &[u8], engine: &Arc<Engine>) -> Option<(Vec<u8>, String, V
         put_bytes(&mut e, 2, v.as_bytes());
         put_bytes(am, 2, &e);
     };
-    put_attr("name", &push_ref, &mut am);
+    put_attr("name", push_ref, &mut am);
     put_attr("push", "true", &mut am);
     for k in CARRY_ATTRS {
         if let Some(v) = get(k) {
             put_attr(k, v, &mut am);
         }
     }
+    if !attrs.iter().any(|(key, _)| matches!(key.as_str(), "compression" | "compression-level" | "force-compression" | "oci-mediatypes")) {
+        for (key, value) in super::builder::LOAD_COMPRESSION {
+            put_attr(key, value, &mut am);
+        }
+    }
     em.extend_from_slice(&am);
-
-    // The exporter field's index within `fields`.
-    let ei = fields.iter().position(|f| std::ptr::eq(f, e))?;
-    Some((rebuild_solve(msg, &fields, ei, &em)?, repo, tags))
+    em
 }
 
 /// Rebuilds the message replacing field `ei`'s content with `em`,
@@ -1373,4 +1381,46 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
     let _ = sender.join();
     let _ = be.shutdown(Shutdown::Both);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exporter(attrs: &[(&str, &str)]) -> (String, Vec<(String, String)>) {
+        let attrs = attrs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect::<Vec<_>>();
+        parse_exporter(&mirror_exporter("mirror.local/push/build:latest", &attrs)).unwrap()
+    }
+
+    #[test]
+    fn default_load_uses_zstd_without_recompressing_shared_layers() {
+        let (kind, attrs) = exporter(&[("name", "app:latest"), ("rewrite-timestamp", "true")]);
+        assert_eq!(kind, "image");
+        assert_eq!(attrs, vec![
+            ("name".into(), "mirror.local/push/build:latest".into()),
+            ("push".into(), "true".into()),
+            ("rewrite-timestamp".into(), "true".into()),
+            ("compression".into(), "zstd".into()),
+            ("compression-level".into(), "3".into()),
+        ]);
+    }
+
+    #[test]
+    fn explicit_export_controls_preserve_buildkit_compression_policy() {
+        for controls in [
+            vec![("compression", "gzip"), ("compression-level", "4")],
+            vec![("compression", "uncompressed")],
+            vec![("compression-level", "9")],
+            vec![("force-compression", "false")],
+            vec![("force-compression", "true")],
+            vec![("oci-mediatypes", "false")],
+            vec![("oci-mediatypes", "true")],
+        ] {
+            let (_, attrs) = exporter(&controls);
+            assert_eq!(attrs.len(), controls.len() + 2);
+            for (key, value) in controls {
+                assert_eq!(attrs.iter().filter(|(k, _)| k == key).collect::<Vec<_>>(), vec![&(key.into(), value.into())]);
+            }
+        }
+    }
 }

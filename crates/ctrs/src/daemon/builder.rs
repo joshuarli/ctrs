@@ -40,6 +40,8 @@ const PINNED: &str = "moby/buildkit@sha256:aa632b921ef07411d2cb77292cd34213d4f7b
 const PINNED_VERSION: &str = "v0.35.0";
 const PINNED_EMULATOR: &str = "QEMU 10.2.3";
 
+pub(super) const LOAD_COMPRESSION: &[(&str, &str)] = &[("compression", "zstd"), ("compression-level", "3")];
+
 struct ManagedIdentity {
     os_arch: &'static str,
     index: &'static str,
@@ -1149,7 +1151,16 @@ impl Options {
         // way, since there may be several.
         a.push("--output".into());
         a.push(match push {
-            Some(r) => format!("type=image,\"name={r}\",push=true"),
+            Some(r) => {
+                let mut output = format!("type=image,\"name={r}\",push=true");
+                for (key, value) in LOAD_COMPRESSION {
+                    output.push(',');
+                    output.push_str(key);
+                    output.push('=');
+                    output.push_str(value);
+                }
+                output
+            },
             None if self.tags.is_empty() => "type=docker,dest=-".into(),
             None => format!("type=docker,\"name={}\",dest=-", self.tags.join(",")),
         });
@@ -1743,6 +1754,14 @@ mod tests {
 
     fn req(query: &[(&str, &str)]) -> Request {
         Request::internal("POST", "/build", query, Vec::new())
+    }
+
+    #[test]
+    fn mirror_build_uses_default_load_compression() {
+        let options = Options::parse(&req(&[("t", "app")])).unwrap();
+        let args = options.argv("/tmp/ctrs-build/x", Some("mirror.local/push/build:latest"));
+        let output = args.windows(2).find(|pair| pair[0] == "--output").unwrap();
+        assert_eq!(output[1], "type=image,\"name=mirror.local/push/build:latest\",push=true,compression=zstd,compression-level=3");
     }
 
     #[test]
