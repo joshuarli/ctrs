@@ -157,8 +157,24 @@ class WorkloadSafetyTests(unittest.TestCase):
                 "/src/target/release/hyperfine": "fcfbf31a7d309a79dba362d75310ead3eafc35d984248a197f5cfbd2dce09c3f",
                 "/src/libz.a": "6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b",
             }
-            engine.sh.side_effect = lambda args, **kw: completed(
-                f"{probe_hashes[args[-1]]}  {args[-1]}\n" if args[0] == "run" else "")
+            solves = []
+            emit_reuse = True
+
+            def run_command(args, **kw):
+                if args[:2] == ["buildx", "build"]:
+                    context = Path(args[args.index("-f") + 1]).parent
+                    instruction = (context / "Dockerfile").read_text().strip().splitlines()[-1]
+                    cached = emit_reuse and "--no-cache" not in args
+                    vertex = {"name": "[stage-0 5/5] " + instruction,
+                              "digest": "sha256:" + "f" * 64,
+                              "started": "2026-11-17T12:00:00Z", "completed": "2026-11-17T12:00:02Z"}
+                    if cached:
+                        vertex["cached"] = True
+                    solves.append((context.name, args, (context / "stamp.txt").read_bytes()))
+                    return subprocess.CompletedProcess(args, 0, "", json.dumps({"vertexes": [vertex]}))
+                return completed(f"{probe_hashes[args[-1]]}  {args[-1]}\n" if args[0] == "run" else "")
+
+            engine.sh.side_effect = run_command
             fixture = Path(tmp) / "source"
             (fixture / "rust").mkdir(parents=True)
             shutil.copy(runner.W6_DIR / "Dockerfile", fixture / "Dockerfile")
@@ -172,20 +188,50 @@ class WorkloadSafetyTests(unittest.TestCase):
             rust_pin["sha256"] = hashlib.sha256(b"rust asset").hexdigest()
             (fixture / "zlib-1.3.1.tar.gz").write_bytes(b"zlib asset")
             (fixture / "hyperfine-2.0.0.tar.gz").write_bytes(b"rust asset")
+            @contextlib.contextmanager
+            def resource_phase(engine, record, name):
+                yield
+                record["resources"].setdefault("phases", {})[name] = {"operation_wall_seconds": 3.5}
+
+            def start_sampler(*args):
+                solves.append(("sampling", None, None))
+                return None, None
+
             with patch.object(runner, "W6_DIR", fixture), \
                     patch.object(runner, "W6_ZLIB_SOURCE", zlib_pin), \
-                    patch.object(runner, "W6_RUST_SOURCE", rust_pin):
+                    patch.object(runner, "W6_RUST_SOURCE", rust_pin), \
+                    patch.object(runner, "resource_phase", resource_phase), \
+                    patch.object(runner, "start_sampler", return_value=(None, None)) as sampler:
                 rec = runner.trial_w6(ctx, engine, "warm")
+                good_hash = probe_hashes["/src/target/release/hyperfine"]
                 probe_hashes["/src/target/release/hyperfine"] = "a" * 64
                 bad_artifact = runner.trial_w6(ctx, engine, "warm")
+                probe_hashes["/src/target/release/hyperfine"] = good_hash
+                sampler.side_effect = start_sampler
+                warm_build = runner.trial_w6(ctx, engine, "warm", build_cache="warm")
+                emit_reuse = False
+                missed_cache = runner.trial_w6(ctx, engine, "warm", build_cache="warm")
             self.assertTrue(rec["correctness"]["ok"], rec)
             self.assertFalse(bad_artifact["correctness"]["ok"], bad_artifact)
             self.assertFalse(bad_artifact["correctness"]["checks"]["artifact_rust"])
             self.assertTrue(bad_artifact["correctness"]["checks"]["artifact_zlib"])
             builds = [call.args[0] for call in engine.sh.call_args_list
                       if call.args[0][:2] == ["buildx", "build"]]
-            self.assertEqual(len(builds), 4)
-            self.assertTrue(all("--no-cache" in b for b in builds))
+            self.assertEqual(len(builds), 12)
+            self.assertTrue(all("--progress=rawjson" in b for b in builds))
+            self.assertTrue(all(b[b.index("--platform") + 1] == "linux/arm64" for b in builds))
+            self.assertTrue(all("--no-cache" in b for b in builds[:4]))
+            self.assertEqual([step[0] for step in solves[4:9]],
+                             ["ctx-rust", "ctx-zlib", "sampling", "ctx-rust", "ctx-zlib"])
+            for prime, timed in zip(solves[4:6], solves[7:9], strict=True):
+                self.assertEqual([arg for arg in prime[1] if arg != "--no-cache"], timed[1])
+                self.assertEqual(prime[2], timed[2])
+            self.assertTrue(warm_build["correctness"]["ok"], warm_build)
+            self.assertEqual(warm_build["metrics"]["cache_mode"], "primed-build-cache")
+            self.assertEqual(warm_build["metrics"]["build_rust_s"], 3.5)
+            self.assertNotIn("prime_rust", warm_build["resources"]["phases"])
+            self.assertFalse(missed_cache["correctness"]["ok"], missed_cache)
+            self.assertIn("did not prove cached=True", missed_cache["validation_errors"][0])
             base = Path(tmp) / "orbstack/W6"
             for name in ("ctx-rust", "ctx-zlib"):
                 self.assertEqual((base / name / "stamp.txt").read_text(),
@@ -193,6 +239,15 @@ class WorkloadSafetyTests(unittest.TestCase):
             first = runner.workload_id("run", "W6", 1, 1)
             self.assertEqual(first, runner.workload_id("run", "W6", 1, 2))
             self.assertNotEqual(first, runner.workload_id("run", "W6", 2, 3))
+
+    def test_w6_compile_receipt_rejects_ambiguous_missing_and_failed_steps(self):
+        instruction = "RUN compile"
+        vertex = {"name": "[stage-0 5/5] " + instruction, "digest": "sha256:" + "a" * 64,
+                  "started": "2026-11-17T12:00:00Z", "completed": "2026-11-17T12:00:02Z"}
+        for vertices in ([], [dict(vertex, error="test failed")], [dict(vertex, completed=None)],
+                         [dict(vertex, cached=True)], [vertex, dict(vertex, digest="sha256:" + "b" * 64)]):
+            with self.subTest(vertices=vertices), self.assertRaises(ValueError):
+                runner._w6_compile_vertex(json.dumps({"vertexes": vertices}), instruction, cached=False)
 
     def test_missing_w6_asset_fails_before_starting_engine(self):
         with tempfile.TemporaryDirectory() as tmp:

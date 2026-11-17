@@ -29,7 +29,8 @@ intervals exceeded the 5% acceptance band. W8 retained pin checks are
 integrated at `4c07c4e`. The parked qualification gate at `c068fba`
 requires 349 named cells across W1–W11. Complete mixed-work counts remain
 mandatory in each W11 cycle. The W6 runner checks both compiled ARM64
-artifact hashes against `assets.lock`.
+artifact hashes against `assets.lock` and checks compile-step cache evidence
+for uncached and warm builds.
 The 19 Hz comparison completed all 12 exact trials and captured all API
 threads. Its lower rate did not reduce observed API CPU or wall in the
 four matched rate comparisons. `4bf9107` prepares a separate 49 Hz
@@ -77,12 +78,13 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, implement the W6 warm-build condition next. The
-current W6 `warm` state describes an already running engine with retained
-base images and an uncached build. Add a separate build-cache condition
-that primes an identical context outside the timed phase and verifies the
-resulting ARM64 artifacts against the new pins. Preserve the uncached
-default and keep default-driver and identical-builder controls distinct.
+If the Mac stays shared, implement W9 job completion tails next. Capture
+each job's terminal monotonic clock relative to the batch dispatch inside
+`ci_jobs.run_condition`. Keep the receipt for failed jobs and report
+successful jobs per minute and p95 per concurrency only after all 16
+jobs and their exact outputs pass.
+The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
+is ready for native validation in the next eligible window.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the
 contract, fixture versions and evidence are reviewed.

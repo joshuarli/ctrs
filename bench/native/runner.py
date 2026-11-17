@@ -1576,15 +1576,39 @@ def trial_w7(ctx, engine: Engine, state: str,
             rec["resources"]["trace"] = _trace_ref(trace)
 
 
+def _w6_compile_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
+    matches = {}
+    for line in progress.splitlines():
+        if not line.lstrip().startswith("{"):
+            continue
+        for vertex in json.loads(line).get("vertexes", ()):
+            name = vertex.get("name", "")
+            if name != instruction and not name.endswith("] " + instruction):
+                continue
+            if vertex.get("error"):
+                raise ValueError(f"compile vertex failed: {vertex['error']}")
+            if vertex.get("completed"):
+                digest = vertex.get("digest", "")
+                if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                    raise ValueError("completed compile vertex has no valid digest")
+                if vertex.get("cached", False) is not cached or (not cached and not vertex.get("started")):
+                    raise ValueError(f"compile and test vertex did not prove cached={cached}")
+                matches[digest] = vertex
+    if len(matches) != 1:
+        raise ValueError("expected exactly one completed compile and test vertex")
+    return next(iter(matches.values()))
+
+
 def trial_w6(ctx, engine: Engine, state: str,
-             driver: str = "default") -> dict:
+             driver: str = "default", *, build_cache: str = "uncached") -> dict:
     """W6: compiled-app CI — two timed `docker build`s per trial on
     pinned upstream sources: hyperfine 2.0.0 (Rust: cargo build
     --release --locked + cargo test on rust:1.100.0-bookworm) and zlib
     1.3.1 (C: configure -> make -j -> make check on
     gcc:14.2.0-bookworm). Each build ends with a run probe that sha256s
     the produced binary/lib. Base images are pulled untimed in setup if
-    absent (prepare also pulls them). Artifact digests must match assets.lock."""
+    absent (prepare also pulls them). Warm builds prime the same context
+    before sampling. Artifact digests must match assets.lock."""
     case_id = "W6"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
@@ -1593,6 +1617,8 @@ def trial_w6(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     sampler = trace = None
     try:
+        if build_cache not in ("uncached", "warm"):
+            raise ValueError("W6 build cache must be uncached or warm")
         with (BENCH / "assets.lock").open("rb") as lock:
             artifact_pins = tomllib.load(lock)["artifacts"]["w6"]
         zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
@@ -1606,34 +1632,66 @@ def trial_w6(ctx, engine: Engine, state: str,
                            check=False)
             if cp.returncode != 0:
                 engine.sh(["pull", image], timeout=900)
-        sampler, trace = start_sampler(engine, trial_dir)
-
-        def build_one(name: str, dockerfile: Path,
-                      sources: list[tuple[Path, str]],
-                      tag: str, probe: list[str],
-                      metric: str, timeout: float = 1800) -> None:
-            # Per-trial context: stamp.txt busts the layer cache so every
-            # timed build is a real compile, not a cache hit.
+        builds = (
+            ("rust", W6_DIR / "rust" / "Dockerfile", rust_src,
+             W6_RUST_SOURCE["file"], tag_rust, "/src/target/release/hyperfine"),
+            ("zlib", W6_DIR / "Dockerfile", zlib_src,
+             W6_ZLIB_SOURCE["file"], tag_zlib, "/src/libz.a"),
+        )
+        contexts = {}
+        for name, dockerfile, source, archive, _, _ in builds:
             ctx_dir = trial_dir / f"ctx-{name}"
             ctx_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy(dockerfile, ctx_dir / "Dockerfile")
-            for src, fname in sources:
-                shutil.copy(src, ctx_dir / fname)
+            shutil.copy(source, ctx_dir / archive)
             (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
-            tp = time.monotonic()
-            build = engine.sh(
-                build_args(engine, driver, ["--no-cache", "-q", "-t", tag,
-                                            "-f", str(ctx_dir / "Dockerfile"),
-                                            str(ctx_dir)]),
-                timeout=timeout, check=False)
-            rec["metrics"][metric] = round(time.monotonic() - tp, 3)
-            checks[f"build_{name}"] = build.returncode == 0
-            if build.returncode != 0:
-                rec["validation_errors"].append(
-                    f"{name} build rc={build.returncode}: "
-                    f"{(build.stderr or build.stdout)[-400:]}")
-                return
-            run = engine.sh(["run", "--rm", tag, *probe],
+            instruction = (ctx_dir / "Dockerfile").read_text().strip().splitlines()[-1]
+            if not instruction.startswith("RUN "):
+                raise ValueError(f"{name} Dockerfile must end with the compile and test instruction")
+            contexts[name] = ctx_dir, instruction
+
+        def solve(name, tag, *, cached):
+            ctx_dir, _ = contexts[name]
+            flags = [] if cached else ["--no-cache"]
+            return engine.sh(build_args(engine, driver, [
+                *flags, "--progress=rawjson", "--platform", "linux/arm64",
+                "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
+            ]), timeout=1800, check=False)
+
+        def verify_solve(name, phase, result, *, cached):
+            (trial_dir / f"{name}-{phase}.stdout").write_text(result.stdout)
+            (trial_dir / f"{name}-{phase}.stderr").write_text(result.stderr)
+            try:
+                if result.returncode:
+                    raise ValueError(f"build exited {result.returncode}: {(result.stderr or result.stdout)[-400:]}")
+                _, instruction = contexts[name]
+                vertex = _w6_compile_vertex(result.stderr, instruction, cached=cached)
+                (trial_dir / f"{name}-{phase}-compile.json").write_text(json.dumps(vertex, indent=2) + "\n")
+            except ValueError as exc:
+                checks[f"{phase}_{name}"] = False
+                rec["validation_errors"].append(f"{name} {phase}: {exc}")
+                return False
+            checks[f"{phase}_{name}"] = True
+            return True
+
+        warm_cache = build_cache == "warm"
+        rec["metrics"]["cache_mode"] = ("primed-build-cache" if warm_cache else
+                                        "no-cache-base-images-retained")
+        if warm_cache:
+            for name, _, _, _, tag, _ in builds:
+                prime = solve(name, tag, cached=False)
+                verify_solve(name, "prime", prime, cached=False)
+        sampler, trace = start_sampler(engine, trial_dir)
+        for name, _, _, _, tag, artifact in builds:
+            if warm_cache and not checks[f"prime_{name}"]:
+                continue
+            phase = f"build_{name}"
+            with resource_phase(engine, rec, phase):
+                result = solve(name, tag, cached=warm_cache)
+            rec["metrics"][phase + "_s"] = round(rec["resources"]["phases"][phase]["operation_wall_seconds"], 3)
+            if not verify_solve(name, "build", result, cached=warm_cache):
+                continue
+            run = engine.sh(["run", "--rm", tag, "sha256sum", artifact],
                             timeout=120, check=False)
             fields = run.stdout.split(maxsplit=1)
             sha = fields[0] if run.returncode == 0 and fields else ""
@@ -1644,17 +1702,6 @@ def trial_w6(ctx, engine: Engine, state: str,
                 rec["validation_errors"].append(
                     f"{name} artifact probe rc={run.returncode}, expected {expected}, got {sha!r}")
 
-        rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
-        build_one(
-            "rust", W6_DIR / "rust" / "Dockerfile",
-            [(rust_src, W6_RUST_SOURCE["file"])],
-            tag_rust,
-            ["sha256sum", "/src/target/release/hyperfine"], "build_rust_s")
-        build_one(
-            "zlib", W6_DIR / "Dockerfile",
-            [(zlib_src, W6_ZLIB_SOURCE["file"])],
-            tag_zlib,
-            ["sha256sum", "/src/libz.a"], "build_zlib_s")
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -2855,6 +2902,8 @@ def cmd_run(args) -> int:
         kw["request_rate"] = getattr(args, "request_rate", None)
     if args.case in ("W6", "W7"):
         kw = {"driver": getattr(args, "driver", "default")}
+    if args.case == "W6" and getattr(args, "build_cache", None) is not None:
+        kw["build_cache"] = args.build_cache
     if args.case == "W8" and getattr(args, "under_load", False):
         kw["under_load"] = True
     rec = run_one(ctx, args.engine, args.case, args.state,
@@ -2897,6 +2946,8 @@ def cmd_baseline(args) -> int:
                     kw["request_rate"] = getattr(args, "request_rate", None)
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
+                if args.case == "W6" and getattr(args, "build_cache", None) is not None:
+                    kw["build_cache"] = args.build_cache
                 if args.case == "W8" and getattr(args, "under_load", False):
                     kw["under_load"] = True
                 rec = run_one(ctx, eng, args.case, args.state,
@@ -3086,6 +3137,9 @@ def main() -> int:
                    choices=["default", "dc"],
                    help="W6/W7: dc pins matching BuildKit images in "
                         "isolated per-engine builders")
+    for command in ("run", "baseline"):
+        sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
+                                         help="W6 build-cache condition (default: uncached); warm primes the same context")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
@@ -3130,6 +3184,8 @@ def main() -> int:
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
     args = ap.parse_args()
+    if getattr(args, "build_cache", None) is not None and args.case != "W6":
+        ap.error("--build-cache requires W6")
     if getattr(args, "operations", None) is not None:
         if args.case != "W2" or args.operations <= 0:
             ap.error("--operations requires W2 and a positive value")

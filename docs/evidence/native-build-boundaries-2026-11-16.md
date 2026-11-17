@@ -366,3 +366,30 @@ runner and now fails the regression. Run
 `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
 All 50 tests passed. No new builds or timed trials ran. The archived records
 still describe pilot uncached builds with retained base images.
+
+## W6 build-cache conditions
+
+`runner.py run` and `baseline` accept `--build-cache uncached|warm` for W6.
+The default runs each compile and test step uncached on an already resident
+engine. Warm issues the same solve twice per application with a shared
+context and stamp. Both uncached prime solves finish before sampling starts.
+The measured phase then includes buildx and image load. The artifact probe
+checks the loaded image outside the measured phase.
+
+The runner keeps BuildKit's raw JSON progress and saves the terminal compile
+vertex from each solve. Uncached requires a completed, started vertex without
+a cache hit. Warm requires a completed cache hit. A missing, failed or
+ambiguous vertex fails the trial, even if buildx exits zero. This changes the
+measurement setup. Start fresh cohorts for both cache conditions and keep the
+default and identical-builder drivers separate. [Buildx progress reference](https://docs.docker.com/reference/cli/docker/buildx/build/#progress), [BuildKit vertex fields](https://github.com/moby/buildkit/blob/master/client/graph.go)
+
+Use the pinned sources and tools for the eventual paired comparison:
+
+```sh
+python3.14 bench/native/runner.py baseline --case W6 --a ctrs --b orbstack \
+  --driver default --build-cache warm --pairs 10
+```
+
+The offline regression covers matching prime and replay contexts, prime work
+outside sampling, both artifact pins and a cache miss that exits zero. Native
+proof on the campaign's two builders and scored timings remain open.

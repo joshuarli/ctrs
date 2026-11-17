@@ -189,10 +189,8 @@ and must not be compared against later runs.
   checksum-verifiable); it is a real FastAPI/Postgres/Redis app, not a
   microbenchmark, but it is not a third-party application.
 - W4's Redis-cli hashing, W5's generated modules, W7's compileall/random
-  bytes and W9's historical timed hash loop are diagnostic proxies. They do not
-  complete the promised real app/CI/dev matrix. W6 also needs a
-  checksum-pinned source preparation path: its zlib archive is absent
-  from a fresh checkout. All these gaps remain explicit queue items.
+  bytes and W9's historical timed hash loop are diagnostic proxies. Keep
+  their records separate from the representative workloads.
 - Successful requests determine load throughput; attempted requests and
   errors are separate. W11 requires zero errors, nonempty valid windows
   and exact accepted writes, but duration alone does not establish leak,
