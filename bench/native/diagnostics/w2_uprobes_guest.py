@@ -53,7 +53,9 @@ def pid_filter(tids):
 def library_identity():
     with LIBRARY.open('rb') as stream:
         before = os.fstat(stream.fileno())
-        digest = hashlib.sha256(stream.read()).hexdigest()
+        if not stat.S_ISREG(before.st_mode) or before.st_size != LIBRARY_SIZE:
+            raise RuntimeError('pinned library identity or digest mismatch')
+        digest = hashlib.sha256(stream.read(LIBRARY_SIZE + 1)).hexdigest()
         after = os.fstat(stream.fileno())
     current = LIBRARY.stat()
     def identity(info):
@@ -168,8 +170,8 @@ def setup(tag, tids_text):
             _write(root / 'enable', 0)
             _write(root / 'filter', filt)
             filter_readback[event] = (root / 'filter').read_text().strip()
-            if not filter_readback[event] or filter_readback[event] == 'none':
-                raise RuntimeError('event filter unavailable')
+            if ''.join(filter_readback[event].split()) != ''.join(filt.split()):
+                raise RuntimeError('event filter readback mismatch')
         receipt = {'schema': SCHEMA, 'tag': tag, 'tids': tids, 'instance': str(instance),
                    'definitions': defs, 'filter': filt, 'library': identity,
                    'formats': formats, 'filter_readback': filter_readback, 'cpus': cpus,
@@ -251,6 +253,17 @@ def stop(tag):
     receipt['phase'] = 'stopped'
     (STATE / (tag + '.json')).write_text(json.dumps(receipt, sort_keys=True))
     stats, errors = {}, []
+    try:
+        clock = (instance / 'trace_clock').read_text().split()
+        if '[mono]' not in clock:
+            errors.append('trace clock changed or unavailable')
+    except OSError:
+        errors.append('trace clock changed or unavailable')
+    try:
+        if int((instance / 'buffer_size_kb').read_text().strip()) != receipt['buffer_kb']:
+            errors.append('trace buffer size changed or unavailable')
+    except (OSError, ValueError):
+        errors.append('trace buffer size changed or unavailable')
     for event in event_paths(tag):
         root = instance / 'events' / event
         if ((root / 'filter').read_text().strip() != receipt['filter_readback'][event] or
