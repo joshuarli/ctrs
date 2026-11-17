@@ -9,6 +9,7 @@ mod fsview;
 mod hostopts;
 mod inroot;
 mod layers;
+mod memory;
 mod net;
 mod netlink;
 mod pid1;
@@ -71,7 +72,9 @@ fn run(init_start_ns: u64) -> io::Result<()> {
 
 fn serve(paths: &container::Paths, init_start_ns: u64) -> io::Result<()> {
     let mut conn = dial_host()?;
-    let (mem_total_kib, mem_available_kib) = meminfo();
+    let memory = memory::Snapshot::read();
+    let mem_total_kib = memory.total_kib();
+    let mem_available_kib = memory.available_kib();
     let mut out = Vec::with_capacity(256);
     Msg::Hello(Hello { protocol: PROTOCOL, init_start_ns, ready_ns: boottime_ns(), mem_total_kib, mem_available_kib })
         .encode(&mut out);
@@ -443,20 +446,6 @@ fn dial_host() -> io::Result<File> {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     Err(io::Error::new(last.kind(), format!("dial host: {last}")))
-}
-
-/// MemTotal and MemAvailable in KiB.
-fn meminfo() -> (u64, u64) {
-    let mut buf = [0u8; 2048];
-    let Ok(n) = File::open("/proc/meminfo").and_then(|mut f| f.read(&mut buf)) else { return (0, 0) };
-    let s = std::str::from_utf8(&buf[..n]).unwrap_or_default();
-    let field = |name: &str| {
-        s.lines()
-            .find_map(|l| l.strip_prefix(name))
-            .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse().ok())
-            .unwrap_or(0)
-    };
-    (field("MemTotal:"), field("MemAvailable:"))
 }
 
 fn power_off() -> ! {

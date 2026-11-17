@@ -128,6 +128,17 @@ loads tiny disposable image archives and checks populated, empty and absent
 labels plus adjacent config fields through an isolated engine socket. It needs
 no registry, guest boot or containers; results stay under `.work/tmp`.
 
+For balloon-accounting edits, `cargo test -p ctrs balloon_target_tests` checks
+reserve/rounding boundaries. The dependency-free guest parser can be checked
+on macOS with `kache "$(command -v rustc)" --test --edition=2021
+crates/ctrs-init/src/linux/memory.rs -o .work/tmp/ctrs-memory-tests`, then
+`.work/tmp/ctrs-memory-tests` (create `.work/tmp` first). Cross-check the actual
+guest component with `CARGO_ENCODED_RUSTFLAGS="" cargo check --offline -p
+ctrs-init --target aarch64-unknown-linux-musl`. These select three host-target
+and three parser tests, rather than the full suites. The native budget proof
+and affected W2/W6 checks are recorded in
+[`evidence/native-balloon-2026-11-16.md`](evidence/native-balloon-2026-11-16.md).
+
 On native ARM64 macOS, `conformance/vm-stop.py --ctrs-binary /path/to/signed/ctrs
 --portfolio-archive /path/to/portfolio.tar` checks idle sleep, wake, injected VM
 loss and recovery, and normal daemon shutdown using an isolated engine. It

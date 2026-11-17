@@ -144,3 +144,68 @@ The next source slice audits the guest memory model instead of weakening the
 128MiB check. The host-only candidate remains private/unmerged pending that
 accounting repair and fresh native proof. No performance or memory-policy
 promotion follows from the passing unit tests.
+
+## Complete accounting repair
+
+The guest now reads total, available and actual balloon memory from one snapshot
+and calculates `MemTotal - MemAvailable - Balloon` for the VM target budget.
+This includes unavailable memory and watermark protection; it is not a physical
+footprint metric. The host adds boot reserve and rounds up to the SDK's whole-MiB
+target. The native Linux-host cgroup calculation and Hello/Stats wire fields
+remain unchanged. Invalid counters are diagnosed; the existing cgroup accounting
+is retained as fallback. No shrink timer, growth increment or sleep setting changes.
+
+Source worker usrw_93e0cd44-f157-4b0c-b999-6e6d9e86b24f is terminal succeeded,
+original 45fd902 on top of 4ecd599, retained at `.work/wt/np-balloon-used`.
+Parent reviews the entire scoped diff and verifies no untracked or out-of-scope
+source. Three focused parser tests pass independently on the parent; the Linux
+musl component check and isolated guest release build pass. Guest build takes
+3.98 seconds. Independent scout usrw_bad24f96-e404-4a17-a128-405d1592c866 is
+terminal succeeded, no demonstrated defects or edits. Parent confirms a clean
+review tree. The integrated four source files match the tested private tree.
+
+Candidate host fda62467… is 6,613,968 bytes (+112); the new initramfs is
+4,349,700 bytes versus baseline 4,385,612. New initrd SHA-256:
+`6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2`;
+guest ELF: `3d9669c2df23b30b188d442d73e2578c4ed00a6ad3bad4711d11a9847b39f52a`.
+The stock kernel remains 35087713…. Main guest assets were preserved.
+
+Fresh AB/BA job dbf8b67439154e7d805ee1dfd09205ad under
+`.work/tmp/balloon-model-paired-20261116/` exits 0, clean teardown, 89 frozen
+inputs rechecked. All four 2GiB payload/read/hash checks pass. Both baseline
+headroom checks fail with available memory zero; candidate available memory is
+274,915,328 and 269,934,592 bytes, meeting the unchanged 128MiB practical floor
+and calculated-headroom checks. No candidate fallback or OOM kills. Sampled
+physical peaks are about 2.63GB for both configurations; this short comparison
+does not qualify the campaign's resource cells or pressure response.
+
+The first post-idle W2 profile, job 58659a68…, exits 1 on API thread-coverage
+change after actual work; it remains failed. Thread-sensitive profiling cannot
+claim complete CPU coverage for that case. A separate application check uses
+the existing fixed-work W2 runner, including cgroup CPU accounting, without
+claiming that profiler coverage. Job 11b5fb9fc836446098ea87464dc3d15d under
+`.work/tmp/balloon-model-w2-functional-20261116/` exits 0, clean teardown:
+5,000 successful operations, 1,486 writes, exactly 1,986 persisted items/payloads,
+zero load errors, available memory 280,031,232 bytes after 45 seconds idle, no
+OOM kills or counter fallback. Result directory:
+`.work/native-perf/results/balloon-w2-269ff19ac1fc/`.
+
+Affected-build job 67e67a280e484a108eeaf2684de14c81 under
+`.work/tmp/balloon-model-builds-20261116/` exits 0, clean teardown, all 102
+frozen receipts unchanged. At actual 2 vCPUs/8GiB and accelerated shrink, the
+uncached offline Rust build passes 132 tests and reproduces c63f2e92…; the C
+build passes make-check and reproduces 6b6ba12f…. Both loaded binaries execute
+correctly, with no OOM kills or memory-counter fallback. Native physical peaks
+are 3,948,323,960 and 790,678,072 bytes, respectively. These are affected-case
+correctness/resource observations, not speed or qualification claims.
+
+The combined repair is accepted as a correctness fix. Full suites, controlled
+host pressure, installed-default resource acceptance, timing confirmation and
+campaign qualification remain open. The failed host-only candidate and W2
+profile are not converted into passes.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Paired `analysis.json` | 4926b5492f020c21fa4c5346e651f9a047e79343f8173de362ef44f686b869b4 |
+| W2 functional `result.json` | b9706a09acc41c8f0a1316c786905ae62917a6cd2c7cd42066fa6cf4fd5323f5 |
+| Builds `analysis.json` | 0bfcbe51cf90d60ba9c6a2a2f7adfbad023d24a05a8e0198d5e6be669abc856c |

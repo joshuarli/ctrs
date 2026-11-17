@@ -20,12 +20,21 @@ use ctrs_proto::{Stream, run_flags};
 use super::network::Networks;
 use super::vmlink::{Event, VmLink};
 
-/// Dynamic memory: the VM boots with a ceiling, and the balloon keeps the
-/// guest at what it uses plus this much, returning the rest to macOS.
 const MEMORY_HEADROOM: u64 = 256 << 20;
 const MEMORY_FLOOR: u64 = 256 << 20;
 /// How much more the guest gets at once when it reports pressure.
 const MEMORY_GROW: u64 = 1 << 30;
+
+// VZ targets total VM memory in whole MiB; Linux MemTotal excludes boot-reserved pages.
+fn balloon_memory_target(ceiling: u64, mem_total_kib: u64, held: u64) -> u64 {
+    let mem_total = mem_total_kib.saturating_mul(1024);
+    if mem_total == 0 || mem_total > ceiling {
+        return ceiling;
+    }
+    let mib = 1 << 20;
+    let wanted = held.saturating_add(MEMORY_HEADROOM).saturating_add(ceiling - mem_total);
+    (wanted.saturating_add(mib - 1) & !(mib - 1)).clamp(MEMORY_FLOOR, ceiling)
+}
 
 /// What a request that needs the VM gets while ctrs is stopped.
 pub const STOPPED: &str = "the container engine is stopped: start it with `ctrs daemon`";
@@ -1303,7 +1312,7 @@ impl Engine {
                 if !cfg!(target_os = "macos") {
                     continue;
                 }
-                let want = (used + MEMORY_HEADROOM).clamp(MEMORY_FLOOR, ceiling);
+                let want = balloon_memory_target(ceiling, stats.mem_total_kib, used);
                 let quiet = now_secs().saturating_sub(
                     engine.last_activity.load(std::sync::atomic::Ordering::Relaxed));
                 // Shrink in steps (so the guest's caches go gradually), grow at once.
@@ -3119,6 +3128,33 @@ fn image_named(images: Vec<Image>, name: &str) -> Option<Image> {
             || i.config_digest == name
             || i.config_digest.strip_prefix("sha256:").is_some_and(|h| name.len() >= 12 && h.starts_with(name))
     })
+}
+
+#[cfg(test)]
+mod balloon_target_tests {
+    use super::balloon_memory_target;
+
+    #[test]
+    fn balloon_target_keeps_boot_reserve_out_of_usable_headroom() {
+        let mib = 1 << 20;
+        assert_eq!(balloon_memory_target(8192 * mib, (8192 - 180) * 1024, 5 * mib), 441 * mib);
+        assert_eq!(balloon_memory_target(45 << 30, 44 << 20, 64 * mib), 1344 * mib);
+    }
+
+    #[test]
+    fn balloon_target_preserves_headroom_after_vz_rounding() {
+        let mib = 1 << 20;
+        assert_eq!(balloon_memory_target(8192 * mib, (8192 - 180) * 1024 - 512, 5 * mib + 1), 442 * mib);
+    }
+
+    #[test]
+    fn balloon_target_holds_ceiling_for_unknown_or_excessive_use() {
+        let ceiling = 8 << 30;
+        assert_eq!(balloon_memory_target(ceiling, 0, 0), ceiling);
+        assert_eq!(balloon_memory_target(ceiling, 9 << 20, 0), ceiling);
+        assert_eq!(balloon_memory_target(ceiling, 7 << 20, u64::MAX), ceiling);
+        assert_eq!(balloon_memory_target(ceiling, u64::MAX, 0), ceiling);
+    }
 }
 
 #[cfg(test)]
