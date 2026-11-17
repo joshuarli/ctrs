@@ -2,9 +2,11 @@
 
 ## Status
 
-**ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
+**ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** add fixed offered-load W2 coverage and test the cadence hypothesis.
+**Current action:** test owned load-generator QoS after fixed-rate admission failures.
+The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
+source fixes and all admission outcomes; no fixed-rate CPU comparison is admitted.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -163,29 +165,48 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** consume registered watch for source worker
-`usrw_f628bac1-b206-46e4-bc41-87380bbfeb03`, tree`.work/wt/np-w2-rate`,
-branch`experiment/w2-fixed-rate`, base`1f9f78a376c9dd98e214d62065ee66b151c30755`.
-It owns only `bench/native/fixtures/w2/load.py`, `bench/native/runner.py`, and
-`bench/native/test_w2.py`. It adds bounded fixed offered-rate work to investigate
-the cadence hypothesis: old closed-loop fixed work/saturation do not establish
-identical delivery cadence. Require absolute slots, schedule-lag/missed delivery
-and scheduled-to-completion latency. Late backlog cannot become a healthy rate
-pass. Preserve old modes/oracles; reject invalid options before engine access.
-No native/full suites/builds authorized for the worker. Review its full committed
-diff, scope and narrow actual-HTTP/bounded-W2 proof once before integration.
+**Exact continuation:** source worker
+`usrw_7611c2e2-6b0f-4dfd-acd0-0a4d58d6de94` is running one scoped correction in
+`.work/wt/np-w2-timer`, branch `perf/w2-timer`, base
+fcf5468d70630609cc4a1ed26849f03afb3cabc7. Initial a0b24b5 is reviewed; consume
+watch session31900, review only correction delta and scope, then independently
+run bounded W2 selection before integrating. Correction bounds queue wait,
+validates events and removes unnecessary test injection parameters. Only v3,
+focused W2 tests and fixture instructions are owned; original v2 is immutable.
 
-Parent prepared `.work/tmp/w2-fixed-rate-proof-20261117/{run,launch}.py`:
-one 500-operation/500req/s native functional leg per engine,17CPU/45091MiB,
-same candidate/pins, exact data and complete counters. Adapt to accepted fields,
-freeze source/inputs and launch after acceptance. No native job active.
-Then test cadence with6 alternating engine pairs and rotating closed-loop,
-500 and2,000req/s conditions,10,000 operations each, concurrency4, same write mix.
-Match seeds within each pair/condition and vary between pairs. Seek consistent
->=10% API cgroup CPU-per-operation contrast from pacing across all6 rounds,
-without missed delivery or failed data. Preserve invalid conditions and stop
-the fixed batch on failure, no replacements. Distinct fixture versions cannot
-pool. Timings stay diagnostic without exclusive host/observer qualification.
+Native timer admission f569a927… is terminal exit0/clean, all95 inputs unchanged.
+All six observations/12,000 exact operations deliver on time with complete
+counters/assets/resource checks. Initial dc8bf1fd… exits1/clean before work on a
+Python kqueue context-manager assumption; preserved separately. No native job
+active. After source acceptance, freeze/launch prepared six-pair C16 CPU matrix
+`.work/tmp/w2-rate-cadence-cpu-20261117/{run,launch}.py`; audit actual config once
+before launch. Three conditions rotate: closed-loop/500/2,000req/s, 10,000ops
+with matching seeds and actual native controls. First invalid cell stops the
+fixed matrix, no replacements. Canonical fixture acceptance remains distinct
+from the private experimental client SHA/version.
+
+Timer-only jobs a7d66088… and bf483e8f… are terminal exit0/clean. Mach absolute
+wait retains misses. Kqueue candidate delivers all slots on time across six
+alternating pairs versus every sleep control missing delivery. This isolates a
+client timer admission boundary, not an engine CPU win. See fixed-rate evidence.
+
+QoS job 895a24ed… is terminal exit0/clean, all 99 receipts unchanged. All 24,000
+application operations and native counter checks pass, actual worker QoS21/25
+matches conditions, but every elevated-QoS leg misses delivery. Reject this
+policy; do not repeat its matrix. Failed initial coordinator 7445817a… remains
+separate exit1/clean. No product/workstation policy changed. Evidence linked above.
+
+Source worker f628bac1 is terminal incomplete; parent reviewed/took over its
+proposal and landed separate v3 rate client e01c298 and absolute-deadline fix
+fcf5468. Original v2 and its portfolio hash are unchanged. Bounded W2 selection
+passes 53 tests/zero skips. Priming admission 949ea73c… and client-capacity
+admission 2dad081d… both complete all exact application/counter checks but fail
+rate admission. Preserve every invalid leg; do not repeat either matrix.
+
+Seek consistent >=10% API cgroup CPU-per-op contrast from pacing across all six
+rounds; inspect both engines and the relative contrast. Timings remain diagnostic
+without exclusive host and observer qualification. Full qualification and
+comprehensive suites remain manual-only; no W11 soak is running.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
