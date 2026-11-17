@@ -8,7 +8,7 @@ publish.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ctrs-proto = { path = "../ctrs-proto" }
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 libc = "0.2"
 ruzstd = "0.9"
 tar = "0.4"
