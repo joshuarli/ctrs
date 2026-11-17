@@ -8,6 +8,7 @@ import socket
 import time
 import tomllib
 
+import ci_jobs
 import durable_job
 import mixed_resources
 import runner
@@ -251,14 +252,24 @@ def _completed_cycle_window(cycles, observations, phases):
             or not isinstance(observations, list) or len(cycles) != len(observations)
             or not isinstance(phases, dict)):
         raise ValueError('completed mixed cycles, resource observations and phase records are required')
+    expected_counts = {
+        'successful_operations': OPERATIONS,
+        'queue_jobs': runner.W4_FIXED_WORK['jobs'],
+        'queue_events': runner.W4_FIXED_WORK['events'],
+        'artifacts': runner.W4_FIXED_WORK['artifacts'],
+        'build_jobs': ci_jobs.SPEC['fixed_jobs'],
+    }
     first = last = None
     for index, (cycle, observation) in enumerate(zip(cycles, observations, strict=True)):
         if (not isinstance(cycle, dict) or type(cycle.get('cycle')) is not int or cycle['cycle'] != index
                 or cycle.get('exact_state') is not True
-                or type(cycle.get('successful_operations')) is not int or cycle['successful_operations'] != OPERATIONS
                 or not isinstance(observation, dict) or type(observation.get('cycle')) is not int
                 or observation['cycle'] != index):
             raise ValueError('completed mixed work and resource observation differ for cycle ' + str(index))
+        for field, expected in expected_counts.items():
+            count = cycle.get(field)
+            if type(count) is not int or count != expected:
+                raise ValueError(f'cycle {index} requires {field}={expected}, got {count!r}')
         work = phases.get(f'cycle_{index}_mixed_work')
         resource = phases.get(f'cycle_{index}_observation')
         if not isinstance(work, dict) or not isinstance(resource, dict):

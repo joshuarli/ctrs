@@ -2276,6 +2276,13 @@ def _recover_queue(engine, queue_id, queue, app, directory, outage):
     return before, {"recovery_s": elapsed, "retries_until_recovery": retries}
 
 
+W4_FIXED_WORK = {
+    'jobs': w4_fixture.JOBS,
+    'events': w4_fixture.JOBS * w4_fixture.EVENTS,
+    'artifacts': w4_fixture.JOBS * len(w4_fixture.filenames(1)),
+}
+
+
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
              image_ref: str | None = None, redis_ref: str = W4_IMAGE,
