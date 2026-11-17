@@ -240,3 +240,26 @@ the failed work record plus cleanup cause. The W2 component gate passes78 tests;
 proof is separately admitted at `.work/tmp/sampler-v4-functional-v2-20261117/job`
 with the same four1000-operation trials, current committed source, and its own
 frozen inputs. Do not pool either short batch as observer qualification.
+
+Final functional job13731c9782f64101a2425063857ddf49 exits0, cleanup complete.
+Its four1000-operation trials each complete708 reads and292 writes with exact
+persisted state. All setup/workload/cleanup CPU boundaries and both periodic
+traces are complete. Private native processes stop, the registry thread joins,
+and all155 frozen inputs recheck unchanged before subsequent source edits.
+
+Independent reviewer usrw_211571d6-d1ee-4916-a2b2-35e803921731 establishes two
+failure paths: W2 cleanup can hide the measurement record, and a final result
+write can replace an exception already propagating. Parent reproduces both
+offline before correction.76d77de retains measurement, cleanup and sampler
+errors in the returned record and per-trial `trial-result.json`, including on
+interruption.90c3bac preserves the primary exception if the final write fails.
+Write failure without a primary exception still propagates. The final write
+guard has parent regression verification after the independent finding.
+
+Periodic controls now additionally reject unknown footprint, incomplete CPU
+or unverified ownership even when explicit phase boundaries succeeded. The
+focused negative controls fail before correction and pass afterward. Run
+`TMPDIR=$PWD/.work/tmp python3.14 bench/native/runner.py check w2` to reproduce
+the accepted80-test, zero-skip component result. The mixed-cycle tests create
+their own ignored scratch parent, so a fresh checkout can run the gate.
+No product/default changes or new timing claims follow from these corrections.

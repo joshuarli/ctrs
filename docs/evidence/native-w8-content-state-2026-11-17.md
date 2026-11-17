@@ -31,3 +31,13 @@ mismatched entries before engine measurement. This strengthens identity evidence
 and must leave cache absence explicitly unknown. Existing identical-input,
 transfer and deployment checks remain required; historical batches are not
 retroactively upgraded into qualification.
+
+Receipt validation is integrated at df1f418 from worker82734b4. It rejects
+missing, duplicate, source-equal or previously used compressed digests and
+DiffIDs, and mismatched source contracts/seeds before measurement. Expected
+sharing within one pair remains valid. Parent reviews the complete diff and
+runs `python3.14 bench/native/runner.py check w8`:66 tests, zero skips.
+The validator also accepts both retained37-layer pair receipts from
+`w8-paired-f8cf4ddcd42e`, with74 distinct derived identities across the pairs.
+No engine rerun or retrospective qualification occurs. Cache absence remains
+unknown at the boundary described above.

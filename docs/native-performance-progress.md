@@ -9,9 +9,10 @@ Accepted measurement repair ef22cc9: sampler v4 requires a current stop acknowle
 Latest product remains2f37d02: readiness reuse,14 tests, seven lifecycle cases and156 correct diagnostic build/run jobs.
 Classic C caller7203a474 passes all5 cases and88 frozen inputs; no product/default changes followed.
 W8 receipt guard df1f418 passes66 component tests and two real37-layer receipts; guest cache absence remains unknown.
-Current candidate c3775ce adds pinned W2 boundary-only/periodic controls; named W2 gate passes78 tests.
-Prototype0b4a3d99 completes4000 exact operations, clean teardown and155 unchanged inputs. Cleanup-failure regressions pass.
-Current action: final native control proof at `.work/tmp/sampler-v4-functional-v2-20261117/job`, then independent source review.
+Pinned W2 boundary-only/periodic controls pass two4000-operation native proofs with exact data and clean teardown.
+Review found cleanup and result-write errors could hide the original failure;76d77de/90c3bac preserve both and interruption status.
+The corrected W2 gate passes80 tests, zero skips. Each native proof retains155 unchanged frozen inputs; neither qualifies timing.
+Current action: repair offline scoring, which still labels a category-only partial footprint as a strict-win pilot cell.
 **Perf gate deferred: host busy**: scalar gate0 does not override hot Niceforge and the unrelated OrbStack VM.
 No scored batch or W11 is admitted. Full qualification, held-out app and resource/durability gates remain open.
 Cleanup:28 retired trees and `.work`195.3→21.0GiB allocated-size sum; completed new lane trees are retired after integration.
@@ -47,15 +48,20 @@ First resume command: `codex-campaign-closeout.py cancel` (already run); execute
 
 ## Exact next action
 
-Finish the final c3775ce fixed-work observer-control proof in
-`.work/tmp/sampler-v4-functional-v2-20261117/job`. One off/on pair per engine
-must complete4000 useful operations with the same read/write mix and exact data.
-The source uses the pinned common service layout and existing W2 runner; both
-modes retain setup/workload/cleanup CPU boundaries. The earlier0b4a3d99 batch
-passed before cleanup-failure handling was tightened; preserve both versions.
-Inspect job identity/status once, retain the terminal result, and recheck all
-frozen inputs before editing bench source. Review source and retire its temporary
-review tree after acceptance. [Exact command and scope](evidence/native-sampler-lifecycle-2026-11-17.md).
+Repair `bench/native/reporting.py` resource-cell admission before another timed
+batch. A ten-pair offline negative control with `ownership_verified=false`, a
+missing required VM, category-table Footprint and fabricated small physical total
+currently yields `strict-win`, ratio0.0001. Reject that resource cell, preserve
+the missing/error reason, and leave unrelated valid application cells separate.
+Recompute W2 CPU/success from valid raw workload boundaries and successful counts.
+Version affected scoring and keep old incomplete records unqualified. Run the
+focused reporting tests with zero skips before integration.
+
+The final c3775ce functional job13731c9782f64101a2425063857ddf49 exits0 with
+all four1000-operation trials correct,708 reads/292 writes each, complete phase
+CPU and both periodic traces. Teardown is verified and all155 inputs rechecked.
+Later failure-path corrections use offline regressions, not another identical
+normal-path run. [Exact command and scope](evidence/native-sampler-lifecycle-2026-11-17.md).
 
 After functional acceptance, the first timed action is a separately predeclared
 exclusive W2 observer/equal-work batch. Require scalar gates AND actual saved
@@ -112,9 +118,9 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Finish the fixed-work observer-control candidate's final native proof and
-   independent review. Retain all failed/preflight receipts; no qualification
-   is inferred from a host-busy functional pass.
+1. Reject incomplete or mislabeled resource cells in offline scoring and derive
+   W2 efficiency from raw phase counters/counts. Retain failed/preflight receipts;
+   no qualification follows from a host-busy functional pass.
 2. In a genuinely exclusive window, confirm W2 CPU/success at equal useful work
    and observer budgets, then profile actual API user/system CPU, synchronization,
    scheduling and network costs. Separate fixed work/offered load, saturation,
