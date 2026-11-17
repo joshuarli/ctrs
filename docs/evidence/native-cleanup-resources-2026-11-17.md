@@ -99,8 +99,18 @@ ancestor-safe retirement; existing green evidence remains valid. The accepted
 initrd was copied to a separate optional asset cache and its standby symlink
 retargeted before the completed source checkout was retired.
 
-A trial merge of `fix/np-vm-stop` conflicted in `docs/development.md` and was
-aborted; the main tree stayed unchanged and that source branch/checkout remains.
+A trial merge of `fix/np-vm-stop` initially conflicted in development docs and
+was aborted. After resume, a16a8b3 resolves that sole conflict with current main
+instructions and integrates the already accepted source history. Its Git tree
+is exactly unchanged from its first parent. The checkout is retired after
+inspection of its56,808KiB compiler cache and confirmation of no open consumer.
+The completed sampler-controls review checkout is retired separately.
+
+Both functional observer pilots report successful owned teardown. A guarded
+cleanup checks those result receipts, exact nonsymlink store paths and empty
+native open-file inspections before removing `sc-fcb0bd96` and `sc-39063b00`.
+Their allocated-size sum was1,967,120KiB. Source, contexts and result receipts
+remain. This is not a claim about unique reclaimed APFS extents.
 No rejected or unverified source was merged. Other parked trees are intentionally
 kept with their reasons in [the retained inventory](../native-performance-retained.md).
 No builds, performance workloads or broad tests ran during cleanup.

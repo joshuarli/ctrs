@@ -199,7 +199,6 @@ record the 28 retirements and removed disposable stores/Docker resources.
 | `np-resource-cells` | `campaign/np-resource-cells` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
 | `np-sched-mc` | `campaign/np-sched-mc` | Rejected private kernel configuration; source and optional assets retained. |
 | `np-uprobes` | `experiment/np-uprobes` | Diagnostic private kernel; unintegrated source and optional reproducible assets. |
-| `np-vm-stop` | `fix/np-vm-stop` | Accepted source provenance but history merge conflicts in development docs; trial aborted, no new implementation. |
 | `np-w10-cache-trace` | `campaign/np-w10-cache-trace` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
 | `np-w11-v2` | `campaign/np-w11-v2` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
 | `np-w2-rate` | `experiment/w2-fixed-rate` | Unverified superseded proposal preserved in dabc710; compare with current implementation before retry. |
@@ -213,3 +212,10 @@ record the 28 retirements and removed disposable stores/Docker resources.
 The earlier branch/revision tables still preserve retired source provenance.
 Ancestor branches removed by `worktree-retire` are reachable through main's
 history. Source reconstruction uses Git, not the deleted ignored stores.
+
+After resume, a16a8b3 integrates the already accepted VM-stop source history.
+The sole development-doc conflict keeps main's current instructions. The merge
+has exactly the same Git tree as its first parent. The clean `np-vm-stop`
+checkout and56,808KiB of unused build cache are retired after no open consumers
+remain. The completed sampler-controls review checkout is also retired.
+`np-scoring-repair` is the current active source lane, not parked cleanup.
