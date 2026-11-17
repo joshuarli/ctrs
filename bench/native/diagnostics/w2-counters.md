@@ -177,3 +177,16 @@ hashes. Explicit-affinity runs have a distinct fixture version and run prefix;
 keep each CPU set separate from every other set and from historical defaults.
 Unavailable or malformed CPU sets fail rather than falling back. The pilot does
 not itself establish a performance result or select a runtime change.
+
+### Client location diagnostic
+
+`syscall_pilot.py --client-location guest` runs the same pinned W2 load source
+in a distinct container from the pinned API image, using `http://api:8000` on
+the Compose bridge. The default remains `host`, through the published port.
+Guest results have a distinct fixture/profile identity and run prefix; do not
+pool them with host-client history. The plan records the client image and source
+hash, and each trial records requested and effective location. The copied load
+source and output live in a bounded guest tmpfs; output is copied after the
+measured phase and host CPU boundaries. Application CPU remains API-thread CPU;
+aggregate engine CPU includes the guest client. Native execution and comparison
+are required before drawing any performance conclusion.

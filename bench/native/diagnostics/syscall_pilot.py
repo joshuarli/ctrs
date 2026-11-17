@@ -12,6 +12,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import collect
+import ci_jobs
 import counter_specs
 import diagnostic_signals
 import ownership
@@ -68,7 +69,50 @@ def task_affinities(tasks, requested):
     return effective
 
 
-def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None):
+def load_command(location, base, label, count, write_ratio, directory):
+    out = str(directory / (label + '.json')) if location == 'host' else '/work/' + label + '.json'
+    return ['--url', base if location == 'host' else 'http://api:8000', '--concurrency', '4',
+            '--operations', str(count), '--write-ratio', str(write_ratio), '--seed', '7', '--out', out]
+
+
+def load(engine, location, client, base, directory, label, count, write_ratio):
+    args = load_command(location, base, label, count, write_ratio, directory)
+    if location == 'host':
+        cp = subprocess.run([sys.executable, str(runner.LOAD_PY), *args], capture_output=True, text=True, timeout=90)
+    else:
+        wrapper = "import subprocess,sys; f=open(sys.argv[1],'w'); e=open(sys.argv[2],'w'); sys.exit(subprocess.run([sys.executable,'/work/load.py',*sys.argv[3:]],stdout=f,stderr=e).returncode)"
+        cp = engine.sh(['exec', client, 'python', '-c', wrapper, '/work/' + label + '.stdout', '/work/' + label + '.stderr', *args], timeout=90, check=False)
+    if location == 'host':
+        (directory / (label + '.stdout')).write_text(cp.stdout)
+        (directory / (label + '.stderr')).write_text(cp.stderr)
+    if cp.returncode:
+        raise RuntimeError('fixed application work failed: ' + label)
+    if location == 'host':
+        return read_load(engine, location, client, directory, label, count)
+
+
+def read_load(engine, location, client, directory, label, count):
+    out = directory / (label + '.json')
+    if location == 'guest':
+        for suffix in ('', '.writes.jsonl', '.errors.jsonl'):
+            engine.sh(['cp', client + ':/work/' + label + '.json' + suffix, str(out) + suffix])
+        for stream in ('stdout', 'stderr'):
+            engine.sh(['cp', client + ':/work/' + label + '.' + stream, str(directory / (label + '.' + stream))])
+    summary = json.loads(out.read_text())
+    if summary['errors'] or summary['requests_ok'] != count:
+        raise RuntimeError('fixed application work failed: ' + label)
+    return summary
+
+
+def cleanup_project(engine, compose, project):
+    compose(['down', '-v', '--remove-orphans'])
+    for args in (['ps', '-aq'], ['network', 'ls', '-q'], ['volume', 'ls', '-q']):
+        remaining = engine.sh([*args, '--filter', 'label=com.docker.compose.project=' + project]).stdout.strip()
+        if remaining:
+            raise RuntimeError('owned compose resources remain: ' + remaining)
+
+
+def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None, client_location='host'):
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -81,11 +125,14 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
                          env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
     api = None
+    client = project + '-client'
     phase = profiler = profiler_log = phase_log = None
     version = cpu_profile.VERSION if profile_kind == 'cpu' else counter_specs.VERSION
     if api_cpus is not None:
         version += '-api-affinity-v1'
-    result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}}
+    if client_location == 'guest':
+        version += '-guest-client-v1'
+    result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -121,18 +168,23 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if engine.name == 'ctrs':
             (directory / 'guest-console.log').write_bytes((engine.dir / 'data/vm-console.log').read_bytes())
         engine.sh(['exec', '--privileged', api, 'mount', '-t', 'tracefs', 'tracefs', '/sys/kernel/tracing'])
-        def load(label, count, write_ratio):
-            out = directory / (label + '.json')
-            cp = subprocess.run([sys.executable, str(runner.LOAD_PY), '--url', base, '--concurrency', '4',
-                '--operations', str(count), '--write-ratio', str(write_ratio), '--seed', '7', '--out', str(out)],
-                capture_output=True, text=True, timeout=90)
-            (directory / (label + '.stdout')).write_text(cp.stdout)
-            (directory / (label + '.stderr')).write_text(cp.stderr)
-            summary = json.loads(out.read_text())
-            if cp.returncode or summary['errors'] or summary['requests_ok'] != count:
-                raise RuntimeError('fixed application work failed: ' + label)
-            return summary
-        load('warmup', 1000, 0)
+        if client_location == 'guest':
+            engine.sh(['create', '--name', client, '--label', 'dev.ctrs.campaign.run=' + run,
+                '--network', project + '_appnet', '--tmpfs', '/work:size=64m', '--entrypoint', 'python',
+                refs['api'], '-c', 'import time; time.sleep(86400)'])
+            engine.sh(['start', client])
+            info = json.loads(engine.sh(['inspect', client]).stdout)[0]
+            if info['Config']['Image'] != refs['api'] or info['Id'] == api:
+                raise ValueError('guest client identity differs from pinned peer')
+            engine.sh(['cp', str(root.parent / 'source' / runner.LOAD_PY.name), client + ':/work/load.py'])
+            digest = engine.sh(['exec', client, 'python', '-c',
+                "import hashlib;print(hashlib.sha256(open('/work/load.py','rb').read()).hexdigest())"]).stdout.strip()
+            if digest != PIN['w2_load_sha256']:
+                raise ValueError('guest client source differs from pin')
+        result['effective_client_location'] = client_location
+        load(engine, client_location, client, base, directory, 'warmup', 1000, 0)
+        if client_location == 'guest':
+            read_load(engine, client_location, client, directory, 'warmup', 1000)
         snapshot = "import pathlib,json;print(json.dumps({p.name:{f:(p/f).read_text() for f in ['comm','stat','status']} for p in pathlib.Path('/proc/1/task').iterdir()}))"
         tasks = json.loads(engine.sh(['exec', api, 'python', '-c', snapshot]).stdout)
         if any(task['comm'].strip() != tag for task in tasks.values()):
@@ -171,7 +223,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
         started = time.monotonic()
-        summary = load('work', operations, .3)
+        summary = load(engine, client_location, client, base, directory, 'work', operations, .3)
         ended = time.monotonic()
         host_after = collect.cpu_boundary(identity)
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()
@@ -180,6 +232,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         result['effective_api_cpus']['after'] = task_affinities(after['tasks'], api_cpus)
         if phase.wait(timeout=15):
             raise RuntimeError('phase helper exit failed')
+        if client_location == 'guest':
+            summary = read_load(engine, client_location, client, directory, 'work', operations)
         delta = sched_trace.application_cpu_delta(before['tasks'], after['tasks'], before['clock_ticks'], required_tids=tasks)
         if delta['status'] != 'ok':
             raise ValueError('API CPU coverage invalid: ' + repr(delta))
@@ -192,6 +246,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             workload_host_started_monotonic=started, workload_host_ended_monotonic=ended,
             workload_wall_seconds=ended - started, helper_counter_window_seconds=after['counter_window_seconds'],
             phase_scope='live helper window encloses same fixed load-driver launch/completion; host CPU boundaries bracket only load driver; both exclude setup and verification',
+            engine_cpu_scope='aggregate engine CPU includes guest client' if client_location == 'guest' else 'aggregate engine CPU excludes host client',
             reads_ok=summary['reads_ok'], writes_ok=summary['writes_ok'], tag=tag)
         if mode == 'on':
             helper('stop')
@@ -256,14 +311,25 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             except Exception as exc:
                 result['cleanup_errors'].append(label + ': ' + repr(exc))
                 if proc is not None and proc.poll() is None:
-                    proc.kill(); proc.wait(timeout=5)
+                    try:
+                        proc.kill(); proc.wait(timeout=5)
+                    except Exception as kill_exc:
+                        result['cleanup_errors'].append(label + ' kill: ' + repr(kill_exc))
         try:
             if api and mode == 'on' and profile_kind == 'counters':
                 helper('cleanup')
         except Exception as exc:
             result['cleanup_errors'].append('probes: ' + repr(exc))
         try:
-            compose(['down', '-v', '--remove-orphans'])
+            if client_location == 'guest':
+                ci_jobs.cleanup(engine, client, run)
+                check = engine.sh(['ps', '-aq', '--filter', 'label=dev.ctrs.campaign.run=' + run, '--filter', 'name=^/' + client + '$']).stdout.strip()
+                if check:
+                    raise RuntimeError('owned client remains: ' + check)
+        except Exception as exc:
+            result['cleanup_errors'].append('client: ' + repr(exc))
+        try:
+            cleanup_project(engine, compose, project)
         except Exception as exc:
             result['cleanup_errors'].append('compose: ' + repr(exc))
         for log in (profiler_log, phase_log):
@@ -272,8 +338,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if result['cleanup_errors']:
             result['correctness'] = False
         save(directory / 'result.json', result)
-    if result['cleanup_errors']:
-        raise RuntimeError('owned diagnostic cleanup failed')
+        if result['cleanup_errors']:
+            raise RuntimeError('owned diagnostic cleanup failed: ' + repr(result['cleanup_errors']))
     return result
 
 
@@ -284,6 +350,7 @@ def main():
     parser.add_argument('--ctrs-binary', type=Path, required=True)
     parser.add_argument('--operations', type=int, default=5000)
     parser.add_argument('--engines', default='ctrs,orbstack')
+    parser.add_argument('--client-location', choices=('host', 'guest'), default='host')
     parser.add_argument('--api-cpus', type=parse_api_cpus, default=None, help='explicit comma-separated guest API CPU IDs')
     parser.add_argument('--profile-kind', choices=('counters', 'cpu'), default='counters')
     parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
@@ -304,15 +371,18 @@ def main():
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
     run = ('w2-affinity-cpu-' if args.profile_kind == 'cpu' else 'w2-affinity-count-') if args.api_cpus is not None else ('w2-cpu-' if args.profile_kind == 'cpu' else 'w2-count-')
+    if args.client_location == 'guest':
+        run = run.replace('w2-', 'w2-guest-client-', 1)
     run = run + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
     for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    save(root / 'plan.json', {'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else ''),
+    guest_suffix = '-guest-client-v1' if args.client_location == 'guest' else ''
+    save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix,
         'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
-        'profile_identity': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1-' + ','.join(map(str, args.api_cpus)) if args.api_cpus is not None else ''),
+        'profile_identity': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix + ('-' + ','.join(map(str, args.api_cpus)) if args.api_cpus is not None else ''),
         'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind == 'cpu' else None,
         'mode_order': args.mode_order.split(','), 'engine_order': engines,
         'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
@@ -330,7 +400,7 @@ def main():
         host_snapshot(directory, 'before')
         try:
             engine.ensure_up()
-            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind, args.api_cpus) for mode in args.mode_order.split(',')]
+            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind, args.api_cpus, args.client_location) for mode in args.mode_order.split(',')]
             save(directory / 'observer-raw-control.json', {**{record['mode']: record for record in records}, 'overhead_verdict': 'inconclusive',
                 'reason': 'individual diagnostic block; host exclusivity and observer confirmation not certified; raw records only, no median-ratio correction'})
         finally:

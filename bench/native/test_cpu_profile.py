@@ -1,5 +1,8 @@
 import unittest
 import sys
+import json
+import tempfile
+import subprocess
 from unittest import mock
 from pathlib import Path
 
@@ -156,6 +159,129 @@ class APIAffinity(unittest.TestCase):
                     w2_scheduler_app.threading.Thread._bootstrap_inner = original
                 self.assertEqual(events, [('set', (0, (0, 1))), 'run'] if spec else ['run'])
 
+
+
+class ClientLocation(unittest.TestCase):
+    def test_default_and_bridge_commands(self):
+        import inspect
+        self.assertEqual(inspect.signature(syscall_pilot.trial).parameters['client_location'].default, 'host')
+        host = syscall_pilot.load_command('host', 'http://127.0.0.1:1234', 'work', 5000, .3, Path('/out'))
+        guest = syscall_pilot.load_command('guest', 'http://127.0.0.1:1234', 'work', 5000, .3, Path('/out'))
+        self.assertEqual(host[1], 'http://127.0.0.1:1234')
+        self.assertEqual(guest[1], 'http://api:8000')
+        self.assertEqual(host[2:-1], guest[2:-1])
+        self.assertEqual(guest[-1], '/work/work.json')
+
+    def test_guest_command_failure_and_summary_copy_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            engine = mock.Mock()
+            engine.sh.return_value = subprocess.CompletedProcess([], 1, '', 'failed')
+            with self.assertRaisesRegex(RuntimeError, 'fixed application work failed'):
+                syscall_pilot.load(engine, 'guest', 'peer', 'unused', directory, 'work', 10, .3)
+            self.assertEqual(engine.sh.call_args.args[0][:4], ['exec', 'peer', 'python', '-c'])
+            self.assertIn('/work/load.py', engine.sh.call_args.args[0][4])
+            engine.sh.side_effect = RuntimeError('copy failed')
+            with self.assertRaisesRegex(RuntimeError, 'copy failed'):
+                syscall_pilot.read_load(engine, 'guest', 'peer', directory, 'work', 10)
+            engine.sh.side_effect = None
+            (directory / 'work.json').write_text('{broken')
+            with self.assertRaises(json.JSONDecodeError):
+                syscall_pilot.read_load(engine, 'guest', 'peer', directory, 'work', 10)
+
+    def test_cleanup_rejects_remaining_project_resources_and_command_failure(self):
+        engine = mock.Mock()
+        compose = mock.Mock()
+        engine.sh.return_value.stdout = 'remaining-id\n'
+        with self.assertRaisesRegex(RuntimeError, 'resources remain'):
+            syscall_pilot.cleanup_project(engine, compose, 'owned-project')
+        self.assertIn('label=com.docker.compose.project=owned-project', engine.sh.call_args.args[0])
+        compose.side_effect = RuntimeError('down failed')
+        with self.assertRaisesRegex(RuntimeError, 'down failed'):
+            syscall_pilot.cleanup_project(engine, compose, 'owned-project')
+
+    def test_guest_trial_copies_after_boundaries_and_cleans_owned_peer(self):
+        events = []
+        class Engine:
+            name = 'orbstack'
+            socket = 'unix:///owned.sock'
+            dir = None
+            def env(self):
+                return {}
+            def sh(self, args, **kwargs):
+                events.append(tuple(args))
+                if args[0] == 'compose' and 'ps' in args:
+                    service = args[-1]
+                    return subprocess.CompletedProcess(args, 0, service + '-id', '')
+                if args[:1] == ['inspect']:
+                    ident = args[1]
+                    image = {'api-id': 'api-ref', 'db-id': 'db-ref', 'cache-id': 'cache-ref'}.get(ident, 'api-ref')
+                    return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': ident, 'Config': {'Image': image}}]), '')
+                if args[:2] == ['image', 'inspect']:
+                    image = {'api-ref': 'api', 'db-ref': 'postgres', 'cache-ref': 'redis'}[args[2]]
+                    pin = syscall_pilot.PIN['images']['np-v2/' + image]
+                    return subprocess.CompletedProcess(args, 0, json.dumps([{'Architecture': 'arm64', 'RepoDigests': [args[2]], 'RootFS': {'Layers': pin['diff_ids']}}]), '')
+                if args[:3] == ['exec', 'api-id', 'python'] and args[3] == '-c' and '/app/app.py' in args[4]:
+                    return subprocess.CompletedProcess(args, 0, json.dumps(syscall_pilot.PIN['api_files_sha256']), '')
+                if args[:2] == ['exec', '--privileged'] and 'hardware' in args:
+                    return subprocess.CompletedProcess(args, 0, '{}', '')
+                if args[:3] == ['exec', 'api-id', 'python']:
+                    return subprocess.CompletedProcess(args, 0, json.dumps({'1': {'comm': 'nptag', 'status': 'Cpus_allowed_list:\t0', 'stat': 'x'}}), '')
+                if args[0] == 'exec' and args[1].endswith('-client') and '-c' in args and 'hashlib' in args[4]:
+                    return subprocess.CompletedProcess(args, 0, syscall_pilot.PIN['w2_load_sha256'], '')
+                if args[:2] == ['exec', 'db-id']:
+                    return subprocess.CompletedProcess(args, 0, '[]', '')
+                if args[0] == 'cp' and ':/work/' in args[1]:
+                    target = Path(args[2])
+                    target.write_text(json.dumps({'errors': 0, 'requests_ok': 1000 if 'warmup' in str(target) else 10, 'reads_ok': 7, 'writes_ok': 3}) if target.suffix == '.json' else '')
+                return subprocess.CompletedProcess(args, 0, '', '')
+        class Phase:
+            stdin = mock.Mock(closed=False)
+            def poll(self): return 0
+            def wait(self, timeout): events.append(('phase-wait',)); return 0
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'source').mkdir()
+            (root / 'source' / syscall_pilot.runner.LOAD_PY.name).write_bytes(syscall_pilot.runner.LOAD_PY.read_bytes())
+            engine_root = root / 'engine'; engine_root.mkdir()
+            tasks = {'1': {'comm': 'nptag', 'status': 'Cpus_allowed_list:\t0', 'stat': 'x'}}
+            frames = [{'tasks': tasks, 'clock_ticks': 100}, {'tasks': tasks, 'counter_window_seconds': 1}]
+            def boundary(identity): events.append(('boundary',)); return {}
+            def cleanup(engine, client, run): events.append(('cleanup-client', client, run))
+            with mock.patch.object(syscall_pilot.secrets, 'token_hex', return_value='tag'), \
+                 mock.patch.object(syscall_pilot.runner, 'wait_health', return_value=('ok', None)), \
+                 mock.patch.object(syscall_pilot.ownership, 'discover', return_value={}), \
+                 mock.patch.object(syscall_pilot, 'frame', side_effect=frames), \
+                 mock.patch.object(syscall_pilot.cpu_profile, 'check_attachment'), \
+                 mock.patch.object(syscall_pilot.collect, 'cpu_boundary', side_effect=boundary), \
+                 mock.patch.object(syscall_pilot.collect, 'cpu_delta', return_value={'errors': []}), \
+                 mock.patch.object(syscall_pilot.sched_trace, 'application_cpu_delta', return_value={'status': 'ok', 'cpu_seconds': 1}), \
+                 mock.patch.object(syscall_pilot.runner, 'exact_w2_items', return_value=True), \
+                 mock.patch.object(syscall_pilot, 'host_snapshot'), \
+                 mock.patch.object(syscall_pilot.subprocess, 'Popen', return_value=Phase()), \
+                 mock.patch.object(syscall_pilot.ci_jobs, 'cleanup', side_effect=cleanup) as cleanup_mock:
+                result = syscall_pilot.trial(Engine(), {'api': 'api-ref', 'postgres': 'db-ref', 'redis': 'cache-ref'}, Path('/archive'), engine_root, 'off', 10, 'owned-run', client_location='guest')
+                cleanup_mock.side_effect = RuntimeError('owned cleanup failed')
+                with mock.patch.object(syscall_pilot, 'load', side_effect=RuntimeError('command failed')):
+                    with self.assertRaisesRegex(RuntimeError, 'owned diagnostic cleanup failed'):
+                        syscall_pilot.trial(Engine(), {'api': 'api-ref', 'postgres': 'db-ref', 'redis': 'cache-ref'}, Path('/archive'), engine_root, 'failed', 10, 'owned-run', client_location='guest')
+                failed = json.loads((engine_root / 'failed' / 'result.json').read_text())
+                self.assertIn('command failed', failed['errors'][0])
+                self.assertIn('owned cleanup failed', failed['cleanup_errors'][0])
+                cleanup_mock.side_effect = cleanup
+                with mock.patch.object(syscall_pilot, 'read_load', side_effect=ValueError('malformed summary')):
+                    with self.assertRaisesRegex(ValueError, 'malformed summary'):
+                        syscall_pilot.trial(Engine(), {'api': 'api-ref', 'postgres': 'db-ref', 'redis': 'cache-ref'}, Path('/archive'), engine_root, 'malformed', 10, 'owned-run', client_location='guest')
+                self.assertFalse(json.loads((engine_root / 'malformed' / 'result.json').read_text())['correctness'])
+            created = next(e for e in events if e[0] == 'create')
+            self.assertIn('dev.ctrs.campaign.run=owned-run', created)
+            self.assertIn('api-ref', created)
+            self.assertIn('--network', created)
+            copy = next(i for i, e in enumerate(events) if e[0] == 'cp' and ':/work/work.json' in e[1])
+            self.assertGreater(copy, max(i for i, e in enumerate(events) if e[0] in ('boundary', 'phase-wait')))
+            self.assertTrue(any(e[0] == 'cleanup-client' for e in events))
+            self.assertEqual(result['effective_client_location'], 'guest')
+            self.assertIn('includes guest client', result['engine_cpu_scope'])
 
 if __name__ == '__main__':
     unittest.main()
