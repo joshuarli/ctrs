@@ -310,30 +310,60 @@ class WorkloadSafetyTests(unittest.TestCase):
             (fixture / "hyperfine-2.0.0.tar.gz").write_bytes(rust)
             (fixture / "httpie-3.2.4.tar.gz").write_bytes(httpie)
             engine = fake_engine()
+            loaded = {}
+            corrupt_warm = False
+            lost_ownership = False
 
             def respond(args, **kw):
+                if args[:2] == ["buildx", "build"]:
+                    tag = args[args.index("-t") + 1]
+                    owner = args[args.index("--label") + 1].split("=", 1)[1]
+                    context = Path(args[args.index("-f") + 1]).parent
+                    loaded[tag] = owner, (context / "stamp/note.txt").read_text()
+                    return completed()
                 if args[0] == "run":
-                    if any("hyperfine" in a for a in args):
-                        return completed(
-                            "hyperfine 2.0.0\n" if "--version" in args
-                            else "incremental-1\n")
-                    if any("http" in a for a in args):
-                        return completed(
-                            "3.2.4\n" if "--version" in args
-                            else "incremental-1\n")
+                    tag = args[3]
+                    self.assertIn("--pull=never", args)
+                    _, note = loaded[tag]
+                    if "--version" in args:
+                        return completed("hyperfine 2.0.0\n" if "hyperfine" in tag else "3.2.4\n")
+                    if corrupt_warm and "hyperfine" in tag and tag.endswith("-warm"):
+                        note = "wrong incremental-0\n"
+                    return completed(note)
+                if args[:3] == ["image", "inspect", "--format"]:
+                    if lost_ownership and "httpie" in args[-1] and args[-1].endswith("-incr"):
+                        return completed("different-owner\n")
+                    return completed(loaded[args[-1]][0] + "\n")
+                if args[:2] == ["image", "rm"]:
+                    del loaded[args[-1]]
                 return completed()
             engine.sh.side_effect = respond
             apps = {"hyperfine": dict(runner.W7_APPS["hyperfine"],
                                       source=rust_pin),
                     "httpie": dict(runner.W7_APPS["httpie"],
                                    source=httpie_pin)}
+            @contextlib.contextmanager
+            def resource_phase(engine, record, name):
+                yield
+                record["resources"].setdefault("phases", {})[name] = {"operation_wall_seconds": .5}
+
             with patch.object(runner, "W7_DIR", fixture), \
                     patch.object(runner, "W7_APPS", apps), \
+                    patch.object(runner, "resource_phase", resource_phase), \
                     patch.object(runner, "start_sampler",
                                  return_value=(None, None)):
                 rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                commands = [call.args[0] for call in engine.sh.call_args_list]
+                self.assertEqual(loaded, {})
+                corrupt_warm = lost_ownership = True
+                bad = runner.trial_w7(FixtureContext(tmp), engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)
-            commands = [call.args[0] for call in engine.sh.call_args_list]
+            self.assertFalse(bad["correctness"]["ok"], bad)
+            self.assertNotIn("hyperfine_warm_first_use_s", bad["metrics"])
+            self.assertNotIn("hyperfine_incr_s", bad["metrics"])
+            self.assertTrue(any("ownership" in error for error in bad["validation_errors"]))
+            self.assertEqual(len(loaded), 1)
+            self.assertIn("httpie", next(iter(loaded)))
             self.assertFalse(any("prune" in command for command in commands))
             builds = [cmd for cmd in commands if cmd[:2] == ["buildx", "build"]]
             # 3 builds per app: uncached + warm + incremental.
@@ -342,6 +372,14 @@ class WorkloadSafetyTests(unittest.TestCase):
             for app in ("hyperfine", "httpie"):
                 for state in ("uncached", "warm", "incr"):
                     self.assertIn(f"{app}_{state}_s", rec["metrics"])
+                    self.assertEqual(rec["metrics"][f"{app}_{state}_first_use_s"], .5)
+            builds_and_runs = [command for command in commands
+                               if command[:2] == ["buildx", "build"] or command[0] == "run"]
+            self.assertEqual(len(builds_and_runs), 18)
+            for index in range(0, len(builds_and_runs), 3):
+                build, version, note = builds_and_runs[index:index + 3]
+                tag = build[build.index("-t") + 1]
+                self.assertEqual((version[3], note[3]), (tag, tag))
 
     def test_w8_keeps_shared_content_and_labels_it_warm(self):
         with tempfile.TemporaryDirectory() as tmp:

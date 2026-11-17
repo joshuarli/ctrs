@@ -26,8 +26,8 @@ CASE_METRICS = {
     "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
     "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],
     "W6": ["build_rust_s", "build_zlib_s"],
-    "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
-           for state in ("uncached", "warm", "incr")],
+    "W7": [f"{app}_{state}{suffix}_s" for app in ("hyperfine", "httpie")
+           for state in ("uncached", "warm", "incr") for suffix in ("", "_first_use")],
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
     "W9": [metric for concurrency in W9_CONCURRENCIES
            for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",

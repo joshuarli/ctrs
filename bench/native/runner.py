@@ -1484,18 +1484,23 @@ def trial_w7(ctx, engine: Engine, state: str,
     """W7: default buildx -> loaded runnable images for two real apps
     (hyperfine 2.0.0 Rust, httpie 3.2.4 Python). Per app: uncached (--no-cache)
     / warm (identical context) / incremental (one-file stamp bump)
-    builds, then run probes for version output and the note marker.
+    builds, each followed by version and note probes of its loaded image.
     Base images pull untimed in setup; stores remain warm."""
     case_id = "W7"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
     sampler = trace = None
+    owner = os.urandom(12).hex()
+    label = "dev.ctrs.campaign.w7"
+    label_value = hashlib.sha256(ctx.workload_id.encode()).hexdigest()
+    tags = []
     try:
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
+        rec["metrics"]["fixture_version"] = "w7-v2-loaded-first-use"
         sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
                    for name, spec in W7_APPS.items()}
         for spec in W7_APPS.values():
@@ -1510,7 +1515,6 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["notes"].append("--no-cache bypasses layer reuse; "
                             "engine/content stores remain warm")
         for name, spec in W7_APPS.items():
-            tag = f"npw7/{name}:{ctx.run_id[-6:]}"
             ctx_dir = trial_dir / f"ctx-{name}"
             ctx_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy(spec["dockerfile"], ctx_dir / "Dockerfile")
@@ -1518,51 +1522,41 @@ def trial_w7(ctx, engine: Engine, state: str,
                         ctx_dir / spec["source"]["file"])
             (ctx_dir / "stamp").mkdir(exist_ok=True)
 
-            def build_ctx(note: str) -> Path:
-                (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
-                return ctx_dir
-
-            def build(context: Path, uncached: bool = False,
-                      timeout: float = 1800) -> tuple[float, bool, str]:
-                tp = time.monotonic()
-                cp = engine.sh(
-                    build_args(engine, driver,
-                               (["--no-cache"] if uncached else [])
-                               + ["-q", "-t", tag, "-f",
-                                  str(context / "Dockerfile"),
-                                  str(context)]),
-                    timeout=timeout, check=False)
-                err = (cp.stderr or cp.stdout or "").strip()[-400:]
-                return round(time.monotonic() - tp, 3), cp.returncode == 0, err
-
-            s, ok, err = build(build_ctx("incremental-0"), uncached=True)
-            rec["metrics"][f"{name}_uncached_s"] = s
-            checks[f"{name}_uncached"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} uncached build failed: {err}")
-                continue
-            s, ok, err = build(build_ctx("incremental-0"))
-            rec["metrics"][f"{name}_warm_s"] = s
-            checks[f"{name}_warm"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} warm build failed: {err}")
-            s, ok, err = build(build_ctx("incremental-1"))
-            rec["metrics"][f"{name}_incr_s"] = s
-            checks[f"{name}_incr"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} incr build failed: {err}")
-
-            ver = engine.sh(["run", "--rm", tag, *spec["probe"]],
-                            timeout=60, check=False)
-            checks[f"{name}_version"] = (ver.returncode == 0
-                                         and spec["expect"] in ver.stdout)
-            note = engine.sh(["run", "--rm", tag, "cat", "/out/note.txt"],
-                             timeout=60, check=False)
-            checks[f"{name}_note"] = (note.returncode == 0
-                                      and "incremental-1" in note.stdout)
+            for condition, expected_note in (("uncached", "incremental-0\n"),
+                                             ("warm", "incremental-0\n"),
+                                             ("incr", "incremental-1\n")):
+                cell = f"{name}_{condition}"
+                tag = f"npw7/{name}:{owner}-{condition}"
+                tags.append(tag)
+                (ctx_dir / "stamp" / "note.txt").write_text(expected_note)
+                flags = ["--no-cache"] if condition == "uncached" else []
+                with resource_phase(engine, rec, f"{cell}_build"):
+                    build = engine.sh(build_args(engine, driver, [
+                        *flags, "-q", "--platform", "linux/arm64", "--label", f"{label}={label_value}",
+                        "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
+                    ]), timeout=1800, check=False)
+                rec["metrics"][f"{cell}_s"] = rec["resources"]["phases"][f"{cell}_build"]["operation_wall_seconds"]
+                checks[cell] = build.returncode == 0
+                if build.returncode:
+                    rec["validation_errors"].append(f"{cell} build failed: {(build.stderr or build.stdout)[-400:]}")
+                    break
+                with resource_phase(engine, rec, f"{cell}_first_use"):
+                    version = engine.sh(["run", "--rm", "--pull=never", tag, *spec["probe"]],
+                                        timeout=60, check=False)
+                note = engine.sh(["run", "--rm", "--pull=never", tag, "cat", "/out/note.txt"],
+                                 timeout=60, check=False)
+                checks[f"{cell}_version"] = version.returncode == 0 and version.stdout == spec["expect"] + "\n"
+                checks[f"{cell}_note"] = note.returncode == 0 and note.stdout == expected_note
+                (trial_dir / f"{cell}-probe.json").write_text(json.dumps({
+                    "tag": tag, "build_output": build.stdout,
+                    "version": {"exit": version.returncode, "stdout": version.stdout, "stderr": version.stderr},
+                    "note": {"exit": note.returncode, "stdout": note.stdout, "stderr": note.stderr},
+                }, indent=2) + "\n")
+                if checks[f"{cell}_version"] and checks[f"{cell}_note"]:
+                    rec["metrics"][f"{cell}_first_use_s"] = rec["resources"]["phases"][f"{cell}_first_use"]["operation_wall_seconds"]
+                else:
+                    rec["validation_errors"].append(f"{cell} loaded image failed version or note verification")
+                    break
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -1570,11 +1564,25 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+        try:
+            if sampler is not None:
+                stop_sampler(sampler)
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        finally:
+            for tag in tags:
+                try:
+                    inspected = engine.sh(["image", "inspect", "--format",
+                                           '{{ index .Config.Labels "' + label + '" }}', tag], check=False)
+                    if inspected.returncode and "no such image" in inspected.stderr.lower():
+                        continue
+                    if inspected.returncode or inspected.stdout.strip() != label_value:
+                        raise ValueError("image ownership could not be established")
+                    engine.sh(["image", "rm", "--no-prune", tag])
+                except Exception as exc:
+                    rec["correctness"]["ok"] = False
+                    rec["validation_errors"].append(f"{tag} cleanup: {exc}")
 
 
 def _w6_compile_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
