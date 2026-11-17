@@ -4,9 +4,10 @@
 
 **ACTIVE 2026-11-17 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** run the bounded default/zstd3 offline W6 journey screen.
-Job1ac9f565cf7c410fa79c574eece63458 is active under
-`.work/tmp/w6-zstd-journey-20261117/job`. Gzip4/5 are rejected after18 correct
+**Current action:** admit the zstd lead at product resources.
+Jobf289743d32884a6fbcd34aa32d0c81e7 is active under
+`.work/tmp/w6-zstd-default-resources-20261117/job`. The earlier six-pair journey
+screen1ac9f565… passes its CPU, journey and byte guards, with91 unchanged inputs. Gzip4/5 are rejected after18 correct
 builds: their size guards pass but their5% CPU guards fail. Product default is
 unchanged. Full qualification remains unproved.
 The [fixed-rate evidence](evidence/native-fixed-rate-2026-11-17.md) preserves
@@ -169,16 +170,25 @@ the guest block total3.664s. This boundary probe does not establish a hard floor
 or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
 [CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
 
-**Exact continuation:** consume job1ac9f565cf7c410fa79c574eece63458, then run
-`.work/tmp/w6-zstd-journey-20261117/analyze.py` only on its terminal result.
-Recheck frozen inputs before editing Python modules. Six balanced default/zstd3
-pairs measure compile/test through first correct container use. Verify132 tests
-per build, frozen c63f2e92 executable, unchanged compressed base descriptors,
-fresh compile-layer codec, resource coverage and owned teardown. Keep the3%
-added/total-byte and5% whole-journey/CPU guards. A mechanism lead requires a
-fresh2CPU/8192MiB resource/first-use confirmation before a product candidate.
-Do not rerun lower or mid-level gzip grids. See the
-[build evidence](evidence/native-build-boundaries-2026-11-16.md).
+**Exact continuation:** consume jobf289743d32884a6fbcd34aa32d0c81e7, then run
+`.work/tmp/w6-zstd-default-resources-20261117/analyze.py` on its terminal result.
+Recheck frozen inputs before edits. This is six balanced pairs, fresh VM perleg,
+2CPU/8192MiB, default sleep/quiet, exact132 tests/executable/codec/base checks,
+no OOM delta, <=3% paired peak footprint, and next-use increase<=max(10ms,3%).
+The same5% CPU/journey and3% byte guards remain. Do not weaken failed guards.
+
+Private source candidatebd35436de01ee849b85bc412a17cbc633ff792df is committed on
+`perf/zstd-load` in `.work/wt/np-zstd-load`, not main. Only builder.rs/buildgrpc.rs
+change. It uses shared zstd3 defaults for mirror image loads and preserves
+explicit compression/media controls. Component tests/build/native candidate proof
+are PENDING until the native resource job completes. Do not run them concurrently.
+Independent read-only workerusrw_a9e10b21-cc7f-47cf-bcbb-0b9fcd51b3d9 is active
+in `.work/wt/np-zstd-review`, branchreview/np-zstd-load, same pinned source.
+Consume its returned watch, verify zero edits and inspect supported findings.
+If resource admission fails, park candidate without integration. If it passes,
+run only named component tests, build/sign the host component, then compare the
+actual implicit default with unchanged fda baseline and explicit controls.
+See [build evidence](evidence/native-build-boundaries-2026-11-16.md).
 
 Python capability admission and API capture are complete. The integrated
 uprobes gate passes43 tests with zero skips in0.375s. See
@@ -195,7 +205,7 @@ active, but both conditions fail the unchanged16MiB native return budget.
 All100 preemption and93 resource receipts pass before further source edits.
 Default quiet120/sleep60 and all product policies remain unchanged.
 The timer/uprobe checkouts are retired; branches and private/live assets remain.
-All workers are terminal. No W11 soak is running. The zstd journey job owns
+One source reviewer is active. No W11 soak is running. The zstd resource job owns
 the native measurement lane.
 
 C128 native job70b50836… is terminal exit1/clean, all96 receipts unchanged.
@@ -675,7 +685,7 @@ No measured Mac job is active.
 
 ## Ready queue
 
-1. Complete the bounded default/zstd3 offline W6 journey screen.
+1. Complete zstd default-resource admission and the private candidate review.
    Keep W2 CPU attribution and observer controls open after the completed count
    capture. Do not repeat rejected scheduling, pacing or quiet-policy matrices.
 2. W11 duration/cleanup integration is accepted. Freeze actual qualification

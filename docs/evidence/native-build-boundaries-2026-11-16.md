@@ -268,3 +268,30 @@ checks the fresh compile layer's codec and the frozen executable, and retains
 separate build and first-use times. The same3% byte and5% CPU/journey guards
 apply. A lead still requires fresh default-resource memory and first-use
 confirmation. No dependency or product default changed.
+
+
+## Zstd journey screen
+
+Job1ac9f565cf7c410fa79c574eece63458 exits0 with clean teardown.
+All91 inputs recheck after completion. Six balanced pairs complete all12 real
+uncached builds,132 tests each, through first correct container use. Every
+executable matches c63f2e92. The fresh compile layer uses the requested codec,
+and shared compressed base descriptors remain identical. No base recompression.
+
+| Condition | Journey seconds, median (range) | Engine CPU seconds, median (range) | Added layer bytes, median |
+| --- | ---: | ---: | ---: |
+|Default|30.375 (30.013–30.865)|69.319 (68.120–71.973)|147,602,972|
+|Zstd3|26.612 (26.243–27.181)|64.172 (63.395–67.839)|111,547,965|
+
+Zstd3 clears the declared median paired5% CPU/journey and3% byte guards.
+This is a mechanism lead, not a qualified speedup. Sequence peaks span5.2–19.9GB
+with retained caches/images, so they cannot admit the memory tradeoff. The fresh
+2CPU/8192MiB perleg batchf289743d32884a6fbcd34aa32d0c81e7 owns that question.
+Its fixed six pairs also check OOM deltas, first-use budget and process closure.
+Private sourcebd35436 in `.work/wt/np-zstd-load` is not integrated and has not
+been built or tested. A separate read-only review is active. Main defaults stay
+unchanged until resource admission, component checks and actual candidate proof.
+
+Plan SHA-256:fdec86a280558a3bc36148d24c94824775c6c2888f2aa38eaa76b49203e2d78f.
+Terminal SHA-256:bc768b76bf87b0e25988b1a208c7d721ae3e8230c3655823152bd01fb7cd2f9a.
+Analysis SHA-256:0e91512dc141f497cd29fdce8eab357b65881ac17f40dbfbfd8809db8fe647a1.
