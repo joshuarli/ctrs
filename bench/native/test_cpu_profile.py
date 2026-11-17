@@ -1,7 +1,12 @@
 import unittest
+import sys
+from unittest import mock
 from pathlib import Path
 
 import cpu_profile
+sys.path.insert(0, str(Path(__file__).parent / 'diagnostics'))
+import syscall_pilot
+import w2_scheduler_app
 
 TAG = 'np123456789abc'
 
@@ -81,6 +86,67 @@ class CPUProfile(unittest.TestCase):
         self.assertEqual(result['per_thread']['2']['samples'], 0)
         self.assertIsNone(result['per_thread']['2']['cost_per_success_estimates'])
         self.assertEqual(self.analyze(text, application_cpu={'status': 'unknown', 'cpu_seconds': None})['status'], 'unknown')
+
+
+class APIAffinity(unittest.TestCase):
+    def test_parse_and_validate_available_cpus(self):
+        self.assertEqual(w2_scheduler_app.parse_api_cpus('2,0,1'), (0, 1, 2))
+        for spec in ('', '-1', '0,', ',0', '0,,1', '0,00', '1 2', '1-2', '+1'):
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                w2_scheduler_app.parse_api_cpus(spec)
+        w2_scheduler_app.validate_available((0, 2), {0, 1, 2})
+        for cpus in ((), (0, 0), (-1,), (3,)):
+            with self.subTest(cpus=cpus), self.assertRaises(ValueError):
+                w2_scheduler_app.validate_available(cpus, {0, 1, 2})
+
+    def test_every_task_must_inherit_requested_affinity(self):
+        tasks = {'1': {'status': 'Cpus_allowed_list:\t0-1,3\n'},
+                 '2': {'status': 'Cpus_allowed_list:\t0,1,3\n'}}
+        expected = {'1': [0, 1, 3], '2': [0, 1, 3]}
+        self.assertEqual(syscall_pilot.task_affinities(tasks, (0, 1, 3)), expected)
+        self.assertEqual(syscall_pilot.task_affinities(tasks, None), expected)
+        tasks['2']['status'] = 'Cpus_allowed_list:\t0-1\n'
+        with self.assertRaisesRegex(ValueError, 'differs from request'):
+            syscall_pilot.task_affinities(tasks, (0, 1, 3))
+        for status in ('', 'Cpus_allowed_list:\t1-0', 'Cpus_allowed_list:\t0,0',
+                       'Cpus_allowed_list:\t0\nCpus_allowed_list:\t0'):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                syscall_pilot.task_affinities({'1': {'status': status}}, None)
+        with self.assertRaises(ValueError):
+            syscall_pilot.task_affinities({}, (0,))
+
+    def test_unavailable_guest_cpu_fails_before_setting_affinity(self):
+        with mock.patch.dict(w2_scheduler_app.os.environ, {'NP_API_CPUS': '2'}, clear=True), \
+             mock.patch.object(w2_scheduler_app.sys, 'version_info', (3, 13, 18)), \
+             mock.patch.object(w2_scheduler_app.os, 'sched_getaffinity', create=True, return_value={0, 1}), \
+             mock.patch.object(w2_scheduler_app.os, 'sched_setaffinity', create=True) as setter:
+            with self.assertRaisesRegex(ValueError, 'not available'):
+                w2_scheduler_app.main()
+            setter.assert_not_called()
+
+    def test_bootstrap_sets_affinity_before_uvicorn_and_default_does_not(self):
+        for spec in (None, '1,0'):
+            with self.subTest(spec=spec):
+                events = []
+                env = {'NP_SCHED_TAG': TAG}
+                if spec is not None:
+                    env['NP_API_CPUS'] = spec
+                libc = mock.MagicMock()
+                libc.prctl.return_value = 0
+                uvicorn = mock.Mock()
+                uvicorn.run.side_effect = lambda *a, **kw: events.append('run')
+                original = w2_scheduler_app.threading.Thread._bootstrap_inner
+                try:
+                    with mock.patch.dict(w2_scheduler_app.os.environ, env, clear=True), \
+                         mock.patch.object(w2_scheduler_app.sys, 'version_info', (3, 13, 18)), \
+                         mock.patch.object(w2_scheduler_app.ctypes, 'CDLL', return_value=libc), \
+                         mock.patch.object(w2_scheduler_app.os, 'sched_getaffinity', create=True, return_value={0, 1}), \
+                         mock.patch.object(w2_scheduler_app.os, 'sched_setaffinity', create=True, side_effect=lambda *a: events.append(('set', a))), \
+                         mock.patch.dict(sys.modules, {'uvicorn': uvicorn}):
+                        w2_scheduler_app.main()
+                finally:
+                    w2_scheduler_app.threading.Thread._bootstrap_inner = original
+                self.assertEqual(events, [('set', (0, (0, 1))), 'run'] if spec else ['run'])
 
 
 if __name__ == '__main__':

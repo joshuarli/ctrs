@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import select
@@ -19,6 +20,7 @@ import cpu_profile
 import runner
 import sched_trace
 from resource_pilot import host_snapshot
+from w2_scheduler_app import parse_api_cpus
 
 PIN = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
 TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
@@ -42,7 +44,31 @@ def frame(proc, event):
     return result
 
 
-def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters'):
+def task_affinities(tasks, requested):
+    if not tasks:
+        raise ValueError('no API tasks for affinity validation')
+    effective = {}
+    for tid, task in tasks.items():
+        lines = [line.split(':', 1)[1].strip() for line in task['status'].splitlines()
+                 if line.startswith('Cpus_allowed_list:')]
+        if len(lines) != 1 or not lines[0]:
+            raise ValueError('missing or ambiguous API task affinity')
+        cpus = set()
+        for part in lines[0].split(','):
+            match = re.fullmatch(r'([0-9]+)(?:-([0-9]+))?', part)
+            if not match:
+                raise ValueError('malformed API task affinity')
+            start = int(match.group(1)); end = int(match.group(2) or start)
+            if end < start or cpus.intersection(range(start, end + 1)):
+                raise ValueError('malformed API task affinity')
+            cpus.update(range(start, end + 1))
+        if requested is not None and cpus != set(requested):
+            raise ValueError('API task affinity differs from request: ' + tid)
+        effective[tid] = sorted(cpus)
+    return effective
+
+
+def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None):
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -50,14 +76,16 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     override = directory / 'compose.json'
     save(override, {'services': {**{service: {'image': refs[image]} for service, image in (('db', 'postgres'), ('cache', 'redis'))},
          'api': {'image': refs['api'], 'privileged': True, 'command': ['python', '-u', '/diagnostics/w2_scheduler_app.py'],
-                 'environment': {'NP_SCHED_TAG': tag}, 'volumes': [str(path.resolve()) + ':/diagnostics/' + path.name + ':ro' for path in (HELPER, BOOTSTRAP, Path(counter_specs.__file__))]}}})
+                 'environment': {'NP_SCHED_TAG': tag, **({'NP_API_CPUS': ','.join(map(str, api_cpus))} if api_cpus is not None else {})}, 'volumes': [str(path.resolve()) + ':/diagnostics/' + path.name + ':ro' for path in (HELPER, BOOTSTRAP, Path(counter_specs.__file__))]}}})
     def compose(args):
         return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
                          env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
     api = None
     phase = profiler = profiler_log = phase_log = None
     version = cpu_profile.VERSION if profile_kind == 'cpu' else counter_specs.VERSION
-    result = {'fixture_version': version, 'profile_kind': profile_kind, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': []}
+    if api_cpus is not None:
+        version += '-api-affinity-v1'
+    result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': version + ('-' + ','.join(map(str, api_cpus)) if api_cpus is not None else ''), 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}}
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -107,6 +135,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if any(task['comm'].strip() != tag for task in tasks.values()):
             raise ValueError('API task tag mismatch')
         save(directory / 'tasks-warm.json', tasks)
+        result['effective_api_cpus']['warm'] = task_affinities(tasks, api_cpus)
         identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
         save(directory / 'running-engine.json', identity)
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
@@ -135,6 +164,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         phase = subprocess.Popen([runner.DOCKER, 'exec', '-i', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py',
             'phase', tag, mode], env=engine.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=phase_log, text=True)
         before = frame(phase, 'ready'); save(directory / 'phase-before.json', before)
+        result['effective_api_cpus']['before'] = task_affinities(before['tasks'], api_cpus)
         cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
         started = time.monotonic()
@@ -144,6 +174,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()
         after = frame(phase, 'done'); save(directory / 'phase-after.json', after)
         host_snapshot(directory, 'after')
+        result['effective_api_cpus']['after'] = task_affinities(after['tasks'], api_cpus)
         if phase.wait(timeout=15):
             raise RuntimeError('phase helper exit failed')
         delta = sched_trace.application_cpu_delta(before['tasks'], after['tasks'], before['clock_ticks'], required_tids=tasks)
@@ -250,6 +281,7 @@ def main():
     parser.add_argument('--ctrs-binary', type=Path, required=True)
     parser.add_argument('--operations', type=int, default=5000)
     parser.add_argument('--engines', default='ctrs,orbstack')
+    parser.add_argument('--api-cpus', type=parse_api_cpus, default=None, help='explicit comma-separated guest API CPU IDs')
     parser.add_argument('--profile-kind', choices=('counters', 'cpu'), default='counters')
     parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
     args = parser.parse_args()
@@ -268,13 +300,16 @@ def main():
             parser.error('service reference differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
-    run = ('w2-cpu-' if args.profile_kind == 'cpu' else 'w2-count-') + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
+    run = ('w2-affinity-cpu-' if args.profile_kind == 'cpu' else 'w2-affinity-count-') if args.api_cpus is not None else ('w2-cpu-' if args.profile_kind == 'cpu' else 'w2-count-')
+    run = run + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
     for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
-    save(root / 'plan.json', {'fixture_version': cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION,
+    save(root / 'plan.json', {'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else ''),
+        'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
+        'profile_identity': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1-' + ','.join(map(str, args.api_cpus)) if args.api_cpus is not None else ''),
         'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind == 'cpu' else None,
         'mode_order': args.mode_order.split(','), 'engine_order': engines,
         'operations': args.operations, 'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
@@ -292,7 +327,7 @@ def main():
         host_snapshot(directory, 'before')
         try:
             engine.ensure_up()
-            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind) for mode in args.mode_order.split(',')]
+            records = [trial(engine, refs, archive, directory, mode, args.operations, run, args.profile_kind, args.api_cpus) for mode in args.mode_order.split(',')]
             save(directory / 'observer-raw-control.json', {**{record['mode']: record for record in records}, 'overhead_verdict': 'inconclusive',
                 'reason': 'individual diagnostic block; host exclusivity and observer confirmation not certified; raw records only, no median-ratio correction'})
         finally:
