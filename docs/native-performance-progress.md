@@ -125,17 +125,33 @@ remain unqualified. Feature admission c8d90a49… exits0/clean; actual balloon h
 neither negotiated hinting nor reporting. No guest-only reporting experiment or
 product cache/idle change. Resource evidence above retains exact results/hashes.
 
-**Exact continuation:** consume registered status watch for native job
-18475b48d7164b2c9d725778f7edee09,
-`.work/tmp/w9-concurrency-profile-20261117/job`. It runs3 AB/BA/AB engine pairs,
-16 real Marked build/CLI jobs at each concurrency1/4/8/16 (384 jobs total),
-pinned digest/tools/lock/artifact, 17CPU/45091MiB ctrs resident control versus
-OrbStack's existing capacity. Correctness, owned cleanup, actual binary/assets,
-phase counters and <=1% capacity parity are required. Timings remain diagnostic;
-predeclared CPU loss screen is >=10% in all3 pairs at a concurrency. Review
-results/host snapshots and all frozen receipts once; preserve failures and
-profile any demonstrated contention boundary. No source worker active; no other
-measured native job may contend. Never treat absent VM counters as zero.
+W9 job18475b48… is terminal exit0/clean:384 exact build/test jobs in3 AB/BA/AB
+pairs, concurrency1/4/8/16, complete native counters and89 unchanged receipts.
+No declared ctrs contention loss selected. W3 WAL jobda7234e1… also exits0/clean:
+6,000 committed transactions, exact all-row checks before/after6 DB restarts,
+1,000 syncs/320,607 WAL bytes per leg, complete resources and89 unchanged inputs.
+Both retain17CPU/45091MiB resident controls and shared-host limits; no win claimed.
+
+[CI/WAL evidence](evidence/native-ci-wal-2026-11-17.md) records the actual cost
+boundary: fresh paired Fsync/Full job1198bea5… exits0/clean with all94 inputs
+unchanged. Full WAL sync costs3.7–3.9s per1,000 commits versus Fsync0.09–0.11s.
+Their contracts differ; this is not equivalent-durability speed credit. Both
+fresh signed artifacts are6,613,984B; actual binary/boot hashes checked.
+Private Full be06882 is unmerged. Uncached+Full b030772 is REJECTED by job
+4240274e… (all6 correctness/resource proofs pass,97 inputs unchanged) because
+the predeclared10% wall improvement/every-pair lead are absent. Main stays Cached+
+Fsync. Original Full branch/proofs remain parked; host power loss remains unknown.
+
+**Exact continuation:** implement the bounded guest fdatasync/block-flush
+timing diagnostic recommended by terminal read-only scout
+usrw_140c29f3-0a3f-4add-a8a3-54747a939f23, tree`.work/wt/np-wal-review`.
+It found no per-commit engine/RPC path but did not inspect raw JSON; parent did.
+Profile the actual PostgreSQL backend under Full using owned tracefs/kprobes
+and block request issue/completion, retaining SQL/row/checkpoint/restart oracles,
+loss accounting and cleanup. Use existing traced-flush feasibility source
+`.work/tmp/full-flush-pilot.py` and counter helper as references, not another
+orderly-restart-only proof. No native job or source worker active. Never treat
+absent VM counters as zero or suppress unsupported/lost trace coverage.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
