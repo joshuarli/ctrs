@@ -1,6 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**Owner steering: 2026-11-15. RESUMED by owner request 2026-11-16; not complete.** This is
+**Owner steering: 2026-11-17. RESUMED after owner-requested winddown and cleanup; not complete.** This is
 the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
@@ -98,6 +98,9 @@ ctrs. These are engineering targets, not current performance claims.
 | Reliability | Frozen candidate and OrbStack each complete one 12-hour W11 mixed-workload qualification: zero unexplained deaths, zero unexpected errors, correct durable data and bounded resource growth |
 | Reproducibility | Fresh signed release build and isolated roots reproduce results; independent held-out app/workload passes; commands, hashes, failures, CIs, limitations and evidence locations recorded |
 
+Parity and aggregate leadership are milestones. The stronger owner objective
+is to exceed OrbStack across every comparable dimension, including application
+performance, CPU, physical memory, idle, storage, recovery and reliability.
 Keep pursuing every remaining comparable weakness. Claim universal
 superiority only if every declared comparable cell is a strict win.
 Claim “meets and exceeds on this macOS matrix” only after **all** gates
@@ -201,6 +204,9 @@ not establish representative inputs, durability or physical accounting.
 
 ## Immediate implementation priorities
 
+Reconcile reviewed checkpoint `94f19a8` with newer integrated work before editing.
+The first accounting/ownership repair, fixed-work W2 and representative fixture
+implementations already landed; reuse valid evidence and close remaining gaps.
 Follow the single ordered queue in `native-performance-progress.md`: bounded
 measurement repair and clean calibration first; normalized fixed-work W2 and
 causal application profiling next, with independent acceptance-fixture and

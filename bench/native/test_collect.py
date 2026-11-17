@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import time
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import collect
 import runner
@@ -94,3 +97,65 @@ class BoundaryTests(unittest.TestCase):
         result = fixture.summary(samples)
         self.assertEqual(result['cpu_seconds_est'], 3)
         self.assertEqual(result['peak_phys_footprint_bytes'], 200100)
+
+
+class SamplerLifecycleTests(unittest.TestCase):
+    def test_early_collector_exit_invalidates_partial_resource_trace(self):
+        fixture = ResourceTests()
+        samples = ''.join(json.dumps(row) + '\n' for row in
+                          [fixture.sample(), fixture.sample(3, 12)])
+        for code in (0, 7):
+            with self.subTest(exit_status=code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                collector = root / 'collector.py'
+                collector.write_text(
+                    'import sys\nfrom pathlib import Path\n'
+                    f'Path(sys.argv[sys.argv.index("--out") + 1]).write_text({samples!r})\n'
+                    'print("collector ended early", file=sys.stderr)\n'
+                    f'raise SystemExit({code})\n')
+                engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
+                with patch.object(runner, 'COLLECT', collector), \
+                        patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
+                    sampler, trace = runner.start_sampler(engine, root)
+                self.assertEqual(sampler.process.wait(timeout=5), code)
+                self.assertEqual(runner.summarize_trace(trace)['cpu_seconds_est'], 3)
+                runner.stop_sampler(sampler)
+                summary = runner.summarize_trace(trace)
+                self.assertIsNone(summary['cpu_seconds_est'])
+                self.assertIsNone(summary['peak_phys_footprint_bytes'])
+                self.assertTrue(any('before requested stop' in error for error in summary['resource_errors']))
+                self.assertIn('collector ended early', sampler.stderr.read_text())
+
+    def test_requested_stop_keeps_complete_collector_samples(self):
+        fixture = ResourceTests()
+        samples = ''.join(json.dumps(row) + '\n' for row in
+                          [fixture.sample(), fixture.sample(3, 12)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            collector = root / 'collector.py'
+            ready = root / 'ready'
+            collector.write_text(
+                'import signal, sys\nfrom pathlib import Path\n'
+                'signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n'
+                f'Path(sys.argv[sys.argv.index("--out") + 1]).write_text({samples!r})\n'
+                f'Path({str(ready)!r}).touch()\n'
+                'signal.pause()\n')
+            engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
+            with patch.object(runner, 'COLLECT', collector), \
+                    patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
+                sampler, trace = runner.start_sampler(engine, root)
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(ready.exists(), 'collector did not reach readiness')
+                runner.stop_sampler(sampler)
+                summary = runner.summarize_trace(trace)
+                self.assertEqual(sampler.process.returncode, 0)
+                self.assertEqual(summary['cpu_seconds_est'], 3)
+                self.assertEqual(summary['peak_phys_footprint_bytes'], 100100)
+                self.assertEqual(summary['resource_errors'], [])
+            finally:
+                if sampler.process.poll() is None:
+                    sampler.process.kill()
+                    sampler.process.wait(timeout=5)

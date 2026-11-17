@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -677,6 +678,13 @@ def http_json(url: str, timeout: float = 5.0):
         return status, body.decode(errors="replace")[:500]
 
 
+@dataclass(frozen=True)
+class Sampler:
+    process: subprocess.Popen
+    trace: Path
+    stderr: Path
+
+
 def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=()):
     trace = trial_dir / "resources.jsonl"
     identity_path = trial_dir / "ownership.json"
@@ -695,12 +703,14 @@ def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=()):
         identity['method'] = identity.get('method', '') + '; explicit owned fixture process identities'
     identity_path.write_text(json.dumps(identity, indent=2) + "\n")
     engine.measurement_identity = identity
-    proc = subprocess.Popen(
-        [sys.executable, str(COLLECT), "--match", MATCH_PATTERNS[engine.name],
-         "--ownership", str(identity_path),
-         "--interval", "0.2", "--out", str(trace)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return proc, trace
+    stderr = trial_dir / "sampler.stderr"
+    with stderr.open("wb") as errors:
+        proc = subprocess.Popen(
+            [sys.executable, str(COLLECT), "--match", MATCH_PATTERNS[engine.name],
+             "--ownership", str(identity_path),
+             "--interval", "0.2", "--out", str(trace)],
+            stdout=subprocess.DEVNULL, stderr=errors)
+    return Sampler(proc, trace, stderr), trace
 
 
 @contextmanager
@@ -720,13 +730,26 @@ def resource_phase(engine, rec, name):
         rec["resources"].setdefault("phases", {})[name] = result
 
 
-def stop_sampler(proc: subprocess.Popen) -> None:
+def stop_sampler(sampler: Sampler) -> None:
+    proc = sampler.process
+    running = proc.poll() is None
+    forced = False
     proc.send_signal(signal.SIGTERM)
     try:
         proc.wait(timeout=35)
     except subprocess.TimeoutExpired:
+        forced = True
         proc.kill()
         proc.wait(timeout=5)
+    if not running or proc.returncode != 0 or forced:
+        error = ("sampler exited before requested stop" if not running else
+                 "sampler required forced termination" if forced else
+                 "sampler failed during requested stop")
+        with sampler.trace.open("a") as trace:
+            trace.write(json.dumps({"record_type": "sampler_exit",
+                "error": f"{error}: exit {proc.returncode}",
+                "exit_status": proc.returncode, "forced_stop": forced,
+                "stderr": str(sampler.stderr)}) + "\n")
 
 
 def _trace_ref(trace: Path) -> str:
