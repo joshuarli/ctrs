@@ -1,6 +1,7 @@
 # Retained native performance work
 
-This inventory records the owner-requested winddown on 2026-11-16.
+This inventory records owner-requested winddowns on 2026-11-16 and 2026-11-17.
+The latest dated inventory supersedes earlier checkout-retention statements.
 The campaign resumed later the same day. Original winddown lanes are terminal;
 the storage repair lane is also terminal and integrated. Checkouts preserve source or
 qualification evidence. The current campaign status and next action live in
@@ -94,3 +95,85 @@ and live-initrd worktree `.work/wt/np-balloon-used`. Every other checkout in
 the pre-retirement worktree inventory also remains; ownership or lane status
 was outside this authorized two-checkout pass. No scratch, builder volume,
 container, VM disk, input, result, or benchmark process was otherwise cleaned.
+
+## Winddown inventory 2026-11-17
+
+The owner paused performance work and separately requested cleanup afterward.
+All experiment/build/worker attempts are terminal. No campaign process was found
+in the native process snapshot; no user crontab exists. User/system launch-agent
+searches contain no campaign job, and scheduled power events are unrelated Apple
+services. No workstation service or unrelated OrbStack workload was stopped.
+No new experiment started. Six clean completed checkouts were retired with
+`worktree-retire`: `np-balloon-reserve-review`, `np-balloon-review`,
+`np-cleanup-resume`, `np-python-leaf`, `np-wal-review`, `np-wal-trace`.
+Ancestor-only branches were removed by the tool; patch-equivalent branches remain.
+
+Every checkout below is temporarily retained for the explicit follow-on cleanup:
+inspect ignored artifacts, establish aggregate integration, and retire only with
+`worktree-retire <exact-path> --into <accepted-head>`. Unverified/rejected branches
+must not be merged merely to satisfy retirement. The unrelated stuf89 checkout
+has its original task as its consumer. All necessary source is committed; no
+uncommitted proposal is required after reboot. Raw `.work` artifacts are optional.
+The source/evidence and runtime reconstruction commands are in the progress file.
+
+| Branch | Revision | Checkout under `.work/wt` | Cause, consumer and retry condition |
+| --- | --- | --- | --- |
+| `campaign/np-disk-expand` | `8b41bc208d52` | `np-disk-expand` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-durable-job` | `ac1fb749b222` | `np-durable-job` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-full-sync` | `f536b6e24466` | `np-full-sync` | Unpromoted VZ Full policy; retry only with exclusive W3/W2/resource and durability confirmation. |
+| `campaign/np-refusal-ttl` | `54c6a00b1c51` | `none` | Unpromoted 50ms recovery delay; retry after exclusive v2 baseline/control; preserve failed confirmation. |
+| `campaign/np-resource-cells` | `b486f06b4c4b` | `np-resource-cells` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-sched-mc` | `1bea138e2918` | `np-sched-mc` | Rejected scheduler hypothesis; require new causal evidence before reconsidering. |
+| `campaign/np-space-fix` | `34a0c3953845` | `np-space-fix` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w10-cache-trace` | `942bba3135b4` | `np-w10-cache-trace` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-w11-deadline` | `31094511425d` | `np-w11-deadline` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w11-fix-review` | `50716e7850b5` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w11-review` | `8acbf602adfd` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w11-v2` | `9052439310d6` | `np-w11-v2` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-w4` | `45dca6dd7873` | `np-w4` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-w5` | `14d3427bde17` | `np-w5` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `campaign/np-w8-content` | `bc6625ffaa18` | `np-w8-content` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w8-paired` | `bfcf4a9d1160` | `np-w8-paired` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w8-phases` | `72f4921566f2` | `np-w8-phases` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w8-underpull` | `d67782c630e0` | `np-w8-underpull` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w8-v2` | `95c318f096aa` | `np-w8-v2` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `campaign/np-w9-v2` | `be7f41da0344` | `np-w9-v2` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `chore/ctrs-proto-target-gate` | `e0a24301a8fa` | `none` | Pre-existing unrelated branch; no campaign cleanup authority to change it. |
+| `chore/np-cleanup-resume` | `6d1df7ba127c` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `chore/np-test-pyramid` | `c8355f0edc9b` | `np-test-pyramid` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `cleanup/mount-guard` | `7acbcf16c123` | `none` | Pre-existing mount-guard provenance; do not integrate again. |
+| `diagnostic/np-builder-readiness` | `4c217a259129` | `np-builder-readiness` | Private logging-only profile; reconstruct if a new readiness boundary needs attribution. |
+| `diagnostic/np-ready-audit` | `24c4c920c1bb` | `np-ready-audit` | Private two-log lifecycle observer; reconstruct from branch for a new functional question. |
+| `diagnostic/w2-uprobes` | `18bd6706b5f5` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `experiment/np-gzip-backend` | `d0b2a72d136a` | `np-gzip-backend` | Rejected: decoder CPU ratio misses declared 10% screen; miniz default remains. |
+| `experiment/np-lse-only` | `f7ea79162d60` | `np-lse-only` | Rejected kernel hypothesis; require new causal evidence before reconsidering. |
+| `experiment/np-preempt-full` | `631d704c70c7` | `np-preempt-full` | Rejected: no pair achieves declared 10% API CPU reduction; require a new causal profile. |
+| `experiment/np-uprobes` | `e5b9a3326ee7` | `np-uprobes` | Private diagnostic kernel only; reconstruct from branch if another named attribution question needs it. |
+| `experiment/np-w2-affinity` | `8d94a2292e7a` | `np-w2-affinity` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `experiment/np-w2-client-path` | `f2d394c09888` | `np-w2-client-path` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `experiment/np-w3-full` | `be068821426c` | `none` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `experiment/np-w3-uncached` | `b03077287b89` | `np-w3-full` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `experiment/w2-fixed-rate` | `dabc710d0a0a` | `np-w2-rate` | Unverified superseded three-file proposal committed as dabc710; compare against current integrated implementation before retry. |
+| `experiment/wal-trace` | `e1b12f6f6ddc` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `fix/image-inspect-diffids` | `cdcbfb4913b4` | `np-image-diffids` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `fix/np-balloon-reserve` | `4ecd599914b9` | `np-balloon-reserve` | Accepted host-accounting repair; patch provenance for cleanup comparison. |
+| `fix/np-balloon-used` | `45fd902b3aa4` | `np-balloon-used` | Accepted guest-accounting repair; old initrd symlink is standby only, not a running consumer; rebuild from main before deleting assets. |
+| `fix/np-resource-pins` | `0783b4371119` | `np-resource-pins` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `fix/np-vm-stop` | `4ad8f0139ab4` | `np-vm-stop` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `fix/stuf89-help` | `4e2bffca3960` | `stuf89` | Unrelated owner task; preserve checkout, branch and all ignored data. |
+| `perf/np-ready-cache` | `c484fa80011c` | `np-ready-cache` | Two source commits combined into accepted 2f37d02; preserve provenance and prove aggregate equivalence before retirement. |
+| `perf/w2-timer` | `89ba4a8bfeac` | `none` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `perf/zstd-load` | `bd35436de01e` | `np-zstd-load` | Rejected: valid 2GiB repeated layer exceeds unchanged unpack expansion bound; no default promotion. |
+| `repomod/fix/f844dfc9dd284537af0a958ad9dfadf1` | `35697c5e33ea` | `none` | Pre-existing unrelated branch; preserve untouched. |
+| `research/np-balloon-model-review` | `45fd902b3aa4` | `np-balloon-model-review` | Accepted guest-accounting source snapshot; prove aggregate equivalence before retirement. |
+| `review/np-disk-expand` | `8b41bc208d52` | `np-disk-review` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `review/np-durable-job` | `879fa20f9064` | `np-durable-review` | Historical source snapshot with non-equivalent commits; cleanup compares final source against integrated main. Preserve branch; do not merge without a demonstrated missing accepted fix and affected proof. |
+| `review/np-flush-path` | `c74b1a196c7f` | `np-flush-audit` | Integrated or patch-equivalent provenance; cleanup may retire after ignored-artifact and process-use checks. No new experiment required. |
+| `review/np-ready-cache` | `c39d95ffae61` | `np-ready-review` | Read-only earlier readiness snapshot; corrected source is integrated; retirement tool may reject partial patch equivalence. |
+| `review/np-zstd-load` | `bd35436de01e` | `np-zstd-review` | Read-only snapshot of rejected zstd source; preserve branch, no retry without a different compatible design. |
+
+This is a retention inventory, not an instruction to rerun completed proofs.
+Reconstruct a retired source checkout with `git worktree add .work/wt/<name>
+<branch>`. Rebuild assets using the pinned component instructions on main; do not
+rely on retained binary locations or old symlinks. Original detailed checkpoints
+remain in Git at `2f37d02:docs/native-performance-progress.md`.
