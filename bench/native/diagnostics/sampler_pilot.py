@@ -32,6 +32,11 @@ def _trial_totals(record, operations):
             raise ValueError('incomplete W2 control CPU boundary: ' + phase)
     if resources.get('resource_errors'):
         raise ValueError('periodic resource collection failed')
+    if resources.get('sampling_mode') == runner.SamplingMode.PERIODIC.value and (
+            resources.get('ownership_verified') is not True
+            or resources.get('cpu_counters_complete') is not True
+            or resources.get('peak_phys_footprint_bytes') is None):
+        raise ValueError('incomplete periodic resource collection')
     workload = resources['phases']['workload']
     values = {
         'cpu_seconds_per_success': workload['cpu_seconds'] / operations,

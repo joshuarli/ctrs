@@ -1,4 +1,5 @@
 import copy
+from contextlib import nullcontext
 import json
 from pathlib import Path
 import sys
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from diagnostics import sampler_pilot as pilot
+from test_safety import FixtureContext, fake_engine
 
 
 def trial():
@@ -22,6 +24,41 @@ def trial():
 
 
 class ObserverControls(unittest.TestCase):
+    def test_trial_preserves_measurement_and_cleanup_failures(self):
+        for failure in (RuntimeError('measurement failed'), SystemExit(143)):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                ctx = FixtureContext(directory)
+                engine = fake_engine()
+                engine.compose.side_effect = failure
+                with patch.object(pilot.runner, 'compose_down', side_effect=[None, RuntimeError('cleanup failed')]), \
+                     patch.object(pilot.runner, 'start_sampler', return_value=(object(), None)), \
+                     patch.object(pilot.runner, 'resource_phase', side_effect=lambda *args: nullcontext()), \
+                     patch.object(pilot.runner, 'stop_sampler', side_effect=RuntimeError('sampler stop failed')) as stop:
+                    invoke = lambda: pilot.runner.trial_w2(ctx, engine, 'warm', 4, 20, .3, 7, 1000)
+                    if isinstance(failure, SystemExit):
+                        with self.assertRaises(SystemExit) as interrupted:
+                            invoke()
+                        self.assertEqual(interrupted.exception.code, 143)
+                    else:
+                        record = invoke()
+                        self.assertFalse(record['correctness']['ok'])
+                    stop.assert_called_once()
+                saved = json.loads((Path(directory) / 'orbstack/W2/trial-result.json').read_text())
+                self.assertFalse(saved['correctness']['ok'])
+                errors = '\n'.join(saved['validation_errors'])
+                self.assertIn(str(failure), errors)
+                self.assertIn('cleanup failed', errors)
+                self.assertIn('sampler stop failed', errors)
+
+    def test_periodic_control_requires_complete_observation(self):
+        for missing in ('ownership_verified', 'cpu_counters_complete', 'peak_phys_footprint_bytes'):
+            record = trial()
+            record['resources'].update(sampling_mode='periodic', ownership_verified=True,
+                                      cpu_counters_complete=True, peak_phys_footprint_bytes=100000)
+            record['resources'][missing] = None
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, 'incomplete periodic'):
+                pilot._trial_totals(record, 1000)
+
     def test_work_failure_survives_cleanup_failure_and_closes_registry(self):
         for failure in ('engine', 'registry'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:

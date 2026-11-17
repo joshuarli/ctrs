@@ -11,6 +11,10 @@ import mixed_cycle
 import runner
 
 
+def setUpModule():
+    (runner.REPO / '.work/tmp').mkdir(parents=True, exist_ok=True)
+
+
 class MixedLoad(unittest.TestCase):
     def test_real_http_cycles_have_disjoint_writes_and_exact_cumulative_state(self):
         writes = []

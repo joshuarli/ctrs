@@ -1102,11 +1102,16 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                                               load.returncode == 0 and summary["errors"] == 0 and
                                               (request_rate is None or summary["offered_rate_valid"]))
         return rec
-    except Exception as exc:
+    except BaseException as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(f"{type(exc).__name__}: {exc}")
+        if isinstance(exc, Exception):
+            return rec
+        raise
     finally:
+        interrupted = sys.exc_info()[1]
+        if isinstance(interrupted, Exception):
+            interrupted = None
         try:
             if allocation_paths:
                 rec["resources"].setdefault("disk_allocation", {})["after_work"] = resource_cells.allocation_snapshot(allocation_paths)
@@ -1117,12 +1122,35 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                 compose_down(engine, proj)
             if allocation_paths:
                 rec["resources"]["disk_allocation"]["after_cleanup"] = resource_cells.allocation_snapshot(allocation_paths)
-        finally:
+        except BaseException as exc:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(f"cleanup {type(exc).__name__}: {exc}")
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+        try:
             if sampler is not None:
                 stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+        except BaseException as exc:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(f"sampler stop {type(exc).__name__}: {exc}")
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+        try:
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        except BaseException as exc:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(f"sampler summary {type(exc).__name__}: {exc}")
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+        try:
+            (trial_dir / "trial-result.json").write_text(json.dumps(rec) + "\n")
+        except OSError:
+            if interrupted is None:
+                raise
+        if interrupted is not None:
+            raise interrupted
 
 
 def registry_name(engine_name: str) -> str:
