@@ -215,13 +215,13 @@ W8_IMAGES = [
 
 CHECK_COMPONENTS = {
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
-    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
     "resources": ("test_resource_cells", "test_resource_cycles", "test_resource_pilot", "test_wal_trace_guest",
                   "test_collect", "test_storage_space",
-                  "test_system_df_cache", "test_safety"),
+                  "test_system_df_cache", "test_reporting", "test_safety"),
 }
 CHECK_TIMEOUT_SECONDS = 60
 
