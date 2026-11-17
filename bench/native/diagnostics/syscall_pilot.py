@@ -121,6 +121,11 @@ def cleanup_project(engine, compose, project):
 
 def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None,
           client_location='host', *, concurrency=4, seed=7):
+    versions = {'cpu': cpu_profile.VERSION, 'counters': counter_specs.VERSION,
+                'wake-counters': counter_specs.WAKE_VERSION}
+    if profile_kind not in versions:
+        raise ValueError('unknown W2 profiler kind: ' + profile_kind)
+    wake_only = profile_kind == 'wake-counters'
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -135,7 +140,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     api = None
     client = project + '-client'
     phase = profiler = profiler_log = phase_log = None
-    version = cpu_profile.VERSION if profile_kind == 'cpu' else counter_specs.VERSION
+    version = versions[profile_kind]
     if api_cpus is not None:
         version += '-api-affinity-v1'
     if client_location == 'guest':
@@ -215,10 +220,10 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                         '--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
                         '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/cpu.data']
             else:
-                helper('probes')
+                helper('wake-probes' if wake_only else 'probes')
                 args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
                         '--delay=-1', '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/stat.json']
-                spec = counter_specs.selectors(tag)
+                spec = counter_specs.wake_selectors(tag) if wake_only else counter_specs.selectors(tag)
                 save(directory / 'selectors.json', spec)
                 for selector in spec:
                     args += ['-e', selector['event']]
@@ -291,11 +296,11 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                 result['cpu_profile'] = profile
             else:
                 engine.sh(['cp', api + ':/tmp/np-count/stat.json', str(directory / 'stat.json')])
-                counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
+                counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations, wake_only=wake_only)
                 save(directory / 'counts.json', counts)
                 if counts['status'] != 'ok':
                     raise ValueError('event counter coverage invalid: ' + repr(counts['errors']))
-                profile = json.loads(helper('probe-profile').stdout)
+                profile = json.loads(helper('wake-probe-profile' if wake_only else 'probe-profile').stdout)
                 if profile['status'] != 'ok':
                     raise ValueError('probe miss coverage invalid')
                 result['probe_profile'] = profile
@@ -330,7 +335,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                     except Exception as kill_exc:
                         result['cleanup_errors'].append(label + ' kill: ' + repr(kill_exc))
         try:
-            if api and mode == 'on' and profile_kind == 'counters':
+            if api and mode == 'on' and profile_kind != 'cpu':
                 helper('cleanup')
         except Exception as exc:
             result['cleanup_errors'].append('probes: ' + repr(exc))

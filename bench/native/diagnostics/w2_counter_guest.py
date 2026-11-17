@@ -75,7 +75,9 @@ def main():
                           'meminfo': Path('/proc/meminfo').read_text(),
                           'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                           'kernel': list(os.uname()), 'kernel_log': kernel_log()}), flush=True)
-    elif action == 'probes':
+    elif action in ('probes', 'wake-probes'):
+        if action == 'wake-probes':
+            definitions = definitions[:1]
         if any(':' + tag + '/' in line for line in (TRACE / 'kprobe_events').read_text().splitlines()):
             raise RuntimeError('trace group already exists; refuse adoption')
         (ROOT / 'owned.json').write_text(json.dumps({'tag': tag, 'created': []}))
@@ -105,11 +107,12 @@ def main():
         if any(':' + tag + '/' in line for line in (TRACE / 'kprobe_events').read_text().splitlines()):
             raise RuntimeError('owned probe remains after cleanup')
         print(json.dumps({'owned_probes_absent': True}), flush=True)
-    elif action == 'probe-profile':
-        names = set(futex_events(tag).values())
+    elif action in ('probe-profile', 'wake-probe-profile'):
+        events = futex_events(tag)
+        names = {events['enter_futex']} if action == 'wake-probe-profile' else set(events.values())
         rows = [line.split() for line in (TRACE / 'kprobe_profile').read_text().splitlines() if line.split()[0] in names]
         if len(rows) != len(names) or any(len(row) != 3 or int(row[-1]) != 0 for row in rows):
-            raise RuntimeError('missing probe profile or missed kretprobe instances')
+            raise RuntimeError('missing probe profile or missed probe instances')
         print(json.dumps({'status': 'ok', 'rows': rows, 'missed': 0}), flush=True)
     elif action == 'launch':
         stat = Path('/proc/self/stat').read_text()
