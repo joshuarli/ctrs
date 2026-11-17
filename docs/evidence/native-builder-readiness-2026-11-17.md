@@ -101,3 +101,24 @@ machine leave timing ineligible. Six pairs and this controlled warm fixture do
 not qualify the full performance matrix, installed defaults, cold content,
 recovery, long builds or12-hour reliability. No qualified speedup is claimed.
 Raw root: `.work/tmp/builder-ready-compare-20261117/`.
+
+## Classic-builder C caller admission
+
+After the sampler repair, run one bounded functional proof using the accepted
+signed host `db20b210...` and unchanged stock kernel/initrd. Use a NEW isolated
+root, 2 CPUs/8192MiB and idle timeout0; this is disclosed functional test policy,
+not installed-default or resource-matched performance evidence. Classic
+`DOCKER_BUILDKIT=0 docker build` must load a runnable native C image through the
+existing default builder. The input is the pinned W6 zlib1.3.1 archive and GCC
+14.2.0 manifest in the tracked Dockerfile. Keep one identical context for five
+cases: cold, warm, paused, externally paused-and-resumed, and restarted builder.
+
+Before each lifecycle mutation verify builder ownership/pin, record ID/PID/start
+and state, then assert the expected changed/unchanged fingerprint. Every resulting
+image must run both the native zlib example and native architecture check, and
+return the identical static-library digest. Preserve the first failure; no retry
+or favorable timing score. Assert owned cleanup and native process termination.
+The finite job lives at `.work/tmp/classic-builder-c-20261117/job` with a fixed
+20-minute deadline and frozen inputs, including explicit sparse-template receipt.
+No shared Docker daemon, user store or context is modified. Source remains the
+accepted product revision; no new candidate or instrumentation is introduced.

@@ -13,7 +13,7 @@ No product, guest or build-driver default is being changed by this measurement r
 Cleanup is complete:28 retired checkouts, `.work`195.3→21.0GiB allocated-size sum; [resource record](evidence/native-cleanup-resources-2026-11-17.md).
 Parked source and remaining trees: [inventory](native-performance-retained.md#after-cleanup-2026-11-17); no rejected candidate is promoted.
 Next action: prepare clean W2 confirmation; while exclusivity is unavailable, execute the queued bounded classic-builder C caller proof.
-Classic-builder C proof is the first independent ready item; no application timing batch is admitted.
+Classic-builder C proof is admitted as a finite5-case functional job; no application timing batch is admitted.
 Full qualification waits for frozen representative inputs, resource/durability gates and a complete per-cell matrix.
 Resume first command is `codex-campaign-closeout.py cancel` (already run); execute the first ready queue item.
 
@@ -65,16 +65,17 @@ Resume first command is `codex-campaign-closeout.py cancel` (already run); execu
 
 ## Exact next action
 
-Finish the bounded sampler-lifecycle repair in `bench/native/runner.py` and
-`test_collect.py`. Baseline reproduction exits the collector with status7 after
-two valid samples: shutdown ignores the status and retains CPU3.0s and physical
-footprint100100B with no error. Preserve the partial raw records, retain stderr
-and invalidate CPU/physical acceptance cells after premature or forced collector
-termination. Confirm graceful requested stop still preserves valid cells.
-Run the named collector/ownership/reporter and affected lifecycle component tests;
-then a short native collection-only proof with normal and intentionally early
-collector exit. Read-only observation may run on a busy host, but it cannot
-establish observer overhead or product performance.
+The sampler v4 repair is accepted at ef22cc9 after87 parent tests, native
+lifecycle/phase controls and independent correction review. Its [evidence](evidence/native-sampler-lifecycle-2026-11-17.md)
+preserves the original defect, race correction and measurement limitations.
+
+Execute the bounded classic-builder C caller proof in
+`.work/tmp/classic-builder-c-20261117/job`: one frozen W6 zlib context, five
+cold/warm/pause/external-resume/restart cases, exact native artifacts, owned
+cleanup. Inspect its identity/status once after launch and retain the terminal
+exit, rather than starting another copy. The [readiness evidence](evidence/native-builder-readiness-2026-11-17.md)
+contains admission and reproduction inputs. This is functional validation only;
+no timing or resource acceptance is implied.
 
 After the repair, admit the predeclared exclusive equal-work W2 confirmation
 only when both scalar gate and saved process/guest snapshots establish a clean
