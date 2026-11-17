@@ -31,6 +31,8 @@ COMPARISONS = frozenset(('installed-default', 'resource-matched-default-driver',
                         'identical-builder'))
 W11_CELLS_FILE = runner.BENCH / 'w11-cells.json'
 W11_CELLS = json.loads(W11_CELLS_FILE.read_text())
+W1_W10_CELLS_FILE = runner.BENCH / 'qualification-cells.json'
+W1_W10_CELLS = json.loads(W1_W10_CELLS_FILE.read_text())
 MINIMUM_WORK_SECONDS = 12 * 60 * 60
 MAX_DIAGNOSTIC_WORK_SECONDS = 15 * 60
 MAX_EXCLUSIVITY_REVIEW_SECONDS = 5 * 60
@@ -214,11 +216,15 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
                 raise ReadinessError('duplicate declared measurement cell: ' + name)
             identities.add(identity)
             workloads.add(workload); dimensions.add(dimension)
-        if workloads != set(CASES) or dimensions != set(DIMENSIONS):
-            raise ReadinessError('cell contract omits a required workload or dimension')
+        for name, specification in W1_W10_CELLS.items():
+            cell = contract.get(name, {})
+            if any(cell.get(field) != value for field, value in specification.items()):
+                raise ReadinessError('missing or changed required qualification cell: ' + name)
         for name, specification in W11_CELLS.items():
             if contract.get(name) != specification:
                 raise ReadinessError('missing or changed required W11 cell: ' + name)
+        if workloads != set(CASES) or dimensions != set(DIMENSIONS):
+            raise ReadinessError('cell contract omits a required workload or dimension')
         review_path = prerequisites['complete_cell_contract']['evidence']['path']
         review = _object(json.loads(Path(review_path).read_text(), object_pairs_hook=_unique), 'cell contract review')
         digest = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -257,7 +263,7 @@ def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_
                 runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
                 runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w8-v2/portfolio.json',
                 ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
-                runner.BENCH / 'schema.json', W11_CELLS_FILE]
+                runner.BENCH / 'schema.json', W11_CELLS_FILE, W1_W10_CELLS_FILE]
     required += [file for file in runner.BENCH.glob('*.py') if not file.name.startswith('test_')]
     required += list((runner.BENCH / 'diagnostics').glob('*.py'))
     for layout in (portfolio_layout, worker_layout):

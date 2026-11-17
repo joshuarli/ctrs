@@ -19,6 +19,12 @@ import test_resource_cycles as resource_examples
 from diagnostics import mixed_pilot
 
 
+CPU_CELL = 'w2.resident-idle.resource-cycle.cpu-cores'
+RECOVERY_CELL = 'w10.warm.api-interruption.recovery-s'
+CORRECTNESS_CELL = 'w1.warm.compose-stack.startup-or-roundtrip-failures'
+EDIT_CELL = 'w5.warm.bind.bind-edit-to-result-median-s'
+
+
 class Readiness(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory()
@@ -33,11 +39,10 @@ class Readiness(unittest.TestCase):
         proof = artifacts['proof']
         versions = {key: key + '-v-test' for key in gate.CASES}
         versions['W11'] = gate.mixed_resources.VERSION
-        contract = {key: {'workload': 'W1', 'dimension': key, 'metric': key,
-            'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': 'W1-v-test'} for key in gate.DIMENSIONS}
-        contract.update({key: {'workload': key, 'dimension': 'application', 'metric': 'test-metric',
-            'state': 'warm', 'load': 'test-load', 'unit': 'test-unit', 'fixture_version': versions[key]} for key in gate.CASES})
+        contract = {key: {**cell, 'fixture_version': versions[cell['workload']]}
+                    for key, cell in gate.W1_W10_CELLS.items()}
         contract.update(copy.deepcopy(gate.W11_CELLS))
+        contract['extra'] = {**contract[EDIT_CELL], 'metric': 'extra_metric'}
         contract_digest = hashlib.sha256(
             json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         self.assets.write_text(f'[freeze]\nstatus="frozen"\ncell_contract_sha256="{contract_digest}"\n[tools]\npython="test-version"\n'
@@ -77,9 +82,9 @@ class Readiness(unittest.TestCase):
 
     def test_frozen_receipts_admit_readiness_without_promoting_unknown_cells(self):
         result = self.check()
-        self.assertEqual(result['matrix']['cpu_efficiency']['status'], 'unmeasured')
-        self.doc['matrix']['cpu_efficiency'] = {'status': 'loss', 'evidence': self.doc['inputs'][0]}
-        self.assertEqual(self.check()['matrix']['cpu_efficiency']['status'], 'loss')
+        self.assertEqual(result['matrix'][CPU_CELL]['status'], 'unmeasured')
+        self.doc['matrix'][CPU_CELL] = {'status': 'loss', 'evidence': self.doc['inputs'][0]}
+        self.assertEqual(self.check()['matrix'][CPU_CELL]['status'], 'loss')
 
     def test_reliability_dimensions_on_other_workloads_cannot_cover_w11(self):
         contract = self.doc['cell_contract']
@@ -103,9 +108,21 @@ class Readiness(unittest.TestCase):
         with self.assertRaisesRegex(gate.ReadinessError, 'missing or changed required W11 cell: ' + name):
             self.check()
 
+    def test_a_missing_load_or_state_cannot_be_covered_by_other_cells(self):
+        for name in ('w2.warm.container-to-container-saturation-c16.p99-ms',
+                     'w6.warm.rust-default-builder.build-rust-s',
+                     'w8.derived.cancelled-delivery.cancellation-or-cleanup-failures',
+                     'w10.warm.database-interruption.recovery-s'):
+            with self.subTest(name=name):
+                doc = copy.deepcopy(self.doc)
+                del doc['cell_contract'][name]
+                del doc['matrix'][name]
+                with self.assertRaisesRegex(gate.ReadinessError, 'missing or changed required qualification cell: ' + name):
+                    self.check(doc)
+
     def test_reviewed_cell_edit_cannot_change_a_frozen_contract(self):
         contract = self.doc['cell_contract']
-        contract['W2']['load'] = 'edited after freeze'
+        contract['extra']['load'] = 'edited after freeze'
         proof = self.doc['prerequisites']['complete_cell_contract']
         path = Path(proof['evidence']['path'])
         review = json.loads(path.read_text())
@@ -125,11 +142,11 @@ class Readiness(unittest.TestCase):
     def test_missing_failed_or_incomparable_prerequisites_cannot_admit(self):
         mutations = (
             lambda d: d['fixtures'].pop('W5'),
-            lambda d: d['matrix'].pop('idle_cpu'),
-            lambda d: d['cell_contract']['idle_cpu'].update(load='changed after review'),
-            lambda d: d['cell_contract']['W5'].update(fixture_version='old-proxy'),
-            lambda d: d['matrix']['recovery'].update(status='tie'),
-            lambda d: d['matrix']['correctness'].update(status='loss'),
+            lambda d: d['matrix'].pop(CPU_CELL),
+            lambda d: d['cell_contract'][CPU_CELL].update(load='changed after review'),
+            lambda d: d['cell_contract'][EDIT_CELL].update(fixture_version='old-proxy'),
+            lambda d: d['matrix'][RECOVERY_CELL].update(status='tie'),
+            lambda d: d['matrix'][CORRECTNESS_CELL].update(status='loss'),
             lambda d: d['prerequisites']['observer_overhead'].update(status='unknown'),
             lambda d: d['prerequisites']['host_conditions'].update(status='fail'),
             lambda d: d['durability'].update(comparable=False),
