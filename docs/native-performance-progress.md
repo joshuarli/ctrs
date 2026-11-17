@@ -18,7 +18,10 @@ The ctrs-only comparison verified all 500,000 operations and put the
 17-vCPU versus 2-vCPU API system CPU ratio at 1.736. The topology profile
 reproduced the wake leaf concentration at 17 vCPUs. W11 v4 native
 observation passed bounded functional checks on both engines.
-Wake-count job `327c401967f742b2a77ea5ea8612dfc5` owns the measured host.
+The wake-count diagnostic completed cleanly. Counter-on wake calls per
+success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
+the counters leaves ordinary wake frequency unresolved.
+Main's W2 component suite passes 108 tests with zero skips.
 
 ## Accepted and verified
 
@@ -49,14 +52,25 @@ Wake-count job `327c401967f742b2a77ea5ea8612dfc5` owns the measured host.
 
 ## Exact next action
 
-Read wake-count job `327c401967f742b2a77ea5ea8612dfc5` at
-`.work/tmp/w2-vcpu-wake-counts-20261117/job/status.json`. Compare the pinned
-W2 counters per success at 2 and 17 ctrs vCPUs, 8,192 MiB, C8 and seed 8.
-All four cells use 50,000 measured operations and an identical read-only
-warmup. Compare the observer-off and observer-on CPU and wall controls.
-Keep event counts, sampled CPU, and off-CPU waits distinct. Preserve all
-overhead and host interference. Counts and sampled instruction addresses
-leave exclusive-store retries unmeasured.
+Next establish a valid observer comparison before selecting a kernel
+change. Use the pinned C8 fixed-work recipe from the
+[W2 evidence](evidence/native-w2-equal-work-2026-11-17.md#reproduction),
+with the 17-vCPU resource-matched allocation declared above. Predeclare
+ten 50,000-operation blocks and alternate engine and observer order.
+Use `syscall_pilot.trial(..., profile_kind='cpu', concurrency=8,
+seed=7 + block)` as shown in the profiler recipe. Keep the 5% API CPU
+and wall limits and report paired intervals per engine. A passed
+`perf-gate-ready` is insufficient without actual exclusive host checks.
+On the last check it returned 0 while a separate Niceforge VM consumed
+about one CPU. Preserve that workload. If the host stays shared, work
+the open admission and W8 source items without scoring timing.
+
+The less-intrusive follow-up for W2 counts is a separate control using
+only wake-entry and `sched_waking` selectors, with zero-miss and explicit
+thread-coverage checks. Compare against profiler-off task CPU before
+interpreting it. Use the existing selector and owned-probe paths.
+The completed profiles do not establish exclusive-store retry counts
+and give no basis for repeating the rejected LSE or affinity candidates.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
@@ -122,8 +136,7 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Resume normalized W2 under disclosed background noise, following the exact
-   next action above. Separate fixed work/offered load, saturation, on-CPU samples
+1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
 2. Parked admission `5bcf48a` still needs a canonical cell contract and native

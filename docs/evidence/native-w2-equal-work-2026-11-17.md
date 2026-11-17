@@ -303,6 +303,37 @@ distinction with the pinned W2 counters and the same vCPU topology before
 selecting another product change. Earlier affinity and LSE results remain
 separate, including the [rejected LSE candidate](native-lse-2026-11-16.md).
 
+## ctrs wake counts by vCPU count
+
+Job `327c401967f742b2a77ea5ea8612dfc5` exited 0. All four cells
+verified exact persisted data for the same seed-8 workload and completed
+200,000 successful requests. Both native engine identities stopped.
+All 161 frozen inputs rechecked. Each counters-on cell collected 162
+required per-thread selector counts, with zero missed probes.
+
+| Event per successful request | 2 vCPUs | 17 vCPUs |
+| --- | ---: | ---: |
+| `FUTEX_WAKE` calls | 21.897 | 29.787 |
+| Positive futex returns | 12.428 | 15.455 |
+| `sched_waking` in API context | 17.753 | 20.423 |
+| Futex `EAGAIN` returns | 0.945 | 1.835 |
+| API task context switches | 20.499 | 19.410 |
+
+The 17-vCPU cell issued 36.0% more `FUTEX_WAKE` calls per success with
+the counters enabled. The positive-return count measures calls reporting
+a wake. It does not count the number of tasks awakened. System task cost
+with counters off was 64.4 and 122.4 µs per request for 2 and 17 vCPUs.
+With counters on it was 103.2 and 162.0 µs per request. Those observer
+effects leave ordinary wake frequency, per-call CPU, and exclusive-store
+retries unmeasured. Keep the sampled-leaf and event counts separate.
+No product change was selected.
+
+Reproduce with the topology-profile recipe and `profile_kind='counters'`.
+Keep off before on and 2 before 17 vCPUs within each mode. Use the
+[documented counter coverage and cleanup checks](../../bench/native/diagnostics/w2-counters.md).
+Job status SHA-256
+`03a2fc5db9149283336d4a86b2f0ba8837cfe079bb67314bb3246404611a0086`.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
