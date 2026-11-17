@@ -149,6 +149,96 @@ Result SHA-256:
 `5455185d2ab008101f93b9ded64628d5c4d11e623911bf21a2733935fdbb4b9d`;
 plan `c4a1d81f0850e6338b6f0d5ac1a167dd262eae0ad1b0df0415adf5e9101d7939`.
 
+## Full flush wait localized
+
+Native trace-v3 job3225b0d7264d4a21b1fb4490f667911f under
+`.work/tmp/w3-full-flush-trace-v3-20261117/job` exits0 with owned cleanup complete.
+All1,000 exact committed rows/counter/checksum survive checkpoint and orderly
+restart. All95 frozen receipts are unchanged. The source helper is integrated
+through d209805, with bounded resources70 tests/zero skips and its7 focused
+tests passing. Full suites remain manual-only.
+
+The raw trace contains exactly4,000 records:1,000 backend `fdatasync` entries,
+1,000 successful returns,1,000 device254:0 flush issues and1,000 successful
+completions. Every syscall contains exactly one issue/completion pair, with no
+overlap or unmatched endpoints. All17 CPU buffers report zero overrun, commit
+overrun and dropped events. Both exact owned kprobe profiles have1,000 hits,
+zero missed instances. The owned trace instance uses monotonic clock; one
+syscall changes CPU between entry and return. Raw formats/filters/PID identity,
+loss stats, scope and cleanup receipts are retained.
+
+Guest timing inside the instrumented diagnostic:
+
+| Span | Total seconds | Median microseconds | p99 microseconds |
+| --- | ---: | ---: | ---: |
+| fdatasync entry→return | 3.716265 | 3658 | 4136 |
+| block issue→complete | 3.663664 | 3608 | 4079 |
+| syscall entry→block issue | 0.049078 | 45 | 109 |
+| block complete→return | 0.003523 | 2 | 7 |
+
+Block issue→completion accounts for98.585% of observed syscall wait. This
+localizes the measured Full wait below the engine control plane; it does not
+separate VZ internals from host storage latency, establish an unavoidable ceiling,
+measure observer overhead, qualify user latency or establish OrbStack durability.
+Trace timestamp precision is microseconds. No product change is selected.
+
+Reproduce with the existing SQL/oracle above and an owned privileged API-image
+probe mounting `bench/native/diagnostics/wal_trace_guest.py`. Mount tracefs inside
+that probe. Connect psql with one unique fresh owned login; retain
+`pg_backend_pid()` and identify its guest-global PID from that login's process
+in `docker top` (the agent reads the container cgroup from the root guest).
+Run the helper's `setup TAG PID`, `start TAG`, stream the1,000 transactions through
+that same psql connection, then `stop TAG` and `cleanup TAG`. TAG is `npwal`
+followed by12 lowercase hex digits. Never trace a shared/unowned guest or infer
+global PID from namespace PID. Require complete exact event pairing and all
+loss counters before using the durations.
+
+Earlier trace attempts remain failed and separate: job3e9509d9… could not read
+the DB root-guest PID inside the isolated probe; the requested host PID mode did
+not provide that view. Job68a3392a… verifies the corrected unique-role/top PID
+identity but stops before transactions because stock kernel `rwbs` is10 bytes,
+not the assumed8. The helper now validates the actual typed field/array length;
+neither failure supplies a performance result. Their cleanup is complete.
+
+Trace JSON SHA-256:
+`3490af3c2b9656baeaeb2d5a767bc2975fc370fea7a5404864cc0def3f9eb52e`;
+analysis `aea4c0ffa0e91ecf552bebc79183a738a4c6bd3760aac8d943b63769bdcea082`;
+result `1895539dac89e18c9296d0e6401971339d2b56be5ec92c314c6b0badf614abbf`.
+Next diagnostic compares direct synchronization of separate owned host files on
+the same APFS volume. It never writes the VM backing file and is a boundary
+probe, not a replacement for application acceptance.
+
+## Direct host synchronization boundary
+
+Job92ce290a552747238e0fb9c7b9766707 under
+`.work/tmp/host-full-sync-boundary-20261117/job` exits0. Three AB/BA/AB pairs each
+write1,000 distinct8KiB blocks into a fresh, prewritten and Full-synced owned file
+on the same host volume. Every write is followed by `fsync` or `F_FULLFSYNC`51,
+as defined in this host's SDK. All6 exact final SHA checks pass. Each file stays
+at8,192,000 allocated bytes and is deleted after verification. No VM backing
+file is opened. Sampled coordinator footprint stays below32MB, within128MiB.
+All96 frozen receipts are unchanged. No engine or product source changes.
+
+| Pair | fsync total s | Full-sync total s |
+| --- | ---: | ---: |
+| 1 | 0.019931 | 3.10 |
+| 2 | 0.021168 | 3.37 |
+| 3 | 0.023407 | 3.21 |
+
+Direct host Full synchronization is already of the same order as the observed
+guest block wait. This provides no evidence for a large removable control-plane
+cost or for a VMM rewrite. It does not prove an irreducible floor: direct-file
+block sizes, filesystem state, virtualization and workload differ. Never subtract
+these totals from the application trace to manufacture a VZ overhead estimate.
+The synthetic boundary probe is neither an application benchmark nor an
+equivalent-durability OrbStack comparison.
+
+Result SHA-256:
+`3d3aa607fd9f5fb4289376946cb96a73ff583b7b7ad7bc03b2bba08ef41b79a8`;
+plan `ca3e822d01d9c49278d605a34272ff40ea41d4b1da7d2b268dc72194420e2936`.
+Resident resource and Full durability qualification remain open. Move to the W2
+offered-load/cadence boundary rather than expand unchanged Full/cache hypotheses.
+
 ## Reproduction and next diagnostic
 
 For the database workload, start the pinned portfolio Postgres17.12 image with

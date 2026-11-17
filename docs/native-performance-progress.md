@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** attribute the measured Full-synchronization WAL wait.
+**Current action:** add fixed offered-load W2 coverage and test the cadence hypothesis.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -148,23 +148,33 @@ worktree paths; parent inspected the actual main-checkout records. It found no
 per-commit engine RPC and recommends guest syscall/block timing. No host trace
 was run: `sudo -n /usr/bin/true` requires a password; preserve host settings.
 
-**Exact continuation:** consume registered watch for helper worker
-`usrw_cd854af3-5017-4804-831b-9c0811a2e4d6`, tree`.work/wt/np-wal-trace`,
-branch`experiment/wal-trace`, base`d233f47cc05d183934abf0f4b6bd8bc02a59df3a`.
-It owns only `bench/native/diagnostics/wal_trace_guest.py` and
-`bench/native/test_wal_trace_guest.py`. Parent reviewed its initial two-commit
-diff once. One same-session correction is admitted: use encoded numeric dev_t,
-explicit signed return fetch/maxactive, exact zero-missed kprobe_profile coverage,
-and persist all event formats. Review only that delta plus final scope/proof;
-run the narrow module, integrate, and include it in bounded resource selection.
-No native job active. The prepared parent coordinator is
-`.work/tmp/w3-full-flush-trace-20261117/run.py`; it maps the actual PostgreSQL
-backend from container NSpid to guest-global PID and keeps one psql connection,
-then retains all1000 transaction/checkpoint/restart oracles. Adapt to the accepted
-helper CLI, freeze helper/source inputs, launch once with its adjacent launch.py,
-register a finite status watch and inspect exact entry/return/issue/completion
-coverage and losses before attributing wait. Preserve failures, unsupported
-tracing and missing counters; never suppress them or substitute zero.
+Helper worker usr w_cd854af3 is terminal; scoped source integrated through d209805.
+Parent reviewed initial/correction diffs and added pre-mutation ownership checks,
+stock10-byte rwbs validation and monotonic per-instance clock. Bounded resource
+selection passes70 tests/zero skips; narrow helper7 tests pass. Native v1/v2
+admission failures are preserved separately: isolated PID view, then rwbs width.
+Trace-v3 job3225b0d7264d4a21b1fb4490f667911f exits0/clean: exactly1,000 successful
+fdatasync pairs and1,000 block flush issue/completion pairs; zero misses and all
+17 CPU loss stats zero. Exact data survives checkpoint/restart, all95 receipts
+unchanged. Block wait is98.585% of syscall wait; no per-commit RPC remedy selected.
+Direct owned-file job92ce290a552747238e0fb9c7b9766707 exits0/clean, all96 inputs
+unchanged: three Full-sync phases already take about3.1–3.4s/1,000 calls versus
+the guest block total3.664s. This boundary probe does not establish a hard floor
+or permit subtracting unlike workloads into a VZ overhead estimate. Evidence:
+[CI/WAL record](evidence/native-ci-wal-2026-11-17.md). No source/native job active.
+
+**Exact continuation:** implement fixed offered-load coverage for W2 before
+another CPU comparison. Current loader offers only closed-loop fixed work or
+duration saturation; neither establishes identical request cadence. Hypothesis:
+the apparent API CPU/futex contrast may depend on different delivery cadence.
+Keep old modes/version unchanged; add separately versioned bounded fixed-rate
+work with absolute scheduled slots, schedule-lag/missed delivery accounting and
+scheduled-to-completion latency. Late backlog must not silently become a valid
+offered-load pass. Extend existing loader/runner and actual HTTP component tests,
+not a new scheduling framework. Then a small pinned native functional proof and
+a predeclared3-pair host-client CPU screen at500/2,000 offered requests per second,
+10,000 operations each, concurrency4, unchanged write mix and exact persisted
+data. Timings stay diagnostic without exclusive host/observer qualification.
 
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
 default-sleep/identity unknowns, active-disk ownership and installed-default
