@@ -21,7 +21,7 @@ W9_THROUGHPUT = "successful_jobs_per_minute_at_"
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
-    "W3": ["tx_tps", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
+    "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
     "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
     "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],

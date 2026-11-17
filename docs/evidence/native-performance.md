@@ -2800,6 +2800,26 @@ verify the metric derivation, and preserve the failed job's receipt without
 a p95. The job inputs, pinned artifacts and concurrency levels are unchanged.
 The new completion measurements need a native paired run.
 
+## W3 commit latency and persisted rows
+
+`w3-v2-commit-latency` sends the 300 fixed transactions over one psql
+connection. Each request contains the existing insert and counter update
+inside an explicit transaction. The runner requires the expected command
+statuses and one psql timing per commit. It retains raw output and publishes
+the nearest-rank p95 after all 300 receipts pass. Migration, transaction work,
+checkpoint and restart retain distinct elapsed intervals. [PostgreSQL 17 psql reference](https://www.postgresql.org/docs/17/app-psql.html)
+
+The transaction session enables synchronous commit. After restart, the fixture
+verifies all ordered keys and payloads, the exact counter, and the PostgreSQL
+`fsync` setting. A corrupted payload with the same count and key sum fails.
+The W3 proof still needs a pinned native service image and comparable
+engine-level durability evidence.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
+All 54 tests passed. The new regression covers the generated transaction
+script, timing aggregation, failed commit receipts and corrupt persisted
+payloads. The altered psql path and resulting timings await native validation.
+
 ## Existing-disk expansion criteria and bounded feasibility plan
 
 Current callers reuse any existing data.img; PID1 only mounts it. The 1 TiB sparse

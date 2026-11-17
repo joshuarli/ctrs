@@ -178,8 +178,26 @@ INSERT INTO npw3_meta VALUES ('txs', 0) ON CONFLICT DO NOTHING;
 
 
 def _w3_tx_sql(i: int) -> str:
-    return (f"BEGIN; INSERT INTO npw3_events(k,v) VALUES ({i}, 'v{i}');"
-            f" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'; COMMIT;\n")
+    return (rf"BEGIN\; INSERT INTO npw3_events(k,v) VALUES ({i}, 'v{i}')\;"
+            r" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'\; COMMIT;" + "\n")
+
+
+def _w3_commit_timings(stdout: str) -> list[float]:
+    lines = stdout.splitlines()
+    if lines[:2] != ["SET", "Timing is on."] or len(lines) != 2 + 5 * W3_TXS:
+        raise ValueError(f"expected {W3_TXS} complete transaction timing receipts")
+    latencies = []
+    for offset in range(2, len(lines), 5):
+        timing = re.fullmatch(r"Time: (\d+\.\d{3}) ms(?: \([^\n]+\))?", lines[offset + 4])
+        if lines[offset:offset + 4] != ["BEGIN", "INSERT 0 1", "UPDATE 1", "COMMIT"] or not timing:
+            raise ValueError(f"invalid transaction timing receipt {(offset - 2) // 5 + 1}")
+        elapsed = float(timing[1])
+        if not math.isfinite(elapsed):
+            raise ValueError("nonfinite transaction timing")
+        latencies.append(elapsed)
+    return latencies
+
+
 # ~0.6 s of CPU work inside the container, deterministic across engines
 # (same image, same interpreter); argv[1] is the job marker.
 W11_CHURN_WORK = (
@@ -1922,7 +1940,7 @@ def trial_w4(ctx, engine: Engine, state: str,
 def trial_w3(ctx, engine: Engine, state: str) -> dict:
     """W3: persistent transactional Postgres — real migrations, a
     deterministic 300-transaction mix, CHECKPOINT, `docker restart`,
-    then exact row-count verification on the persisted volume."""
+    then exact row and counter verification on the persisted volume."""
     case_id = "W3"
     proj = project_name(ctx.run_id, engine.name, case_id)
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -1932,18 +1950,22 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
     vol = f"{proj}-pgdata"
     sampler = trace = None
 
-    def psql(sql_file: str, timeout: float = 300) -> tuple[float, bool]:
-        tp = time.monotonic()
-        cp = engine.sh(
-            ["exec", name, "sh", "-c",
-             f"psql -U postgres -d postgres -f {sql_file} >/dev/null"],
-            timeout=timeout, check=False)
-        s = round(time.monotonic() - tp, 3)
+    rec["metrics"]["fixture_version"] = "w3-v2-commit-latency"
+    psql_cmd = ["exec", "-e", "LC_ALL=C", name, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                "-U", "postgres", "-d", "postgres"]
+
+    def psql(sql_file: str, phase: str, timeout: float = 300):
+        with resource_phase(engine, rec, phase):
+            cp = engine.sh(
+                [*psql_cmd, "-v", "SHOW_ALL_RESULTS=on", "-f", f"/tmp/{sql_file}"],
+                timeout=timeout, check=False)
+        (trial_dir / f"{sql_file}.stdout").write_text(cp.stdout)
+        (trial_dir / f"{sql_file}.stderr").write_text(cp.stderr)
         if cp.returncode != 0:
             rec["validation_errors"].append(
                 f"psql {sql_file} rc={cp.returncode}: "
                 f"{(cp.stderr or cp.stdout)[-300:]}")
-        return s, cp.returncode == 0
+        return cp
 
     def wait_ready(deadline: float = 90.0,
                    stable: bool = True) -> float | None:
@@ -2003,8 +2025,8 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         mig = trial_dir / "migrate.sql"
         mig.write_text(W3_SQL)
         tx = trial_dir / "txmix.sql"
-        tx.write_text("".join(_w3_tx_sql(i) for i in range(W3_TXS))
-                      + "SELECT 'done';\n")
+        tx.write_text("SET synchronous_commit = on;\n\\timing on\n"
+                      + "".join(_w3_tx_sql(i) for i in range(W3_TXS)))
         for f in (mig, tx):
             cp = engine.sh(["cp", str(f), f"{name}:/tmp/{f.name}"],
                            timeout=60, check=False)
@@ -2013,14 +2035,24 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
                     f"docker cp {f.name} rc={cp.returncode}: "
                     f"{(cp.stderr or cp.stdout)[-300:]}")
 
-        s, ok = psql("/tmp/migrate.sql")
-        rec["metrics"]["migrate_s"] = s
-        checks["migrate"] = ok
+        migration = psql("migrate.sql", "migration")
+        rec["metrics"]["migrate_s"] = rec["resources"]["phases"]["migration"]["operation_wall_seconds"]
+        checks["migrate"] = migration.returncode == 0
 
-        s, ok = psql("/tmp/txmix.sql", timeout=600)
+        transactions = psql("txmix.sql", "transactions", timeout=600)
+        s = rec["resources"]["phases"]["transactions"]["operation_wall_seconds"]
         rec["metrics"]["txmix_s"] = s
-        rec["metrics"]["tx_tps"] = round(W3_TXS / s, 1) if s else None
-        checks["txmix"] = ok
+        checks["txmix"] = transactions.returncode == 0
+        if checks["txmix"]:
+            try:
+                latencies = _w3_commit_timings(transactions.stdout)
+            except ValueError as exc:
+                checks["txmix"] = False
+                rec["validation_errors"].append(str(exc))
+            else:
+                rec["metrics"]["tx_tps"] = len(latencies) / s if s > 0 else None
+                rec["metrics"]["transaction_p95_ms"] = sorted(latencies)[math.ceil(.95 * len(latencies)) - 1]
+                (trial_dir / "commit-latencies-ms.json").write_text(json.dumps(latencies) + "\n")
 
         tp = time.monotonic()
         cp = engine.sh(["exec", name, "psql", "-U", "postgres", "-d",
@@ -2037,15 +2069,18 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         checks["restart_ready"] = ready2 is not None
 
         out = engine.sh(
-            ["exec", name, "psql", "-U", "postgres", "-d", "postgres",
-             "-tA", "-c",
-             "SELECT count(*), COALESCE(sum(k),0), "
-             "(SELECT n FROM npw3_meta WHERE k='txs') FROM npw3_events"],
+            [*psql_cmd, "-tA", "-c",
+             "SELECT json_build_object("
+             "'rows', (SELECT json_agg(json_build_array(k,v) ORDER BY k) FROM npw3_events), "
+             "'meta', (SELECT json_agg(json_build_array(k,n) ORDER BY k) FROM npw3_meta), "
+             "'fsync', current_setting('fsync'))"],
             timeout=60, check=False)
-        expected_k = sum(range(W3_TXS))
-        want = f"{W3_TXS}|{expected_k}|{W3_TXS}"
-        checks["verify_rows"] = (out.returncode == 0
-                                 and want in out.stdout.replace(" ", "|"))
+        (trial_dir / "persisted-rows.stdout").write_text(out.stdout)
+        expected = {"rows": [[i, f"v{i}"] for i in range(W3_TXS)],
+                    "meta": [["txs", W3_TXS]], "fsync": "on"}
+        checks["verify_rows"] = out.returncode == 0 and json.loads(out.stdout) == expected
+        if not checks["verify_rows"]:
+            rec["validation_errors"].append("persisted rows, counter, or fsync differs from W3 fixture")
         # Allocated-storage cell: bytes actually allocated for the
         # persisted dataset (du counts blocks, not apparent size).
         # `du -sk` is explicit KiB on both GNU and busybox.
@@ -2062,7 +2097,7 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         else:
             rec["validation_errors"].append(
                 f"du rc={du.returncode}: {(du.stderr or '')[-200:]}")
-        rec["correctness"]["ok"] = all(
+        rec["correctness"]["ok"] = not rec["validation_errors"] and all(
             checks.get(k) for k in
             ("db_start", "db_ready", "migrate", "txmix", "checkpoint",
              "restart_ready", "verify_rows"))

@@ -149,6 +149,56 @@ class BuilderIsolationTests(unittest.TestCase):
 
 
 class WorkloadSafetyTests(unittest.TestCase):
+    def test_w3_reports_complete_commits_and_rejects_corrupt_persisted_payload(self):
+        timings = "SET\nTiming is on.\n" + "".join(
+            f"BEGIN\nINSERT 0 1\nUPDATE 1\nCOMMIT\nTime: {i}.125 ms\n"
+            for i in range(1, runner.W3_TXS + 1))
+        rows = {"rows": [[i, f"v{i}"] for i in range(runner.W3_TXS)],
+                "meta": [["txs", runner.W3_TXS]], "fsync": "on"}
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = fake_engine()
+
+            def execute(args, **kwargs):
+                if "-tAc" in args:
+                    return completed("1\n")
+                if "-tA" in args:
+                    return completed(json.dumps(rows))
+                if args[-1] == "/tmp/txmix.sql":
+                    self.assertIn("ON_ERROR_STOP=1", args)
+                    self.assertIn("LC_ALL=C", args)
+                    return completed(timings)
+                if "du" in args:
+                    return completed("12 /var/lib/postgresql/data\n")
+                return completed()
+
+            engine.sh.side_effect = execute
+
+            @contextlib.contextmanager
+            def resource_phase(engine, record, name):
+                yield
+                record["resources"].setdefault("phases", {})[name] = {"operation_wall_seconds": 2}
+
+            with patch.object(runner, "start_sampler", return_value=(None, None)), \
+                    patch.object(runner, "resource_phase", resource_phase), \
+                    patch.object(runner.time, "monotonic", side_effect=iter(range(1000))), \
+                    patch.object(runner.time, "sleep"):
+                rec = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                rows["rows"][25][1] = "wrong payload"
+                bad_rows = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                timings = timings.replace("COMMIT", "ROLLBACK", 1)
+                bad_tx = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+
+            self.assertTrue(rec["correctness"]["ok"], rec)
+            self.assertEqual(rec["metrics"]["transaction_p95_ms"], 285.125)
+            self.assertEqual(rec["metrics"]["tx_tps"], 150)
+            self.assertFalse(bad_rows["correctness"]["checks"]["verify_rows"])
+            self.assertFalse(bad_tx["correctness"]["checks"]["txmix"])
+            self.assertNotIn("transaction_p95_ms", bad_tx["metrics"])
+            statements = (Path(tmp) / "orbstack/W3/txmix.sql").read_text().splitlines()
+            self.assertEqual(statements[:2], ["SET synchronous_commit = on;", r"\timing on"])
+            self.assertEqual(len(statements[2:]), runner.W3_TXS)
+            self.assertTrue(all(line.count(r"\;") == 3 and line.endswith("COMMIT;") for line in statements[2:]))
+
     def test_w6_compiles_both_apps_and_records_paired_stamp(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = FixtureContext(tmp)

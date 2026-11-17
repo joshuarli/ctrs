@@ -78,14 +78,14 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, implement W3 transaction latency receipts next.
-Use the existing 300-transaction durable mix on one PostgreSQL connection.
-Record one completed-transaction latency per commit inside the transaction
-phase. Keep migration, checkpoint, restart and exact persisted-row
-verification separate.
+If the Mac stays shared, implement W4 queue tails next. Capture one
+enqueue-to-completion interval per verified job and derive p95 and p99 for
+each worker count. Preserve the W11 mixed workload's existing pinned W4
+image and its artifact oracle while introducing the new W4 receipt.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
+and [W3 commit latency](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
 are ready for native validation in the next eligible window.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the
