@@ -60,3 +60,37 @@ patch-equivalent provenance. Their checkouts contained no ignored evidence.
 
 Pre-existing branches `chore/ctrs-proto-target-gate`, `cleanup/mount-guard` and
 `repomod/fix/f844dfc9dd284537af0a958ad9dfadf1` remain unchanged outside this winddown.
+
+## Completed W2 checkout retirement (2026-11-17)
+
+Integration head: `c2a7fab426667d383d9e04dcc5f9d10047769618`.
+Both completed source lanes were patch-equivalent to this head with no merge
+commits, clean of tracked and untracked changes, and had no live agent, process
+working directory, or open file using either checkout. `git worktree list
+--porcelain` identified both exact paths and branches before retirement. The
+only ignored files were Python `.pyc` files under `__pycache__` directories;
+they were test scratch, not source or unique proof.
+
+| Checkout retired | Lane source commits | Integrated commits on main | Verdict and retirement |
+| --- | --- | --- | --- |
+| `.work/wt/np-w2-timer` (`perf/w2-timer`) | `a0b24b553d238e38a1d39a9628dffe4723c0d1fe`, `89ba4a8bfeac43db09224fcecc3e46edfaca917e` | `cae881b1bd5f0092a49caaef4bdb2ad19ec9c91f`, `ab7861343443b7a5d2d2f2dc5a82c55a1784ab0d` | Both integration commits are ancestors of the pinned head; `git cherry` marked both lane commits `-` (patch-equivalent). Retired successfully; branch preserved because it is not an ancestor. |
+| `.work/wt/np-w2-uprobes` (`diagnostic/w2-uprobes`) | `31783d78c001d37d29423e80adf460843440047e`, `18bd6706b5f51fd94648f9e0c2f791f0212de750` | `b2a676164df5e97faed4930b3beb53d4b8b36e83`, `f042b2195a29c743d699ce2be683e7ee5125ce0e`, plus parent fix `7c0dda12d8e15e538cfd90a81738f5bfb5a69664` | All three integration commits are ancestors of the pinned head; `git cherry` marked both lane commits `-` (patch-equivalent). Retired successfully; branch preserved because it is not an ancestor. |
+
+Retirement used `worktree-retire` with `--discard-ignored` only after inspecting
+the `.pyc` entries, and both dry runs reported `would remove` with the branch
+kept. Before retirement, `du -sk` reported 6,092 KiB for the timer checkout
+and 5,528 KiB for uprobes (11,620 KiB total). After retirement both exact paths
+were absent (`du` reported “No such file or directory”), reclaiming those
+checkout sizes. Native fixture sentinels `.work/tmp/resource-quiet-policy-20261117/job`,
+`.work/tmp/balloon-model-assets`, `.work/tmp/balloon-reserve-target/release/ctrs`
+and `.work/native-perf/engines/ctrs-warm` remained present. No fixture or
+benchmark process was modified. `sparseguest/out/data.img` was not present at
+the integration checkout path when checked.
+
+Kept unchanged: integration checkout `/Users/josh/repos/ctrs`; controller
+`.work/wt/np-cleanup-resume`; parked dirty proposal `.work/wt/np-w2-rate`;
+private-kernel worktrees `.work/wt/np-uprobes` and `.work/wt/np-preempt-full`;
+and live-initrd worktree `.work/wt/np-balloon-used`. Every other checkout in
+the pre-retirement worktree inventory also remains; ownership or lane status
+was outside this authorized two-checkout pass. No scratch, builder volume,
+container, VM disk, input, result, or benchmark process was otherwise cleaned.
