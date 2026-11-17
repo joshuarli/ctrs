@@ -2,21 +2,46 @@
 
 ## Status
 
-**PAUSED 2026-11-16 — owner requested winddown. Campaign not complete.**
-On an authorized resume, first run `codex-campaign-closeout.py cancel`.
+**ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
+`codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
+Resume steering: repair the two demonstrated storage diagnostic review defects
+in isolated `campaign/np-space-fix`; parent owns the Mac for the predeclared W2
+ten-block 50k observer confirmation. No runtime policy change is accepted.
 Read the [contract](campaign-native-performance.md), then inspect
 `git show campaign/np-storage-space:bench/native/diagnostics/storage_space_pilot.py`.
-Last accepted code is 1a48731. Main code matches the tested 2d11c40 baseline;
-its 162-test evidence remains valid. No new source slice was accepted during winddown.
-Storage source 538e2c3 is parked on `campaign/np-storage-space`, absent from main.
-Fix its active allocation guard and cleanup receipt failure path before retrying.
-W8 bc6625f is parked on `campaign/np-w8-content`: five source tests pass,
-but parent review, real artifact and native absence proofs remain unrun.
+Resumed source milestones: W8 bc6625f reviewed and integrated as 00ac842;
+storage source restored as 3a87d61 with review fixes 97a6a69. Host guard now
+checks between bounded 64MiB allocation attempts; snapshot failure cannot skip
+shutdown, log closure or the result write attempt. Six focused storage tests
+and all 173 harness tests pass. Native revised storage proof passes;
+real W8 artifact generation and native absence proofs remain unrun.
 Other parked branches, retained trees and consumers are recorded in the
 [retained-work inventory](native-performance-retained.md).
-All lanes are terminal. No campaign engine, benchmark or cron job is running.
-Winddown commits are local. No winddown changes were pushed.
-Resume the full measurement and qualification goal after these review fixes.
+Storage worker `usrw_58efedef-31f1-4f36-be14-30c5c008481b` is terminal succeeded;
+parent reviewed its scoped diff and independently ran the integrated suite.
+W2 block `w2-cpu-20261116T163545-94e4` completed all four exact 50k phases,
+852/582 native CPU samples, no errors or cleanup failures. Timing and observer
+overhead are INVALID: ctrs/off/before-gate.json recorded Niceforge import PID
+98721 at 100% CPU despite gate exit 0. The ten-block batch was interrupted after
+block one; nine blocks were not started, with no replacement or pooled history.
+Batch scratch: `.work/tmp/w2-observer-resume-20261116/`; parent exited 143 only
+after its child completed. No W2 job remains. Re-establish genuine exclusivity
+before a separately predeclared observer batch. Continue native storage correctness
+and W8 preparation while timing is deferred; no runtime candidate is promoted.
+
+Revised native storage runs `space-e793d5a5` (allocation) and `space-9c94d113`
+(relation ENOSPC) both exit 0 for Fsync and Full. Each uses NEW owned roots,
+the pinned common portfolio, baseline 37bec61b… and Full 12d48b6a… binaries,
+unchanged guest assets and source 97a6a69. The allocation stage verifies exact
+100-record contents and 64MiB unwritten extents. The ENOSPC stage verifies
+relation SQLSTATE 53100, the exact 100-record prefix and 10 recovered commits;
+filesystem/volume identities remain unchanged and cleanup reports no errors.
+Reproduce both commands in `bench/native/diagnostics/storage-space.md` on main.
+Raw receipts remain `.work/tmp/<run>/{fsync,full}/`. Zero endpoint host growth
+is not a peak bound, exclusive allocation/reclaim or host-full/power-loss proof.
+Full remains an unpromoted candidate. W8 real artifact reproduction is running
+from `.work/tmp/w8-variant-proof.py`; destination
+`.work/native-perf/inputs/w8-portfolio-v3-resume-20261116/`. Do not duplicate it.
 
 ## Accepted and verified
 
