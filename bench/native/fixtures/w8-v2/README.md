@@ -11,8 +11,17 @@ The retained local artifact is `.work/native-perf/inputs/w8-portfolio-v2/`:
 `portfolio.tar` SHA256 99dbbad6ba7df1f16919c7c41aaff39886cc2a826536deb3caf73be2dc51a592,
 390,585,344 bytes. The directory contains the extracted OCI layout, source image
 inspections, export driver and preparation receipt. The archive is not committed.
-Re-export requires the exact source image IDs in that receipt; mutable tags alone
-are insufficient. Publication/reproduction on another host remains open.
+Re-export requires exact source image IDs, not mutable tags. The config digests
+in tracked `portfolio.json` are those Docker image IDs, so the scratch receipt
+is not required to identify them. The shared OrbStack store retains these inputs.
+Use a new owned tag namespace with the existing `layout_reference` tag suffixes,
+save those exact images through the explicit Unix endpoint, and extract the OCI
+archive with `tarfile.extractall(filter='data')`. Validate the resulting layout
+with `registry_portfolio.prepare_pinned_portfolio(layout, contract)` before use.
+Record a fresh export receipt without rewriting the historical archive checksum.
+If pinned manifests or blobs cannot be recovered, stop or version new inputs and
+affected baselines. Do not silently substitute an image. Publication/reproduction
+on another host remains open.
 
 ```sh
 TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_pilot.py \

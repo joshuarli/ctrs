@@ -13,26 +13,33 @@ import statistics
 import resource_cells
 from pathlib import Path
 
+import ci_jobs
+
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
+W9_CONCURRENCIES = ci_jobs.SPEC['concurrency']
+W9_THROUGHPUT = "successful_jobs_per_minute_at_"
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
-    "W3": ["tx_tps", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
+    "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
-    "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
+    "W4": [metric for count in (1, 4, 16) for metric in
+           (f"workers_{count}_s", f"queue_p95_ms_at_{count}", f"queue_p99_ms_at_{count}")],
     "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],
     "W6": ["build_rust_s", "build_zlib_s"],
-    "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
-           for state in ("uncached", "warm", "incr")],
+    "W7": [f"{app}_{state}{suffix}_s" for app in ("hyperfine", "httpie")
+           for state in ("uncached", "warm", "incr") for suffix in ("", "_first_use")],
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
-    "W9": ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s"],
+    "W9": [metric for concurrency in W9_CONCURRENCIES
+           for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",
+                          f"job_completion_p95_ms_at_{concurrency}")],
     # Legacy load_rps counts failed attempts during downtime, not useful work.
-    "W10": ["recovery_s"],
+    "W10": ["recovery_s", "recovered_p99_ms"],
     # Soak windows/requests/churn counts are reliability observations.
     "W11": [],
 }
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps"}
+HIGHER_BETTER = {"rps", "tx_tps", "load_rps"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")

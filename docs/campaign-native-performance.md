@@ -1,12 +1,18 @@
 # Campaign: beat OrbStack on macOS
 
-**Owner steering: 2026-11-17. WINDING DOWN at the owner's explicit request; not complete.** This is
-the current execution contract. It supersedes the previous campaign's
+**Active 2026-11-17 after owner resume.** This is the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
 [`native-performance-progress.md`](native-performance-progress.md).
 The progress file is the single work queue and continuation checkpoint;
 `docs/evidence/native-performance.md` is the historical experiment log.
+
+The owner subsequently accepts some background noise for continued experiments.
+After resume, use interleaved W2 work and observer controls with disclosed host
+activity, paired uncertainty and preserved failures. Do not wait for a perfectly
+quiet host before investigating W2. Keep correctness, durability and numerical
+budgets unchanged. Unattributable whole-engine resources remain inconclusive.
+This steering supersedes older blanket exclusivity requirements for diagnostics.
 
 ## Objective and current position
 

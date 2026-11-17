@@ -58,6 +58,101 @@ class Engine:
 
 
 class W4References(unittest.TestCase):
+    def test_w10_queue_verifies_recovered_backlog_before_workers_and_measures_fresh_work(self):
+        queue_id = "a" * 64
+        pending = [{"job": i, "clock": "guest", "enqueued_ns": i} for i in range(200)]
+
+        class PersistentQueue(Engine):
+            def __init__(self, lose_backlog=False):
+                super().__init__()
+                self.lose_backlog = lose_backlog
+                self.snapshots = 0
+                self.pings = 0
+                self.owned = {}
+
+            def sh(self, args, **kwargs):
+                self.calls.append(args)
+                if args[:2] == ["run", "-d"] and "redis-server" in args:
+                    self.owned[args[args.index("--name") + 1]] = "container"
+                    return Result(queue_id)
+                if args[:2] == ["volume", "create"]:
+                    self.owned[args[-1]] = "volume"
+                if args[:1] == ["exec"] and "hashlib" in args[-1]:
+                    file = "latency.py" if "/app/latency.py" in args[-1] else "app.py"
+                    return Result(runner.sha256_file(runner.FIXTURES / "w4" / file))
+                if args[:1] == ["exec"] and "pending" in args:
+                    self.snapshots += 1
+                    rows = pending[:-1] if self.lose_backlog and self.snapshots == 2 else pending
+                    return Result(json.dumps(rows))
+                if args == ["exec", queue_id, "redis-cli", "PING"]:
+                    self.pings += 1
+                    return Result("LOADING" if self.pings == 1 else "PONG")
+                if args[:1] == ["run"] and "verify" in args:
+                    name = args[args.index("--name") + 1]
+                    extra = 50_000_000 if name.endswith("-backlog") else 1_000_000
+                    rows = [row | {"completed_ns": row["enqueued_ns"] + extra} for row in pending]
+                    return Result(json.dumps({"verified": 200, "clock": "guest", "timings": rows}))
+                if len(args) > 1 and args[1] == "inspect":
+                    kind = self.owned.get(args[-1])
+                    if kind is None:
+                        return Result(returncode=1, stderr="no such object")
+                    labels = {"Labels": {"dev.ctrs.campaign.run": "test-w11"}}
+                    return Result(json.dumps([{"Config": labels} if kind == "container" else labels]))
+                return Result()
+
+        with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / ".work/tmp") as directory:
+            with patch.object(runner, "start_sampler", return_value=(None, None)), \
+                    patch.object(runner, "resource_phase", side_effect=lambda *args: __import__("contextlib").nullcontext()), \
+                    patch.object(runner.time, "sleep"):
+                engine = PersistentQueue()
+                outcome = runner.trial_w10(Context(Path(directory)), engine, "warm", concurrency=4, interrupt_service="queue")
+                lost = PersistentQueue(lose_backlog=True)
+                wrong = runner.trial_w10(Context(Path(directory)), lost, "warm", concurrency=4, interrupt_service="queue")
+
+            self.assertTrue(outcome["correctness"]["ok"], outcome)
+            self.assertEqual(outcome["metrics"]["jobs"], 400)
+            self.assertEqual(outcome["metrics"]["retries_until_recovery"], 1)
+            self.assertEqual(outcome["metrics"]["queue_p99_ms_at_backlog"], 50)
+            self.assertEqual(outcome["metrics"]["recovered_p99_ms"], 1)
+            self.assertEqual(lost.snapshots, 2)
+            self.assertFalse(wrong["correctness"]["ok"])
+            self.assertNotIn("recovered_p99_ms", wrong["metrics"])
+            self.assertFalse(any(cmd[0] == "run" and "worker" in cmd for cmd in lost.calls))
+            for queue_engine in (engine, lost):
+                redis = next(cmd for cmd in queue_engine.calls if "redis-server" in cmd)
+                self.assertIn("--appendfsync", redis)
+                self.assertEqual(redis[redis.index("--appendfsync") + 1], "always")
+                volume = redis[redis.index("-v") + 1].removesuffix(":/data")
+                self.assertIn(["kill", queue_id], queue_engine.calls)
+                self.assertIn(["start", queue_id], queue_engine.calls)
+                self.assertIn(["volume", "rm", volume], queue_engine.calls)
+
+    def test_timed_w4_publishes_tails_only_for_complete_receipts(self):
+        class TimedEngine(Engine):
+            def __init__(self, omit=False):
+                super().__init__()
+                self.omit = omit
+
+            def sh(self, args, **kwargs):
+                if args[:1] == ['exec'] and '/app/latency.py' in args[-1] and 'hashlib' in args[-1]:
+                    return Result(runner.sha256_file(runner.FIXTURES / 'w4/latency.py'))
+                if args[:1] == ['run'] and 'verify' in args:
+                    timings = [{'job': i, 'clock': 'guest', 'enqueued_ns': 0, 'completed_ns': (i + 1) * 1_000_000}
+                               for i in range(199 if self.omit else 200)]
+                    return Result(json.dumps({'verified': 200, 'clock': 'guest', 'timings': timings}))
+                return super().sh(args, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:
+            with patch.object(runner, 'start_sampler', return_value=(None, None)), patch.object(runner, 'resource_phase', side_effect=lambda *args: __import__('contextlib').nullcontext()):
+                context = Context(Path(directory))
+                result = runner.trial_w4(context, TimedEngine(), 'warm', workers=(4,), fixture_version=runner.W4_LATENCY_VERSION)
+                missing = runner.trial_w4(context, TimedEngine(omit=True), 'warm', workers=(4,), fixture_version=runner.W4_LATENCY_VERSION)
+            self.assertTrue(result['correctness']['ok'], result)
+            self.assertEqual(result['metrics']['queue_p95_ms_at_4'], 190)
+            self.assertEqual(result['metrics']['queue_p99_ms_at_4'], 198)
+            self.assertFalse(missing['correctness']['ok'])
+            self.assertNotIn('queue_p95_ms_at_4', missing['metrics'])
+
     def test_explicit_images_are_used_for_queue_and_workers(self):
         with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:
             engine = Engine()

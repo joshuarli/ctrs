@@ -207,6 +207,7 @@ record the 28 retirements and removed disposable stores/Docker resources.
 | `np-w5` | `campaign/np-w5` | Historical prototype differs from accepted final source; retain for explicit patch review, never merge only to delete a checkout. |
 | `np-zstd-load` | `perf/zstd-load` | Rejected global default due to valid-layer expansion incompatibility; unintegrated source. |
 | `np-zstd-review` | `review/np-zstd-load` | Read-only source snapshot of rejected default; unintegrated source. |
+| `np-w11-admission-paused` | `campaign/w11-admission-20261117` | Unaccepted5bcf48a,122 component tests pass; independent review and native v4 proof are missing. Resume W2 first. |
 | `stuf89` | `fix/stuf89-help` | Unrelated original owner task; contents untouched. |
 
 The earlier branch/revision tables still preserve retired source provenance.
@@ -218,4 +219,15 @@ The sole development-doc conflict keeps main's current instructions. The merge
 has exactly the same Git tree as its first parent. The clean `np-vm-stop`
 checkout and56,808KiB of unused build cache are retired after no open consumers
 remain. The completed sampler-controls review checkout is also retired.
-`np-scoring-repair` is the current active source lane, not parked cleanup.
+The completed `np-scoring-repair` and `np-w11-growth` checkouts are also retired.
+No lane remains active after winddown. The new admission checkout holds only
+parked source. Its commit survives deletion of the checkout.
+
+These additional unmerged references complete the branch inventory:
+
+| Branch | Preserved commit | Disposition and retry condition |
+| --- | --- | --- |
+| `campaign/w11-admission-20261117` | `5bcf48a` | Unaccepted frozen-admission/tool-provenance continuation. Review and native v4 proof before integration; no new W2 batch ran after noise approval. |
+| `feat/np-w11-growth` | `49fe47a` | Patch-equivalent source integrated at81e51d2, followed by4fc901b. Checkout retired; branch preserves provenance. |
+| `fix/np-scoring-repair` | `8ea61c4` | Patch-equivalent source integrated atd0893fe. Checkout retired; no remaining implementation task. |
+| `fix/np-w8-receipt-guard` | `82734b4` | Patch-equivalent source integrated atdf1f418. Checkout retired; content-state limitations remain in evidence. |

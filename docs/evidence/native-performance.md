@@ -2221,6 +2221,28 @@ historical diagnostics; v2 fixture sizes, budgets and candidate image lock must
 be frozen before performance acceptance. Persistent power-loss durability is
 not claimed for disposable workflow artifacts.
 
+### W4 queue latency
+
+`w4-v3-queue-latency` retains the pinned 200-job artifact workload. Its
+ingest timestamps each accepted request as it prepares the Redis enqueue.
+The worker timestamps completion after both artifact files close. The
+verifier requires all 400 artifact bytes to match, an empty Redis queue,
+and one timing receipt per job from the same guest boot and time namespace.
+The runner keeps those receipts and reports nearest-rank p95 and p99
+separately for 1, 4 and 16 workers.
+
+`runner.py prepare` builds the new W4 image. The timed fixture uses
+`fixtures/w4/Dockerfile.latency`; its image contains the original `app.py`
+and the timing entry point. Both source hashes are checked before work.
+W11 still uses the pinned v2 worker image and the earlier oracle.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4 test_w4_lifecycle
+test_mixed_cycle test_reporting`. All 42 tests passed. The local HTTP and
+RESP fixture covers enqueue, worker execution and exact artifact verification.
+Negative cases reject missing timing files, reversed clocks, mismatched
+clock identities, and incorrect job IDs. The two native engine images and
+paired measurements still need validation.
+
 ## W8 preparation state-preservation repair
 
 Preparing a selected engine now merges its completed portfolio section into the
@@ -2783,6 +2805,42 @@ Node container per engine. Both are confirmed running afterward; ownership-check
 cleanup removes them, subsequent inspect fails, no cleanup errors. This is a fault
 probe, not the fixed-work fixture. All 123 integrated Python tests pass; missing
 W9 --image-ref exits 2 before engine access. No new dependency or build-driver change.
+
+### W9 job completion measurement
+
+`w9-v3-marked-completion` records each job's completion time from batch
+dispatch through exact output verification. The shared clock includes time
+waiting for a worker. Failed jobs retain their completion receipts and errors.
+The runner publishes successful jobs per minute and nearest-rank p95 only for
+a condition with all 16 exact jobs. At 16 observations the nearest-rank p95
+is the slowest completion. The reporter compares throughput and latency in
+their respective directions.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_ci_jobs test_safety
+test_reporting test_mixed_cycle`. The offline checks use a controlled clock,
+verify the metric derivation, and preserve the failed job's receipt without
+a p95. The job inputs, pinned artifacts and concurrency levels are unchanged.
+The new completion measurements need a native paired run.
+
+## W3 commit latency and persisted rows
+
+`w3-v2-commit-latency` sends the 300 fixed transactions over one psql
+connection. Each request contains the existing insert and counter update
+inside an explicit transaction. The runner requires the expected command
+statuses and one psql timing per commit. It retains raw output and publishes
+the nearest-rank p95 after all 300 receipts pass. Migration, transaction work,
+checkpoint and restart retain distinct elapsed intervals. [PostgreSQL 17 psql reference](https://www.postgresql.org/docs/17/app-psql.html)
+
+The transaction session enables synchronous commit. After restart, the fixture
+verifies all ordered keys and payloads, the exact counter, and the PostgreSQL
+`fsync` setting. A corrupted payload with the same count and key sum fails.
+The W3 proof still needs a pinned native service image and comparable
+engine-level durability evidence.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
+All 54 tests passed. The new regression covers the generated transaction
+script, timing aggregation, failed commit receipts and corrupt persisted
+payloads. The altered psql path and resulting timings await native validation.
 
 ## Existing-disk expansion criteria and bounded feasibility plan
 

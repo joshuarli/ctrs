@@ -33,7 +33,8 @@ class ComponentCheckTests(unittest.TestCase):
         command, kwargs = calls[0]
         self.assertTrue(command[4:])
         self.assertEqual(command, [sys.executable, "-m", "unittest", "-v",
-                                   "test_w2", "test_cpu_profile", "test_mixed_cycle", "test_safety"])
+                                   "test_w2", "test_cpu_profile", "test_mixed_cycle",
+                                   "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"])
         self.assertEqual(kwargs["cwd"], runner.BENCH)
         self.assertEqual(kwargs["timeout"], runner.CHECK_TIMEOUT_SECONDS)
         self.assertFalse(kwargs["check"])

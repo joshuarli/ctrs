@@ -351,3 +351,66 @@ the declared0.90 threshold. The journey ratio is0.9297, with two slower candidat
 legs, and all paired footprint checks pass. Reject the backend change for this
 screen. It remains private and inactive on main. No SBOM change is required.
 Raw root: `.work/tmp/gzip-decoder-pilot-20261117/`.
+
+## W6 compiled artifact pins
+
+The archived W6 pilot records with both digests contain 452 successful trials.
+The default driver accounts for 190 ctrs and 242 OrbStack records. The
+identical-builder control accounts for ten records per engine. Across these
+records, the pinned hyperfine executable and zlib static library each have one
+SHA-256 value. `bench/native/assets.lock` records both digests.
+
+The W6 runner requires those digests after both builds and retains actual values
+and probe errors. A correctly formatted wrong digest passed the previous
+runner and now fails the regression. Run
+`PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
+All 50 tests passed. No new builds or timed trials ran. The archived records
+still describe pilot uncached builds with retained base images.
+
+## W6 build-cache conditions
+
+`runner.py run` and `baseline` accept `--build-cache uncached|warm` for W6.
+The default runs each compile and test step uncached on an already resident
+engine. Warm issues the same solve twice per application with a shared
+context and stamp. Both uncached prime solves finish before sampling starts.
+The measured phase then includes buildx and image load. The artifact probe
+checks the loaded image outside the measured phase.
+
+The runner keeps BuildKit's raw JSON progress and saves the terminal compile
+vertex from each solve. Uncached requires a completed, started vertex without
+a cache hit. Warm requires a completed cache hit. A missing, failed or
+ambiguous vertex fails the trial, even if buildx exits zero. This changes the
+measurement setup. Start fresh cohorts for both cache conditions and keep the
+default and identical-builder drivers separate. [Buildx progress reference](https://docs.docker.com/reference/cli/docker/buildx/build/#progress), [BuildKit vertex fields](https://github.com/moby/buildkit/blob/master/client/graph.go)
+
+Use the pinned sources and tools for the eventual paired comparison:
+
+```sh
+python3.14 bench/native/runner.py baseline --case W6 --a ctrs --b orbstack \
+  --driver default --build-cache warm --pairs 10
+```
+
+The offline regression covers matching prime and replay contexts, prime work
+outside sampling, both artifact pins and a cache miss that exits zero. Native
+proof on the campaign's two builders and scored timings remain open.
+
+## W7 per-build first-use receipts
+
+`w7-v2-loaded-first-use` measures buildx with image load for both apps in
+all three cache states. Each build uses a fresh ARM64 output tag and a
+paired workload label. The next command runs the installed app with pulls
+disabled and measures time to its version output. The runner then checks the
+exact version and note bytes before continuing to the next cache state.
+The raw probe receipt retains both outputs, their exit statuses and the tag.
+
+The uncached and warm contexts both contain `incremental-0`. The incremental
+context changes only the note to `incremental-1`. First-use time excludes
+the separate note probe. A failed build or incorrect result stops that app's
+sequence. Cleanup checks ownership before removing output tags and leaves
+builder cache intact.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
+All 53 tests passed. The regression proves build/probe ordering, exact output
+checks, failed warm-probe handling, and cleanup ownership on the offline
+fixture. Native execution and cache-vertex confirmation for both applications
+remain open. Keep the new phases separate from the previous W7 profiles.

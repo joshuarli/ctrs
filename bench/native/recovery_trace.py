@@ -1,5 +1,7 @@
 """Pure interpretation of bounded W10 host probes and guest clock brackets."""
 import errno
+import hashlib
+import math
 import urllib.error
 
 
@@ -15,13 +17,48 @@ def classify_failures(attempts, interrupted_ns, recovered_ns):
             continue
         if attempt.get('error_errno') == errno.EADDRNOTAVAIL:
             host_address_errors.append(attempt)
-        if attempt['ended_ns'] >= interrupted_ns and attempt['started_ns'] <= recovered_ns:
+        if (not attempt.get('invalid_response')
+                and attempt['ended_ns'] >= interrupted_ns and attempt['started_ns'] <= recovered_ns):
             expected.append(attempt)
         else:
             unexpected.append(attempt)
     return {'expected_outage_errors': expected, 'unexpected_errors': unexpected,
             'host_address_errors': host_address_errors,
             'host_client_valid': not host_address_errors}
+
+
+def workload_metrics(attempts, interrupted_ns, recovered_ns, *, require_reads, require_writes):
+    healthy = [attempt for attempt in attempts if attempt['ok'] and attempt['ended_ns'] < interrupted_ns]
+    recovered = [attempt for attempt in attempts if attempt['ok'] and attempt['started_ns'] >= recovered_ns]
+    for phase in (healthy, recovered):
+        kinds = {attempt['kind'] for attempt in phase}
+        if (require_reads and 'read' not in kinds) or (require_writes and 'write' not in kinds):
+            raise ValueError('W10 needs completed load before interruption and after recovery')
+    elapsed = sorted(attempt['ended_ns'] - attempt['started_ns'] for attempt in recovered)
+    return {'recovered_p99_ms': elapsed[math.ceil(.99 * len(elapsed)) - 1] / 1e6,
+            'recovered_requests_ok': len(recovered)}
+
+
+def verify_persisted_items(rows, acknowledged, uncertain):
+    original = {f'item-{i}': (i, hashlib.md5(str(i).encode()).hexdigest()) for i in range(1, 501)}
+    allowed = {item['name']: item['payload'] for item in uncertain}
+    required = original | {item['name']: (item['id'], item['payload']) for item in acknowledged}
+    if len(required) != len(original) + len(acknowledged) or len(allowed) != len(uncertain) or allowed.keys() & required.keys():
+        raise ValueError('duplicate attempted write identity')
+    seen_names, seen_ids = set(), set()
+    for identity, name, payload in rows:
+        if type(identity) is not int or identity <= 0 or identity in seen_ids or name in seen_names:
+            raise ValueError('duplicate or invalid persisted item identity')
+        seen_names.add(name)
+        seen_ids.add(identity)
+        if name in required:
+            if required[name] != (identity, payload):
+                raise ValueError(f'persisted acknowledged item differs: {name}')
+        elif name not in allowed or identity <= 500 or allowed[name] != payload:
+            raise ValueError(f'unexpected persisted item: {name}')
+    if required.keys() - seen_names:
+        raise ValueError('persisted acknowledged items are missing')
+    return len(seen_names & allowed.keys())
 
 
 def clock_bracket(samples):
@@ -45,3 +82,33 @@ def recovery_intervals(events):
             'command_and_ready_s': (max(success, returned) - begin) / 1e9,
             'after_command_to_first_success_s': max(0, success - returned) / 1e9,
             'success_preceded_command_return': success < returned}
+
+
+def owned_ctrs_processes(manifest, socket_path, child_pid, binary_sha256):
+    if manifest['engine'] != 'ctrs' or manifest['socket'] != socket_path:
+        raise ValueError('recovery socket is not owned by ctrs')
+    processes = manifest['required_processes']
+    roles = {process['role']: process for process in processes}
+    if len(processes) != 2 or set(roles) != {'daemon', 'vm'}:
+        raise ValueError('recovery needs one owned daemon and one VM helper')
+    daemon, vm = roles['daemon'], roles['vm']
+    if (daemon['pid'] != child_pid or daemon['executable']['sha256'] != binary_sha256
+            or daemon['pid'] == vm['pid']):
+        raise ValueError('recovery daemon is not the requested child')
+    if {asset['path'].rsplit('/', 1)[-1] for asset in vm['boot_assets']} != {'Image', 'initramfs.cpio'}:
+        raise ValueError('recovery needs both booted guest artifacts')
+    return roles
+
+
+def verify_ctrs_restart(before, after, disk_before, disk_after):
+    if disk_after != disk_before:
+        raise ValueError('recovery changed the owned guest disk identity')
+    for role in ('daemon', 'vm'):
+        old, new = before[role], after[role]
+        if (old['pid'], old['kernel_start_identity']) == (new['pid'], new['kernel_start_identity']):
+            raise ValueError(f'{role} process did not restart')
+        if old['executable'] != new['executable']:
+            raise ValueError(f'{role} loaded executable changed during recovery')
+    if sorted(before['vm']['boot_assets'], key=lambda asset: asset['path']) != sorted(
+            after['vm']['boot_assets'], key=lambda asset: asset['path']):
+        raise ValueError('booted guest artifacts changed during recovery')

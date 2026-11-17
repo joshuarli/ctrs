@@ -1,10 +1,34 @@
 import unittest
 import errno
+import hashlib
+from copy import deepcopy
 import urllib.error
 import recovery_trace as trace
 
 
 class RecoveryTraceTests(unittest.TestCase):
+    def test_owned_engine_restart_checks_new_processes_and_same_boot_and_disk(self):
+        socket = '/private/run/docker.sock'
+        daemon = dict(role='daemon', pid=10, kernel_start_identity=20, executable={'sha256': 'binary'})
+        vm = dict(role='vm', pid=11, kernel_start_identity=21, executable={'sha256': 'vm'},
+                  boot_assets=[{'path': '/guest/Image', 'sha256': 'kernel'},
+                               {'path': '/guest/initramfs.cpio', 'sha256': 'initrd'}])
+        manifest = dict(engine='ctrs', socket=socket, required_processes=[daemon, vm])
+        before = trace.owned_ctrs_processes(manifest, socket, daemon['pid'], 'binary')
+        after = deepcopy(before)
+        after['daemon'].update(pid=12, kernel_start_identity=22)
+        after['vm'].update(pid=13, kernel_start_identity=23)
+        trace.verify_ctrs_restart(before, after, (1, 10), (1, 10))
+        with self.assertRaisesRegex(ValueError, 'requested child'):
+            trace.owned_ctrs_processes(manifest, socket, 99, 'binary')
+        with self.assertRaisesRegex(ValueError, 'disk identity'):
+            trace.verify_ctrs_restart(before, after, (1, 10), (1, 11))
+        with self.assertRaisesRegex(ValueError, 'vm process did not restart'):
+            trace.verify_ctrs_restart(before, after | {'vm': vm}, (1, 10), (1, 10))
+        after['vm']['boot_assets'][0]['sha256'] = 'changed'
+        with self.assertRaisesRegex(ValueError, 'booted guest artifacts changed'):
+            trace.verify_ctrs_restart(before, after, (1, 10), (1, 10))
+
     def test_host_address_error_invalidates_even_inside_expected_outage(self):
         error, error_errno = trace.transport_error(
             urllib.error.URLError(OSError(errno.EADDRNOTAVAIL, "Can't assign requested address")))
@@ -21,6 +45,34 @@ class RecoveryTraceTests(unittest.TestCase):
         result = trace.classify_failures(attempts, 10, 20)
         self.assertEqual(len(result['expected_outage_errors']), 3)
         self.assertEqual(len(result['unexpected_errors']), 2)
+
+    def test_wrong_payload_is_unexpected_even_during_outage(self):
+        attempt = dict(started_ns=12, ended_ns=19, ok=False, status=201, invalid_response=True)
+        result = trace.classify_failures([attempt], 10, 20)
+        self.assertEqual(result['unexpected_errors'], [attempt])
+        self.assertEqual(result['expected_outage_errors'], [])
+
+    def test_persisted_items_allow_only_exact_uncertain_outage_writes(self):
+        seed = [[i, f'item-{i}', hashlib.md5(str(i).encode()).hexdigest()] for i in range(1, 501)]
+        ack = [{'id': 501, 'name': 'ack', 'payload': 'x'}]
+        uncertain = [{'id': None, 'name': 'uncertain', 'payload': 'y'}]
+        rows = seed + [[501, 'ack', 'x']]
+        self.assertEqual(trace.verify_persisted_items(rows, ack, uncertain), 0)
+        self.assertEqual(trace.verify_persisted_items(rows + [[503, 'uncertain', 'y']], ack, uncertain), 1)
+        for invalid in (seed + [[503, 'uncertain', 'y']], seed + [[501, 'ack', 'wrong']],
+                        seed + [[502, 'ack', 'x']], rows + [[503, 'uncertain', 'wrong']],
+                        rows + [[503, 'unsent', 'anything']], rows + [[505, 'ack', 'x']]):
+            with self.subTest(invalid=invalid[-1]), self.assertRaises(ValueError):
+                trace.verify_persisted_items(invalid, ack, uncertain)
+
+    def test_recovered_latency_excludes_outage_spanning_success(self):
+        attempts = [dict(started_ns=a, ended_ns=b, ok=ok, kind=kind) for a, b, ok, kind in
+                    [(2, 3, True, 'write'), (3, 4, True, 'read'), (5, 60_000_000, True, 'read'),
+                     (30, 40, True, 'read'), (40, 60, True, 'write'), (60, 10_000_000, False, 'read')]]
+        result = trace.workload_metrics(attempts, 10, 25, require_reads=True, require_writes=True)
+        self.assertEqual(result, {'recovered_p99_ms': 20 / 1e6, 'recovered_requests_ok': 2})
+        with self.assertRaisesRegex(ValueError, 'before interruption and after recovery'):
+            trace.workload_metrics(attempts[:-2], 10, 25, require_reads=True, require_writes=True)
 
     def test_end_to_end_includes_command_even_if_service_recovers_early(self):
         result = trace.recovery_intervals(dict(start_command_begin_ns=10,

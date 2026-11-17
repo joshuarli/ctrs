@@ -260,7 +260,8 @@ def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_
     artifacts = {'ctrs_binary': ctrs_binary, 'guest_kernel': guest / 'Image',
                  'guest_initramfs': guest / 'initramfs.cpio'}
     required = [Path(sys.executable), *artifacts.values(), template, runner.COMPOSE_FILE,
-                runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
+                runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.RATE_LOAD_PY,
+                runner.FIXTURES / 'w4/app.py', runner.FIXTURES / 'w4/latency.py',
                 runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w8-v2/portfolio.json',
                 ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
                 runner.BENCH / 'schema.json', W11_CELLS_FILE, W1_W10_CELLS_FILE]

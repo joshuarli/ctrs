@@ -41,3 +41,14 @@ The validator also accepts both retained37-layer pair receipts from
 `w8-paired-f8cf4ddcd42e`, with74 distinct derived identities across the pairs.
 No engine rerun or retrospective qualification occurs. Cache absence remains
 unknown at the boundary described above.
+
+
+Retained inspection now validates every returned image against the
+common portfolio at `4c07c4e`. The before and after snapshots both
+require complete coverage, ARM64 and the pinned DiffID list. ctrs uses
+the pinned config ID and OrbStack uses the pinned manifest ID. The
+under-pull baseline uses the same check. The eight archived inspections
+from the two native pairs validate on the new code. Negative cases
+cover missing images, wrong order and unchanged IDs with wrong layers
+or architecture. The W8 component suite passed 68 tests, zero skips.
+The native results retain the original measurements and cache scope.

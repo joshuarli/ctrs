@@ -3,6 +3,7 @@ import json
 import subprocess
 import threading
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import ci_jobs
@@ -65,6 +66,12 @@ class CIJobsTests(unittest.TestCase):
                 self.assertEqual(len(set(engine.names)), 16)
                 self.assertTrue(all(r['body'] == BODY and r['error'] is None for r in results))
 
+    def test_job_completion_uses_shared_dispatch_clock(self):
+        engine = FakeEngine(1)
+        with patch.object(ci_jobs.time, 'monotonic', side_effect=range(10, 27)):
+            results = ci_jobs.run_condition(engine, IMAGE, 'np-campaign', 1)
+        self.assertEqual([row['completion_seconds'] for row in results], list(range(1, 17)))
+
     def test_result_validation_rejects_wrong_artifact_tools_and_cli(self):
         for key, value in [('artifact', 'wrong'), ('source_lock', 'wrong'), ('tools', {}), ('tests', []), ('extra', 1)]:
             body = copy.deepcopy(BODY)
@@ -85,6 +92,7 @@ class CIJobsTests(unittest.TestCase):
         self.assertEqual(len(results), 16)
         self.assertEqual(len([r for r in results if r['error']]), 1)
         self.assertIn('TimeoutExpired', results[3]['error'])
+        self.assertGreaterEqual(results[3]['completion_seconds'], 0)
         self.assertEqual(engine.removed, [results[3]['name']])
         self.assertTrue(all(r['body'] == BODY for r in results if r['job'] != 3))
 

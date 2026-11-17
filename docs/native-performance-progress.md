@@ -2,17 +2,41 @@
 
 ## Status
 
-**WINDING DOWN 2026-11-17 — explicit owner stop; campaign not complete.**
-Launch no experiments or lanes. Preserve unfinished source and finish the reboot audit.
-Accepted integration HEAD is4fc901b: reviewed W11 v3, local growth capability81e51d2 and counter-window correction.
-Latest product remains2f37d02. Default builder work stays accepted and unchanged.
-Native W11 job0a89d8f8 passes20,000 API operations,800 queue jobs and64 build/test jobs;172 inputs unchanged.
-No native job remains active. No W2 batch started after the owner accepted some background noise.
-Unfinished guard/tool-provenance changes will park on `campaign/w11-admission-20261117`; review and native v4 proof remain pending.
-Existing parked branches and retained checkouts are listed in [the inventory](native-performance-retained.md#after-cleanup-2026-11-17).
-Owner now accepts some noise: use disclosed interleaved W2 diagnostics, preserve unrelated workloads and keep invalid cells explicit.
-On resume, first run `codex-campaign-closeout.py cancel`, then read this file and inspect the parked branch.
-Prioritize normalized W2 reproduction/profiling over further qualification tooling. Full qualification remains unready.
+**Active 2026-11-17 after owner resume.** Closeout cancellation succeeded.
+The product baseline remains `2f37d02`; parked `5bcf48a` stays separate.
+The primed W2 batch completed all 20 trials and one million successful
+requests, with matching payloads and complete CPU boundaries. Total API CPU
+did not reproduce a consistent ctrs deficit. The system component was higher
+on ctrs in all five boundary-only pairs.
+[W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
+Saturation and the native API profile both completed. Saturation was
+inconclusive. The profile reproduced the `wake_up_q+0x64` concentration
+with no validity errors, while its profiler overhead remained unresolved.
+Capacity-matched fixed work verified all 500,000 operations. The median
+paired API system CPU ratio was 2.020 at 17 vCPUs on both sides.
+The ctrs-only comparison verified all 500,000 operations and put the
+17-vCPU versus 2-vCPU API system CPU ratio at 1.736. The topology profile
+reproduced the wake leaf concentration at 17 vCPUs. W11 v4 native
+observation passed bounded functional checks on both engines.
+The wake-count diagnostic completed cleanly. Counter-on wake calls per
+success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
+the counters leaves ordinary wake frequency unresolved. The reduced
+wake-entry observer also completed exact work and remains parked because
+observer overhead is unresolved. Main's W2 component suite passes 108
+tests with zero skips. The 49 Hz comparison completed all 40 exact
+trials. In all ten blocks an unrelated VM was active and the observer
+intervals exceeded the 5% acceptance band. W8 retained pin checks are
+integrated at `4c07c4e`. The parked qualification gate at `c068fba`
+requires 349 named cells across W1–W11. Complete mixed-work counts remain
+mandatory in each W11 cycle. The W6 runner checks both compiled ARM64
+artifact hashes against `assets.lock` and checks compile-step cache evidence
+for uncached and warm builds.
+The 19 Hz comparison completed all 12 exact trials and captured all API
+threads. Its lower rate did not reduce observed API CPU or wall in the
+four matched rate comparisons. `4bf9107` prepares a separate 49 Hz
+leaf-only observer. The diagnostic passed offline checks and awaits
+native sample and overhead validation.
+No campaign-owned measured job is active.
 
 ## Accepted and verified
 
@@ -43,20 +67,46 @@ Prioritize normalized W2 reproduction/profiling over further qualification tooli
 
 ## Exact next action
 
-Implement the missing W11 growth observations and readiness admission using
-the bounded v3 working set. Reuse existing native counters and explicit backing-
-file allocation helpers. Declare observation points, warmup exclusion, numerical
-budgets and minimum coverage before running. Keep unknown allocation/cache
-scope and incomplete data unknown. Never infer bounded growth from a short
-cycle count or a successful process exit. Then require a frozen candidate/input
-identity and a complete per-cell prerequisite matrix before `--qualification`
-can admit the owner-requested12-hour jobs. Existing refusal cites missing
-prerequisites, not missing owner authority.
+Check host availability with `perf-gate-ready` and actual process
+snapshots before the next scored run. The previous ten-block W2 observer
+run was shared with a Niceforge VM despite successful readiness exits.
+The 19 Hz comparison is complete and the lower-rate code stays parked.
+
+In a suitable host window, use the [leaf-only command and paired plan](evidence/native-w2-equal-work-2026-11-17.md#leaf-only-observer-preparation)
+from `experiment/w2-leaf-49hz` at `4bf9107`. First validate the guest
+capture in one matched block using 50,000 exact C8 operations per cell.
+Require every API thread, valid native samples and zero loss. Collect a
+fresh paired overhead batch before using the profile for product selection.
+
+If the Mac stays shared, integrate current main into the parked
+`campaign/w11-bind-completed-cycles` branch. Resolve shared runner and
+mixed-fixture changes while preserving the seven required W11 cells, exact
+completed-cycle counts, and the finite launcher. Recheck the parked
+qualification suite against the new fixture sources and leave the asset
+lock in pilot status.
+The [W10 fixtures](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
+now include an owned ctrs crash diagnostic. Native validation and a separate
+isolated OrbStack interruption target remain open.
+The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
+and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
+and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
+and [W3 commit latency](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
+and [W4 queue latency](evidence/native-performance.md#w4-queue-latency)
+are ready for native validation in the next eligible window.
+The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
+lists the next fixture gaps. Keep `assets.lock` in pilot status until the
+contract, fixture versions and evidence are reviewed.
+
+The reduced observer proof is complete. Source `7184d42` remains on
+`experiment/w2-wake-entry-only`. Use the evidence record for its verified
+probe coverage, scope and perturbation. A new run requires a distinct
+observer policy or an exclusive confirmation window. The completed profiles
+do not establish exclusive-store retry counts and give no basis for
+repeating the rejected LSE or affinity candidates.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
-No native job or source lane remains active. The20,000-operation result is not
-the12-hour leg and does not close growth, timing or durability gates.
+The 20,000-operation result leaves the 12-hour, growth, timing and durability gates open.
 
 The final c3775ce functional job13731c9782f64101a2425063857ddf49 exits0 with
 all four1000-operation trials correct,708 reads/292 writes each, complete phase
@@ -64,13 +114,12 @@ CPU and both periodic traces. Teardown is verified and all155 inputs rechecked.
 Later failure-path corrections use offline regressions, not another identical
 normal-path run. [Exact command and scope](evidence/native-sampler-lifecycle-2026-11-17.md).
 
-After functional acceptance, the first timed action is a separately predeclared
-exclusive W2 observer/equal-work batch. Require scalar gates AND actual saved
-process/guest snapshots. Ordinary gate0 has coexisted with hot Niceforge work;
-the unrelated `bctl-r7-qualify` VM also prevents attribution of OrbStack's helper.
-Do not stop unrelated work. The `-s` swap advisory is lane admission, not a
-performance gate. If exclusivity is absent, continue the next independent queue
-item; do not rerun neutral matrices or poll counters to fill turns.
+Save pre/post gates and actual process, guest, power and thermal snapshots.
+Ordinary gate0 has coexisted with hot Niceforge work. The owner subsequently
+accepted some noise; a perfectly quiet window is no longer a prerequisite for
+diagnostic W2 progress. Preserve unrelated work and disclose interference.
+Keep inconclusive or structurally contaminated resource cells explicit. The
+`-s` swap advisory is lane admission, not a performance gate.
 
 W8 receipt validation is integrated at df1f418. Its source investigation and
 remaining [content-state limits](evidence/native-w8-content-state-2026-11-17.md)
@@ -119,16 +168,22 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Add W11 post-warmup resource-growth observations and fail-closed frozen-
-   readiness admission. Keep bounded v3 state, exact-data oracles and explicit
-   unknown cells. Short functional proofs never substitute for qualification.
-2. In a genuinely exclusive window, confirm W2 CPU/success at equal useful work
-   and observer budgets, then profile actual API user/system CPU, synchronization,
-   scheduling and network costs. Separate fixed work/offered load, saturation,
-   on-CPU samples and off-CPU/wake latency. Commands/budgets:
+1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
+   and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
-3. W8: strengthen comparable retained/content-absent evidence and complete
-   exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
+2. Parked `campaign/w11-bind-completed-cycles` binds the contract digest to
+   `assets.lock` and validates the complete mixed workload and resource
+   observation per cycle. The archived
+   [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
+   passed on both engines, with 181 frozen receipts unchanged. Complete
+   the fixture producers, conditions and evidence needed to freeze the
+   proposed cell contract. The parked
+   `mixed_job.py` uses the finite supervisor for admitted qualification
+   legs. Launch the two 12-hour legs after their admission requirements
+   are satisfied.
+3. W8: retained-image pin checks are integrated and pass 68 component
+   tests. The eight archived native inspections agree with the pins.
+   Complete exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
    AB/BA order, actual transfer/deployment and source-state unknowns explicit.
    Never treat a deleted tag as a cold store or pool incompatible fixtures.
 4. Interleave resource-cycle acceptance with W2/W10: declared5 post-warmup cycles,

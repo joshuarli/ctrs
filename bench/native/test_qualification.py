@@ -307,6 +307,20 @@ class ToolIdentity(unittest.TestCase):
 
 
 class ManualAdmission(unittest.TestCase):
+    def test_required_sources_cover_shared_runner_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            readiness = root / 'readiness.json'
+            readiness.write_text('{}')
+            with patch.object(gate, 'require_readiness', side_effect=gate.ReadinessError('stop after inventory')) as require:
+                with self.assertRaisesRegex(gate.ReadinessError, 'stop after inventory'):
+                    gate.require_leg_readiness(readiness, ctrs_binary=root / 'ctrs', guest=root,
+                                               portfolio_layout=root, worker_layout=root)
+            required = require.call_args.kwargs['required_paths']
+            self.assertIn(gate.runner.BENCH / 'runner.py', required)
+            self.assertIn(gate.runner.RATE_LOAD_PY, required)
+            self.assertIn(gate.runner.FIXTURES / 'w4/latency.py', required)
+
     def test_primary_failure_survives_engine_registry_and_result_cleanup(self):
         for stage in ('engine', 'registry', 'save'):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:

@@ -19,8 +19,10 @@ import ownership
 import watch_loop
 import collect
 import resource_cells
+import recovery_client
+import recovery_trace
 import ci_jobs
-from fixtures.w4 import app as w4_fixture
+from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
 import base64
@@ -28,6 +30,7 @@ import concurrent.futures
 import hashlib
 import inspect
 import json
+import math
 import os
 import platform
 import random
@@ -37,6 +40,7 @@ import shutil
 import signal
 import statistics
 import tempfile
+import threading
 import socket
 import subprocess
 import sys
@@ -158,6 +162,10 @@ def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
 DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
+W4_LATENCY_VERSION = "w4-v3-queue-latency"
+W4_LATENCY_IMAGE = "np-w4-events:v3"
+W4_FIXED_WORK = {"jobs": w4_fixture.JOBS, "events": w4_fixture.JOBS * w4_fixture.EVENTS,
+                 "artifacts": w4_fixture.JOBS * len(w4_fixture.filenames(0))}
 # Holdout: a real third-party app never used for tuning — Gitea +
 # Postgres. REST API seed/read workload plus git smart-HTTP clones over
 # the published port. Executed once per engine at gates via the
@@ -180,8 +188,26 @@ INSERT INTO npw3_meta VALUES ('txs', 0) ON CONFLICT DO NOTHING;
 
 
 def _w3_tx_sql(i: int) -> str:
-    return (f"BEGIN; INSERT INTO npw3_events(k,v) VALUES ({i}, 'v{i}');"
-            f" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'; COMMIT;\n")
+    return (rf"BEGIN\; INSERT INTO npw3_events(k,v) VALUES ({i}, 'v{i}')\;"
+            r" UPDATE npw3_meta SET n = n + 1 WHERE k = 'txs'\; COMMIT;" + "\n")
+
+
+def _w3_commit_timings(stdout: str) -> list[float]:
+    lines = stdout.splitlines()
+    if lines[:2] != ["SET", "Timing is on."] or len(lines) != 2 + 5 * W3_TXS:
+        raise ValueError(f"expected {W3_TXS} complete transaction timing receipts")
+    latencies = []
+    for offset in range(2, len(lines), 5):
+        timing = re.fullmatch(r"Time: (\d+\.\d{3}) ms(?: \([^\n]+\))?", lines[offset + 4])
+        if lines[offset:offset + 4] != ["BEGIN", "INSERT 0 1", "UPDATE 1", "COMMIT"] or not timing:
+            raise ValueError(f"invalid transaction timing receipt {(offset - 2) // 5 + 1}")
+        elapsed = float(timing[1])
+        if not math.isfinite(elapsed):
+            raise ValueError("nonfinite transaction timing")
+        latencies.append(elapsed)
+    return latencies
+
+
 # ~0.6 s of CPU work inside the container, deterministic across engines
 # (same image, same interpreter); argv[1] is the job marker.
 W11_CHURN_WORK = (
@@ -218,13 +244,14 @@ W8_IMAGES = [
 
 CHECK_COMPONENTS = {
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
-    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_mixed_resources", "test_qualification", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
     "resources": ("test_resource_cells", "test_resource_cycles", "test_resource_pilot", "test_wal_trace_guest",
                   "test_collect", "test_storage_space",
-                  "test_system_df_cache", "test_mixed_resources", "test_qualification", "test_reporting", "test_safety"),
+                  "test_system_df_cache", "test_reporting", "test_safety"),
+    "w11": ("test_qualification", "test_mixed_job", "test_mixed_cycle", "test_mixed_resources", "test_durable_job"),
 }
 CHECK_TIMEOUT_SECONDS = 60
 TOOL_CONTRACTS = {
@@ -459,6 +486,7 @@ class Engine:
         self.name = name
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
+        self.recovery_root: Path | None = None
         if name == "orbstack":
             self.dir = None
             self.socket = f"unix://{ORBSTACK_SOCK}"
@@ -470,6 +498,17 @@ class Engine:
         endpoint_hash = hashlib.sha256(self.socket.encode()).hexdigest()[:12]
         self.builder_name = f"np-dc-{self.name}-{endpoint_hash}"
         self.buildx_config = WORK / "buildx" / f"{self.name}-{endpoint_hash}"
+
+    @classmethod
+    def for_recovery(cls, run_id: str):
+        parent = WORK / "engines"
+        parent.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix="w10-", dir=parent))
+        if len(os.fsencode(root / "run/docker.sock")) >= 104:
+            raise ValueError("W10 recovery Unix socket path is too long")
+        engine = cls("ctrs", run_id, fresh_dir=root)
+        engine.recovery_root = root
+        return engine
 
     def env(self, extra: dict | None = None) -> dict:
         env = os.environ.copy()
@@ -1493,18 +1532,23 @@ def trial_w7(ctx, engine: Engine, state: str,
     """W7: default buildx -> loaded runnable images for two real apps
     (hyperfine 2.0.0 Rust, httpie 3.2.4 Python). Per app: uncached (--no-cache)
     / warm (identical context) / incremental (one-file stamp bump)
-    builds, then run probes for version output and the note marker.
+    builds, each followed by version and note probes of its loaded image.
     Base images pull untimed in setup; stores remain warm."""
     case_id = "W7"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
     sampler = trace = None
+    owner = os.urandom(12).hex()
+    label = "dev.ctrs.campaign.w7"
+    label_value = hashlib.sha256(ctx.workload_id.encode()).hexdigest()
+    tags = []
     try:
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
+        rec["metrics"]["fixture_version"] = "w7-v2-loaded-first-use"
         sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
                    for name, spec in W7_APPS.items()}
         for spec in W7_APPS.values():
@@ -1519,7 +1563,6 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["notes"].append("--no-cache bypasses layer reuse; "
                             "engine/content stores remain warm")
         for name, spec in W7_APPS.items():
-            tag = f"npw7/{name}:{ctx.run_id[-6:]}"
             ctx_dir = trial_dir / f"ctx-{name}"
             ctx_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy(spec["dockerfile"], ctx_dir / "Dockerfile")
@@ -1527,51 +1570,41 @@ def trial_w7(ctx, engine: Engine, state: str,
                         ctx_dir / spec["source"]["file"])
             (ctx_dir / "stamp").mkdir(exist_ok=True)
 
-            def build_ctx(note: str) -> Path:
-                (ctx_dir / "stamp" / "note.txt").write_text(note + "\n")
-                return ctx_dir
-
-            def build(context: Path, uncached: bool = False,
-                      timeout: float = 1800) -> tuple[float, bool, str]:
-                tp = time.monotonic()
-                cp = engine.sh(
-                    build_args(engine, driver,
-                               (["--no-cache"] if uncached else [])
-                               + ["-q", "-t", tag, "-f",
-                                  str(context / "Dockerfile"),
-                                  str(context)]),
-                    timeout=timeout, check=False)
-                err = (cp.stderr or cp.stdout or "").strip()[-400:]
-                return round(time.monotonic() - tp, 3), cp.returncode == 0, err
-
-            s, ok, err = build(build_ctx("incremental-0"), uncached=True)
-            rec["metrics"][f"{name}_uncached_s"] = s
-            checks[f"{name}_uncached"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} uncached build failed: {err}")
-                continue
-            s, ok, err = build(build_ctx("incremental-0"))
-            rec["metrics"][f"{name}_warm_s"] = s
-            checks[f"{name}_warm"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} warm build failed: {err}")
-            s, ok, err = build(build_ctx("incremental-1"))
-            rec["metrics"][f"{name}_incr_s"] = s
-            checks[f"{name}_incr"] = ok
-            if not ok:
-                rec["validation_errors"].append(
-                    f"{name} incr build failed: {err}")
-
-            ver = engine.sh(["run", "--rm", tag, *spec["probe"]],
-                            timeout=60, check=False)
-            checks[f"{name}_version"] = (ver.returncode == 0
-                                         and spec["expect"] in ver.stdout)
-            note = engine.sh(["run", "--rm", tag, "cat", "/out/note.txt"],
-                             timeout=60, check=False)
-            checks[f"{name}_note"] = (note.returncode == 0
-                                      and "incremental-1" in note.stdout)
+            for condition, expected_note in (("uncached", "incremental-0\n"),
+                                             ("warm", "incremental-0\n"),
+                                             ("incr", "incremental-1\n")):
+                cell = f"{name}_{condition}"
+                tag = f"npw7/{name}:{owner}-{condition}"
+                tags.append(tag)
+                (ctx_dir / "stamp" / "note.txt").write_text(expected_note)
+                flags = ["--no-cache"] if condition == "uncached" else []
+                with resource_phase(engine, rec, f"{cell}_build"):
+                    build = engine.sh(build_args(engine, driver, [
+                        *flags, "-q", "--platform", "linux/arm64", "--label", f"{label}={label_value}",
+                        "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
+                    ]), timeout=1800, check=False)
+                rec["metrics"][f"{cell}_s"] = rec["resources"]["phases"][f"{cell}_build"]["operation_wall_seconds"]
+                checks[cell] = build.returncode == 0
+                if build.returncode:
+                    rec["validation_errors"].append(f"{cell} build failed: {(build.stderr or build.stdout)[-400:]}")
+                    break
+                with resource_phase(engine, rec, f"{cell}_first_use"):
+                    version = engine.sh(["run", "--rm", "--pull=never", tag, *spec["probe"]],
+                                        timeout=60, check=False)
+                note = engine.sh(["run", "--rm", "--pull=never", tag, "cat", "/out/note.txt"],
+                                 timeout=60, check=False)
+                checks[f"{cell}_version"] = version.returncode == 0 and version.stdout == spec["expect"] + "\n"
+                checks[f"{cell}_note"] = note.returncode == 0 and note.stdout == expected_note
+                (trial_dir / f"{cell}-probe.json").write_text(json.dumps({
+                    "tag": tag, "build_output": build.stdout,
+                    "version": {"exit": version.returncode, "stdout": version.stdout, "stderr": version.stderr},
+                    "note": {"exit": note.returncode, "stdout": note.stdout, "stderr": note.stderr},
+                }, indent=2) + "\n")
+                if checks[f"{cell}_version"] and checks[f"{cell}_note"]:
+                    rec["metrics"][f"{cell}_first_use_s"] = rec["resources"]["phases"][f"{cell}_first_use"]["operation_wall_seconds"]
+                else:
+                    rec["validation_errors"].append(f"{cell} loaded image failed version or note verification")
+                    break
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -1579,22 +1612,60 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+        try:
+            if sampler is not None:
+                stop_sampler(sampler)
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        finally:
+            for tag in tags:
+                try:
+                    inspected = engine.sh(["image", "inspect", "--format",
+                                           '{{ index .Config.Labels "' + label + '" }}', tag], check=False)
+                    if inspected.returncode and "no such image" in inspected.stderr.lower():
+                        continue
+                    if inspected.returncode or inspected.stdout.strip() != label_value:
+                        raise ValueError("image ownership could not be established")
+                    engine.sh(["image", "rm", "--no-prune", tag])
+                except Exception as exc:
+                    rec["correctness"]["ok"] = False
+                    rec["validation_errors"].append(f"{tag} cleanup: {exc}")
+
+
+def _w6_compile_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
+    matches = {}
+    for line in progress.splitlines():
+        if not line.lstrip().startswith("{"):
+            continue
+        for vertex in json.loads(line).get("vertexes", ()):
+            name = vertex.get("name", "")
+            if name != instruction and not name.endswith("] " + instruction):
+                continue
+            if vertex.get("error"):
+                raise ValueError(f"compile vertex failed: {vertex['error']}")
+            if vertex.get("completed"):
+                digest = vertex.get("digest", "")
+                if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                    raise ValueError("completed compile vertex has no valid digest")
+                if vertex.get("cached", False) is not cached or (not cached and not vertex.get("started")):
+                    raise ValueError(f"compile and test vertex did not prove cached={cached}")
+                matches[digest] = vertex
+    if len(matches) != 1:
+        raise ValueError("expected exactly one completed compile and test vertex")
+    return next(iter(matches.values()))
 
 
 def trial_w6(ctx, engine: Engine, state: str,
-             driver: str = "default") -> dict:
+             driver: str = "default", *, build_cache: str = "uncached") -> dict:
     """W6: compiled-app CI — two timed `docker build`s per trial on
     pinned upstream sources: hyperfine 2.0.0 (Rust: cargo build
     --release --locked + cargo test on rust:1.100.0-bookworm) and zlib
     1.3.1 (C: configure -> make -j -> make check on
     gcc:14.2.0-bookworm). Each build ends with a run probe that sha256s
     the produced binary/lib. Base images are pulled untimed in setup if
-    absent (prepare also pulls them)."""
+    absent (prepare also pulls them). Warm builds prime the same context
+    before sampling. Artifact digests must match assets.lock."""
     case_id = "W6"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
@@ -1603,6 +1674,10 @@ def trial_w6(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     sampler = trace = None
     try:
+        if build_cache not in ("uncached", "warm"):
+            raise ValueError("W6 build cache must be uncached or warm")
+        with (BENCH / "assets.lock").open("rb") as lock:
+            artifact_pins = tomllib.load(lock)["artifacts"]["w6"]
         zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
         rust_src = ensure_pinned_source(W6_RUST_SOURCE, W6_DIR)
         engine.ensure_up()
@@ -1614,53 +1689,76 @@ def trial_w6(ctx, engine: Engine, state: str,
                            check=False)
             if cp.returncode != 0:
                 engine.sh(["pull", image], timeout=900)
-        sampler, trace = start_sampler(engine, trial_dir)
-
-        def build_one(name: str, dockerfile: Path,
-                      sources: list[tuple[Path, str]],
-                      tag: str, probe: list[str],
-                      metric: str, timeout: float = 1800) -> None:
-            # Per-trial context: stamp.txt busts the layer cache so every
-            # timed build is a real compile, not a cache hit.
+        builds = (
+            ("rust", W6_DIR / "rust" / "Dockerfile", rust_src,
+             W6_RUST_SOURCE["file"], tag_rust, "/src/target/release/hyperfine"),
+            ("zlib", W6_DIR / "Dockerfile", zlib_src,
+             W6_ZLIB_SOURCE["file"], tag_zlib, "/src/libz.a"),
+        )
+        contexts = {}
+        for name, dockerfile, source, archive, _, _ in builds:
             ctx_dir = trial_dir / f"ctx-{name}"
             ctx_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy(dockerfile, ctx_dir / "Dockerfile")
-            for src, fname in sources:
-                shutil.copy(src, ctx_dir / fname)
+            shutil.copy(source, ctx_dir / archive)
             (ctx_dir / "stamp.txt").write_text(f"{ctx.workload_id}\n")
-            tp = time.monotonic()
-            build = engine.sh(
-                build_args(engine, driver, ["--no-cache", "-q", "-t", tag,
-                                            "-f", str(ctx_dir / "Dockerfile"),
-                                            str(ctx_dir)]),
-                timeout=timeout, check=False)
-            rec["metrics"][metric] = round(time.monotonic() - tp, 3)
-            checks[f"build_{name}"] = build.returncode == 0
-            if build.returncode != 0:
-                rec["validation_errors"].append(
-                    f"{name} build rc={build.returncode}: "
-                    f"{(build.stderr or build.stdout)[-400:]}")
-                return
-            run = engine.sh(["run", "--rm", tag, *probe],
-                            timeout=120, check=False)
-            out = run.stdout.strip()
-            sha = out.split()[0] if run.returncode == 0 else ""
-            rec["metrics"][f"artifact_{name}_sha256"] = sha
-            checks[f"artifact_{name}"] = (
-                run.returncode == 0
-                and re.fullmatch(r"[0-9a-f]{64}", sha) is not None)
+            instruction = (ctx_dir / "Dockerfile").read_text().strip().splitlines()[-1]
+            if not instruction.startswith("RUN "):
+                raise ValueError(f"{name} Dockerfile must end with the compile and test instruction")
+            contexts[name] = ctx_dir, instruction
 
-        rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
-        build_one(
-            "rust", W6_DIR / "rust" / "Dockerfile",
-            [(rust_src, W6_RUST_SOURCE["file"])],
-            tag_rust,
-            ["sha256sum", "/src/target/release/hyperfine"], "build_rust_s")
-        build_one(
-            "zlib", W6_DIR / "Dockerfile",
-            [(zlib_src, W6_ZLIB_SOURCE["file"])],
-            tag_zlib,
-            ["sha256sum", "/src/libz.a"], "build_zlib_s")
+        def solve(name, tag, *, cached):
+            ctx_dir, _ = contexts[name]
+            flags = [] if cached else ["--no-cache"]
+            return engine.sh(build_args(engine, driver, [
+                *flags, "--progress=rawjson", "--platform", "linux/arm64",
+                "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
+            ]), timeout=1800, check=False)
+
+        def verify_solve(name, phase, result, *, cached):
+            (trial_dir / f"{name}-{phase}.stdout").write_text(result.stdout)
+            (trial_dir / f"{name}-{phase}.stderr").write_text(result.stderr)
+            try:
+                if result.returncode:
+                    raise ValueError(f"build exited {result.returncode}: {(result.stderr or result.stdout)[-400:]}")
+                _, instruction = contexts[name]
+                vertex = _w6_compile_vertex(result.stderr, instruction, cached=cached)
+                (trial_dir / f"{name}-{phase}-compile.json").write_text(json.dumps(vertex, indent=2) + "\n")
+            except ValueError as exc:
+                checks[f"{phase}_{name}"] = False
+                rec["validation_errors"].append(f"{name} {phase}: {exc}")
+                return False
+            checks[f"{phase}_{name}"] = True
+            return True
+
+        warm_cache = build_cache == "warm"
+        rec["metrics"]["cache_mode"] = ("primed-build-cache" if warm_cache else
+                                        "no-cache-base-images-retained")
+        if warm_cache:
+            for name, _, _, _, tag, _ in builds:
+                prime = solve(name, tag, cached=False)
+                verify_solve(name, "prime", prime, cached=False)
+        sampler, trace = start_sampler(engine, trial_dir)
+        for name, _, _, _, tag, artifact in builds:
+            if warm_cache and not checks[f"prime_{name}"]:
+                continue
+            phase = f"build_{name}"
+            with resource_phase(engine, rec, phase):
+                result = solve(name, tag, cached=warm_cache)
+            rec["metrics"][phase + "_s"] = round(rec["resources"]["phases"][phase]["operation_wall_seconds"], 3)
+            if not verify_solve(name, "build", result, cached=warm_cache):
+                continue
+            run = engine.sh(["run", "--rm", tag, "sha256sum", artifact],
+                            timeout=120, check=False)
+            fields = run.stdout.split(maxsplit=1)
+            sha = fields[0] if run.returncode == 0 and fields else ""
+            rec["metrics"][f"artifact_{name}_sha256"] = sha
+            expected = artifact_pins[name]
+            checks[f"artifact_{name}"] = bool(sha and sha == expected)
+            if not checks[f"artifact_{name}"]:
+                rec["validation_errors"].append(
+                    f"{name} artifact probe rc={run.returncode}, expected {expected}, got {sha!r}")
+
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:
@@ -1714,8 +1812,17 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
                 raise
             owned_jobs.extend(results)
             (trial_dir / f'jobs-at-{concurrency}.json').write_text(json.dumps(results, indent=2))
-            rec['metrics'][f'fixed16_at_{concurrency}_s'] = rec['resources']['phases'][f'jobs_at_{concurrency}']['operation_wall_seconds']
-            rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = len(results) == ci_jobs.SPEC['fixed_jobs']
+            if len(results) != ci_jobs.SPEC['fixed_jobs']:
+                raise ValueError(f'W9 returned incomplete fixed work at concurrency {concurrency}')
+            wall = rec['resources']['phases'][f'jobs_at_{concurrency}']['operation_wall_seconds']
+            latencies = sorted(row['completion_seconds'] for row in results)
+            if (wall <= 0 or not math.isfinite(wall)
+                    or not all(0 <= value <= wall for value in latencies)):
+                raise ValueError(f'W9 completion clocks are outside the phase at concurrency {concurrency}')
+            rec['metrics'][f'fixed16_at_{concurrency}_s'] = wall
+            rec['metrics'][f'successful_jobs_per_minute_at_{concurrency}'] = 60 * len(results) / wall
+            rec['metrics'][f'job_completion_p95_ms_at_{concurrency}'] = 1000 * latencies[math.ceil(.95 * len(latencies)) - 1]
+            rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = True
         rec['correctness']['ok'] = all(rec['correctness']['checks'].values())
         return rec
     except Exception as exc:
@@ -1749,25 +1856,66 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
             rec['resources']['trace'] = _trace_ref(trace)
 
 
-W4_FIXED_WORK = {
-    'jobs': w4_fixture.JOBS,
-    'events': w4_fixture.JOBS * w4_fixture.EVENTS,
-    'artifacts': w4_fixture.JOBS * len(w4_fixture.filenames(1)),
-}
+@dataclass(frozen=True)
+class QueueInterruption:
+    down_seconds: float
+    recovery_timeout: float
+
+
+def _recover_queue(engine, queue_id, queue, app, directory, outage):
+    def snapshot(stage, timeout):
+        result = engine.sh(["exec", app, "python", "/app/latency.py", "pending", "--redis-host", queue],
+                           timeout=timeout, check=False)
+        (directory / f"queue-{stage}.json").write_text(result.stdout)
+        if result.returncode:
+            raise ValueError(f"queue snapshot {stage} failed: {(result.stderr or result.stdout)[-400:]}")
+        return json.loads(result.stdout)
+
+    before = snapshot("before", 15)
+    engine.sh(["kill", queue_id], timeout=30)
+    time.sleep(outage.down_seconds)
+    started = time.monotonic()
+    engine.sh(["start", queue_id], timeout=outage.recovery_timeout)
+    retries = 0
+
+    def recovery_remaining():
+        remaining = outage.recovery_timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("W10 queue recovery deadline")
+        return remaining
+
+    while True:
+        remaining = recovery_remaining()
+        ready = engine.sh(["exec", queue_id, "redis-cli", "PING"], timeout=min(5, remaining), check=False)
+        if ready.returncode == 0 and ready.stdout.strip() == "PONG":
+            break
+        retries += 1
+        time.sleep(min(.05, remaining))
+    if snapshot("after", min(15, recovery_remaining())) != before:
+        raise ValueError("recovered queue differs from the acknowledged backlog")
+    elapsed = time.monotonic() - started
+    if elapsed > outage.recovery_timeout:
+        raise TimeoutError("W10 queue recovery deadline")
+    return before, {"recovery_s": elapsed, "retries_until_recovery": retries}
 
 
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
-             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE,
-             cleanup_command=None) -> dict:
+             image_ref: str | None = None, redis_ref: str = W4_IMAGE,
+             cleanup_command=None, queue_interruption: QueueInterruption | None = None) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
-    case_id = "W4"
+    case_id = "W10" if queue_interruption is not None else "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
+    if queue_interruption is not None:
+        proj += "-" + os.urandom(4).hex()
     net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
-    image = image_ref
+    timed = fixture_version == W4_LATENCY_VERSION
+    if queue_interruption is not None and (not timed or len(workers) != 1):
+        raise ValueError("queue interruption requires one timed W4 worker condition")
+    image = image_ref or (W4_LATENCY_IMAGE if timed else "np-w4-events:v2")
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
@@ -1775,9 +1923,19 @@ def trial_w4(ctx, engine: Engine, state: str,
         engine.ensure_up()
         engine.sh(["image", "inspect", image])
         engine.sh(["network", "create", "--label", label, net])
+        mounts = []
+        persistence = ["--appendonly", "no"]
+        if queue_interruption is not None:
+            queue_volume = f"{proj}-redis-data"
+            engine.sh(["volume", "create", "--label", label, queue_volume])
+            owned_volumes.append(queue_volume)
+            mounts = ["-v", f"{queue_volume}:/data"]
+            persistence = ["--appendonly", "yes", "--appendfsync", "always", "--aof-load-truncated", "no"]
         owned_containers.append(queue)
-        engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
-                   redis_ref, "redis-server", "--save", "", "--appendonly", "no"])
+        queue_id = engine.sh(["run", "-d", "--name", queue, "--label", label, "--network", net,
+                              *mounts, redis_ref, "redis-server", "--save", "", *persistence]).stdout.strip()
+        if queue_interruption is not None and not re.fullmatch(r"[0-9a-f]{64}", queue_id):
+            raise ValueError("cannot establish the owned queue container identity")
         owned_containers.append(app)
         engine.sh(["run", "-d", "--name", app, "--label", label, "--network", net,
                    image, "serve", "--redis-host", queue])
@@ -1786,6 +1944,12 @@ def trial_w4(ctx, engine: Engine, state: str,
         if app_hash != sha256_file(FIXTURES / "w4" / "app.py"):
             raise ValueError("W4 fixture image does not match current pinned input")
         rec["metrics"]["fixture_app_sha256"] = app_hash
+        if timed:
+            latency_hash = engine.sh(["exec", app, "python", "-c",
+                "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/latency.py').read_bytes()).hexdigest())"]).stdout.strip()
+            if latency_hash != sha256_file(FIXTURES / "w4" / "latency.py"):
+                raise ValueError("W4 latency fixture image does not match pinned input")
+            rec["metrics"]["fixture_latency_sha256"] = latency_hash
         deadline = time.monotonic() + 60
         while True:
             ready = engine.sh(["exec", app, "python", "-c",
@@ -1796,16 +1960,22 @@ def trial_w4(ctx, engine: Engine, state: str,
                 raise TimeoutError("W4 Redis-backed ingest readiness")
             time.sleep(.1)
         sampler, trace = start_sampler(engine, trial_dir)
-        for count in workers:
-            volume = f"{proj}-artifacts-{count}"
+        conditions = ([(workers[0], "backlog"), (workers[0], "recovered")] if queue_interruption is not None
+                      else [(count, str(count)) for count in workers])
+        backlog = recovery = None
+        for count, condition in conditions:
+            volume = f"{proj}-artifacts-{condition}"
             engine.sh(["volume", "create", "--label", label, volume])
             owned_volumes.append(volume)
-            engine.sh(["exec", queue, "redis-cli", "FLUSHALL"])
-            with resource_phase(engine, rec, f"workers_{count}"):
+            if queue_interruption is None:
+                engine.sh(["exec", queue, "redis-cli", "FLUSHALL"])
+            with resource_phase(engine, rec, f"workers_{condition}"):
                 started = time.monotonic()
                 engine.sh(["exec", app, "python", "/app/app.py", "submit", "--url", "http://127.0.0.1:8080"], timeout=120)
                 ingested = time.monotonic()
-                names = [f"{proj}-worker-{count}-{i}" for i in range(count)]
+                if condition == "backlog":
+                    backlog, recovery = _recover_queue(engine, queue_id, queue, app, trial_dir, queue_interruption)
+                names = [f"{proj}-worker-{condition}-{i}" for i in range(count)]
                 owned_containers.extend(names)
                 def work(name):
                     return engine.sh(["run", "--name", name, "--label", label, "--network", net,
@@ -1814,30 +1984,50 @@ def trial_w4(ctx, engine: Engine, state: str,
                 with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
                     outcomes = list(pool.map(work, names))
                 completed = time.monotonic()
-            rec["metrics"][f"workers_{count}_s"] = completed - started
-            rec["metrics"][f"ingest_{count}_s"] = ingested - started
-            rec["metrics"][f"drain_{count}_s"] = completed - ingested
-            verifier = f"{proj}-verify-{count}"
+            rec["metrics"][f"workers_{condition}_s"] = completed - started
+            rec["metrics"][f"ingest_{condition}_s"] = ingested - started
+            rec["metrics"][f"drain_{condition}_s"] = completed - ingested
+            verifier = f"{proj}-verify-{condition}"
             owned_containers.append(verifier)
             verify = engine.sh(["run", "--rm", "--name", verifier, "--label", label, "--network", net,
                                 "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], timeout=180, check=False)
-            checks[f"workers_{count}"] = (all(cp.returncode == 0 for cp in outcomes)
-                                           and verify.returncode == 0
-                                           and verify.stdout.strip() == f"verified {W4_FIXED_WORK['jobs']}")
-            (trial_dir / f"workers-{count}.json").write_text(json.dumps({
+            (trial_dir / f"workers-{condition}.json").write_text(json.dumps({
                 "workers": [{"exit": cp.returncode, "stderr": cp.stderr} for cp in outcomes],
                 "verification_exit": verify.returncode, "verification": verify.stdout + verify.stderr}))
+            verified = all(cp.returncode == 0 for cp in outcomes) and verify.returncode == 0
+            if verified and timed:
+                receipt = json.loads(verify.stdout)
+                latencies = sorted(w4_latency.completed_latencies(receipt))
+                if condition == "backlog":
+                    consumed = [{key: row[key] for key in ("job", "clock", "enqueued_ns")}
+                                for row in receipt["timings"]]
+                    if consumed != backlog:
+                        raise ValueError("workers did not consume the recovered backlog")
+                for percentile in (95, 99):
+                    rank = math.ceil(percentile * len(latencies) / 100)
+                    rec["metrics"][f"queue_p{percentile}_ms_at_{condition}"] = latencies[rank - 1] / 1_000_000
+            checks[f"workers_{condition}"] = verified and (timed or verify.stdout.strip() == f"verified {w4_fixture.JOBS}")
+            if queue_interruption is not None and not checks[f"workers_{condition}"]:
+                raise ValueError(f"W10 {condition} queue work failed verification")
         rec["metrics"].update(W4_FIXED_WORK, fixture_version=fixture_version)
-        rec["correctness"]["ok"] = all(checks.get(f"workers_{n}") for n in workers)
+        if queue_interruption is not None:
+            rec["metrics"].update({key: value * len(conditions) for key, value in W4_FIXED_WORK.items()})
+            rec["metrics"].update(recovery, fixture_version="w10-v3-exact-recovery", interrupt_service="queue",
+                                  recovered_p99_ms=rec["metrics"]["queue_p99_ms_at_recovered"])
+        rec["correctness"]["ok"] = all(checks.values())
     except Exception as exc:
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(str(exc))
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
+        try:
+            if sampler is not None:
+                stop_sampler(sampler)
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        except Exception as exc:
+            rec["validation_errors"].append(f"sampler shutdown or receipt: {exc}")
+            rec["correctness"]["ok"] = False
         def cleanup(kind, name, remove):
             try:
                 command = engine.sh if cleanup_command is None else cleanup_command
@@ -1871,7 +2061,7 @@ def trial_w4(ctx, engine: Engine, state: str,
 def trial_w3(ctx, engine: Engine, state: str) -> dict:
     """W3: persistent transactional Postgres — real migrations, a
     deterministic 300-transaction mix, CHECKPOINT, `docker restart`,
-    then exact row-count verification on the persisted volume."""
+    then exact row and counter verification on the persisted volume."""
     case_id = "W3"
     proj = project_name(ctx.run_id, engine.name, case_id)
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -1881,18 +2071,22 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
     vol = f"{proj}-pgdata"
     sampler = trace = None
 
-    def psql(sql_file: str, timeout: float = 300) -> tuple[float, bool]:
-        tp = time.monotonic()
-        cp = engine.sh(
-            ["exec", name, "sh", "-c",
-             f"psql -U postgres -d postgres -f {sql_file} >/dev/null"],
-            timeout=timeout, check=False)
-        s = round(time.monotonic() - tp, 3)
+    rec["metrics"]["fixture_version"] = "w3-v2-commit-latency"
+    psql_cmd = ["exec", "-e", "LC_ALL=C", name, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                "-U", "postgres", "-d", "postgres"]
+
+    def psql(sql_file: str, phase: str, timeout: float = 300):
+        with resource_phase(engine, rec, phase):
+            cp = engine.sh(
+                [*psql_cmd, "-v", "SHOW_ALL_RESULTS=on", "-f", f"/tmp/{sql_file}"],
+                timeout=timeout, check=False)
+        (trial_dir / f"{sql_file}.stdout").write_text(cp.stdout)
+        (trial_dir / f"{sql_file}.stderr").write_text(cp.stderr)
         if cp.returncode != 0:
             rec["validation_errors"].append(
                 f"psql {sql_file} rc={cp.returncode}: "
                 f"{(cp.stderr or cp.stdout)[-300:]}")
-        return s, cp.returncode == 0
+        return cp
 
     def wait_ready(deadline: float = 90.0,
                    stable: bool = True) -> float | None:
@@ -1952,8 +2146,8 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         mig = trial_dir / "migrate.sql"
         mig.write_text(W3_SQL)
         tx = trial_dir / "txmix.sql"
-        tx.write_text("".join(_w3_tx_sql(i) for i in range(W3_TXS))
-                      + "SELECT 'done';\n")
+        tx.write_text("SET synchronous_commit = on;\n\\timing on\n"
+                      + "".join(_w3_tx_sql(i) for i in range(W3_TXS)))
         for f in (mig, tx):
             cp = engine.sh(["cp", str(f), f"{name}:/tmp/{f.name}"],
                            timeout=60, check=False)
@@ -1962,14 +2156,24 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
                     f"docker cp {f.name} rc={cp.returncode}: "
                     f"{(cp.stderr or cp.stdout)[-300:]}")
 
-        s, ok = psql("/tmp/migrate.sql")
-        rec["metrics"]["migrate_s"] = s
-        checks["migrate"] = ok
+        migration = psql("migrate.sql", "migration")
+        rec["metrics"]["migrate_s"] = rec["resources"]["phases"]["migration"]["operation_wall_seconds"]
+        checks["migrate"] = migration.returncode == 0
 
-        s, ok = psql("/tmp/txmix.sql", timeout=600)
+        transactions = psql("txmix.sql", "transactions", timeout=600)
+        s = rec["resources"]["phases"]["transactions"]["operation_wall_seconds"]
         rec["metrics"]["txmix_s"] = s
-        rec["metrics"]["tx_tps"] = round(W3_TXS / s, 1) if s else None
-        checks["txmix"] = ok
+        checks["txmix"] = transactions.returncode == 0
+        if checks["txmix"]:
+            try:
+                latencies = _w3_commit_timings(transactions.stdout)
+            except ValueError as exc:
+                checks["txmix"] = False
+                rec["validation_errors"].append(str(exc))
+            else:
+                rec["metrics"]["tx_tps"] = len(latencies) / s if s > 0 else None
+                rec["metrics"]["transaction_p95_ms"] = sorted(latencies)[math.ceil(.95 * len(latencies)) - 1]
+                (trial_dir / "commit-latencies-ms.json").write_text(json.dumps(latencies) + "\n")
 
         tp = time.monotonic()
         cp = engine.sh(["exec", name, "psql", "-U", "postgres", "-d",
@@ -1986,15 +2190,18 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         checks["restart_ready"] = ready2 is not None
 
         out = engine.sh(
-            ["exec", name, "psql", "-U", "postgres", "-d", "postgres",
-             "-tA", "-c",
-             "SELECT count(*), COALESCE(sum(k),0), "
-             "(SELECT n FROM npw3_meta WHERE k='txs') FROM npw3_events"],
+            [*psql_cmd, "-tA", "-c",
+             "SELECT json_build_object("
+             "'rows', (SELECT json_agg(json_build_array(k,v) ORDER BY k) FROM npw3_events), "
+             "'meta', (SELECT json_agg(json_build_array(k,n) ORDER BY k) FROM npw3_meta), "
+             "'fsync', current_setting('fsync'))"],
             timeout=60, check=False)
-        expected_k = sum(range(W3_TXS))
-        want = f"{W3_TXS}|{expected_k}|{W3_TXS}"
-        checks["verify_rows"] = (out.returncode == 0
-                                 and want in out.stdout.replace(" ", "|"))
+        (trial_dir / "persisted-rows.stdout").write_text(out.stdout)
+        expected = {"rows": [[i, f"v{i}"] for i in range(W3_TXS)],
+                    "meta": [["txs", W3_TXS]], "fsync": "on"}
+        checks["verify_rows"] = out.returncode == 0 and json.loads(out.stdout) == expected
+        if not checks["verify_rows"]:
+            rec["validation_errors"].append("persisted rows, counter, or fsync differs from W3 fixture")
         # Allocated-storage cell: bytes actually allocated for the
         # persisted dataset (du counts blocks, not apparent size).
         # `du -sk` is explicit KiB on both GNU and busybox.
@@ -2011,7 +2218,7 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         else:
             rec["validation_errors"].append(
                 f"du rc={du.returncode}: {(du.stderr or '')[-200:]}")
-        rec["correctness"]["ok"] = all(
+        rec["correctness"]["ok"] = not rec["validation_errors"] and all(
             checks.get(k) for k in
             ("db_start", "db_ready", "migrate", "txmix", "checkpoint",
              "restart_ready", "verify_rows"))
@@ -2069,121 +2276,226 @@ def trial_w5(ctx, engine: Engine, state: str,
     return rec
 
 
+def _w10_engine_identity(engine, binary_sha):
+    if engine.name != "ctrs" or engine.dir != engine.recovery_root or engine.recovery_root is None:
+        raise ValueError("engine interruption requires a new private ctrs root")
+    child = engine.proc
+    if child is None or child.poll() is not None:
+        raise ValueError("recovery engine is not a live owned child")
+    path = engine.dir / "run/docker.sock"
+    if engine.socket != f"unix://{path}":
+        raise ValueError("recovery engine socket is outside its private root")
+    manifest = ownership.discover("ctrs", path, engine.dir)
+    roles = recovery_trace.owned_ctrs_processes(manifest, str(path), child.pid, binary_sha)
+    disk = (engine.dir / "data/vm/data.img").stat()
+    return roles, (disk.st_dev, disk.st_ino)
+
+
+def _w10_crash_engine(engine, before, deadline):
+    child = engine.proc
+    if child is None or child.pid != before["daemon"]["pid"] or child.poll() is not None:
+        raise ValueError("recovery daemon identity changed before interruption")
+    if time.monotonic() >= deadline:
+        raise TimeoutError("load deadline expired before the planned interruption")
+    child.kill()
+    if child.wait(timeout=max(0, deadline - time.monotonic())) != -signal.SIGKILL:
+        raise ValueError("owned daemon did not exit from the planned kill")
+    engine.proc = None
+    while time.monotonic() < deadline:
+        current = ownership.process_table().get(before["vm"]["pid"])
+        if current is None or current["start_identity"] != before["vm"]["start_identity"]:
+            return
+        time.sleep(.05)
+    raise TimeoutError("old owned VM helper did not exit after interruption")
+
+
 def trial_w10(ctx, engine: Engine, state: str,
               duration: float = 20.0, concurrency: int = 8,
               write_ratio: float = 0.3, seed: int = 1,
-              kill_at: float = 6.0, down_for: float = 3.0) -> dict:
-    """W10 (pilot): kill the API container mid-load, restart it, and
-    verify the stack recovers with no lost committed writes. Metrics:
-    recovery time, errors in the kill window, and post-restart health.
-    Engine-level kill is out of scope for this cell (OrbStack's shared
-    daemon makes an engine restart non-comparable)."""
-    case_id = "W10"
-    proj = project_name(ctx.run_id, engine.name, case_id)
+              kill_at: float = 6.0, down_for: float = 3.0, *,
+              interrupt_service: str = "api") -> dict:
+    """Interrupt one owned service during persistent load and verify recovery."""
+    if interrupt_service == "queue":
+        if not all(math.isfinite(value) and value > 0 for value in (duration, down_for)) or concurrency <= 0:
+            raise ValueError("W10 queue recovery requires positive duration, downtime and worker count")
+        return trial_w4(ctx, engine, state, workers=(concurrency,), fixture_version=W4_LATENCY_VERSION,
+                        queue_interruption=QueueInterruption(down_for, duration))
+    if interrupt_service not in ("api", "db", "engine"):
+        raise ValueError("W10 interrupt service must be api, db, queue or engine")
+    crash_engine = interrupt_service == "engine"
+    if crash_engine and (engine.name != "ctrs" or getattr(engine, "recovery_root", None) is None):
+        raise ValueError("engine interruption requires a new private ctrs root")
+    if (not all(math.isfinite(value) for value in (duration, kill_at, down_for, write_ratio))
+            or concurrency <= 0 or not 0 <= write_ratio <= 1
+            or kill_at <= 0 or down_for <= 0 or duration <= kill_at + down_for):
+        raise ValueError("W10 load must cover both sides of a positive outage")
+    proj = project_name(ctx.run_id, engine.name, "W10")
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
-    trial_dir = ctx.trial_dir(engine.name, case_id, state)
-    trial_dir.mkdir(parents=True, exist_ok=True)
-    load_out = trial_dir / "load.json"
-    rec = ctx.new_record(engine, case_id, state, trial_dir)
+    trial_dir = ctx.trial_dir(engine.name, "W10", state)
+    rec = ctx.new_record(engine, "W10", state, trial_dir)
+    checks = rec["correctness"]["checks"]
+    rec["metrics"].update(fixture_version="w10-v3-exact-recovery", interrupt_service=interrupt_service)
     sampler = trace = None
-    load_proc = None
+    stop = threading.Event()
+    attempts, probes, timeline = [], [], {}
+    stack_owned = False
     t0 = time.monotonic()
+    if crash_engine:
+        rec.update(measurement_valid=False, measurement_invalidation="owned ctrs engine recovery diagnostic")
+
+    def service_id(service):
+        found = engine.compose(proj, ["ps", "-q", service], timeout=30)
+        ids = found.stdout.split()
+        if found.returncode or len(ids) != 1:
+            raise ValueError(f"cannot establish the owned {service} container identity")
+        return ids[0]
+
+    def load(worker, deadline):
+        client = recovery_client.ProbeClient("127.0.0.1", port)
+        rng = random.Random(seed * 1000 + worker)
+        sequence = 0
+        try:
+            while not stop.is_set() and time.monotonic() < deadline:
+                if rng.random() < write_ratio:
+                    name = f"w10-{seed}-{worker}-{sequence}"
+                    attempt = client.write(name, hashlib.sha256(name.encode()).hexdigest())
+                else:
+                    attempt = client.query("read")
+                attempts.append(attempt)
+                sequence += 1
+        finally:
+            client.close()
+
+    def wait_for_exact_read(deadline):
+        client = recovery_client.ProbeClient("127.0.0.1", port)
+        try:
+            while time.monotonic() < deadline:
+                attempt = client.query("read")
+                probes.append(attempt)
+                if attempt["ok"]:
+                    return attempt["ended_ns"]
+                time.sleep(.01)
+        finally:
+            client.close()
+        raise TimeoutError("W10 did not recover before the load deadline")
+
     try:
         engine.ensure_up()
+        if crash_engine and (engine.proc is None or engine.proc.poll() is not None):
+            raise ValueError("initial recovery daemon was not launched by this run")
+        stack_owned = True
         compose_down(engine, proj)
-        sampler, trace = start_sampler(engine, trial_dir)
+        if not crash_engine:
+            sampler, trace = start_sampler(engine, trial_dir)
         up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
-        if up.returncode != 0:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append(
-                f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
-            return rec
-        t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
-        if t_ready is None:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append("stack never became healthy")
-            return rec
-        rec["metrics"]["setup_seconds"] = round(time.monotonic() - t0, 3)
+        if up.returncode:
+            raise RuntimeError(f"compose up failed: {(up.stderr or up.stdout)[-300:]}")
+        ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+        if ready is None:
+            raise RuntimeError("stack never became healthy")
+        rec["metrics"]["setup_seconds"] = time.monotonic() - t0
 
-        load_t0 = time.monotonic()
-        load_proc = subprocess.Popen(
-            [sys.executable, str(LOAD_PY), "--url", base,
-             "--concurrency", str(concurrency), "--duration", str(duration),
-             "--write-ratio", str(write_ratio), "--seed", str(seed),
-             "--out", str(load_out)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        db = service_id("db")
+        target = db if interrupt_service == "db" else service_id("api")
+        if crash_engine:
+            binary_sha = sha256_file(CTRS_BIN)
+            before, disk_before = _w10_engine_identity(engine, binary_sha)
+            (trial_dir / "engine-before.json").write_text(json.dumps({
+                "processes": before, "disk": disk_before, "socket": engine.socket,
+            }, indent=2))
+        with nullcontext() if crash_engine else resource_phase(engine, rec, "recovery_workload"):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+                load_t0 = time.monotonic()
+                try:
+                    futures = [pool.submit(load, worker, load_t0 + duration)
+                               for worker in range(concurrency)]
+                    time.sleep(max(0, load_t0 + kill_at - time.monotonic()))
+                    timeline["kill_command_begin_ns"] = time.monotonic_ns()
+                    if crash_engine:
+                        _w10_crash_engine(engine, before, load_t0 + duration)
+                    else:
+                        engine.sh(["kill", target], timeout=30)
+                    timeline["kill_command_returned_ns"] = time.monotonic_ns()
+                    time.sleep(down_for)
+                    timeline["start_command_begin_ns"] = time.monotonic_ns()
+                    if crash_engine:
+                        remaining = load_t0 + duration - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("no time remains to recover the owned engine")
+                        engine.ensure_up(timeout=remaining)
+                        if engine.proc is None or engine.proc.poll() is not None:
+                            stack_owned = False
+                            raise ValueError("recovery daemon was not launched by this run")
+                        remaining = load_t0 + duration - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("owned engine did not return before the load deadline")
+                        restored = engine.compose(proj, ["up", "-d", "--no-build", "--pull", "never"],
+                                                  env_extra=cenv, timeout=remaining)
+                        if restored.returncode:
+                            raise RuntimeError(f"owned stack recovery failed: {(restored.stderr or restored.stdout)[-300:]}")
+                    else:
+                        engine.sh(["start", target], timeout=120)
+                    timeline["start_command_returned_ns"] = time.monotonic_ns()
+                    timeline["first_success_ns"] = wait_for_exact_read(load_t0 + duration)
+                    for future in futures:
+                        future.result()
+                finally:
+                    stop.set()
 
-        # Let load reach steady state, then kill the API container.
-        time.sleep(kill_at - (time.monotonic() - load_t0))
-        api_id = engine.compose(proj, ["ps", "-q", "api"],
-                                timeout=30).stdout.strip()
-        checks = rec["correctness"]["checks"]
-        checks["api_found"] = bool(api_id)
-        tk = time.monotonic()
-        kill = engine.sh(["kill", api_id], timeout=30, check=False) \
-            if api_id else None
-        checks["kill_rc"] = kill is not None and kill.returncode == 0
-        rec["metrics"]["kill_at_load_s"] = round(
-            time.monotonic() - load_t0, 3)
-
-        time.sleep(down_for)
-        ts = time.monotonic()
-        start = engine.sh(["start", api_id], timeout=120, check=False) \
-            if api_id else None
-        checks["start_rc"] = start is not None and start.returncode == 0
-        # Recovery = docker start returned -> /health ok again.
-        t_rec, _ = wait_health(base, HEALTH_DEADLINE_S)
-        rec["metrics"]["recovery_s"] = (
-            round(t_rec - ts, 3) if t_rec is not None else None)
-        checks["recovered"] = t_rec is not None
-
-        try:
-            load_proc.wait(timeout=duration + 120)
-        except subprocess.TimeoutExpired:
-            load_proc.kill()
-            load_proc.wait(timeout=10)
-        if load_out.exists():
-            summary = json.loads(load_out.read_text())
-            rec["metrics"].update({
-                "load_duration_s": summary["duration_s"],
-                "load_rps": summary["rps"],
-                "load_requests": summary["requests"],
-                "load_errors": summary["errors"],
-                "load_writes_ok": summary["writes_ok"],
-                "load_p95_ms": summary["latency_ms"]["p95"],
-                "load_p99_ms": summary["latency_ms"]["p99"],
-            })
-            # Errors clustered in the kill window are expected; what
-            # matters is that the stack came back and no committed write
-            # was lost (got >= 500 + acked writes).
-            status, stats = http_json(f"{base}/stats", timeout=10)
-            expected = 500 + summary["writes_ok"]
-            got = stats.get("items") if isinstance(stats, dict) else None
-            rec["metrics"]["items_expected_min"] = expected
-            rec["metrics"]["items_got"] = got
-            checks["no_lost_writes"] = (
-                isinstance(got, int) and got >= expected)
-        rec["correctness"]["ok"] = all(
-            checks.get(k) for k in
-            ("api_found", "kill_rc", "start_rc", "recovered",
-             "no_lost_writes"))
-        return rec
+        interrupted = timeline["kill_command_begin_ns"]
+        recovered = timeline["first_success_ns"]
+        failures = recovery_trace.classify_failures([*attempts, *probes], interrupted, recovered)
+        if crash_engine:
+            after, disk_after = _w10_engine_identity(engine, binary_sha)
+            (trial_dir / "engine-after.json").write_text(json.dumps({
+                "processes": after, "disk": disk_after, "socket": engine.socket,
+            }, indent=2))
+            recovery_trace.verify_ctrs_restart(before, after, disk_before, disk_after)
+            if service_id("db") != db or service_id("api") != target:
+                raise ValueError("owned stack containers were replaced during recovery")
+            checks["owned_engine_restarted"] = True
+        (trial_dir / "request-validation.json").write_text(json.dumps(failures, indent=2) + "\n")
+        rec["metrics"].update(expected_outage_errors=len(failures["expected_outage_errors"]),
+                              unexpected_errors=len(failures["unexpected_errors"]),
+                              retries_until_recovery=len(probes) - 1)
+        checks["request_failures_explained"] = failures["host_client_valid"] and not failures["unexpected_errors"]
+        acknowledged = [attempt["write"] for attempt in attempts if attempt["kind"] == "write" and attempt["ok"]]
+        uncertain = [attempt["write"] for attempt in failures["expected_outage_errors"] if attempt["kind"] == "write"]
+        result = engine.sh(["exec", db, "psql", "-X", "-U", "app", "-d", "app", "-At", "-c",
+            "SELECT coalesce(json_agg(json_build_array(id,name,payload) ORDER BY id),'[]'::json) FROM items"],
+            timeout=60)
+        (trial_dir / "persisted-items.json").write_text(result.stdout)
+        persisted_uncertain = recovery_trace.verify_persisted_items(json.loads(result.stdout), acknowledged, uncertain)
+        checks["exact_persisted_items"] = True
+        rec["metrics"].update(acknowledged_writes=len(acknowledged), persisted_uncertain_writes=persisted_uncertain)
+        tails = recovery_trace.workload_metrics(attempts, interrupted, recovered,
+                                               require_reads=write_ratio < 1, require_writes=write_ratio > 0)
+        checks["complete_load_phases"] = True
+        if checks["request_failures_explained"]:
+            rec["metrics"].update(recovery_s=recovery_trace.recovery_intervals(timeline)["command_and_ready_s"], **tails)
+        rec["correctness"]["ok"] = all(checks.values())
     except Exception as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(str(exc))
     finally:
-        if load_proc is not None and load_proc.poll() is None:
-            load_proc.kill()
-            load_proc.wait(timeout=10)
-        compose_down(engine, proj)
-        if sampler is not None:
-            stop_sampler(sampler)
+        for label, action in (
+                ("sampler shutdown", lambda: stop_sampler(sampler) if sampler is not None else None),
+                ("owned stack cleanup", lambda: compose_down(engine, proj) if stack_owned else None)):
+            try:
+                action()
+            except Exception as exc:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(f"{label}: {exc}")
+        (trial_dir / "timeline.json").write_text(json.dumps(timeline, indent=2) + "\n")
+        with (trial_dir / "attempts.jsonl").open("w") as output:
+            for attempt in sorted([*attempts, *probes], key=lambda value: value["started_ns"]):
+                output.write(json.dumps(attempt) + "\n")
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
+    return rec
 
 
 def http_json_write(url: str, obj: dict, timeout: float = 10.0):
@@ -2661,12 +2973,19 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
     trial = trials[case_id]
+    if case_id == "W4":
+        kw.setdefault("fixture_version", W4_LATENCY_VERSION)
     defaults = {name: parameter.default
                 for name, parameter in inspect.signature(trial).parameters.items()
                 if parameter.default is not inspect.Parameter.empty}
     ctx.workload_id = workload_id(ctx.run_id, case_id, pair_id, ctx._seq + 1)
     ctx.workload_params = {"cold": cold, **defaults, **kw}
-    if cold:
+    if case_id == "W10" and kw.get("interrupt_service") == "engine":
+        if engine_name != "ctrs" or cold or keep_warm:
+            raise ValueError("engine interruption requires a standalone ctrs recovery run")
+        engine = Engine.for_recovery(ctx.run_id)
+        stop = True
+    elif cold:
         # Socket paths must stay under SUN_LEN (~104): keep cold engine
         # dirs short and outside the deep results tree.
         short = f"{engine_name}-cold-{ctx.run_id[-6:]}-{time.time_ns() % 100000:05d}"
@@ -2826,8 +3145,9 @@ def cmd_prepare(args) -> int:
             if odd:
                 print(f"{name}: WARNING non-arm64 images: {odd}")
 
-            engine.sh(["build", "--load", "-t", "np-w4-events:v2",
-                       str(FIXTURES / "w4")], timeout=300)
+            w4_dir = FIXTURES / "w4"
+            engine.sh(["build", "--load", "--platform", "linux/arm64", "-t", W4_LATENCY_IMAGE,
+                       "-f", str(w4_dir / "Dockerfile.latency"), str(w4_dir)], timeout=300)
             w5_source = watch_loop.contract()["source"]
             w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
                 "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")
@@ -2888,8 +3208,12 @@ def cmd_run(args) -> int:
     if args.case == "W2":
         kw["operations"] = getattr(args, "operations", None)
         kw["request_rate"] = getattr(args, "request_rate", None)
+    if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
+        kw["interrupt_service"] = args.interrupt_service
     if args.case in ("W6", "W7"):
         kw = {"driver": getattr(args, "driver", "default")}
+    if args.case == "W6" and getattr(args, "build_cache", None) is not None:
+        kw["build_cache"] = args.build_cache
     if args.case == "W8" and getattr(args, "under_load", False):
         kw["under_load"] = True
     rec = run_one(ctx, args.engine, args.case, args.state,
@@ -2930,8 +3254,12 @@ def cmd_baseline(args) -> int:
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
                     kw["request_rate"] = getattr(args, "request_rate", None)
+                if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
+                    kw["interrupt_service"] = args.interrupt_service
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
+                if args.case == "W6" and getattr(args, "build_cache", None) is not None:
+                    kw["build_cache"] = args.build_cache
                 if args.case == "W8" and getattr(args, "under_load", False):
                     kw["under_load"] = True
                 rec = run_one(ctx, eng, args.case, args.state,
@@ -3121,6 +3449,11 @@ def main() -> int:
                    choices=["default", "dc"],
                    help="W6/W7: dc pins matching BuildKit images in "
                         "isolated per-engine builders")
+    for command in ("run", "baseline"):
+        sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
+                                         help="W6 build-cache condition (default: uncached); warm primes the same context")
+        sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
+                                         help="W10 target (default: api); engine requires a standalone ctrs run")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
@@ -3160,11 +3493,18 @@ def main() -> int:
 
     p = sub.add_parser("check", help="bounded offline native tests for one component")
     p.add_argument("component", choices=tuple(CHECK_COMPONENTS),
-                   help="required component: w2, w8, or resources")
+                   help="component to verify offline")
     p.add_argument("--timeout", type=int, default=CHECK_TIMEOUT_SECONDS,
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
     args = ap.parse_args()
+    if getattr(args, "build_cache", None) is not None and args.case != "W6":
+        ap.error("--build-cache requires W6")
+    if getattr(args, "interrupt_service", None) is not None and args.case != "W10":
+        ap.error("--interrupt-service requires W10")
+    if getattr(args, "interrupt_service", None) == "engine" and (
+            args.cmd != "run" or args.engine != "ctrs" or args.cold or args.state != "warm"):
+        ap.error("engine interruption requires run --case W10 --engine ctrs with a warmed private stack")
     if getattr(args, "operations", None) is not None:
         if args.case != "W2" or args.operations <= 0:
             ap.error("--operations requires W2 and a positive value")
