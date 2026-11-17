@@ -14,6 +14,11 @@ from diagnostics import w8_load_guest as client_spec
 CLIENT = Path(__file__).with_name('w8_load_guest.py')
 
 
+def baseline_image_reference(engine_name, pin):
+    kind = {'ctrs': 'config', 'orbstack': 'manifest'}[engine_name]
+    return kind, pin[kind]
+
+
 def coverage(intervals, completions):
     result = []
     for interval in intervals:
@@ -79,9 +84,10 @@ def baseline(engine, directory, run, contract, phase):
                 'client': runner.sha256_file(CLIENT), 'controller': runner.sha256_file(Path(__file__)),
                 'contract': runner.sha256_file(runner.FIXTURES / 'w8-v2/portfolio.json'),
                 'compose': runner.sha256_file(runner.COMPOSE_FILE)}
-            identity_kind = {'ctrs': 'config', 'orbstack': 'manifest'}[engine.name]
+            identity_kind, _ = baseline_image_reference(engine.name, contract['images']['np-v2/api'])
             state['baseline_image_id_kind'] = identity_kind
-            refs = {name: contract['images']['np-v2/' + name][identity_kind] for name in ('api', 'postgres', 'redis')}
+            refs = {name: baseline_image_reference(engine.name, contract['images']['np-v2/' + name])[1]
+                    for name in ('api', 'postgres', 'redis')}
             images = {}
             for name, ref in refs.items():
                 image = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]

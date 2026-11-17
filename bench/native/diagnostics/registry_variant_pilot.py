@@ -151,13 +151,13 @@ def require_valid_result(result):
         raise RuntimeError('W8 integrity or resource coverage failed; retain the failed run')
 
 
-def prepare_warm_engine(engine, run):
+def prepare_warm_engine(engine, run, *, api_image):
     engine.ensure_up()
     container = runner.project_name(run, engine.name, 'warm')
     try:
         cp = engine.sh(['run', '--rm', '--pull=never', '--name', container,
             '--label', 'dev.ctrs.campaign.run=' + run,
-            'np-fixture-api:' + runner.API_TAG, 'python', '-c', "print('np-w8-warm')"], timeout=90)
+            api_image, 'python', '-c', "print('np-w8-warm')"], timeout=90)
         if cp.stdout.strip() != 'np-w8-warm':
             raise RuntimeError('warm-engine preconditioning did not complete')
     finally:
@@ -210,7 +210,8 @@ def main():
             result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
             try:
                 host_snapshot(directory, 'before')
-                prepare_warm_engine(engine, run)
+                _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v2/api'])
+                prepare_warm_engine(engine, run, api_image=api_image)
                 coordinator = ownership.current_coordinator()
                 coordinator['owned_service'] = {'kind': 'local-fixture-registry',
                     'address': server.server_address, 'fd': server.fileno()}

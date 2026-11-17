@@ -42,14 +42,16 @@ class PhaseAccounting(unittest.TestCase):
         engine.name = 'ctrs'
         engine.sh.return_value = subprocess.CompletedProcess([], 0, 'np-w8-warm\n', '')
         with mock.patch.object(pilot.ci_jobs, 'cleanup') as cleanup:
-            pilot.prepare_warm_engine(engine, 'run')
+            pilot.prepare_warm_engine(engine, 'run', api_image='sha256:pinned')
         engine.ensure_up.assert_called_once_with()
         self.assertIn('--pull=never', engine.sh.call_args.args[0])
+        self.assertIn('sha256:pinned', engine.sh.call_args.args[0])
+        self.assertFalse(any(arg.startswith('np-fixture-api:') for arg in engine.sh.call_args.args[0]))
         cleanup.assert_called_once()
         engine.sh.return_value = subprocess.CompletedProcess([], 0, '', '')
         with mock.patch.object(pilot.ci_jobs, 'cleanup') as cleanup, \
              self.assertRaisesRegex(RuntimeError, 'preconditioning did not complete'):
-            pilot.prepare_warm_engine(engine, 'run')
+            pilot.prepare_warm_engine(engine, 'run', api_image='sha256:pinned')
         cleanup.assert_called_once()
 
     def test_failed_phase_records_boundary_and_unknown_missing_counters(self):
