@@ -106,7 +106,7 @@ static LAST_USE: AtomicU64 = AtomicU64::new(0);
 static CANCELLABLE: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
 /// Making, starting and stopping the builder, one at a time. Never held
 /// across a pull of its image, which [`PULL`] keeps to one at a time.
-static ENSURE: Mutex<()> = Mutex::new(());
+static ENSURE: Mutex<Option<Incarnation>> = Mutex::new(None);
 /// Pulling the BuildKit image. Apart from [`ENSURE`]: on a slow network
 /// the pull takes minutes, and buildx looking for its container (which it
 /// gives 20 s) or the idle watch must not wait for it.
@@ -161,6 +161,44 @@ fn snapshot(c: &super::engine::Container) -> BuilderSnapshot {
             && c.spec.cmd.iter().any(|a| a.contains("buildkitd.sock")),
         created: c.created,
     }
+}
+
+/// A successful readiness probe applies only to this live process incarnation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Incarnation {
+    id: String,
+    pid: u32,
+    started: SystemTime,
+}
+
+fn incarnation(c: &super::engine::Container) -> Option<Incarnation> {
+    fingerprint(&c.id, c.pid, c.started, c.status, c.paused, c.vm_stopped)
+}
+
+fn fingerprint(id: &str, pid: u32, started: Option<SystemTime>, status: Status, paused: bool, vm_stopped: bool) -> Option<Incarnation> {
+    if id.is_empty() || pid == 0 || status != Status::Running || paused || vm_stopped {
+        return None;
+    }
+    let started = started?.duration_since(UNIX_EPOCH).ok().filter(|d| !d.is_zero())?;
+    Some(Incarnation { id: id.to_owned(), pid, started: UNIX_EPOCH + started })
+}
+
+fn current_incarnation(engine: &Engine, id: &str) -> Option<Incarnation> {
+    engine.with(id, incarnation).ok().flatten()
+}
+
+// Both checks clear stale proofs, including unknown state and failed probes.
+fn reuse(proof: &mut Option<Incarnation>, current: Option<Incarnation>) -> bool {
+    if current.is_some() && *proof == current {
+        true
+    } else {
+        *proof = None;
+        false
+    }
+}
+
+fn retain_proof(proof: &mut Option<Incarnation>, before: Option<Incarnation>, after: Option<Incarnation>, succeeded: bool) {
+    *proof = if succeeded && before.is_some() && before == after { before } else { None };
 }
 
 /// The builder snapshot for a name or container id (id prefixes of 12+),
@@ -771,36 +809,42 @@ fn ensure_running(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, 
     if matches!(classify(find(engine).as_ref()), Assessment::Fresh | Assessment::StaleStopped) {
         desired_image(engine, say)?;
     }
-    let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut proof = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(rec0) = find(engine) else {
+        *proof = None;
         // Still fresh under the boundary.
         let id = create_locked(engine, say)?;
-        return start_or_resume(engine, &id, say);
+        return start_or_resume(engine, &id, say, &mut proof);
     };
     match classify(Some(&rec0)) {
-        Assessment::Matching => start_or_resume(engine, &rec0.id, say),
+        Assessment::Matching => start_or_resume(engine, &rec0.id, say, &mut proof),
         Assessment::StaleStopped => {
+            *proof = None;
             // The pin was pulled and verified outside the boundary; verify it
             // again locally under it (a concurrent stop may have flipped a
             // stale running builder to stale stopped meanwhile).
             verified_pin(engine)?;
             engine.remove(&rec0.id, true, false)?;
             let id = create_locked(engine, say)?;
-            start_or_resume(engine, &id, say)
+            start_or_resume(engine, &id, say, &mut proof)
         }
-        Assessment::StaleRunning | Assessment::StalePaused => Err(stale_upgrade_error(&rec0, "new builds are refused")),
-        Assessment::Foreign => Err(foreign_error(&rec0)),
+        Assessment::StaleRunning | Assessment::StalePaused => { *proof = None; Err(stale_upgrade_error(&rec0, "new builds are refused")) },
+        Assessment::Foreign => { *proof = None; Err(foreign_error(&rec0)) },
         Assessment::Fresh => {
             // The record vanished between the check and the boundary; treat as fresh.
             let id = create_locked(engine, say)?;
-            start_or_resume(engine, &id, say)
+            start_or_resume(engine, &id, say, &mut proof)
         }
     }
 }
 
 /// Starts (or resumes) the builder and waits for it to answer; shared by
 /// the fresh-create and matching paths.
-fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str)) -> Result<String, Error> {
+fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: &mut Option<Incarnation>) -> Result<String, Error> {
+    if reuse(proof, current_incarnation(engine, id)) {
+        LAST_USE.store(now_secs(), Ordering::Relaxed);
+        return Ok(id.to_owned());
+    }
     let needs_start = engine.with(id, |c| c.status != Status::Running).unwrap_or(true);
     if needs_start {
         write_config(engine, id);
@@ -813,7 +857,10 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str)) -> Resu
     LAST_USE.store(now_secs(), Ordering::Relaxed);
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Ok((0, _)) = engine.exec_capture(&id, &["buildctl", "debug", "workers"]) {
+        let before = current_incarnation(engine, &id);
+        let succeeded = matches!(engine.exec_capture(&id, &["buildctl", "debug", "workers"]), Ok((0, _)));
+        retain_proof(proof, before, current_incarnation(engine, &id), succeeded);
+        if succeeded {
             return Ok(id);
         }
         if find(engine).is_none_or(|r| r.status != Status::Running) || Instant::now() > deadline {
@@ -824,6 +871,10 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str)) -> Resu
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+fn idle_expired(now: u64, last_use: u64, idle: u64) -> bool {
+    idle != 0 && last_use != 0 && now.saturating_sub(last_use) >= idle
 }
 
 /// Pauses the builder once it has been idle [`idle_secs`]: no build here,
@@ -866,10 +917,11 @@ pub fn watch(engine: Arc<Engine>) {
         if now.saturating_sub(LAST_USE.load(Ordering::Relaxed)) < idle {
             continue;
         }
-        let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
-        if busy() {
+        let mut proof = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
+        if busy() || !idle_expired(now_secs(), LAST_USE.load(Ordering::Relaxed), idle) {
             continue;
         }
+        *proof = None;
         crate::diag::info!("builder idle, pausing it", secs = idle);
         if let Err(e) = engine.pause_idle_builder(&id) {
             crate::diag::warn!("builder did not pause", error = format!("{e:?}"));
@@ -1856,6 +1908,50 @@ mod tests {
         assert_eq!(rows[0]["Type"], "regular");
         assert_eq!(rows[0]["Size"], 42);
         assert_eq!(rows[0]["InUse"], true);
+    }
+
+    #[test]
+    fn readiness_proof_tracks_the_live_incarnation() {
+        let started = UNIX_EPOCH + Duration::from_secs(100);
+        let valid = |id, pid, time, status, paused, vm_stopped| fingerprint(id, pid, time, status, paused, vm_stopped);
+        let original = valid("id", 42, Some(started), Status::Running, false, false);
+        let mut proof = None;
+        retain_proof(&mut proof, original.clone(), original.clone(), true);
+        assert!(reuse(&mut proof, original.clone()));
+        for changed in [
+            valid("other", 42, Some(started), Status::Running, false, false),
+            valid("id", 43, Some(started), Status::Running, false, false),
+            valid("id", 42, Some(started + Duration::from_nanos(1)), Status::Running, false, false),
+            valid("id", 42, Some(started), Status::Running, true, false),
+            valid("id", 42, Some(started), Status::Exited, false, false),
+            valid("id", 42, Some(started), Status::Running, false, true),
+            valid("id", 0, Some(started), Status::Running, false, false),
+            valid("id", 42, None, Status::Running, false, false),
+            valid("", 42, Some(started), Status::Running, false, false),
+            valid("id", 42, Some(UNIX_EPOCH), Status::Running, false, false),
+            None,
+        ] {
+            let mut proof = original.clone();
+            assert!(!reuse(&mut proof, changed));
+            assert!(proof.is_none());
+        }
+        let mut proof = original.clone();
+        retain_proof(&mut proof, original.clone(), original.clone(), false);
+        assert!(!reuse(&mut proof, original.clone()));
+        retain_proof(&mut proof, original.clone(), valid("id", 43, Some(started), Status::Running, false, false), true);
+        assert!(!reuse(&mut proof, original.clone()));
+        retain_proof(&mut proof, original.clone(), None, true);
+        assert!(!reuse(&mut proof, original));
+        retain_proof(&mut proof, None, None, true);
+        assert!(proof.is_none());
+    }
+
+    #[test]
+    fn idle_decision_rechecks_last_use_after_ensure() {
+        assert!(idle_expired(500, 100, 300));
+        assert!(!idle_expired(500, 499, 300));
+        assert!(!idle_expired(500, 0, 300));
+        assert!(!idle_expired(500, 100, 0));
     }
 
     #[test]
