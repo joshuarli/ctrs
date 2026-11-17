@@ -201,6 +201,42 @@ Use the pinned profiler archive and common registry preparation from the
 Run ctrs then OrbStack once with the profiler off and once with it on.
 Use the accepted boot assets and the default-size capacity pair above.
 
+## Capacity-matched fixed work
+
+Job `aa8b70c7c2fc4d41893fa5463d766a11` exited 0 with clean native
+teardown and 160 unchanged input receipts. The ten boundary-only cells
+replayed the same five seeds and exact request counts. The write receipts
+matched within every pair. All 500,000 requests succeeded and persisted
+state was exact.
+
+Both guests reported 17 vCPUs. Guest MemTotal was 46,321,221,632 bytes
+on ctrs and 46,278,524,928 bytes on OrbStack, within 0.1%.
+ctrs's configured memory ceiling was 45,084 MiB. Every trial had equal
+CPU counts and guest MemTotal within 1% before and after work.
+
+| Metric | ctrs median [range] | OrbStack median [range] | Paired ratio [95% interval] |
+| --- | ---: | ---: | ---: |
+| API CPU, µs/op | 362.9 [352.8–378.9] | 289.3 [276.4–324.5] | 1.266 [1.087–1.289] |
+| API user, µs/op | 259.0 [250.9–269.7] | 239.4 [225.6–266.5] | 1.089 [0.941–1.115] |
+| API system, µs/op | 104.7 [101.9–109.3] | 51.4 [49.9–58.5] | 2.020 [1.760–2.114] |
+| Successful requests/s | 2,691 [2,527–2,755] | 2,086 [1,775–2,246] | 0.790 [0.644–0.819] |
+| p99, ms | 5.66 [5.48–6.22] | 9.86 [8.03–13.89] | 0.631 [0.445–0.705] |
+
+All 20 readiness checks passed. OrbStack helper CPU ranged from 0%
+to 257% near trials. The system CPU deficit recurred in every pair under
+these conditions. Timing and host resource qualification remain open.
+The fixed-work batches changed both CPU allocation and memory across cohorts.
+The next test isolates vCPU count at a common 8,192 MiB configured limit
+on the same ctrs binary and guest assets.
+
+To reproduce, use the same five-block fixed-work plan with boundary
+sampling only, and reverse engine order on even blocks. Set `CTRS_CPUS=17`
+and `CTRS_MEMORY_MIB=45084` for the guest envelope above. Derive the
+ceiling from observed OrbStack MemTotal shifted by 20, plus
+`runner.CTRS_GUEST_RESERVE_MIB`, on other supported configurations.
+Require matching reported vCPU counts and MemTotal within 1% both before
+and after each workload.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign

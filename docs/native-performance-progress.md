@@ -12,7 +12,9 @@ on ctrs in all five boundary-only pairs.
 Saturation and the native API profile both completed. Saturation was
 inconclusive. The profile reproduced the `wake_up_q+0x64` concentration
 with no validity errors, while its profiler overhead remained unresolved.
-Capacity-matched fixed-work job `aa8b70c7c2fc4d41893fa5463d766a11`
+Capacity-matched fixed work verified all 500,000 operations. The median
+paired API system CPU ratio was 2.020 at 17 vCPUs on both sides.
+The ctrs-only vCPU diagnostic `92611768ac9d4895ae440ce893cf05df`
 owns the measured host.
 
 ## Accepted and verified
@@ -44,16 +46,17 @@ owns the measured host.
 
 ## Exact next action
 
-Read the terminal status for job `aa8b70c7c2fc4d41893fa5463d766a11`
-at `.work/tmp/w2-capacity-matched-20261117/job/status.json`. Compare five
-alternating boundary-only pairs at 50,000 operations, concurrency 8, write
-probability 0.3 and seed `7 + block`. Require equal guest vCPU counts and
-MemTotal within 1% before and after each trial. The plan sets ctrs to
-17 vCPUs and 45,084 MiB using the measured OrbStack guest envelope.
-Recheck frozen inputs and exact payloads. Normalize API usage, user and
-system CPU by successes. Keep this cohort separate from default-size ctrs
-and saturation. Review any remaining system cost alongside the on-CPU
-evidence, and check observer overhead before selecting a kernel change.
+Read the terminal status for job `92611768ac9d4895ae440ce893cf05df`
+at `.work/tmp/w2-ctrs-vcpu-20261117/job/status.json`. Estimate the effect of
+2 versus 17 vCPUs on guest API system CPU per successful request. The
+comparison uses separate private ctrs roots with the same signed executable,
+boot assets, 8,192 MiB configured memory, common pinned portfolio and
+boundary-only measurements. Predeclared work is five alternating pairs
+of 50,000 operations at concurrency 8, write probability 0.3 and seed
+`7 + block`. Confirm guest envelopes and matching exact writes. A
+17-vCPU versus 2-vCPU paired 95% lower bound above 1.10 for system CPU
+will motivate a separate topology profile. Preserve total API CPU and tails.
+Use matched-generation profiling before attributing cost to a kernel leaf.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
@@ -127,8 +130,15 @@ next-action paragraphs from that historical revision.
    v4 proof. The separate review confirmed that `qualification.require_readiness`
    checks workload and dimension sets independently. Its own
    `test_frozen_receipts_admit_readiness_without_promoting_unknown_cells`
-   passes with only an application cell for W11. Define required cell identities
-   per workload before admitting a qualification leg. Growth capability
+   passes with only an application cell for W11. Local commit `0c0e10a`
+   on `campaign/w11-required-cells-20261117` now requires correctness,
+   persistence, durability, growth and reliability on W11 itself. Its
+   regression fails on the parked validator and passes after the fix.
+   The branch still needs the complete cell contract and a native v4 proof.
+   For a bounded v4 proof, use the tracked
+   [mixed pilot command](evidence/native-mixed-retention-2026-11-17.md#short-native-admission)
+   from that branch with `--resource-observation-seconds 30`.
+   Growth capability
    `81e51d2` and counter-window fix `4fc901b` are already integrated.
 3. W8: strengthen comparable retained/content-absent evidence and complete
    exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
