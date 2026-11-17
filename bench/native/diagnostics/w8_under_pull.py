@@ -9,6 +9,7 @@ import time
 
 import runner
 from diagnostics.registry_pilot import save
+from diagnostics import w8_load_guest as client_spec
 
 CLIENT = Path(__file__).with_name('w8_load_guest.py')
 
@@ -36,14 +37,14 @@ def require_coverage(intervals, completions):
 def verify_payload(rows, client, completions):
     counts = client['counts']
     writes = client['writes']
-    valid_trace = (len(completions) == 50000 and
+    valid_trace = (len(completions) == client_spec.OPERATIONS and
         all(row.get('sequence') == index and
             all(isinstance(row.get(k), (int, float)) and math.isfinite(row[k]) and row[k] >= 0
                 for k in ('completion_monotonic', 'latency_ms'))
             for index, row in enumerate(completions)) and
         all(a['completion_monotonic'] <= b['completion_monotonic']
             for a, b in zip(completions, completions[1:])))
-    if (counts['errors'] or client['errors'] or counts['reads'] + counts['writes'] != 50000
+    if (counts['errors'] or client['errors'] or counts['reads'] + counts['writes'] != client_spec.OPERATIONS
             or not valid_trace or len(writes) != counts['writes']
             or len({item['name'] for item in writes}) != len(writes)
             or not runner.exact_w2_items(rows, writes)):
@@ -61,7 +62,10 @@ def baseline(engine, directory, run, contract, phase):
     intervals = []
     started = False
     state = {'project': project, 'port': port, 'intervals': intervals,
-             'network': project + '_appnet', 'volume': project + '_dbdata'}
+             'network': project + '_appnet', 'volume': project + '_dbdata',
+             'workload': {'operations': client_spec.OPERATIONS, 'concurrency': client_spec.CONCURRENCY,
+                 'write_ratio': client_spec.WRITE_RATIO, 'seed': client_spec.SEED,
+                 'client_deadline_seconds': client_spec.CLIENT_SECONDS}}
     def compose(args):
         return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-f', str(override), '-p', project, *args],
             env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
@@ -104,7 +108,7 @@ def baseline(engine, directory, run, contract, phase):
             stdout = (directory / 'under-pull-client.stdout').open('w')
             stderr = (directory / 'under-pull-client.stderr').open('w')
             process = subprocess.Popen([sys.executable, str(CLIENT), str(runner.LOAD_PY), contract['w2_load_sha256'], base, str(directory)], stdout=stdout, stderr=stderr)
-            state['deadline_monotonic'] = time.monotonic() + 900
+            state['deadline_monotonic'] = time.monotonic() + client_spec.CLIENT_SECONDS
             state['client_pid'] = process.pid
             state['process'] = process
             deadline = time.monotonic() + 60

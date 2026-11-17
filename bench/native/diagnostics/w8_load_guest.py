@@ -10,6 +10,12 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+OPERATIONS = 50000
+CONCURRENCY = 4
+WRITE_RATIO = .3
+SEED = 7
+CLIENT_SECONDS = 900
+
 
 class Recorder:
     def __init__(self, output, directory):
@@ -55,12 +61,12 @@ def main():
             (directory / 'client-errors.jsonl').open('w', buffering=1) as error_stream:
         writes, errors = Journal(write_stream), Journal(error_stream)
         recorder = Recorder(output, directory)
-        timer = threading.Timer(900, stop.set)
+        timer = threading.Timer(CLIENT_SECONDS, stop.set)
         try:
             timer.start()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                futures = [pool.submit(load.worker, i, (target.hostname, target.port), 900, .3, 7000 + i,
-                    recorder, counts, stop, errors, begin, operations=12500, writes=writes) for i in range(4)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+                futures = [pool.submit(load.worker, i, (target.hostname, target.port), CLIENT_SECONDS, WRITE_RATIO, SEED * 1000 + i,
+                    recorder, counts, stop, errors, begin, operations=OPERATIONS // CONCURRENCY, writes=writes) for i in range(CONCURRENCY)]
                 for future in futures:
                     future.result()
         finally:
@@ -68,7 +74,7 @@ def main():
             timer.join()
             (directory / 'client-result.json').write_text(json.dumps({'counts': counts, 'errors': errors,
                 'writes': writes, 'elapsed_seconds': time.monotonic() - begin}) + '\n')
-    if counts['errors'] or counts['reads'] + counts['writes'] != 50000:
+    if counts['errors'] or counts['reads'] + counts['writes'] != OPERATIONS:
         raise RuntimeError('fixed client work failed or expired')
 
 
