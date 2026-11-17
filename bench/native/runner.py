@@ -209,6 +209,20 @@ W8_IMAGES = [
      "expect": "PostgreSQL"},
 ]
 
+# Small ownership map for the native component gate. Tests remain natively
+# discovered by unittest from these exact modules; shared harness behavior is
+# covered by test_safety in every component selection.
+CHECK_COMPONENTS = {
+    "w2": ("test_w2", "test_mixed_cycle", "test_safety"),
+    "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
+           "test_registry_portfolio", "test_registry_variant",
+           "test_registry_variant_pilot", "test_safety"),
+    "resources": ("test_resource_cells", "test_resource_cycles",
+                  "test_collect", "test_storage_space",
+                  "test_system_df_cache", "test_safety"),
+}
+CHECK_TIMEOUT_SECONDS = 60
+
 HEALTH_DEADLINE_S = 240.0
 # Health/readiness polling granularity. Kept fine (0.1 s): coarser
 # intervals quantize startup/recovery measurements and can invert the
@@ -2860,6 +2874,53 @@ def cmd_report(args) -> int:
     return int(invalid_report(report))
 
 
+def run_component_check(component: str, timeout: int = CHECK_TIMEOUT_SECONDS,
+                        run=None) -> int:
+    """Run a bounded, exact native unittest selection without engine setup."""
+    if run is None:
+        run = subprocess.run
+    modules = CHECK_COMPONENTS[component]
+    command = [sys.executable, "-m", "unittest", "-v", *modules]
+    print("check selection: " + ", ".join(modules), flush=True)
+    try:
+        result = run(command, cwd=BENCH, text=True, capture_output=True,
+                     timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        print(f"component check timed out after {timeout}s: {exc.cmd}",
+              file=sys.stderr)
+        if exc.stdout:
+            print(exc.stdout, file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        return 1
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+
+    summary = re.search(r"^Ran (\d+) tests? in ", result.stderr + result.stdout,
+                        flags=re.MULTILINE)
+    if summary is None:
+        print("component check did not produce a unittest completion summary",
+              file=sys.stderr)
+        return 1
+    count = int(summary.group(1))
+    if count == 0:
+        print("component check selected zero tests", file=sys.stderr)
+        return 1
+    skipped = re.search(r"\bskipped=(\d+)\b", result.stderr + result.stdout)
+    if skipped and int(skipped.group(1)):
+        print(f"component check has {skipped.group(1)} required skipped test(s)",
+              file=sys.stderr)
+        return 1
+    if result.returncode:
+        print(f"component check failed with exit code {result.returncode}",
+              file=sys.stderr)
+        return 1
+    print(f"component check passed: {count} tests, 0 skips")
+    return 0
+
+
 def main() -> int:
     global DOCKER
     ap = argparse.ArgumentParser(description=__doc__)
@@ -2948,6 +3009,12 @@ def main() -> int:
                    help="report same-engine A/B slot noise control from "
                         "noop runs; never cross-engine scores")
 
+    p = sub.add_parser("check", help="bounded offline native tests for one component")
+    p.add_argument("component", choices=tuple(CHECK_COMPONENTS),
+                   help="required component: w2, w8, or resources")
+    p.add_argument("--timeout", type=int, default=CHECK_TIMEOUT_SECONDS,
+                   help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
+
     args = ap.parse_args()
     try:
         manifest = validate_manifest()
@@ -2956,6 +3023,10 @@ def main() -> int:
     if args.cmd == "validate-manifest":
         print(json.dumps(manifest, indent=2))
         return 0
+    if args.cmd == "check":
+        if not 1 <= args.timeout <= 300:
+            ap.error("--timeout must be between 1 and 300 seconds")
+        return run_component_check(args.component, args.timeout)
     if args.cmd == "report":
         return cmd_report(args)
     if getattr(args, "case", None) == "W8" and args.cmd in ("run", "baseline", "noop"):

@@ -15,12 +15,51 @@ Healthy soak/watch counters are not hillclimb progress.
 
 ```sh
 python3.14 bench/native/runner.py validate-manifest
+python3.14 bench/native/runner.py check w2
+python3.14 bench/native/runner.py check w8
+python3.14 bench/native/runner.py check resources
+python3.14 -m unittest discover -s bench/native -p test_checks.py -v
 python3.14 -m unittest discover -s bench/native -p 'test_*.py' -v
 ```
 
 Manifest validation checks syntax/identity and records hashes. It does
 not assert that assets are digest-locked or that every fixture is ready.
 All runtime commands validate the manifest before engine access.
+
+`check` requires exactly one component (`w2`, `w8`, or `resources`); a
+missing/unknown component, including `full`, is an error and never falls back
+to broad discovery. It runs the listed native unittest modules directly,
+including `test_safety` as a shared harness boundary, with a 60-second whole
+command timeout (adjustable only from 1 to 300 seconds). Import/discovery errors,
+zero tests, any skip, timeout, or failing test return nonzero. When editing a
+test, run that test directly as well; the `test_checks.py` command above is the
+direct command for this gate's own contract tests.
+
+### Verification ceilings and cost
+
+| Tier | Allowed evidence | Cost ceiling / authority |
+| --- | --- | --- |
+| Edit | Exact changed module and `test_checks.py` with native unittest | One local Python process; no Docker or engine. |
+| Change | One explicit `runner.py check {w2,w8,resources}` plus changed tests | One selected module set, 60 seconds by default (hard maximum 300); no build or engine setup. |
+| Scenario | Named native benchmark scenario | Exact scenario, engines, inputs, and resource budget authorized separately before execution. |
+| Full | Full Python discovery, workspace Rust tests/builds, broad conformance/qualification, or W11 | Manual-only, one exact workload per explicit authorization; no automatic fallback or prerequisite. |
+
+Observed before this gate: the full Python discovery run took 13.477 seconds
+for 201 tests; benchmark infrastructure accumulated 10 commits over 72 minutes.
+The first W2 check ran 32 tests in 1.630 seconds on this host. W8/resources
+timings and timeout adequacy are unknown; no build is part of `check`, and no
+benchmark cost is claimed from these figures.
+
+Full/manual commands remain available and unchanged: full Python discovery is
+the last command in the offline block; Rust unit suite is `cargo test
+--workspace`; release/guest build is `CARGO_ENCODED_RUSTFLAGS="" cargo xtask
+all`; broad API conformance is `conformance/run.sh`. The ARM64 qualification
+matrix remains `tests/arm64-build.sh` with one named `--case` from its documented
+matrix. The 12-hour W11 qualification is a separate named per-engine workload;
+authorize that exact engine, frozen binary/input receipt, fixed deadline, and
+command through the finite-job procedure in
+[`diagnostics/durable-job.md`](diagnostics/durable-job.md). None is reachable
+from `check`; do not substitute a short W11 pilot for qualification.
 
 ## Engines
 
