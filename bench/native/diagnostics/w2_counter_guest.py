@@ -1,4 +1,5 @@
 """Owned W2 probe lifecycle and live phase boundary helper inside the API namespace."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,24 @@ import time
 from counter_specs import probe_definitions, futex_events
 ROOT = Path('/tmp/np-count')
 TRACE = Path('/sys/kernel/tracing')
+SYSLOG_ACTION_READ_ALL = 3
+SYSLOG_ACTION_SIZE_BUFFER = 10
+
+
+def kernel_log():
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.klogctl.argtypes = (ctypes.c_int, ctypes.c_void_p, ctypes.c_int)
+    libc.klogctl.restype = ctypes.c_int
+    size = libc.klogctl(SYSLOG_ACTION_SIZE_BUFFER, None, 0)
+    if size < 0:
+        raise OSError(ctypes.get_errno(), 'kernel log size query failed')
+    if not 0 < size <= 16 * 1024 * 1024:
+        raise ValueError('kernel log buffer size outside diagnostic bound')
+    buffer = ctypes.create_string_buffer(size)
+    length = libc.klogctl(SYSLOG_ACTION_READ_ALL, buffer, size)
+    if length < 0:
+        raise OSError(ctypes.get_errno(), 'kernel log read failed')
+    return buffer.raw[:length].decode('utf-8', errors='replace')
 
 
 def snapshot(tag):
@@ -51,6 +70,11 @@ def main():
         ROOT.mkdir()
         tarfile.open('/tmp/np-tools.tgz').extractall('/tmp/np-tools', filter='data')
         os.mkfifo(ROOT / 'control'); os.mkfifo(ROOT / 'ack')
+    elif action == 'hardware':
+        print(json.dumps({'cpuinfo': Path('/proc/cpuinfo').read_text(),
+                          'meminfo': Path('/proc/meminfo').read_text(),
+                          'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                          'kernel': list(os.uname()), 'kernel_log': kernel_log()}), flush=True)
     elif action == 'probes':
         if any(':' + tag + '/' in line for line in (TRACE / 'kprobe_events').read_text().splitlines()):
             raise RuntimeError('trace group already exists; refuse adoption')
