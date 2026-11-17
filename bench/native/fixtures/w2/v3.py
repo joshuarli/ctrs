@@ -37,41 +37,44 @@ _NOTE_NSECONDS = 0x4
 _NOTE_CRITICAL = 0x20
 
 
-def _wait_until_kqueue(deadline, clock, kqueue_factory=None):
+def _wait_until_kqueue(deadline):
     """Wait for a monotonic deadline with minimally coalesced Darwin timers."""
-    queue = (kqueue_factory or select.kqueue)()
+    if deadline <= time.monotonic():
+        return
+    queue = select.kqueue()
     try:
         while True:
-            remaining = deadline - clock()
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return
             timeout_ns = max(1, math.ceil(remaining * 1_000_000_000))
+            timeout_s = min(remaining + 1.0, MAX_PLANNED_SPAN_S + 1.0)
             timer = select.kevent(
                 ident=1, filter=select.KQ_FILTER_TIMER,
                 flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
                 fflags=_NOTE_NSECONDS | _NOTE_CRITICAL, data=timeout_ns)
-            events = queue.control([timer], 1, None)
+            events = queue.control([timer], 1, timeout_s)
             if not events:
                 raise RuntimeError("kqueue timer returned no event")
             for event in events:
                 if event.flags & select.KQ_EV_ERROR:
                     code = event.data or errno.EIO
                     raise OSError(code, "kqueue timer registration failed")
+                if event.filter != select.KQ_FILTER_TIMER or event.data <= 0:
+                    raise RuntimeError("kqueue timer returned an invalid event")
     finally:
         queue.close()
 
 
-def _wait_until(deadline, *, clock=None, sleeper=None, kqueue_factory=None):
+def _wait_until(deadline):
     """Wait until an absolute monotonic deadline, rechecking after every wake."""
-    clock = clock or time.monotonic
-    if sys.platform == "darwin" and sleeper is None:
-        return _wait_until_kqueue(deadline, clock, kqueue_factory)
-    sleeper = sleeper or time.sleep
+    if sys.platform == "darwin":
+        return _wait_until_kqueue(deadline)
     while True:
-        remaining = deadline - clock()
+        remaining = deadline - time.monotonic()
         if remaining <= 0:
             return
-        sleeper(remaining)
+        time.sleep(remaining)
 
 
 def planned_span(operations, request_rate):

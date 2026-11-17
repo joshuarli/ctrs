@@ -35,9 +35,11 @@ guarantee a wake time or qualify a speedup. The timer is armed for the remaining
 monotonic interval and the deadline is rechecked after the event. The SDK
 documents `NOTE_ABSOLUTE` deadlines in the `gettimeofday` clock domain, so v3.2
 does not use that flag for monotonic scheduled slots. Other platforms retain
-standard-library sleep waits. v3.1 and v3.2 records are separate fixture
-versions and must not be pooled. The native timer experiment is diagnostic
-evidence only; no speedup is qualified by it.
+standard-library sleep waits. The kqueue call has a bounded timeout, and the
+client rejects empty results, `EV_ERROR`, and events without a positive timer
+expiration. v3.1 and v3.2 records are separate fixture versions and must not be
+pooled. The native timer experiment is diagnostic evidence only; no speedup is
+qualified by it.
 
 Example exploratory command, using the runner's existing prepared engine inputs:
 
