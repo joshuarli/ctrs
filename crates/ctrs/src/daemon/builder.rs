@@ -107,6 +107,7 @@ static CANCELLABLE: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new()
 /// Making, starting and stopping the builder, one at a time. Never held
 /// across a pull of its image, which [`PULL`] keeps to one at a time.
 static ENSURE: Mutex<Option<Incarnation>> = Mutex::new(None);
+static PAUSE_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// Pulling the BuildKit image. Apart from [`ENSURE`]: on a slow network
 /// the pull takes minutes, and buildx looking for its container (which it
 /// gives 20 s) or the idle watch must not wait for it.
@@ -163,31 +164,34 @@ fn snapshot(c: &super::engine::Container) -> BuilderSnapshot {
     }
 }
 
-/// A successful readiness probe applies only to this live process incarnation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Incarnation {
     id: String,
     pid: u32,
     started: SystemTime,
+    pause_epoch: u64,
 }
 
 fn incarnation(c: &super::engine::Container) -> Option<Incarnation> {
-    fingerprint(&c.id, c.pid, c.started, c.status, c.paused, c.vm_stopped)
+    fingerprint(&c.id, c.pid, c.started, c.status, c.paused, c.vm_stopped, PAUSE_EPOCH.load(Ordering::Relaxed))
 }
 
-fn fingerprint(id: &str, pid: u32, started: Option<SystemTime>, status: Status, paused: bool, vm_stopped: bool) -> Option<Incarnation> {
+fn fingerprint(id: &str, pid: u32, started: Option<SystemTime>, status: Status, paused: bool, vm_stopped: bool, pause_epoch: u64) -> Option<Incarnation> {
     if id.is_empty() || pid == 0 || status != Status::Running || paused || vm_stopped {
         return None;
     }
     let started = started?.duration_since(UNIX_EPOCH).ok().filter(|d| !d.is_zero())?;
-    Some(Incarnation { id: id.to_owned(), pid, started: UNIX_EPOCH + started })
+    Some(Incarnation { id: id.to_owned(), pid, started: UNIX_EPOCH + started, pause_epoch })
+}
+
+pub(super) fn invalidate_readiness() {
+    PAUSE_EPOCH.fetch_add(1, Ordering::Relaxed);
 }
 
 fn current_incarnation(engine: &Engine, id: &str) -> Option<Incarnation> {
     engine.with(id, incarnation).ok().flatten()
 }
 
-// Both checks clear stale proofs, including unknown state and failed probes.
 fn reuse(proof: &mut Option<Incarnation>, current: Option<Incarnation>) -> bool {
     if current.is_some() && *proof == current {
         true
@@ -1913,7 +1917,7 @@ mod tests {
     #[test]
     fn readiness_proof_tracks_the_live_incarnation() {
         let started = UNIX_EPOCH + Duration::from_secs(100);
-        let valid = |id, pid, time, status, paused, vm_stopped| fingerprint(id, pid, time, status, paused, vm_stopped);
+        let valid = |id, pid, time, status, paused, vm_stopped| fingerprint(id, pid, time, status, paused, vm_stopped, 0);
         let original = valid("id", 42, Some(started), Status::Running, false, false);
         let mut proof = None;
         retain_proof(&mut proof, original.clone(), original.clone(), true);
@@ -1929,6 +1933,7 @@ mod tests {
             valid("id", 42, None, Status::Running, false, false),
             valid("", 42, Some(started), Status::Running, false, false),
             valid("id", 42, Some(UNIX_EPOCH), Status::Running, false, false),
+            fingerprint("id", 42, Some(started), Status::Running, false, false, 1),
             None,
         ] {
             let mut proof = original.clone();

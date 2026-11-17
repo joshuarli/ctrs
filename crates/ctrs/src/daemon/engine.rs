@@ -2449,6 +2449,9 @@ impl Engine {
         self.vm()?.freeze(&id, paused)?;
         if let Some(c) = self.lock().containers.get_mut(&id) {
             c.paused = paused;
+            if is_builder(c) {
+                super::builder::invalidate_readiness();
+            }
         }
         // Docker probes only running, unpaused containers.
         if paused {
