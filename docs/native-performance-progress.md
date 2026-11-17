@@ -78,14 +78,19 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, implement W4 queue tails next. Capture one
-enqueue-to-completion interval per verified job and derive p95 and p99 for
-each worker count. Preserve the W11 mixed workload's existing pinned W4
-image and its artifact oracle while introducing the new W4 receipt.
+If the Mac stays shared, repair the W10 runner next. The normal
+`trial_w10` still uses total row count to infer that no acknowledged
+write was lost. Use exact persisted records, retain expected outage
+errors separately from unexpected errors, and compute p99 only from
+successful requests after verified recovery. Reuse the persistent client
+and outage classifier from the existing diagnostic. Extend the recovered
+state oracle to database and queue interruption before attempting the
+engine-level cell on disposable owned engines.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
 and [W3 commit latency](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
+and [W4 queue latency](evidence/native-performance.md#w4-queue-latency)
 are ready for native validation in the next eligible window.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the

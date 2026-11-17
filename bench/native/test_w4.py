@@ -16,6 +16,8 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from fixtures.w4 import latency
+
 APP = Path(__file__).parent / 'fixtures/w4/app.py'
 spec = importlib.util.spec_from_file_location('w4_app', APP)
 w4 = importlib.util.module_from_spec(spec)
@@ -253,3 +255,40 @@ class CleanupOwnershipTests(unittest.TestCase):
         self.assertFalse(record['correctness']['ok'])
         self.assertTrue(any('ownership mismatch' in error for error in record['validation_errors']))
         self.assertFalse(any(call.args[0][:2] == ['network', 'rm'] for call in engine.sh.call_args_list))
+
+
+class QueueLatencyTests(unittest.TestCase):
+    def test_timed_pipeline_pairs_receipts_with_exact_artifacts(self):
+        clock = 'guest:time-namespace'
+        with FakeRedis() as redis, tempfile.TemporaryDirectory() as directory:
+            host, port = redis.server_address
+            redis_thread = threading.Thread(target=redis.serve_forever, daemon=True)
+            redis_thread.start()
+            try:
+                with ThreadingHTTPServer(('127.0.0.1', 0), latency.handler(host, port, clock, now=lambda: 100)) as http:
+                    http_thread = threading.Thread(target=http.serve_forever, daemon=True)
+                    http_thread.start()
+                    try:
+                        w4.submit(f'http://127.0.0.1:{http.server_port}')
+                    finally:
+                        http.shutdown()
+                        http_thread.join()
+                output = Path(directory)
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    list(executor.map(lambda _: latency.worker(host, port, output, clock, now=lambda: 500), range(4)))
+                receipt = latency.verify(host, port, output, clock)
+                self.assertEqual(receipt['verified'], w4.JOBS)
+                self.assertEqual(latency.completed_latencies(receipt), [400] * w4.JOBS)
+                timing = output / 'timings/25.json'
+                original = json.loads(timing.read_text())
+                for wrong in ({'clock': 'different'}, {'completed_ns': 99}, {'job': 24}):
+                    with self.subTest(wrong=wrong):
+                        timing.write_text(json.dumps(original | wrong))
+                        with self.assertRaisesRegex(ValueError, 'invalid queue timing for job 25'):
+                            latency.verify(host, port, output, clock)
+                timing.unlink()
+                with self.assertRaisesRegex(ValueError, 'missing or extra queue timing'):
+                    latency.verify(host, port, output, clock)
+            finally:
+                redis.shutdown()
+                redis_thread.join()

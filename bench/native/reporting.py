@@ -23,7 +23,8 @@ CASE_METRICS = {
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
     "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
-    "W4": ["workers_1_s", "workers_4_s", "workers_16_s"],
+    "W4": [metric for count in (1, 4, 16) for metric in
+           (f"workers_{count}_s", f"queue_p95_ms_at_{count}", f"queue_p99_ms_at_{count}")],
     "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],
     "W6": ["build_rust_s", "build_zlib_s"],
     "W7": [f"{app}_{state}{suffix}_s" for app in ("hyperfine", "httpie")

@@ -20,6 +20,7 @@ import watch_loop
 import collect
 import resource_cells
 import ci_jobs
+from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
 import base64
@@ -156,6 +157,10 @@ def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
 DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
+W4_LATENCY_VERSION = "w4-v3-queue-latency"
+W4_LATENCY_IMAGE = "np-w4-events:v3"
+W4_FIXED_WORK = {"jobs": w4_fixture.JOBS, "events": w4_fixture.JOBS * w4_fixture.EVENTS,
+                 "artifacts": w4_fixture.JOBS * len(w4_fixture.filenames(0))}
 # Holdout: a real third-party app never used for tuning — Gitea +
 # Postgres. REST API seed/read workload plus git smart-HTTP clones over
 # the published port. Executed once per engine at gates via the
@@ -1828,7 +1833,7 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
 
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
-             image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE,
+             image_ref: str | None = None, redis_ref: str = W4_IMAGE,
              cleanup_command=None) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W4"
@@ -1837,7 +1842,8 @@ def trial_w4(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     proj = project_name(ctx.run_id, engine.name, case_id)
     net, queue, app = f"{proj}-net", f"{proj}-queue", f"{proj}-ingest"
-    image = image_ref
+    timed = fixture_version == W4_LATENCY_VERSION
+    image = image_ref or (W4_LATENCY_IMAGE if timed else "np-w4-events:v2")
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
@@ -1856,6 +1862,12 @@ def trial_w4(ctx, engine: Engine, state: str,
         if app_hash != sha256_file(FIXTURES / "w4" / "app.py"):
             raise ValueError("W4 fixture image does not match current pinned input")
         rec["metrics"]["fixture_app_sha256"] = app_hash
+        if timed:
+            latency_hash = engine.sh(["exec", app, "python", "-c",
+                "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/latency.py').read_bytes()).hexdigest())"]).stdout.strip()
+            if latency_hash != sha256_file(FIXTURES / "w4" / "latency.py"):
+                raise ValueError("W4 latency fixture image does not match pinned input")
+            rec["metrics"]["fixture_latency_sha256"] = latency_hash
         deadline = time.monotonic() + 60
         while True:
             ready = engine.sh(["exec", app, "python", "-c",
@@ -1891,12 +1903,17 @@ def trial_w4(ctx, engine: Engine, state: str,
             owned_containers.append(verifier)
             verify = engine.sh(["run", "--rm", "--name", verifier, "--label", label, "--network", net,
                                 "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], timeout=180, check=False)
-            checks[f"workers_{count}"] = (all(cp.returncode == 0 for cp in outcomes)
-                                           and verify.returncode == 0 and verify.stdout.strip() == "verified 200")
             (trial_dir / f"workers-{count}.json").write_text(json.dumps({
                 "workers": [{"exit": cp.returncode, "stderr": cp.stderr} for cp in outcomes],
                 "verification_exit": verify.returncode, "verification": verify.stdout + verify.stderr}))
-        rec["metrics"].update(jobs=200, events=12800, artifacts=400, fixture_version=fixture_version)
+            verified = all(cp.returncode == 0 for cp in outcomes) and verify.returncode == 0
+            if verified and timed:
+                latencies = sorted(w4_latency.completed_latencies(json.loads(verify.stdout)))
+                for percentile in (95, 99):
+                    rank = math.ceil(percentile * len(latencies) / 100)
+                    rec["metrics"][f"queue_p{percentile}_ms_at_{count}"] = latencies[rank - 1] / 1_000_000
+            checks[f"workers_{count}"] = verified and (timed or verify.stdout.strip() == f"verified {w4_fixture.JOBS}")
+        rec["metrics"].update(W4_FIXED_WORK, fixture_version=fixture_version)
         rec["correctness"]["ok"] = all(checks.get(f"workers_{n}") for n in workers)
     except Exception as exc:
         rec["correctness"]["ok"] = False
@@ -2726,6 +2743,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
     trial = trials[case_id]
+    if case_id == "W4":
+        kw.setdefault("fixture_version", W4_LATENCY_VERSION)
     defaults = {name: parameter.default
                 for name, parameter in inspect.signature(trial).parameters.items()
                 if parameter.default is not inspect.Parameter.empty}
@@ -2891,8 +2910,9 @@ def cmd_prepare(args) -> int:
             if odd:
                 print(f"{name}: WARNING non-arm64 images: {odd}")
 
-            engine.sh(["build", "--load", "-t", "np-w4-events:v2",
-                       str(FIXTURES / "w4")], timeout=300)
+            w4_dir = FIXTURES / "w4"
+            engine.sh(["build", "--load", "--platform", "linux/arm64", "-t", W4_LATENCY_IMAGE,
+                       "-f", str(w4_dir / "Dockerfile.latency"), str(w4_dir)], timeout=300)
             w5_source = watch_loop.contract()["source"]
             w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
                 "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")

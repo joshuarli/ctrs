@@ -58,6 +58,32 @@ class Engine:
 
 
 class W4References(unittest.TestCase):
+    def test_timed_w4_publishes_tails_only_for_complete_receipts(self):
+        class TimedEngine(Engine):
+            def __init__(self, omit=False):
+                super().__init__()
+                self.omit = omit
+
+            def sh(self, args, **kwargs):
+                if args[:1] == ['exec'] and '/app/latency.py' in args[-1] and 'hashlib' in args[-1]:
+                    return Result(runner.sha256_file(runner.FIXTURES / 'w4/latency.py'))
+                if args[:1] == ['run'] and 'verify' in args:
+                    timings = [{'job': i, 'clock': 'guest', 'enqueued_ns': 0, 'completed_ns': (i + 1) * 1_000_000}
+                               for i in range(199 if self.omit else 200)]
+                    return Result(json.dumps({'verified': 200, 'clock': 'guest', 'timings': timings}))
+                return super().sh(args, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:
+            with patch.object(runner, 'start_sampler', return_value=(None, None)), patch.object(runner, 'resource_phase', side_effect=lambda *args: __import__('contextlib').nullcontext()):
+                context = Context(Path(directory))
+                result = runner.trial_w4(context, TimedEngine(), 'warm', workers=(4,), fixture_version=runner.W4_LATENCY_VERSION)
+                missing = runner.trial_w4(context, TimedEngine(omit=True), 'warm', workers=(4,), fixture_version=runner.W4_LATENCY_VERSION)
+            self.assertTrue(result['correctness']['ok'], result)
+            self.assertEqual(result['metrics']['queue_p95_ms_at_4'], 190)
+            self.assertEqual(result['metrics']['queue_p99_ms_at_4'], 198)
+            self.assertFalse(missing['correctness']['ok'])
+            self.assertNotIn('queue_p95_ms_at_4', missing['metrics'])
+
     def test_explicit_images_are_used_for_queue_and_workers(self):
         with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:
             engine = Engine()

@@ -2221,6 +2221,28 @@ historical diagnostics; v2 fixture sizes, budgets and candidate image lock must
 be frozen before performance acceptance. Persistent power-loss durability is
 not claimed for disposable workflow artifacts.
 
+### W4 queue latency
+
+`w4-v3-queue-latency` retains the pinned 200-job artifact workload. Its
+ingest timestamps each accepted request as it prepares the Redis enqueue.
+The worker timestamps completion after both artifact files close. The
+verifier requires all 400 artifact bytes to match, an empty Redis queue,
+and one timing receipt per job from the same guest boot and time namespace.
+The runner keeps those receipts and reports nearest-rank p95 and p99
+separately for 1, 4 and 16 workers.
+
+`runner.py prepare` builds the new W4 image. The timed fixture uses
+`fixtures/w4/Dockerfile.latency`; its image contains the original `app.py`
+and the timing entry point. Both source hashes are checked before work.
+W11 still uses the pinned v2 worker image and the earlier oracle.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4 test_w4_lifecycle
+test_mixed_cycle test_reporting`. All 42 tests passed. The local HTTP and
+RESP fixture covers enqueue, worker execution and exact artifact verification.
+Negative cases reject missing timing files, reversed clocks, mismatched
+clock identities, and incorrect job IDs. The two native engine images and
+paired measurements still need validation.
+
 ## W8 preparation state-preservation repair
 
 Preparing a selected engine now merges its completed portfolio section into the
