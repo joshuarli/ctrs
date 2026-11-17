@@ -19,6 +19,18 @@ def baseline_image_reference(engine_name, pin):
     return kind, pin[kind]
 
 
+def require_baseline_images(engine_name, pins, images):
+    if not isinstance(images, list) or len(images) != len(pins):
+        raise ValueError('baseline image inspection coverage differs from the pinned images')
+    for (name, pin), image in zip(pins.items(), images, strict=True):
+        _, reference = baseline_image_reference(engine_name, pin)
+        rootfs = image.get('RootFS') if isinstance(image, dict) else None
+        if (not isinstance(rootfs, dict) or rootfs.get('Layers') != pin['diff_ids']
+                or image.get('Id') != reference or image.get('Architecture') != 'arm64'):
+            raise ValueError('baseline image differs from pin: ' + name)
+    return dict(zip(pins, images, strict=True))
+
+
 def coverage(intervals, completions):
     result = []
     for interval in intervals:
@@ -90,11 +102,9 @@ def baseline(engine, directory, run, contract, phase):
                     for name in ('api', 'postgres', 'redis')}
             images = {}
             for name, ref in refs.items():
-                image = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
+                inspected = json.loads(engine.sh(['image', 'inspect', ref]).stdout)
                 pin = contract['images']['np-v2/' + name]
-                if image['Id'] != ref or image['RootFS']['Layers'] != pin['diff_ids'] or image['Architecture'] != 'arm64':
-                    raise ValueError('baseline image differs from pin: ' + name)
-                images[name] = image
+                images.update(require_baseline_images(engine.name, {name: pin}, inspected))
             state['images'] = images
             save(override, {'services': {service: {'image': images[name]['Id']} for service, name in
                 (('api', 'api'), ('db', 'postgres'), ('cache', 'redis'))}})

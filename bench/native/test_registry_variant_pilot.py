@@ -24,6 +24,23 @@ class VariantTransferProof(unittest.TestCase):
                     pilot.require_variant_absent(engine, image, path)
                 self.assertEqual(json.loads(path.read_text())['reference_kind'], kind)
 
+    def test_retained_receipts_require_pinned_contents_even_with_identical_ids(self):
+        contract = json.loads((pilot.runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
+        pins = {name: contract['images']['np-v2/' + name]
+                for name in ('api', 'postgres', 'redis', 'marked')}
+        for engine_name, id_kind in (('ctrs', 'config'), ('orbstack', 'manifest')):
+            rows = [{'Id': pin[id_kind], 'Architecture': 'arm64', 'RootFS': {'Layers': pin['diff_ids']}}
+                    for pin in pins.values()]
+            self.assertEqual(pilot.w8_under_pull.require_baseline_images(engine_name, pins, rows),
+                             dict(zip(pins, rows, strict=True)))
+            wrong_layers = rows[0] | {'RootFS': {'Layers': rows[1]['RootFS']['Layers']}}
+            self.assertEqual(wrong_layers['Id'], rows[0]['Id'])
+            invalid = ([], rows[:-1], rows[::-1], [wrong_layers, *rows[1:]],
+                       [rows[0] | {'Architecture': 'amd64'}, *rows[1:]])
+            for candidate in invalid:
+                with self.subTest(engine=engine_name, count=len(candidate)), self.assertRaises(ValueError):
+                    pilot.w8_under_pull.require_baseline_images(engine_name, pins, candidate)
+
     def test_missing_image_requires_daemon_absence_response(self):
         absent = subprocess.CompletedProcess([], 1, '[]\n', 'Error response from daemon: No such image: sha256:abc\n')
         pilot.require_missing_image(absent)

@@ -198,10 +198,13 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
             refs = {}
             with phase('pre_pull_setup'):
                 engine_transfer_start = len(portfolio.transfers)
-                old_refs = [w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v2/' + name])[1]
-                            for name in ('api', 'postgres', 'redis', 'marked')]
+                retained_pins = {name: contract['images']['np-v2/' + name]
+                                 for name in ('api', 'postgres', 'redis', 'marked')}
+                old_refs = [w8_under_pull.baseline_image_reference(engine.name, pin)[1]
+                            for pin in retained_pins.values()]
                 retained_before = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-before.json', retained_before)
+                w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_before)
             context = w8_under_pull.baseline(engine, directory, run, contract, phase) if under_load else nullcontext(None)
             with context as load:
                 for repository, digest in portfolio.manifests.items():
@@ -254,8 +257,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
             with phase('retained_identity'):
                 retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-after.json', retained_after)
-                if [i['Id'] for i in retained_before] != [i['Id'] for i in retained_after]:
-                    raise ValueError('retained image identity changed')
+                w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_after)
             result['correctness'] = True
     except BaseException as exc:
         result['errors'].append(traceback.format_exc())
