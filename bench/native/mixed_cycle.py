@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 import ci_jobs
 import ownership
+import mixed_resources
 import runner
 
 PIN = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
@@ -123,8 +124,10 @@ def cleanup_cycle_items(engine, db, writes, directory):
 
 
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
-        cleanup_deadline=None, expected_boot_assets=None):
+        cleanup_deadline=None, expected_boot_assets=None, observation=None):
     validate_refs(refs)
+    if observation is not None:
+        mixed_resources.plan(observation, {})
     if work_deadline is None:
         if type(cycles) is not int or not 1 <= cycles <= 3:
             raise ValueError('short mixed pilot requires 1..3 cycles')
@@ -134,8 +137,12 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         raise ValueError('cleanup deadline must follow drain deadline')
     directory = ctx.results_dir / engine.name
     directory.mkdir()
-    rec = ctx.new_record(engine, 'W11', 'mixed-v3', directory)
-    rec.update(fixture_version=VERSION, qualification_eligible=False, cycles=[])
+    rec = ctx.new_record(engine, 'W11', 'mixed-v3' if observation is None else 'mixed-v4-resources', directory)
+    rec.update(fixture_version=VERSION if observation is None else mixed_resources.VERSION, qualification_eligible=False, cycles=[])
+    observation_plan = None
+    observations = []
+    if observation is not None:
+        rec['resources']['cycle_growth'] = mixed_resources.summarize(mixed_resources.plan(observation, {}), observations)
     rec['notes'].append('Functional finite pilot. API/queue/build tasks start together. Each cycle verifies all writes before explicit transient-row cleanup; 500 seed rows and the committed record persist. No reliability duration, growth or performance verdict.')
     project = runner.project_name(ctx.run_id, engine.name, 'mixed')
     warmup = 'np-mixed-' + hashlib.sha256(project.encode()).hexdigest()[:16]
@@ -181,6 +188,9 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                    '--entrypoint', 'node', refs['marked'], '-e', 'process.exit(0)'], timeout=90)
         identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
         save(directory / 'running-engine-before.json', identity)
+        if observation is not None:
+            observation_plan = mixed_resources.plan(observation, identity)
+            save(directory / 'resource-plan.json', observation_plan)
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
         if expected_boot_assets is not None:
@@ -292,6 +302,18 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             current_ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ('api', 'db', 'cache')}
             if current_ids != ids:
                 raise ValueError('persistent service identities changed')
+            if observation_plan is not None:
+                try:
+                    with runner.resource_phase(engine, rec, f'cycle_{cycle}_observation'):
+                        observed = mixed_resources.observe(observation_plan, cycle, cycle_dir)
+                except Exception as exc:
+                    observed = {'cycle': cycle, 'version': mixed_resources.VERSION,
+                                'interval': {'status': 'unknown', 'errors': [repr(exc)]}}
+                observations.append(observed)
+                try:
+                    save(cycle_dir / 'resource-observation.json', observed)
+                except OSError as exc:
+                    observed['interval'] = {'status': 'unknown', 'errors': ['observation write: ' + repr(exc)]}
             total_writes += len(api_writes)
             rec['cycles'].append({'cycle': cycle, 'successful_operations': OPERATIONS,
                 'acknowledged_writes': len(api_writes), 'cumulative_writes': total_writes,
@@ -311,6 +333,9 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         raise
     finally:
         primary_failure = sys.exc_info()[1]
+        if observation is not None:
+            rec['resources']['cycle_growth'] = mixed_resources.summarize(
+                observation_plan or mixed_resources.plan(observation, {}), observations)
         if work_deadline is not None:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, old_alarm)

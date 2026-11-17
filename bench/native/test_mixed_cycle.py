@@ -129,6 +129,39 @@ class DurationAdmission(unittest.TestCase):
                 result = mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10)
                 cumulative.clear()
                 clock[0] = 0
+                observation_root = root / 'observed'; observation_root.mkdir()
+                ctx.results_dir = observation_root
+                def observe(plan, cycle, directory):
+                    self.assertEqual(cumulative, [])
+                    return {'cycle': cycle, 'version': mixed_cycle.mixed_resources.VERSION,
+                            'interval': {'status': 'unknown', 'errors': ['missing VM']}}
+                with patch.object(mixed_cycle.mixed_resources, 'observe', side_effect=observe):
+                    observed = mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
+                                               observation={'seconds': 30})
+                growth = observed['resources']['cycle_growth']
+                self.assertEqual(observed['fixture_version'], mixed_cycle.mixed_resources.VERSION)
+                self.assertEqual(len(growth['observations']), 2)
+                self.assertEqual(growth['physical_footprint']['status'], 'unknown')
+                self.assertFalse(growth['qualification_eligible'])
+                self.assertTrue((observation_root / 'orbstack/cycle-0/resource-observation.json').exists())
+                self.assertNotIn('cycle_growth', result['resources'])
+                cumulative.clear()
+                clock[0] = 0
+                combined_root = root / 'combined-failure'; combined_root.mkdir()
+                ctx.results_dir = combined_root
+                def load_then_fail(base, cycle, directory, deadline):
+                    if cycle == 1:
+                        raise RuntimeError('later workload failure')
+                    return load(base, cycle, directory)
+                with patch.object(mixed_cycle.mixed_resources, 'observe', side_effect=RuntimeError('observation failed')), \
+                     patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=load_then_fail):
+                    with self.assertRaisesRegex(RuntimeError, 'later workload failure'):
+                        mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10, observation={})
+                combined = json.loads((combined_root / 'orbstack/result.json').read_text())
+                self.assertIn('observation failed', combined['resources']['cycle_growth']['observations'][0]['interval']['errors'][0])
+                self.assertTrue(any('later workload failure' in error for error in combined['validation_errors']))
+                cumulative.clear()
+                clock[0] = 0
                 failure_root = root / 'failure'; failure_root.mkdir()
                 ctx.results_dir = failure_root
                 with patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=RuntimeError('injected workload failure')), \
@@ -144,7 +177,7 @@ class DurationAdmission(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'boot assets differ'):
                     mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
                                     expected_boot_assets={'/unexpected/Image': {'sha256': 'wrong'}})
-                self.assertEqual(cleanup.call_count, 3)
+                self.assertEqual(cleanup.call_count, 5)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
             self.assertEqual([c['explicitly_deleted_writes'] for c in result['cycles']], [1, 1])
             for index in range(2):
