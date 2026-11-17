@@ -9,11 +9,11 @@ requests, with matching payloads and complete CPU boundaries. Total API CPU
 did not reproduce a consistent ctrs deficit. The system component was higher
 on ctrs in all five boundary-only pairs.
 [W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
-The separate saturation batch verified 402,065 successful operations in
-ten cells. Its workload and CPU comparisons are inconclusive under the
-recorded conditions. On-CPU profile job `e8b1976509aa4a94843dc16e1100c570`
-owns the measured host. An earlier profile launch failed before creating
-workloads because its import path omitted the diagnostics directory.
+Saturation and the native API profile both completed. Saturation was
+inconclusive. The profile reproduced the `wake_up_q+0x64` concentration
+with no validity errors, while its profiler overhead remained unresolved.
+Capacity-matched fixed-work job `aa8b70c7c2fc4d41893fa5463d766a11`
+owns the measured host.
 
 ## Accepted and verified
 
@@ -44,20 +44,16 @@ workloads because its import path omitted the diagnostics directory.
 
 ## Exact next action
 
-Read the terminal status for profile job
-`e8b1976509aa4a94843dc16e1100c570` at
-`.work/tmp/w2-system-cpu-import-fixed-20261117/job/status.json`. It replays seed 8 from
-equal-work block 1 at concurrency 8, with 1,000 warmup reads and 50,000
-measured operations per cell. Engine order is ctrs then OrbStack, with
-observer-off before observer-on. The existing 49 Hz CPU sampler runs only
-in the on cells. Both guest envelopes match the fixed-work cohort.
-
-Recheck frozen inputs, actual guest assets, exact payloads, process identity
-and profile sample validity. Compare task usage, user and system CPU per
-success and the observer-off/on work intervals. Attribute only sampled
-on-CPU kernel leaves, preserving unresolved frames and counting
-quantization. This seed-8 diagnostic leaves both observer qualification
-and capacity-matched comparisons open.
+Read the terminal status for job `aa8b70c7c2fc4d41893fa5463d766a11`
+at `.work/tmp/w2-capacity-matched-20261117/job/status.json`. Compare five
+alternating boundary-only pairs at 50,000 operations, concurrency 8, write
+probability 0.3 and seed `7 + block`. Require equal guest vCPU counts and
+MemTotal within 1% before and after each trial. The plan sets ctrs to
+17 vCPUs and 45,084 MiB using the measured OrbStack guest envelope.
+Recheck frozen inputs and exact payloads. Normalize API usage, user and
+system CPU by successes. Keep this cohort separate from default-size ctrs
+and saturation. Review any remaining system cost alongside the on-CPU
+evidence, and check observer overhead before selecting a kernel change.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).

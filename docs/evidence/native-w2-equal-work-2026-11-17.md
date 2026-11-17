@@ -153,6 +153,54 @@ limit selects duration mode. Capture the guest capacity and host conditions
 before and after each trial. Normalize CPU using each trial's actual
 successful count. Keep the raw results and write fractions for each pair.
 
+## API system CPU profile
+
+Job `e8b1976509aa4a94843dc16e1100c570` exited 0. All four cells replayed
+the first equal-work block with concurrency 8 and seed 8, following 1,000
+read-only warmup requests per cell. They verified 200,000 successful mixed
+operations, clean teardown, 161 unchanged input receipts, and the same
+write receipt as equal-work block 1. The first launch
+`f713778b52b548e4bb817da8d0d32647` failed at import before creating a
+result directory, registry or engine. Its receipts rechecked unchanged.
+
+The guest helper sums stable API thread ticks and excludes profiler and
+counter-reader processes. The bound on CPU quantization is 0.18 seconds
+per trial, or 3.6 µs per successful request. This measurement and the
+earlier cgroup totals have different counting scopes.
+
+| Engine | Profile | API usage, µs/op | API user, µs/op | API system, µs/op | Work wall, s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| ctrs | Off | 320.0 | 251.6 | 68.4 | 18.46 |
+| OrbStack | Off | 276.2 | 226.4 | 49.8 | 23.04 |
+| ctrs | On | 295.2 | 224.2 | 71.0 | 16.38 |
+| OrbStack | On | 326.8 | 264.2 | 62.6 | 27.39 |
+
+The 49 Hz collector recorded 692 ctrs samples and 678 OrbStack samples.
+All nine API threads on each engine were sampled. Decoded and raw counts
+agreed, with no loss or throttle records. The most common kernel leaf on
+both sides was `wake_up_q`, with 66 ctrs samples and 22 OrbStack samples.
+All 66 ctrs leaves landed at `ffff800080078fe4`, the stock
+`wake_up_q+0x64` exclusive-store instruction from the
+[earlier binary mapping](../../bench/native/diagnostics/w2-counters.md).
+The per-thread sample-weighted cost estimates are 29.1 and 12.3 µs per
+request for that leaf. Sampling cannot establish store retries, instruction
+latency, or time spent off CPU. The ctrs profile also retained 178 unknown
+libpython leaves.
+
+API CPU and wall varied beyond 5% between off and on cells. The OrbStack
+helper reached 1,322% CPU in the adjoining snapshots despite all eight
+readiness commands returning 0. No observer budget pass or kernel change
+follows. Run the capacity-matched workload to check whether normalized
+system CPU still differs before selecting another experiment.
+
+The profile uses the documented `syscall_pilot.trial` path with
+`profile_kind='cpu', concurrency=8, seed=8`. Include both `bench/native`
+and `bench/native/diagnostics` on `PYTHONPATH` for programmatic imports.
+Use the pinned profiler archive and common registry preparation from the
+[W2 profiler instructions](../../bench/native/diagnostics/w2-counters.md).
+Run ctrs then OrbStack once with the profiler off and once with it on.
+Use the accepted boot assets and the default-size capacity pair above.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign
