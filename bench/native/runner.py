@@ -349,12 +349,15 @@ def guest_provenance() -> dict:
         cache = json.loads(cache_path.read_text())
     except Exception:
         cache = {}
+    guest = REPO / os.environ.get("CTRS_GUEST_DIR", "guest/out")
     out, dirty = {}, False
     for key, name in assets.items():
-        path = REPO / "guest" / "out" / name
+        path = guest / name
         entry = cache.get(name)
         st = path.stat() if path.is_file() else None
         if (st is not None and isinstance(entry, dict)
+                and entry.get("device") == st.st_dev
+                and entry.get("inode") == st.st_ino
                 and entry.get("size") == st.st_size
                 and entry.get("mtime_ns") == st.st_mtime_ns):
             out[key] = entry["sha256"]
@@ -363,7 +366,8 @@ def guest_provenance() -> dict:
                   else sha256_file(path))
         out[key] = digest
         if st is not None:
-            cache[name] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+            cache[name] = {"device": st.st_dev, "inode": st.st_ino,
+                           "size": st.st_size, "mtime_ns": st.st_mtime_ns,
                            "sha256": digest}
             dirty = True
     if dirty:

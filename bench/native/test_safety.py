@@ -432,6 +432,29 @@ class ExitStatusTests(unittest.TestCase):
 
 
 class GuestProvenanceTests(unittest.TestCase):
+    def test_guest_override_uses_selected_assets_even_with_matching_size_and_mtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            default = repo / "guest/out"
+            override = repo / "override"
+            work = repo / "work"
+            default.mkdir(parents=True)
+            override.mkdir()
+            work.mkdir()
+            for directory, kernel in ((default, b"old"), (override, b"new")):
+                for name, data in (("Image", kernel), ("initramfs.cpio", b"initrd"),
+                                   ("data.img", b"disk")):
+                    path = directory / name
+                    path.write_bytes(data)
+                    os.utime(path, ns=(1700000000000000000, 1700000000000000000))
+            with patch.object(runner, "REPO", repo), patch.object(runner, "WORK", work):
+                with patch.dict(os.environ, {"CTRS_GUEST_DIR": "guest/out"}):
+                    baseline = runner.guest_provenance()
+                with patch.dict(os.environ, {"CTRS_GUEST_DIR": "override"}):
+                    selected = runner.guest_provenance()
+                self.assertEqual(baseline["guest_kernel_sha256"], runner.sha256_file(default / "Image"))
+                self.assertEqual(selected["guest_kernel_sha256"], runner.sha256_file(override / "Image"))
+
     def test_guest_hashes_cached_by_stat_signature(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "guest" / "out"
@@ -442,6 +465,7 @@ class GuestProvenanceTests(unittest.TestCase):
             work.mkdir()
             with patch.object(runner, "REPO", Path(tmp)), \
                     patch.object(runner, "WORK", work), \
+                    patch.dict(os.environ, {"CTRS_GUEST_DIR": "guest/out"}), \
                     patch.object(runner, "sha256_file",
                                  side_effect=lambda p: "ab" * 32) as digest, \
                     patch.object(runner, "sha256_sparse_file",
