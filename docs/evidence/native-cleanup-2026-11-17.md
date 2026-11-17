@@ -79,10 +79,10 @@ cwd and open-file checks found no consumer in the exact authorized trees.
 ## Retirement commands and result
 
 For each row, the pre-command was exactly
-`git -C <exact-path> status --porcelain --ignored=matching`; all output consisted
-of the `!!` ignored-directory entries shown in the retirement transcript, with
-no tracked or untracked changes. The following exact retire commands each
-exited 0. No refusal occurred.
+`git -C <exact-path> status --porcelain --ignored=matching`; output contained
+only the `!!` ignored-directory entries shown in the retirement transcript
+(empty for `np-resource-pins`), with no tracked or untracked changes. The
+following exact retire commands each exited 0. No refusal occurred.
 
 | Exact command | Exit | Decisive output |
 | --- | ---: | --- |
@@ -218,5 +218,7 @@ No refusal or unresolved condition is recorded at this stage.
 
 ## Verification and commit
 
-`git diff --check` and the report-only commit result are recorded after running
-them below.
+`git diff --cached --check` exited 0. The only staged path was this report.
+The report's initial commit was `bac1d06bf2b917db478db78991151bb20ba2e8d9`
+(`docs(perf): record native cleanup proof`, exit 0). This final verification
+update is committed separately to honor the no-amend rule.
