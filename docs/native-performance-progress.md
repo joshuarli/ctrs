@@ -12,7 +12,7 @@ No product, guest or build-driver default is being changed by this measurement r
 **Perf gate deferred: host busy**: ordinary gate exits0 but Niceforge is hot and an unrelated OrbStack VM is running; no scored batch or W11 runs.
 Cleanup is complete:28 retired checkouts, `.work`195.3→21.0GiB allocated-size sum; [resource record](evidence/native-cleanup-resources-2026-11-17.md).
 Parked source and remaining trees: [inventory](native-performance-retained.md#after-cleanup-2026-11-17); no rejected candidate is promoted.
-Next action: prepare a reproducible fixed-work sampler-on/off command for W2; keep scored confirmation deferred until exclusivity is established.
+Current action: validate the tracked fixed-work sampler-on/off entrypoint with one1k-operation pair per engine; scored confirmation remains deferred.
 Classic C proof7203a474 passes all5 cases with exact native artifacts, clean teardown and88 unchanged inputs; no application timing batch is admitted.
 Full qualification waits for frozen representative inputs, resource/durability gates and a complete per-cell matrix.
 Resume first command is `codex-campaign-closeout.py cancel` (already run); execute the first ready queue item.
@@ -77,7 +77,10 @@ driver with a bounded, pinned fixed-work command using the existing W2 runner
 and immutable common services. Retain explicit workload CPU boundaries with
 periodic sampling off; collect the same exact operations with it on. Validate
 control selection and cleanup narrowly. Host-busy functional execution cannot
-pass observer budgets or product timing gates.
+pass observer budgets or product timing gates. The finite functional job is
+`.work/tmp/sampler-v4-functional-20261117/job`; inspect identity/status once after
+launch, preserve terminal results and recheck its frozen inputs before editing
+bench source. Its four trials must complete4000 exact useful operations.
 
 After the repair, admit the predeclared exclusive equal-work W2 confirmation
 only when both scalar gate and saved process/guest snapshots establish a clean

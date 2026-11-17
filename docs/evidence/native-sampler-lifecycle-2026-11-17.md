@@ -180,3 +180,45 @@ ignored review directory was inspected and discarded when retiring its checkout.
 The bounded measurement source repair is accepted. Fresh application observer
 confirmation and all performance/resource qualification remain open. The normal
 timing gate's exit0 did not override the independently observed foreign load.
+
+## Fixed-work application-control admission
+
+The scratch-only v3 calibration driver is superseded by the tracked
+`diagnostics/sampler_pilot.py` entrypoint. It reuses the pinned common W2 service
+images and existing exact-state runner. Boundary-only controls retain ownership
+and setup/workload/cleanup CPU boundaries while spawning no periodic observer;
+periodic controls use sampler v4 unchanged. The existing default remains periodic.
+ResourceEngine accepts an explicit isolated root for this consumer. No product
+CLI, dependency, guest asset, persisted runtime format or default changes.
+
+The bounded functional admission is one alternating off/on pair per engine,
+1000 exact operations per trial, concurrency4 and write ratio0.3: four trials,
+4000 measured useful operations. The same seed/work mix must match across modes
+and engines. Require actual image/boot/process identity, exact persisted data,
+complete CPU boundaries, valid periodic traces, owned stack cleanup, stopped
+ctrs processes and registry-thread termination. Compute observer ratios from
+raw workload-phase CPU and successful counts, never published medians.
+
+This first batch deliberately remains timing/qualification ineligible under the
+known foreign activity. It can validate instrumentation and real control flow;
+it cannot pass observer-overhead budgets or an engine-performance gate. The
+finite job is `.work/tmp/sampler-v4-functional-20261117/job`, with20-minute
+fixed deadline and frozen scripts/layout/boot inputs. Source command:
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, 'bench/native')
+from diagnostics.sampler_pilot import run_calibration
+run_calibration(run_id='sampler-v4-functional-20261117',
+    portfolio_layout=Path('.work/native-perf/inputs/w8-portfolio-v2/layout'),
+    ctrs_binary=Path('.work/tmp/readiness-main-target/release/ctrs'),
+    pairs=1, operations=1000)
+```
+
+Use a new run ID/output and rebuild the pinned layout from the tracked portfolio
+instructions if scratch is absent. The admitted child discloses2CPU/8192MiB and
+the accepted explicit guest assets for ctrs; each engine's own off/on pair keeps
+its resources fixed. This does not compare the engines' allocation envelopes.
+The source supports a predeclared five-pair batch later, with fresh exclusive
+host admission and no replacement of failed/contaminated pairs.
