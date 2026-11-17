@@ -2,99 +2,74 @@
 
 ## Status
 
-**ACTIVE 2026-11-17 — owner requested resume after completed winddown and cleanup.**
-Reviewed `94f19a8` is an ancestor of HEAD; subsequent measurement, fixture and product work is reconciled below.
-Accepted measurement repair: sampler v4 correction ef22cc9; independent delta review reports no additional demonstrated defect.
-43 existing tests pass; baseline crash reproduction retains falsely valid partial totals. The affected87-test selection passes after correction.
-Sampler v4 requires a current stop acknowledgment; native normal/early0/SIGKILL and phase-cell cases pass. See [evidence](evidence/native-sampler-lifecycle-2026-11-17.md).
-Last accepted product remains `2f37d02`: readiness reuse, 14 tests, seven lifecycle cases and156 correct diagnostic jobs.
-No product, guest or build-driver default is being changed by this measurement repair.
-**Perf gate deferred: host busy**: ordinary gate exits0 but Niceforge is hot and an unrelated OrbStack VM is running; no scored batch or W11 runs.
-Cleanup is complete:28 retired checkouts, `.work`195.3→21.0GiB allocated-size sum; [resource record](evidence/native-cleanup-resources-2026-11-17.md).
-Parked source and remaining trees: [inventory](native-performance-retained.md#after-cleanup-2026-11-17); no rejected candidate is promoted.
-Current action: validate the tracked fixed-work sampler-on/off entrypoint with one1k-operation pair per engine; scored confirmation remains deferred.
-Classic C proof7203a474 passes all5 cases with exact native artifacts, clean teardown and88 unchanged inputs; no application timing batch is admitted.
-Full qualification waits for frozen representative inputs, resource/durability gates and a complete per-cell matrix.
-Resume first command is `codex-campaign-closeout.py cancel` (already run); execute the first ready queue item.
+**ACTIVE 2026-11-17 — resumed after owner-requested winddown and cleanup; not complete.**
+Reviewed `94f19a8` is an ancestor; newer accounting, fixtures and product work are reconciled in linked evidence.
+Accepted measurement repair ef22cc9: sampler v4 requires a current stop acknowledgment and preserves errors in phase cells.
+87 focused tests, native normal/early0/SIGKILL controls and independent correction review pass.
+Latest product remains2f37d02: readiness reuse,14 tests, seven lifecycle cases and156 correct diagnostic build/run jobs.
+Classic C caller7203a474 passes all5 cases and88 frozen inputs; no product/default changes followed.
+W8 receipt guard df1f418 passes66 component tests and two real37-layer receipts; guest cache absence remains unknown.
+Current candidate c3775ce adds pinned W2 boundary-only/periodic controls; named W2 gate passes78 tests.
+Prototype0b4a3d99 completes4000 exact operations, clean teardown and155 unchanged inputs. Cleanup-failure regressions pass.
+Current action: final native control proof at `.work/tmp/sampler-v4-functional-v2-20261117/job`, then independent source review.
+**Perf gate deferred: host busy**: scalar gate0 does not override hot Niceforge and the unrelated OrbStack VM.
+No scored batch or W11 is admitted. Full qualification, held-out app and resource/durability gates remain open.
+Cleanup:28 retired trees and `.work`195.3→21.0GiB allocated-size sum; completed new lane trees are retired after integration.
+Parked work: [inventory](native-performance-retained.md#after-cleanup-2026-11-17). Rejected candidates stay unpromoted.
+First resume command: `codex-campaign-closeout.py cancel` (already run); execute the current action once, never duplicate a job.
 
 ## Accepted and verified
 
-- Sampler v3 uses actual ri_phys_footprint, converted native CPU/wake counters,
-  kernel start identity, exact socket/disk ownership and open binary/guest hashes.
-  Missing daemon/VM/counters invalidate totals. Short phases have fast boundaries.
-  Native on/off calibration passed median budgets; final confirmation still needed.
-- W2 fixed work verifies successful reads/writes and every persisted payload.
-  CPU/success comes from aligned raw workload counters. Saturation is separate.
-  Matched pinned futex controls show both engines about 0.4us same CPU and 6us
-  distinct CPUs. Old unpinned contrast does not establish a VZ wake ceiling.
-  Scheduler parser joins guest namespace/global TIDs; task CPU and off-CPU/wake
-  elapsed remain separate, with short-run quantization and unknown edges explicit.
-- W4 real HTTP ingest/Redis/workers/artifact fixture passes both engines at 1/4/16
-  workers. W5 real Marked persistent watch/rebuild/CLI loop passes bind and volume
-  modes. Exact contents/outputs, pinned inputs, complete phase accounting.
-- W2 resource-cycle pilot 4f21c82 measures idle CPU/wakes, sampled steady/peak
-  physical footprint, reclamation/next use, explicit backing allocation and
-  repeated-cycle growth. Budgets declared before collection. Native pilots
- 041130/041443/041549 pass exact data and counter coverage. Short windows leave
-  growth unknown; foreign host work invalidates performance verdicts. Exclusive
-  APFS allocation and isolated build-cache size stay unknown.
-- W10 client 96297f7 uses per-worker persistent HTTP, bounded workers/socket waits,
-  no hidden retry and explicit connect/open/reuse/native errno. Baseline proof
- 041907 passes exact committed DB/cache state on both engines; no unexpected or
-  host-address failures. Timings invalid under foreign work. Never pool v1/v2.
-- Persistent mount guard 3fa2f01 rejects ext4 errors before agent startup instead
-  of acknowledging authoritative data on tmpfs. Native invalid-media/normal
-  restart/old→new guest upgrade proofs pass. Preserved mount-guard initramfs
-  eb0ef32667a4d0560d23482cab670f0fa7693bbd013b0484d27fb1d349cf42c7;
-  workspace now uses the reviewed expansion guest 71934e6d... below. Kernel
-  unchanged. No daemon restart or VZ Fsync policy change.
-  Preserved variants: `.work/native-perf/guest-variants/{mount-guard,pre-mount-guard}`.
-- RootFS metadata fix cdcbfb4 reports config diff IDs, not compressed blob hashes.
-  All 177 ctrs tests and real common-image deployment pass. Signed test binary:
-  `.work/tmp/image-diffids-target/release/ctrs`, SHA
-  cd29f06cad1cd73bab4d6377ce535159ba08f081899cab3a4a8ec30aabae8126.
-  Main target/release is older; do not assume it contains this fix.
-- W8 common portfolio 95c318f pins API/PostgreSQL/Redis/Marked manifests, layers,
-  tool versions and exact app/load/seed inputs. Independent host registry and
-  healthy deployment pass both engines; exact 1,000 operations and same Marked
-  artifact. Main proof `w8-common-20261116T044051-d3d5`; worktree proof 043656-23ec
-  has full 389MB ctrs transfer versus retained OrbStack 0 bytes, explicitly NOT a
-  comparable cold result. Old per-engine flattened fixtures stay diagnostic-only.
-  Artifact/layout/export receipt: `.work/native-perf/inputs/w8-portfolio-v2/`.
-  All 123 Python harness tests pass. No final fixture/qualification claim.
+- Native accounting uses actual ri_phys_footprint and complete owned daemon/VM
+  counters, kernel start identity and loaded executable/boot hashes. v4 adds
+  shutdown acknowledgment. [Measurement evidence](evidence/native-sampler-lifecycle-2026-11-17.md)
+  retains the defects, focused checks and original v3 on/off calibration limits.
+- W2 fixed useful work, exact persisted payloads, normalized CPU/success,
+  fixed-offered-rate diagnostics and separate saturation are implemented.
+  Matched same/distinct-CPU futex controls reject the old unpinned contrast as
+  proof of a VZ ceiling. Counts and on-CPU/wait profiles remain distinct.
+- Real W4 queue/artifacts, pinned Marked W5 watch/test, common/derived W8,
+  fixed-build W9 and representative short W11 fixtures pass functional proofs.
+  [Historical evidence](evidence/native-performance.md) preserves versions and
+  failures; these are not final acceptance or 12h reliability results.
+- Resource-cycle source declares idle/reclaim/next-use/growth budgets. Physical
+  allocation is scoped to explicit files; exclusive APFS extents and isolated
+  build-cache size remain unknown. [Current cycles](evidence/native-resource-cycles-2026-11-17.md).
+- W10 v2 persistent clients and recovery tracing pass exact-data functional
+  checks. The50ms refusal-cache candidate remains parked;250ms default stays.
+- Persistent-mount guard, data-preserving disk expansion, image DiffID/label
+  repairs and balloon accounting are integrated. Restart/daemon-interruption
+  proofs do not establish host power-loss durability; Full sync is unpromoted.
+- Readiness reuse passes both buildx/Rust and classic C callers. Compression,
+  scheduler, affinity and quiet-policy candidates remain rejected/unqualified;
+  their [build](evidence/native-build-boundaries-2026-11-16.md), [W2](evidence/native-w2-boundaries-2026-11-16.md)
+  and [preemption](evidence/native-preemption-2026-11-17.md) records preserve the decisions.
 
 ## Exact next action
 
-The sampler v4 repair is accepted at ef22cc9 after87 parent tests, native
-lifecycle/phase controls and independent correction review. Its [evidence](evidence/native-sampler-lifecycle-2026-11-17.md)
-preserves the original defect, race correction and measurement limitations.
+Finish the final c3775ce fixed-work observer-control proof in
+`.work/tmp/sampler-v4-functional-v2-20261117/job`. One off/on pair per engine
+must complete4000 useful operations with the same read/write mix and exact data.
+The source uses the pinned common service layout and existing W2 runner; both
+modes retain setup/workload/cleanup CPU boundaries. The earlier0b4a3d99 batch
+passed before cleanup-failure handling was tightened; preserve both versions.
+Inspect job identity/status once, retain the terminal result, and recheck all
+frozen inputs before editing bench source. Review source and retire its temporary
+review tree after acceptance. [Exact command and scope](evidence/native-sampler-lifecycle-2026-11-17.md).
 
-The classic C caller proof7203a474 is complete: five cases, exact native zlib
-artifacts, clean teardown and88 unchanged input receipts. The original v1 lazy-boot
-failure remains separate in [readiness evidence](evidence/native-builder-readiness-2026-11-17.md).
-Do not rerun this unchanged proof. Next, replace the scratch-only sampler-on/off
-driver with a bounded, pinned fixed-work command using the existing W2 runner
-and immutable common services. Retain explicit workload CPU boundaries with
-periodic sampling off; collect the same exact operations with it on. Validate
-control selection and cleanup narrowly. Host-busy functional execution cannot
-pass observer budgets or product timing gates. The finite functional job is
-`.work/tmp/sampler-v4-functional-20261117/job`; inspect identity/status once after
-launch, preserve terminal results and recheck its frozen inputs before editing
-bench source. Its four trials must complete4000 exact useful operations.
+After functional acceptance, the first timed action is a separately predeclared
+exclusive W2 observer/equal-work batch. Require scalar gates AND actual saved
+process/guest snapshots. Ordinary gate0 has coexisted with hot Niceforge work;
+the unrelated `bctl-r7-qualify` VM also prevents attribution of OrbStack's helper.
+Do not stop unrelated work. The `-s` swap advisory is lane admission, not a
+performance gate. If exclusivity is absent, continue the next independent queue
+item; do not rerun neutral matrices or poll counters to fill turns.
 
-After the repair, admit the predeclared exclusive equal-work W2 confirmation
-only when both scalar gate and saved process/guest snapshots establish a clean
-window. The ordinary scalar gate exits0, but saved snapshots show hot unrelated Niceforge work and the unrelated `bctl-r7-qualify` VM. The separate `-s` lane-admission advisory exits75 on its swap threshold; it is not the timing gate. Host exclusivity remains unestablished. Prior v3 sampler-on/off calibration,
-fixed-work implementations, pinned wake controls, real W4/W5/W8/W9 and short
-representative W11 proofs are already complete; do not rebuild these as if absent.
-Preserve all original failed/invalid batches. Investigate a new causal application
-boundary after the rejected scheduling/quiet/compression hypotheses, rather than
-rerunning their matrices. No full W1–W10 sweep is next.
-
-The bounded classic-builder C caller proof remains pending: isolated owned root,
-`DOCKER_BUILDKIT=0`, native executable with exact stdout, cold/warm, completed
-external pause/unpause, and restarted-builder cases. Keep accepted default-driver
-behavior. Do not substitute the existing buildx/Rust proof for this second caller.
+W8 receipt validation is integrated at df1f418. Its source investigation and
+remaining [content-state limits](evidence/native-w8-content-state-2026-11-17.md)
+are explicit: new compressed identities/DiffIDs plus full delivery and runnable
+contents do not establish guest-cache or page-cache absence. Preserve the66-test
+component result and successful validation of two actual37-layer receipts.
 
 Reconstruct the accepted runtime from the repository, without retaining scratch:
 
@@ -137,40 +112,35 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Sampler v4 lifecycle/phase repair is accepted at ef22cc9 with87 parent tests,
-   native requested/early0/kill controls and independent correction review.
-   Confirm application observer overhead in a genuinely exclusive window; keep
-   invalid runs visible. Until then, execute the independent C caller proof
-   in other independent ready items, without performance claims.
-2. Confirm equal useful W2 work and CPU/success on a clean host, then profile the
-   actual API user/system CPU, synchronization, scheduling and network boundary.
-   Fixed-work/offered-load and saturation stay separate. Use raw paired records;
-   sampled on-CPU and off-CPU/wake latency remain distinct. Current commands:
-   `bench/native/diagnostics/w2-counters.md` and the linked W2 boundary evidence.
-3. Complete the bounded classic-builder C readiness caller proof above. Preserve
-   the accepted default build driver and later reconfirm W6/W7 on the frozen
-   candidate. Do not rerun rejected compression/kernel/quiet-policy matrices.
-4. Complete resource-cycle/reclaim/growth acceptance with predeclared budgets in
-   `bench/native/diagnostics/resources.md`; unknown exclusive allocation or
-   build-cache size stays unknown. Existing-disk expansion and named-volume
-   survival are proved; host-full, reclaim and power-loss guarantees remain open.
-   Audit Cached+Fsync versus Full without weakening authoritative-data policy.
-5. W8 representative paired execution/reporting and real W4/W5/W9 functional
-   paths are implemented. Freeze acceptance inputs, close content-absence and
-   resource-scope gaps, then run exclusive paired acceptance. Keep retained
-   content, absent content and installed-default coverage separate.
-6. W10 is independent. Use the existing recovery trace and bounded v2 persistent
-   client; only reconsider `campaign/np-refusal-ttl`50ms after an exclusive v2
-   baseline/control. Keep250ms default and original EADDRNOTAVAIL failure.
-7. Resolve known correctness failures and freeze a complete per-cell status
-   matrix, input set, candidate and durability/resource contract. Then execute
-   the explicitly requested full paired qualification, independent confirmation,
-   fresh held-out app and finite12-hour W11 leg per engine. Full workspace suites
-   remain separately manual-only; no unchanged short-W11 rerun substitutes.
+1. Finish the fixed-work observer-control candidate's final native proof and
+   independent review. Retain all failed/preflight receipts; no qualification
+   is inferred from a host-busy functional pass.
+2. In a genuinely exclusive window, confirm W2 CPU/success at equal useful work
+   and observer budgets, then profile actual API user/system CPU, synchronization,
+   scheduling and network costs. Separate fixed work/offered load, saturation,
+   on-CPU samples and off-CPU/wake latency. Commands/budgets:
+   `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
+3. W8: strengthen comparable retained/content-absent evidence and complete
+   exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
+   AB/BA order, actual transfer/deployment and source-state unknowns explicit.
+   Never treat a deleted tag as a cold store or pool incompatible fixtures.
+4. Interleave resource-cycle acceptance with W2/W10: declared5 post-warmup cycles,
+   30s idle/reclaim minima, next-use cost and real allocation/growth. Commands:
+   `bench/native/diagnostics/resources.md`. Unknown cache/exclusive allocation
+   stays unknown; do not count sparse nominal capacity as physical reclamation.
+5. Resolve Cached+Fsync/Full, guest flush and promised persistence guarantees
+   before storage leadership claims. Full and50ms refusal-cache branches need
+   separate exclusive confirmations. Preserve250ms/default Fsync meanwhile.
+6. Resolve known correctness gaps, freeze candidate/inputs and a complete
+   per-cell status matrix. Implement actual frozen-readiness/resource-growth
+   qualification admission; existing short W11 proofs must not be repeated as
+   substitutes. Then execute the owner-requested full paired comparison,
+   independent batch, fresh held-out app and finite12h W11 for each engine.
 
-Before scored work, remove only identified owned diagnostics and certify actual
-exclusivity. Aggregate gate exit0 alone is insufficient; never stop unrelated
-work. Keep installed-default, disclosed resource-matched/default-driver and
-identical-builder attribution evidence separate. Report measured win, parity,
-loss, inconclusive, invalid and unmeasured per dimension. A geometric mean cannot
-hide CPU, memory, storage, recovery, tails, correctness or durability losses.
+All work stays native ARM64/macOS. Installed-default behavior, disclosed
+resource-matched default-driver results and identical-builder controls stay
+separate. No mean may hide a CPU, memory, storage, recovery, tail, correctness or
+durability loss. Full/workspace suites remain deliberate named manual gates;
+qualification is conditional on the prerequisites above, never an automatic
+check-command fallback. Continue until measured goals, explicit owner stop or
+a specific blocker of all remaining authorized work.

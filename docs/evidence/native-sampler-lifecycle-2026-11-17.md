@@ -222,3 +222,21 @@ the accepted explicit guest assets for ctrs; each engine's own off/on pair keeps
 its resources fixed. This does not compare the engines' allocation envelopes.
 The source supports a predeclared five-pair batch later, with fresh exclusive
 host admission and no replacement of failed/contaminated pairs.
+
+The first functional-control job0b4a3d99041a48b79aabbd680fc0e0ea exits0 and
+completes all four1000-operation trials. Each has708 reads/292 writes, exact
+persisted data and complete CPU boundaries. Both periodic runs have complete
+owned-process traces; both off runs retain boundaries without a periodic child.
+Owned stacks clean up, the private ctrs processes stop and registry thread joins.
+All155 frozen receipts recheck before later source edits. Timing and qualification
+remain explicitly false. A pre-launch missing-interpreter receipt was rejected
+before any job was admitted; the corrected launch is the sole admitted job.
+
+The current c3775ce candidate additionally preserves the original work exception
+through engine or registry cleanup failure and always joins the registry thread.
+A real-thread/fake-engine failure test exercises both cleanup failures and keeps
+the failed work record plus cleanup cause. The W2 component gate passes78 tests;
+29 direct collector/control/resource tests pass. The final equivalent normal-path
+proof is separately admitted at `.work/tmp/sampler-v4-functional-v2-20261117/job`
+with the same four1000-operation trials, current committed source, and its own
+frozen inputs. Do not pool either short batch as observer qualification.
