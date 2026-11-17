@@ -209,3 +209,22 @@ profile are not converted into passes.
 | Paired `analysis.json` | 4926b5492f020c21fa4c5346e651f9a047e79343f8173de362ef44f686b869b4 |
 | W2 functional `result.json` | b9706a09acc41c8f0a1316c786905ae62917a6cd2c7cd42066fa6cf4fd5323f5 |
 | Builds `analysis.json` | 0bfcbe51cf90d60ba9c6a2a2f7adfbad023d24a05a8e0198d5e6be669abc856c |
+
+## Guest compaction rejected, 2026-11-17
+
+Job f2313a753f744fca90698cd4ddb646c3 under
+`.work/tmp/balloon-compaction-20261117/` exits 0 with clean owned teardown.
+Two AB/BA pairs compare an owned privileged no-op with writing `1` to the
+owned guest's `compact_memory` before inflation. Both use the complete repair,
+2vCPU/8GiB, resident control, quiet=20, 2GiB exact files and a 60-second interval.
+All payload/hash checks pass, no OOM kills/fallback, all frozen receipts unchanged.
+
+The hypothesis is rejected: additional native physical reclaim from compaction,
+computed from each scenario's before/after deltas, is -9,584,616 and 1,654,808
+bytes in the two pairs. Neither reaches the predeclared 512MiB minimum. Available
+memory remains 264–270MB and sampled physical peaks stay around 2.6–2.7GB.
+This diagnostic establishes no pressure-dependent reclaim or speed claim.
+No compaction action or new wire message is added to the product. Continue
+pinned resource/installed-default acceptance rather than expanding this weak
+kernel hypothesis. Analysis SHA-256:
+`48533d258571a400531a6d84efbd1d2a1e2da4d89e01555692c0a6b8511a08c2`.

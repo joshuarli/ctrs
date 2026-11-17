@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** test whether guest compaction improves native balloon reclamation.
+**Current action:** freeze service inputs in the bounded resource-cycle fixture.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -83,27 +83,39 @@ export/load loss. Do not repeat this completed matrix or claim default parity.
 Raw `analysis.json` separates build and verified-run commands; it is not an
 inclusive command-to-run latency metric. See build evidence for limitations.
 
-**Exact continuation:** inspect
-`.work/tmp/balloon-compaction-20261117/job`, durable ID
-`f2313a753f744fca90698cd4ddb646c3`, once for identity/status/deadline. It is
-already launched; never duplicate it. The saved coordinator tests SDK-recommended
-pre-inflation guest compaction versus a privileged no-op in two AB/BA pairs.
-Each scenario writes/fsyncs 2GiB, includes compaction CPU in the idle counter
-window, idles 60s, then reads/hashes all bytes. Actual inflate/deflate/cache,
-native physical/RSS/peak, host pressure/vmmap and next-read costs are retained.
-Both use the complete accounting candidate, stock kernel, 2vCPU/8GiB, resident
-idle=0 and diagnostic quiet=20. Only the owned guest receives the compaction
-write; no workstation setting or product default changes. Deadline1800s,
-cleanup240s, all inputs frozen until terminal; no competing native work.
-Require at least512MiB additional native reclaim in both compact cases, no >3%
-peak increase, pre-read available>=128MiB, exact data, no OOM kills/fallback and
-clean owned teardown before considering any product mechanism. Otherwise reject
-this hypothesis and take the ready pinned-resource/W8 acceptance work; do not
-expand weak kernel/reclaim guesses. All timing remains diagnostic. Latest
-preflight reported unrelated hot Niceforge work; the OrbStack Linux machine
-also remains running. Canonical observer confirmation is deferred, and no user
-jobs may be stopped. Keep vendoring scratch at
-`/private/tmp/ctrs-w6-vendor-20261116` for provenance.
+Compaction job f2313a753f744fca90698cd4ddb646c3 is terminal exit0 with clean
+owned teardown and correct bytes. Its two additional-reclaim deltas are about
+-9.6MB and1.7MB, missing the declared512MiB minimum: hypothesis REJECTED.
+No product compaction/protocol change. All memory-policy pressure/installed-
+default resource gates remain open. The latest timing preflight reported hot
+unrelated Niceforge work and the OrbStack Linux machine remains running; timing
+is deferred, never a pass. Preserve user work.
+
+**Exact continuation:** inspect source worker
+`usrw_25d0ca4b-7cd8-4e5c-9708-1bbf4520ccd5` in
+`.work/wt/np-resource-pins`, branch `fix/np-resource-pins`, base
+`aa5b6741448204d93349a82d4b159127a3d80eb6`.
+Its watch is registered; do not launch a replacement. It owns only
+`bench/native/diagnostics/resource_pilot.py`, new
+`bench/native/test_resource_pilot.py`, and `bench/native/diagnostics/resources.md`.
+The task requires explicit frozen image refs and ctrs binary, pinned installed
+content/native architecture/API sources, no implicit pull/build, actual running
+binary checks, and focused nonempty no-skip tests. Resource budgets, cleanup,
+unknown accounting, engine-block ordering and diagnostic status must remain.
+No engines/native jobs/full suites/dependencies/shared runner redesign authorized
+for this lane. Parent must review its entire base diff including commits,
+untracked paths, scope and exact proof once, then run the narrow module as
+needed before integration. No measured native job is active.
+
+After source acceptance, prepare the pinned portfolio in an owned isolated root
+if needed and run the smallest explicit native functional resource scenario.
+Do not stop user containers or silently adopt wrong binary/assets. Preserve
+failures, default-sleep/identity unknowns, active-disk ownership and installed-
+default versus resident controls. Then five-cycle/30s minimum resource evidence
+with frozen inputs and host validity; full qualification remains manual-only.
+Canonical W2 observer confirmation still needs a genuinely exclusive window.
+Do not repeat completed W7/build/compression/compaction matrices or unchanged
+short W11 proofs. Keep `/private/tmp/ctrs-w6-vendor-20261116` for provenance.
 
 Affinity diagnostics completed;
 [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
