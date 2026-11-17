@@ -122,12 +122,25 @@ complete cleanup, no receipt error and zero remaining project containers. Driver
 `.work/tmp/w8-underpull-cancel.py` enters the real baseline context, signals itself
 after readiness, then verifies the saved project filter before stopping its engine.
 
-Next executable source action: remove the remaining legacy API-tag dependency in
-`prepare_warm_engine`; select the same pinned store-specific image ID used by the
-background stack, verify a clean/common-only root and keep startup outside warm
-cells. Then connect the v3/v4 path to the canonical W8 pair/scorecard route with
-immutable per-pair shared artifacts and explicit engine order. Keep the pinned
-W2 driver unchanged and histories separate.
+Warmup legacy-tag dependency is removed at 612441e. The background stack and
+warmup share `baseline_image_reference`, which selects the verified immutable ID
+kind for each store. Native `w8-warm-pin-20261116T173929` passes both engines;
+ctrs uses a NEW isolated root containing only the common API manifest, explicitly
+rejects inspection of the absent legacy tag, verifies pinned DiffIDs, completes
+the guest warmup and leaves zero owned containers. OrbStack uses its immutable
+manifest ID without tag changes. Twenty focused tests pass. Driver
+`.work/tmp/w8-pinned-warm-proof.py`, receipts under the run's engine directories.
+Startup/preconditioning remains outside warm resource cells.
+
+Next executable source action: connect the v3/v4 path to a canonical W8 paired
+command and the existing reporting record format. Prepare one unique immutable
+artifact before each pair, alternate engine order, retain warmed engine ownership
+across the batch, record whole-workflow resources without summing nested phases,
+and include per-pair artifact receipt checks. Move foreground readiness before
+background drain so pull-to-health does not include an artificial join. Keep the
+pinned W2 driver unchanged and histories separate; retire scoreable proxy entry
+points once the replacement is usable. Diagnostic mode must explicitly invalidate
+timings; host-busy runs cannot produce favorable statistical ratios.
 Preserve unique per-pair inputs shared by both engines. Keep v2 history separate
 and require a new exclusive paired baseline before scoring v3. An async request
 for a quiet host window is pending; this does not block independent source work.
