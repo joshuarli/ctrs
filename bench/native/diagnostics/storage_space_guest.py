@@ -54,15 +54,28 @@ def main():
         return {'count': mapped, 'all_unwritten': True, 'length': sum(row[2] for row in rows),
                 'first': rows[0], 'last': rows[-1]}
 
+    def proceed():
+        print(json.dumps({'event': 'progress'}), flush=True)
+        if not select.select([sys.stdin], [], [], 75)[0]:
+            raise TimeoutError('no reservation command')
+        line = sys.stdin.readline()
+        if line in ('RELEASE\n', ''):
+            return False
+        if line != 'CONTINUE\n':
+            raise ValueError('invalid reservation command')
+        return True
+
     try:
         before = state()
         offset = 0
         attempts = 0
         allocation_errors = []
-        step = 1 << 30
+        step = 64 << 20
         if mode == 'allocation':
             os.posix_fallocate(fd, 0, 64 << 20)
             attempts = 1
+            if not proceed():
+                return
         else:
             while True:
                 fs = os.statvfs('/fill')
@@ -82,6 +95,8 @@ def main():
                     step = max(fs.f_frsize, step // 8)
                 else:
                     offset += length
+                if not proceed():
+                    return
         print(json.dumps({'event': 'reserved', 'before': before, 'after': state(), 'extents': extents(), 'allocation_attempts': attempts,
                           'allocation_errors': allocation_errors}), flush=True)
         if not select.select([sys.stdin], [], [], 75)[0]:

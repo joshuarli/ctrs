@@ -23,6 +23,38 @@ def relation_enospc(returncode, stderr):
             and 'pgsql_tmp' not in stderr and ('base/' in stderr or 'pg_wal' in stderr))
 
 
+def await_reservation(holder, frame, snapshot, before, budget):
+    while True:
+        row = frame()
+        if row['event'] == 'reserved':
+            return row
+        if row['event'] != 'progress':
+            raise ValueError('unexpected reservation event: ' + repr(row))
+        try:
+            current = snapshot()
+            if (current['status'] != 'ok' or current['allocated_bytes'] - before['allocated_bytes'] > budget
+                    or current['files'][0]['filesystem_free_bytes'] < 2 << 30):
+                raise ValueError('host reservation growth or free-space guard exceeded')
+        except BaseException:
+            holder.stdin.write('RELEASE\n')
+            holder.stdin.flush()
+            holder.stdin.close()
+            raise
+        holder.stdin.write('CONTINUE\n')
+        holder.stdin.flush()
+
+
+def finish_cleanup(result, snapshot, stop, close, persist):
+    for name, action in (('allocation snapshot', snapshot), ('engine stop', stop), ('log close', close)):
+        try:
+            action()
+        except Exception as exc:
+            result['cleanup_errors'].append(name + ': ' + repr(exc))
+    if result['cleanup_errors']:
+        result['correctness'] = False
+    persist(result)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', choices=guest.STAGES, required=True, help='64MiB unwritten preflight or bounded relation ENOSPC test')
@@ -80,12 +112,12 @@ def main():
         def compose(command):
             return engine.sh(['compose', '-f', str(runner.COMPOSE_FILE), '-p', project, *command],
                              env_extra={'NP_API_PORT': str(port), 'NP_API_TAG': runner.API_TAG}, timeout=120)
-        def frame(event):
+        def frame(event=None):
             if not select.select([holder.stdout], [], [], 60)[0]:
                 raise TimeoutError('reservation frame deadline')
             row = json.loads(holder.stdout.readline())
             save(directory / 'last-frame.json', row)
-            if row['event'] != event:
+            if event is not None and row['event'] != event:
                 raise ValueError('unexpected reservation event: ' + repr(row))
             return row
         def records():
@@ -95,7 +127,8 @@ def main():
             return json.loads(cp.stdout)
         def release():
             if holder and holder.poll() is None:
-                holder.stdin.write('RELEASE\n'); holder.stdin.flush(); holder.stdin.close()
+                if not holder.stdin.closed:
+                    holder.stdin.write('RELEASE\n'); holder.stdin.flush(); holder.stdin.close()
                 saved = frame('released'); save(directory / 'released.json', saved)
                 code = holder.wait(timeout=10)
                 result['holder_exit'] = code
@@ -150,11 +183,12 @@ def main():
             log = (directory / 'holder.stderr').open('wb')
             holder = subprocess.Popen([runner.DOCKER, 'exec', '-i', '--privileged', helper, 'python', '-u', '/guest.py', args.stage],
                                       env=engine.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True)
-            reserved = frame('reserved'); save(directory / 'reserved.json', reserved)
+            budget = (8 if args.stage == 'allocation' else 512) << 20
+            reserved = await_reservation(holder, frame, lambda: resource_cells.allocation_snapshot([disk]), before, budget)
+            save(directory / 'reserved.json', reserved)
             after = resource_cells.allocation_snapshot([disk]); save(directory / 'allocation-reserved.json', after)
             growth = after['allocated_bytes'] - before['allocated_bytes']
-            budget = (8 if args.stage == 'allocation' else 512) << 20
-            if not (after['status'] == 'ok' and growth <= budget):
+            if not (after['status'] == 'ok' and growth <= budget and after['files'][0]['filesystem_free_bytes'] >= 2 << 30):
                 raise ValueError('host reservation allocation budget exceeded')
             if args.stage == 'enospc':
                 if not (reserved['after']['available_bytes'] <= guest.LEAVE_AVAILABLE_BYTES):
@@ -197,12 +231,16 @@ def main():
                 release()
             except Exception as exc:
                 result['cleanup_errors'].append('reservation: ' + repr(exc))
-            if holder and holder.poll() is None:
-                holder.stdin.close() if holder.stdin and not holder.stdin.closed else None
-                try: holder.wait(timeout=95)
-                except subprocess.TimeoutExpired:
-                    holder.kill(); holder.wait(timeout=5)
-                    result['cleanup_errors'].append('reservation helper required kill')
+            try:
+                if holder and holder.poll() is None:
+                    if holder.stdin and not holder.stdin.closed:
+                        holder.stdin.close()
+                    try: holder.wait(timeout=95)
+                    except subprocess.TimeoutExpired:
+                        holder.kill(); holder.wait(timeout=5)
+                        result['cleanup_errors'].append('reservation helper required kill')
+            except Exception as exc:
+                result['cleanup_errors'].append('reservation shutdown: ' + repr(exc))
             try:
                 ci_jobs.cleanup(engine, helper, run)
                 inspected = json.loads(engine.sh(['volume', 'inspect', volume]).stdout)[0]
@@ -215,11 +253,11 @@ def main():
                 compose(['down', '-v', '--remove-orphans'])
             except Exception as exc:
                 result['cleanup_errors'].append('stack: ' + repr(exc))
-            if disk.exists(): save(directory / 'allocation-cleanup.json', resource_cells.allocation_snapshot([disk]))
-            engine.stop()
-            if log: log.close()
-            if result['cleanup_errors']: result['correctness'] = False
-            save(directory / 'result.json', result)
+            def cleanup_snapshot():
+                if disk.exists():
+                    save(directory / 'allocation-cleanup.json', resource_cells.allocation_snapshot([disk]))
+            finish_cleanup(result, cleanup_snapshot, engine.stop, lambda: log.close() if log else None,
+                           lambda value: save(directory / 'result.json', value))
         if not (result['correctness']):
             raise ValueError("diagnostic validation failed: result['correctness']")
     print('PASS', root)

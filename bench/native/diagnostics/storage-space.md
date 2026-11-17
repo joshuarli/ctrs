@@ -18,9 +18,12 @@ active backing-file allocation growth. Run the relation test with the same
 command and `--stage enospc`. Both stages require 2GiB host free space.
 
 The helper reserves guest space until non-root available capacity reaches 8MiB.
-It recomputes available capacity to account for extent metadata. ENOSPC during
-reservation reduces the allocation step. Other allocation errors fail. FIEMAP
-must confirm unwritten extents. Reservation growth on the host must stay within
+It recomputes available capacity to account for extent metadata. After each
+allocation attempt of at most 64MiB, the helper waits while the controller
+checks host growth and requires at least 2GiB free. A failed check releases the
+reservation before another attempt. ENOSPC during reservation reduces the
+allocation step. Other allocation errors fail. FIEMAP must confirm unwritten
+extents. Reservation growth on the host must stay within
 512MiB. Both limits are diagnostic budgets, not final resource acceptance.
 
 PostgreSQL keeps fsync, synchronous_commit and full_page_writes enabled. The

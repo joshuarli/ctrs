@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -38,6 +39,69 @@ class StorageSpace(unittest.TestCase):
         result = subprocess.run([sys.executable, str(program), '--stage', 'typo'], env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
         self.assertIn('invalid choice', result.stderr)
+
+class ReservationFaults(unittest.TestCase):
+    def test_guard_releases_during_allocation_on_growth_or_low_free_space(self):
+        from unittest.mock import Mock
+        baseline = {'allocated_bytes': 100}
+        for snapshot in (
+            {'status': 'ok', 'allocated_bytes': 110, 'files': [{'filesystem_free_bytes': 3 << 30}]},
+            {'status': 'ok', 'allocated_bytes': 100, 'files': [{'filesystem_free_bytes': (2 << 30) - 1}]},
+        ):
+            with self.subTest(snapshot=snapshot):
+                holder = Mock()
+                frame = Mock(side_effect=[{'event': 'progress'}, {'event': 'progress'}])
+                healthy = {'status': 'ok', 'allocated_bytes': 100, 'files': [{'filesystem_free_bytes': 3 << 30}]}
+                snapshots = iter([healthy, snapshot])
+                with self.assertRaises(ValueError):
+                    storage_space_pilot.await_reservation(holder, frame, lambda: next(snapshots), baseline, 8)
+                self.assertEqual([call.args[0] for call in holder.stdin.write.call_args_list], ['CONTINUE\n', 'RELEASE\n'])
+                holder.stdin.close.assert_called_once_with()
+                self.assertEqual(frame.call_count, 2)
+
+    def test_cleanup_snapshot_failure_still_stops_closes_and_persists_failure(self):
+        from unittest.mock import Mock
+        result = {'correctness': True, 'cleanup_errors': []}
+        stop, close, persist = Mock(), Mock(), Mock()
+        def fail_snapshot():
+            raise OSError('receipt failed')
+        storage_space_pilot.finish_cleanup(result, fail_snapshot, stop, close, persist)
+        stop.assert_called_once_with()
+        close.assert_called_once_with()
+        persist.assert_called_once_with(result)
+        self.assertFalse(result['correctness'])
+        self.assertIn('receipt failed', result['cleanup_errors'][0])
+
+    def test_guest_releases_before_second_allocation_when_host_requests_it(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        fs = SimpleNamespace(f_frsize=4096, f_blocks=100000, f_bfree=100000, f_bavail=100000)
+        stat = SimpleNamespace(st_rdev=7, st_dev=7, st_ino=42)
+        file_stat = SimpleNamespace(st_size=0, st_blocks=0)
+        output = io.StringIO()
+        with (patch.object(sys, 'argv', ['guest', 'enospc']),
+              patch.object(sys, 'platform', 'linux'),
+              patch.object(sys, 'stdin', io.StringIO('RELEASE\n')),
+              patch.object(sys, 'stdout', output),
+              patch.object(storage_space_guest.os, 'uname', return_value=SimpleNamespace(machine='aarch64')),
+              patch.object(storage_space_guest.os, 'open', return_value=9),
+              patch.object(storage_space_guest.os, 'close') as close,
+              patch.object(storage_space_guest.os, 'statvfs', return_value=fs),
+              patch.object(storage_space_guest.os, 'stat', return_value=stat),
+              patch.object(storage_space_guest.os, 'fstat', return_value=file_stat),
+              patch.object(storage_space_guest.os, 'posix_fallocate', create=True) as allocate,
+              patch.object(storage_space_guest.signal, 'signal'),
+              patch.object(storage_space_guest.signal, 'alarm'),
+              patch.object(storage_space_guest.select, 'select', return_value=([sys.stdin], [], [])),
+              patch.object(Path, 'open', side_effect=lambda *args, **kwargs: io.BytesIO(bytes(1144))),
+              patch.object(Path, 'unlink') as unlink):
+            storage_space_guest.main()
+        self.assertEqual(allocate.call_count, 1)
+        self.assertEqual([json.loads(line)['event'] for line in output.getvalue().splitlines()],
+                         ['progress', 'released'])
+        unlink.assert_called_once_with(missing_ok=True)
+        close.assert_called_once_with(9)
 
 
 if __name__ == '__main__':
