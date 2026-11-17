@@ -23,9 +23,11 @@ success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
 the counters leaves ordinary wake frequency unresolved. The reduced
 wake-entry observer also completed exact work and remains parked because
 observer overhead is unresolved. Main's W2 component suite passes 108
-tests with zero skips. Observer job `58086f0fccb04a1c94b4cb4320a4d961`
-owns the measured host. The W11 completed-cycle correction and W8
-retained-image checks are isolated from its frozen inputs.
+tests with zero skips. The 49 Hz comparison completed all 40 exact
+trials. In all ten blocks an unrelated VM was active and the observer
+intervals exceeded the 5% acceptance band. W8 retained pin checks are
+integrated at `4c07c4e`; W11 evidence binding remains parked.
+The 19 Hz comparison `0f4d52b0bc314c75bc291ca344d43295` owns the host.
 
 ## Accepted and verified
 
@@ -56,24 +58,14 @@ retained-image checks are isolated from its frozen inputs.
 
 ## Exact next action
 
-Read the terminal status of `58086f0fccb04a1c94b4cb4320a4d961` at
-`.work/tmp/w2-observer-confirmation-20261117/job/status.json`. Preserve
-the 40 declared cells and the 40-minute deadline. Recheck frozen receipts
-and exact per-block payloads, then review the per-cell host and gate
-snapshots before interpreting the on/off paired intervals. The run's
-results are under `.work/native-perf/results/w2-observer-confirmation-20261117`.
-
-Establish a valid observer comparison before selecting a kernel change. Use the pinned C8 fixed-work recipe from the
-[W2 evidence](evidence/native-w2-equal-work-2026-11-17.md#reproduction),
-with the 17-vCPU resource-matched allocation declared above. Predeclare
-ten 50,000-operation blocks and alternate engine and observer order.
-Use `syscall_pilot.trial(..., profile_kind='cpu', concurrency=8,
-seed=7 + block)` as shown in the profiler recipe. Keep the 5% API CPU
-and wall limits and report paired intervals per engine. A passed
-`perf-gate-ready` is insufficient without actual exclusive host checks.
-On the last check it returned 0 while a separate Niceforge VM consumed
-about one CPU. Preserve that workload. If the host stays shared, work
-the open admission and W8 source items without scoring timing.
+Read the terminal status of `0f4d52b0bc314c75bc291ca344d43295` at
+`.work/tmp/w2-observer-rate-20261117/job/status.json`. Compare the
+same pinned C8 fixed work at 17 matched guest vCPUs across off, 49 Hz and
+19 Hz. The two blocks reverse engine and observer order. Keep both the
+exact payload proof and per-thread sample coverage. Review host gates,
+task CPU and workload wall. This finite diagnostic cannot certify the
+observer budget. The parked source is `e2127f0` on
+`experiment/w2-cpu-19hz`.
 
 The reduced observer proof is complete. Source `7184d42` remains on
 `experiment/w2-wake-entry-only`. Use the evidence record for its verified
@@ -162,10 +154,9 @@ next-action paragraphs from that historical revision.
    cell contract, frozen readiness and 12-hour legs remain open.
    Growth capability
    `81e51d2` and counter-window fix `4fc901b` are already integrated.
-3. W8: the retained-image pin checks at `bc95d96` pass 13 focused tests
-   and validate eight archived native inspections. Integrate after the
-   active W2 job releases its frozen source. Complete exclusive paired
-   acceptance. Keep the identity guard, shared per-pair inputs,
+3. W8: retained-image pin checks are integrated and pass 68 component
+   tests. The eight archived native inspections agree with the pins.
+   Complete exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
    AB/BA order, actual transfer/deployment and source-state unknowns explicit.
    Never treat a deleted tag as a cold store or pool incompatible fixtures.
 4. Interleave resource-cycle acceptance with W2/W10: declared5 post-warmup cycles,

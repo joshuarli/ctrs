@@ -367,6 +367,49 @@ worktree first. Bind all runtime and image paths to the accepted assets.
 Job status SHA-256
 `79b76c74125d35ef4c87d2dc59e9261610a27fe5363d32a6c1c4db0b87ed4b16`.
 
+## Ten-block observer comparison
+
+Job `58086f0fccb04a1c94b4cb4320a4d961` exited 0 after 40 exact trials
+and two million successful measured requests. All four cells in each
+block agreed on writes and read/write counts. The 20 profile traces
+passed the raw event checks. Native teardown and all 161 frozen
+receipts rechecked. Both guest CPU counts were 17 and MemTotal stayed
+within 1%. The plan reverses the engine and observer order in alternate
+blocks. Each cell uses C8, seed `7 + block`, 1,000 warmup reads and
+50,000 measured operations.
+
+| Engine | Metric | Off median [range], s | On median [range], s | Paired on/off [95% interval] |
+| --- | --- | ---: | ---: | ---: |
+| ctrs | API CPU | 18.87 [17.93–23.15] | 19.83 [18.85–21.33] | 1.042 [1.023–1.088] |
+| ctrs | Workload wall | 19.48 [18.37–24.73] | 20.10 [19.03–21.70] | 1.016 [0.996–1.062] |
+| ctrs | API system CPU | 5.51 [5.15–6.46] | 6.42 [6.05–6.95] | 1.168 [1.105–1.205] |
+| OrbStack | API CPU | 15.25 [14.13–19.17] | 15.81 [15.12–16.89] | 1.029 [0.970–1.143] |
+| OrbStack | Workload wall | 23.26 [21.15–32.33] | 24.33 [21.64–27.53] | 1.043 [0.944–1.123] |
+| OrbStack | API system CPU | 2.75 [2.48–3.43] | 3.31 [3.08–3.65] | 1.206 [1.103–1.343] |
+
+All 80 readiness commands returned 0. Per-trial process snapshots
+recorded the separate Niceforge VM at 90% CPU or higher in 48 snapshots
+across all ten blocks. Preserve those blocks as diagnostics. Host
+exclusivity remains unestablished, and the four primary CPU and wall
+intervals each extend above the 1.05 observer limit. No qualified
+observer pass follows.
+
+Reproduce using the capacity-matched recipe with `syscall_pilot.trial`,
+`profile_kind='cpu'`, C8 and seed `7 + block`. Run 10 blocks with a
+distinct directory per engine and block. In odd blocks run ctrs then
+OrbStack in each mode, off before on. Reverse both orders in even blocks.
+Check capacity and process evidence before and after each trial. Compare
+on/off within each engine using the median of matched ratios and the
+same whole-block bootstrap procedure. Keep the samples and system/user
+CPU breakdowns separate from the primary observer budget.
+
+Plan SHA-256
+`40fd44ea3ac59046b2431d5d02b62894243f2783c47f3d8b79bc65325222252e`.
+Result SHA-256
+`55c6472a621c8e36b05fad8445884c52add14f5969d05995ad2863c062b06f9b`.
+Terminal status SHA-256
+`6fbb6c2840782696770cce29242d9aa3e9be9d856021d6df1656d7e124dbfe4a`.
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign

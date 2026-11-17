@@ -128,3 +128,27 @@ Trial receipt SHA-256
 `4bae89bb68c67b49f3bb6b96c8eccecda445dfbd4aacf7e74b97dbe1b0dc84ff`.
 Job status SHA-256
 `bebd27db56322dd26c657fbbe7cad6f4e2892b735d843321556f2fb96164c39b`.
+
+
+## Qualification evidence binding
+
+Parked `campaign/w11-bind-completed-cycles` at `5ae0da9` binds one
+resource observation to each completed, indexed cycle and its phase
+clocks. The producer records the monotonic work-loop exit before
+cleanup. Qualification checks the 12-hour deadline against that
+clock. The observer and mixed-work phase rows must be ordered.
+
+Eleven malformed records passed the previous gate and fail the
+regression after `4d2e88c`. Both archived native v4 records agree
+with the new cycle and phase structure. The short records still fail
+the growth and duration criteria. Commit `5ae0da9` also rejects a
+changed cell contract with a freshly matching review unless the
+canonical SHA-256 matches `freeze.cell_contract_sha256` in
+`assets.lock`. Compute the digest from sorted, compact JSON using
+the same serialization as the readiness validator. An independent
+review checked both changes and the producer's phase order.
+
+In the parked checkout, run `PYTHONPATH=bench/native python3.14 -m unittest
+test_qualification test_mixed_cycle test_mixed_resources`. All 26
+tests pass. The actual asset lock remains a pilot. A complete frozen
+cell contract and both native qualification legs remain open.
