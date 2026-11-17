@@ -36,3 +36,26 @@ anonymous volumes. Global prune and shared builder-cache prune are out of scope.
 The pre-cleanup report lists 340 unique images, 38 stopped containers and 83
 volumes; the advertised reclaimable totals include unrelated data and are not
 an authorization to delete it.
+
+## Exact Docker deletion set
+
+Five stopped kernel-build containers carry `dev.ctrs.campaign=native-performance`:
+`np-preempt-full-private-20261117`, `np-uprobes-private-v2-20261117`,
+`np-uprobes-private-20261117`, `np-lse-build-20261116`, `np-sched-mc-build`.
+Their four experiment-specific build volumes carry matching campaign/experiment
+labels. The shared `ctrs-kbuild` volume is this repository's documented kernel
+cache; its only five container references are exactly those five owned builds.
+The original closeout contract also names this cache for deletion after use.
+
+The stopped `buildx_buildkit_np-dc-orbstack-f04a9943362a0` container and its exact
+`_state` volume match the campaign-owned buildx instance's node, endpoint and
+pinned BuildKit image in `.work/native-perf/buildx/orbstack-f04a9943362a/instances`.
+This is an owned attribution-control builder, not a user default builder.
+
+158 exact `npw6/hyperfine:<suffix>` / `npw6/zlib:<suffix>` tags match the tag
+construction in `bench/native/runner.py` and the suffixes of 82 recorded OrbStack
+W6 run IDs. Remove these exact tags only; preserve any other aliases on the same
+image. The labeled uprobes builder image has only its owned alias and was used
+only by the three owned stopped kernel builds. No base image or unknown image
+is selected. Reinspect stopped state and labels before removal, check container
+references before deleting volumes/images, and use no force flag.
