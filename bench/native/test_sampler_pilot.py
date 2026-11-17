@@ -60,7 +60,7 @@ class ObserverControls(unittest.TestCase):
                 pilot._trial_totals(record, 1000)
 
     def test_work_failure_survives_cleanup_failure_and_closes_registry(self):
-        for failure in ('engine', 'registry'):
+        for failure in ('engine', 'registry', 'result-save'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 results = Path(directory)
                 written, engines = [], []
@@ -95,6 +95,11 @@ class ObserverControls(unittest.TestCase):
                 portfolio = SimpleNamespace(manifests={'np-v2/' + name: 'sha256:' + 'a' * 64
                     for name in ('api', 'postgres', 'redis')})
                 identity = {'required_processes': [{'pid': 999999, 'start_identity': 'absent'}]}
+                save = pilot.resource_pilot.save
+                def failing_save(path, value):
+                    if failure == 'result-save' and path.name == 'result.json':
+                        raise OSError('result save failed')
+                    save(path, value)
                 with patch.object(pilot.runner, 'RESULTS', results), \
                      patch.object(pilot.runner, 'CTRS_BIN', pilot.runner.CTRS_BIN), \
                      patch.object(pilot.runner, 'DOCKER', pilot.runner.DOCKER), \
@@ -108,16 +113,18 @@ class ObserverControls(unittest.TestCase):
                      patch.object(pilot.resource_pilot, 'warmup_api'), \
                      patch.object(pilot.resource_pilot, 'verify_binary'), \
                      patch.object(pilot.resource_pilot, 'host_snapshot'), \
+                     patch.object(pilot.resource_pilot, 'save', side_effect=failing_save), \
                      patch.object(pilot.ownership, 'discover', return_value=identity), \
                      patch.object(pilot.ownership, 'process_table', return_value={}), \
                      patch.object(pilot.diagnostic_signals, 'install_cleanup_signals'):
                     with self.assertRaisesRegex(ValueError, 'failed correctness'):
                         pilot.run_calibration(run_id='failed-control', portfolio_layout=results,
                                               ctrs_binary=Path(sys.executable), pairs=1, operations=1000)
-                outcome = json.loads((results / 'failed-control/result.json').read_text())
-                self.assertIn('failed correctness', outcome['error'])
-                self.assertTrue(any(failure + ' cleanup failed' in item for item in outcome['cleanup_errors']))
-                self.assertEqual(outcome['status'], 'failed')
+                if failure != 'result-save':
+                    outcome = json.loads((results / 'failed-control/result.json').read_text())
+                    self.assertIn('failed correctness', outcome['error'])
+                    self.assertTrue(any(failure + ' cleanup failed' in item for item in outcome['cleanup_errors']))
+                    self.assertEqual(outcome['status'], 'failed')
                 self.assertEqual(len(engines), 1)
                 self.assertTrue(engines[0].stopped)
                 self.assertFalse(written[0]['correctness']['ok'])

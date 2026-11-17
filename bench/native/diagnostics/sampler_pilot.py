@@ -203,7 +203,12 @@ def run_calibration(*, run_id, portfolio_layout, ctrs_binary, pairs=5, operation
             if primary is None:
                 raise
         finally:
-            resource_pilot.save(root / 'result.json', result)
+            pending = sys.exc_info()[1]
+            try:
+                resource_pilot.save(root / 'result.json', result)
+            except OSError:
+                if pending is None:
+                    raise
     if result['status'] != 'passed':
         raise RuntimeError('observer control cleanup failed')
     return root
