@@ -121,7 +121,7 @@ class DurationAdmission(unittest.TestCase):
                  patch.object(runner, 'http_json_write', return_value=(200, {})), \
                  patch.object(runner, 'http_json', return_value=(200, {'key': 'mixed-committed', 'value': 'exact-v3', 'cache_match': True})), \
                  patch.object(runner, 'exact_w2_items', side_effect=lambda actual, expected: actual == expected), \
-                 patch.object(runner, 'trial_w4', return_value={'correctness': {'ok': True}}), \
+                 patch.object(runner, 'trial_w4', return_value={'correctness': {'ok': True}, 'metrics': dict(runner.W4_FIXED_WORK)}), \
                  patch.object(mixed_cycle, 'bounded_load_cycle', side_effect=lambda base, cycle, directory, deadline: load(base, cycle, directory)), \
                  patch.object(mixed_cycle.ci_jobs, 'run_condition', return_value=[{}] * 16), \
                  patch.object(mixed_cycle.ci_jobs, 'cleanup') as cleanup:
@@ -186,6 +186,11 @@ class DurationAdmission(unittest.TestCase):
                 self.assertEqual(cleanup.call_count, 6)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
             self.assertEqual([c['explicitly_deleted_writes'] for c in result['cycles']], [1, 1])
+            for cycle in result['cycles']:
+                self.assertEqual(cycle['queue_jobs'], 200)
+                self.assertEqual(cycle['queue_events'], 12800)
+                self.assertEqual(cycle['artifacts'], 400)
+                self.assertEqual(cycle['build_jobs'], 16)
             for index in range(2):
                 directory = root / 'orbstack' / f'cycle-{index}'
                 self.assertEqual(len(json.loads((directory / 'persisted-items.json').read_text())), 1)

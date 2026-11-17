@@ -20,6 +20,7 @@ import watch_loop
 import collect
 import resource_cells
 import ci_jobs
+from fixtures.w4 import app as w4_fixture
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
 import base64
@@ -1748,6 +1749,13 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
             rec['resources']['trace'] = _trace_ref(trace)
 
 
+W4_FIXED_WORK = {
+    'jobs': w4_fixture.JOBS,
+    'events': w4_fixture.JOBS * w4_fixture.EVENTS,
+    'artifacts': w4_fixture.JOBS * len(w4_fixture.filenames(1)),
+}
+
+
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
              image_ref: str = "np-w4-events:v2", redis_ref: str = W4_IMAGE,
@@ -1814,11 +1822,12 @@ def trial_w4(ctx, engine: Engine, state: str,
             verify = engine.sh(["run", "--rm", "--name", verifier, "--label", label, "--network", net,
                                 "-v", f"{volume}:/output:ro", image, "verify", "--redis-host", queue], timeout=180, check=False)
             checks[f"workers_{count}"] = (all(cp.returncode == 0 for cp in outcomes)
-                                           and verify.returncode == 0 and verify.stdout.strip() == "verified 200")
+                                           and verify.returncode == 0
+                                           and verify.stdout.strip() == f"verified {W4_FIXED_WORK['jobs']}")
             (trial_dir / f"workers-{count}.json").write_text(json.dumps({
                 "workers": [{"exit": cp.returncode, "stderr": cp.stderr} for cp in outcomes],
                 "verification_exit": verify.returncode, "verification": verify.stdout + verify.stderr}))
-        rec["metrics"].update(jobs=200, events=12800, artifacts=400, fixture_version=fixture_version)
+        rec["metrics"].update(W4_FIXED_WORK, fixture_version=fixture_version)
         rec["correctness"]["ok"] = all(checks.get(f"workers_{n}") for n in workers)
     except Exception as exc:
         rec["correctness"]["ok"] = False

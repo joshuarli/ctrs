@@ -269,7 +269,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     if failures:
                         raise RuntimeError('; '.join(failures))
                     api_writes, queue_result, jobs = (outcomes[name] for name in ('api', 'queue', 'build'))
-                    if not queue_result['correctness']['ok'] or len(jobs) != 16:
+                    if not queue_result['correctness']['ok'] or len(jobs) != ci_jobs.SPEC['fixed_jobs']:
                         raise RuntimeError('mixed queue/build work failed')
             finally:
                 cycle_failure = sys.exc_info()[1]
@@ -320,10 +320,12 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 except OSError as exc:
                     observed['interval'] = {'status': 'unknown', 'errors': ['observation write: ' + repr(exc)]}
             total_writes += len(api_writes)
+            queue_metrics = queue_result['metrics']
             rec['cycles'].append({'cycle': cycle, 'successful_operations': OPERATIONS,
                 'acknowledged_writes': len(api_writes), 'cumulative_writes': total_writes,
                 'explicitly_deleted_writes': len(api_writes), 'retained_seed_rows': 500,
-                'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
+                'queue_jobs': queue_metrics['jobs'], 'queue_events': queue_metrics['events'],
+                'artifacts': queue_metrics['artifacts'], 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
             cycle += 1
         rec['work_loop_ended_monotonic'] = time.monotonic()
         if not rec['cycles']:

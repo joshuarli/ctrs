@@ -184,7 +184,8 @@ class CompletedLeg(unittest.TestCase):
         phases = {}
         for index, row in enumerate(fixture.rows):
             start = 10. + index * 7200
-            cycles.append({'cycle': row['cycle'], 'successful_operations': 5000, 'exact_state': True})
+            cycles.append({'cycle': row['cycle'], 'successful_operations': 5000, 'exact_state': True,
+                           'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': 16})
             phases[f'cycle_{index}_mixed_work'] = {
                 'operation_started_monotonic': start, 'operation_ended_monotonic': start + 7150,
             }
@@ -241,6 +242,20 @@ class CompletedLeg(unittest.TestCase):
                 mutate(record)
                 issues = gate.leg_issues(record, work_deadline=deadline, completed_monotonic=deadline + 1)
                 self.assertTrue(issues)
+
+    def test_every_cycle_requires_complete_queue_and_build_work(self):
+        deadline = 10 + gate.MINIMUM_WORK_SECONDS
+        for field in ('queue_jobs', 'queue_events', 'artifacts', 'build_jobs'):
+            for value in (None, 0, True):
+                with self.subTest(field=field, value=value):
+                    record = self.record()
+                    cycle = record['cycles'][1]
+                    if value is None:
+                        del cycle[field]
+                    else:
+                        cycle[field] = value
+                    issues = gate.leg_issues(record, work_deadline=deadline, completed_monotonic=deadline + 1)
+                    self.assertTrue(any(field in issue for issue in issues), issues)
 
 
 class ToolIdentity(unittest.TestCase):
