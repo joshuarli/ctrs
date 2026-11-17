@@ -256,13 +256,75 @@ if __name__ == "__main__":
 
 class NormalizedW2Tests(unittest.TestCase):
     def test_efficiency_uses_raw_normalized_metric_and_omits_total_cpu(self):
-        rows = pair(case="W2", metric="cpu_seconds_per_success", ratio=1.2)
+        rows = pair(case="W2", metric="cpu_seconds_per_success", ratio=0.001)
+        for row, cpu in zip(rows, (12, 10)):
+            row["resources"]["phases"] = {"workload": {"cpu_seconds": cpu, "errors": []}}
+            row["metrics"].update(requests_ok=100, reads_ok=70, writes_ok=30, errors=0)
         rows[0]["resources"]["cpu_seconds_est"] = .1
         rows[1]["resources"]["cpu_seconds_est"] = 100
         report = reporting.analyze(rows)
         metrics = {m["metric"]: m for m in report["cohorts"][0]["metrics"]}
         self.assertEqual(metrics["cpu_seconds_per_success"]["ratio_median"], 1.2)
         self.assertNotIn("cpu_seconds_est", metrics)
+
+        for mutate in (
+            lambda r: r["resources"].pop("phases"),
+            lambda r: r["resources"]["phases"]["workload"].update(errors=["missing VM"]),
+            lambda r: r["metrics"].update(requests_ok=99),
+            lambda r: r["metrics"].update(errors=1),
+            lambda r: r["metrics"].update(requests_ok=101, reads_ok=71),
+        ):
+            bad = copy.deepcopy(rows)
+            mutate(bad[0])
+            result = metric_result(reporting.analyze(bad), "cpu_seconds_per_success")
+            self.assertIsNone(result["ratio_median"])
+            self.assertTrue(result["missing_reasons"])
+
+    def test_resource_coverage_and_noise_reporting(self):
+        rows = [r for n in range(1, 11) for r in pair(n)]
+        for row in rows:
+            row["resources"].update(peak_phys_footprint_bytes=100, cpu_seconds_est=10,
+                                    peak_total_rss_kb=20, ownership_verified=True,
+                                    resource_errors=[], footprint_field="phys_footprint",
+                                    cpu_counters_complete=True)
+        rows[0]["resources"].update(peak_phys_footprint_bytes=.01, ownership_verified=False,
+                                    resource_errors=["missing VM"])
+        rows[2]["resources"]["footprint_field"] = "category_table"
+        rows[4]["resources"]["cpu_counters_complete"] = False
+        report = reporting.analyze(rows)
+        for name in ("peak_phys_footprint_bytes", "cpu_seconds_est"):
+            result = metric_result(report, name)
+            self.assertIsNone(result["ratio_median"])
+            self.assertTrue(result["missing_reasons"])
+            self.assertIn(name, reporting.render_markdown(report))
+        self.assertEqual(metric_result(report)["valid_pairs"], 10)
+        self.assertEqual(metric_result(report, "peak_total_rss_kb")["valid_pairs"], 10)
+        good = reporting.analyze(rows[6:])
+        self.assertEqual(metric_result(good, "peak_phys_footprint_bytes")["ratio_median"], 1)
+        self.assertEqual(metric_result(good, "cpu_seconds_est")["ratio_median"], 1)
+        for updates, name, reason in (
+            ({"ownership_verified": False, "resource_errors": ["missing VM"]}, "peak_phys_footprint_bytes", "missing VM"),
+            ({"footprint_field": "category_table"}, "peak_phys_footprint_bytes", "footprint field"),
+            ({"cpu_counters_complete": False}, "cpu_seconds_est", "CPU counters"),
+        ):
+            bad = copy.deepcopy(rows[6:8])
+            bad[0]["resources"].update(updates)
+            result = metric_result(reporting.analyze(bad), name)
+            self.assertIsNone(result["ratio_median"])
+            self.assertIn(reason, result["missing_reasons"][0]["reason"])
+        legacy = pair()
+        for row in legacy:
+            row["resources"].update(peak_phys_footprint_bytes=100, cpu_seconds_est=10)
+        for name in ("peak_phys_footprint_bytes", "cpu_seconds_est"):
+            result = metric_result(reporting.analyze(legacy), name)
+            self.assertEqual(result["assessment"], "unmeasured")
+            self.assertIsNone(result["ratio_median"])
+        noise = noise_pair()
+        for row in noise:
+            row["resources"].update(rows[0]["resources"])
+        result = metric_result(reporting.analyze_noise(noise), "peak_phys_footprint_bytes")
+        self.assertIsNone(result["ratio_median"])
+        self.assertIn("missing VM", reporting.render_noise_markdown(reporting.analyze_noise(noise)))
 
 
 class InvalidMeasurementTests(unittest.TestCase):

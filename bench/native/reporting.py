@@ -112,9 +112,35 @@ def _number(value: object) -> bool:
 
 
 def _metric(record: dict, name: str):
+    resources = record.get("resources", {})
+    if name in ("peak_phys_footprint_bytes", "cpu_seconds_est"):
+        if resources.get("ownership_verified") is not True:
+            return None, "ownership not verified: " + str(resources.get("resource_errors", "missing resource errors"))
+        if resources.get("resource_errors") != []:
+            return None, "resource errors or missing error metadata: " + str(resources.get("resource_errors"))
+        if name == "peak_phys_footprint_bytes" and resources.get("footprint_field") != "phys_footprint":
+            return None, "footprint field is not phys_footprint"
+        if name == "cpu_seconds_est" and resources.get("cpu_counters_complete") is not True:
+            return None, "CPU counters incomplete or missing completeness metadata"
+    if name == "cpu_seconds_per_success" and record.get("case") == "W2":
+        phases = resources.get("phases")
+        phase = phases.get("workload") if isinstance(phases, dict) else None
+        if not isinstance(phase, dict) or phase.get("errors") != []:
+            return None, "workload CPU boundary errors or missing phase: " + str(phase.get("errors") if isinstance(phase, dict) else None)
+        cpu = phase.get("cpu_seconds")
+        if not _number(cpu) or cpu <= 0:
+            return None, "invalid workload CPU seconds"
+        metrics = record.get("metrics", {})
+        counts = [metrics.get(key) for key in ("requests_ok", "reads_ok", "writes_ok", "errors")]
+        if any(type(value) is not int or value < 0 for value in counts):
+            return None, "missing or invalid W2 success/failure counts"
+        requests, reads, writes, errors = counts
+        if not requests or reads + writes != requests or errors:
+            return None, "W2 success counts disagree or failures occurred"
+        return cpu / requests, None
     container = "resources" if name in RESOURCE_METRICS else "metrics"
     value = record.get(container, {}).get(name)
-    return value if _number(value) else None
+    return (value, None) if _number(value) and value > 0 else (None, "missing or invalid numeric value")
 
 
 def _resource_mismatch(a: dict, b: dict) -> bool:
@@ -217,11 +243,18 @@ def _analyze_cohort(identity: dict, records: list[dict],
         metrics.append("build_empty_s")
     hard_failure = any(info["failed"] for info in result["engines"].values())
     for metric in metrics:
-        ratios, missing = [], []
+        ratios, missing, missing_reasons = [], [], []
         for pair_id, a, b in valid:
-            left, right = _metric(a, metric), _metric(b, metric)
-            if left is None or right is None or left <= 0 or right <= 0:
+            left, left_reason = _metric(a, metric)
+            right, right_reason = _metric(b, metric)
+            if metric == "cpu_seconds_per_success" and left is not None and right is not None:
+                keys = ("requests_ok", "reads_ok", "writes_ok")
+                if any(a["metrics"][key] != b["metrics"][key] for key in keys):
+                    left_reason = "W2 useful work counts differ within pair"
+            if left_reason or right_reason:
                 missing.append(pair_id)
+                missing_reasons.append({"pair_id": pair_id, "reason": "; ".join(
+                    f"{side}: {reason}" for side, reason in zip(sides, (left_reason, right_reason)) if reason)})
                 continue
             ratios.append(right / left if metric in HIGHER_BETTER else left / right)
         low, high = bootstrap_ci(ratios)
@@ -234,11 +267,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
             assessment = "invalid"
         elif missing:
             assessment = "unmeasured" if not ratios else "incomplete"
+        complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success")
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
-            "missing_pairs": missing, "assessment": assessment,
-            "ratio_median": statistics.median(ratios) if ratios else None,
-            "ci95": [low, high] if len(ratios) >= 2 else None,
+            "missing_pairs": missing, "missing_reasons": missing_reasons, "assessment": assessment,
+            "ratio_median": statistics.median(ratios) if ratios and complete_resource else None,
+            "ci95": [low, high] if len(ratios) >= 2 and complete_resource else None,
             "evidence_status": "pilot", "promotion_eligible": False,
         })
     return result
@@ -377,6 +411,9 @@ def render_markdown(report: dict) -> str:
                 ci = metric["ci95"]
                 interval = f"[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else "unmeasured"
                 lines.append(f"| {metric['metric']} | {metric['valid_pairs']} | {len(metric['missing_pairs'])} | {ratio} | {interval} | {metric['assessment']} |")
+            lines.append("")
+            for metric in cohort["metrics"]:
+                lines += [f"- {metric['metric']}, pair {item['pair_id']}: {item['reason']}." for item in metric["missing_reasons"]]
     return "\n".join(lines) + "\n"
 
 
@@ -413,6 +450,9 @@ def render_noise_markdown(report: dict) -> str:
                 lines.append(f"| {metric['metric']} | {metric['valid_pairs']} | "
                              f"{len(metric['missing_pairs'])} | {ratio} | {interval} | "
                              f"{metric['assessment']} |")
+            lines.append("")
+            for metric in cohort["metrics"]:
+                lines += [f"- {metric['metric']}, pair {item['pair_id']}: {item['reason']}." for item in metric["missing_reasons"]]
     return "\n".join(lines) + "\n"
 
 
