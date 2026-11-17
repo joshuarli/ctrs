@@ -73,3 +73,20 @@ exclude live children and are not phase-aligned client totals. CLI footprint,
 sampler overhead and active backing allocation remain excluded.
 Sampled footprint is not a continuous peak. Host snapshots accompany
 the run, which remains ineligible for qualification and makes no timing claim.
+
+`--under-load` selects the separate `w8-v4-under-pull` instrumented history.
+It starts an independent project from the original v2 API, PostgreSQL and Redis
+config IDs and checks their DiffIDs, application hashes and workload inputs.
+The project uses its own network and volume; images are never built or pulled
+for this stack. A separate client runs the pinned W2 worker for 50,000 attempts,
+four workers, write ratio 0.3 and seed 7. Its first successful completion admits
+pulls. Every pull/install interval must contain a successful completion, and
+fixed work, error counts and every acknowledged database payload must verify.
+Early completion or missing overlap fails the run; no work or pairs are extended.
+
+The client records every successful latency with its callback completion time,
+acknowledged writes, errors, stdout and stderr. Interval percentiles describe
+requests observed completing during a pull; callback time does not establish an
+exact request start. The sampler covers baseline setup, pulls, verification and
+cleanup. Waited-child CPU remains diagnostic and does not cover all client work.
+This fixture is not a qualification or all-client footprint claim.

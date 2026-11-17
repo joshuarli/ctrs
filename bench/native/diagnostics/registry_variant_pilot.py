@@ -1,6 +1,6 @@
 """Verify complete derived W8 transfers and exact native application outputs."""
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -19,6 +19,7 @@ import resource
 import resource_cycles
 import runner
 from diagnostics.registry_pilot import deploy, save
+from diagnostics import w8_under_pull
 from diagnostics.resource_pilot import host_snapshot
 
 
@@ -167,6 +168,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--layout', type=Path, required=True)
     parser.add_argument('--ctrs-binary', type=Path, required=True)
+    parser.add_argument('--under-load', action='store_true')
     args = parser.parse_args()
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')
@@ -181,7 +183,7 @@ def main():
     run = 'w8-unique-' + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run
     root.mkdir()
-    save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v3',
+    save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v4-under-pull' if args.under_load else 'w8-v3',
         'receipt': receipt, 'reason': 'functional resource diagnostic; timing and guest pre-content absence unqualified',
         'resource_scope_version': 'w8-engine-fixture-v1',
         'resource_scope': 'warm engine plus native registry/coordinator process; excludes boot/preconditioning, CLI footprint, sampler and active backing allocation; waited-child CPU disclosed separately'})
@@ -203,6 +205,8 @@ def main():
                 for repository in portfolio.manifests for kind in ('pre_pull_inspection', 'pull_install', 'markers')] + [
                 'identity_verification', 'stack_health', 'load_1000', 'persistence_recovery',
                 'marked_verification', 'owned_cleanup', 'retained_identity']
+            if args.under_load:
+                names += ['under_pull_setup', 'under_pull_verification', 'under_pull_cleanup']
             result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
             try:
                 host_snapshot(directory, 'before')
@@ -219,39 +223,52 @@ def main():
                                 'redis:7-alpine', 'np-w5-marked:v2']
                     retained_before = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                     save(directory / 'retained-before.json', retained_before)
-                for repository, digest in portfolio.manifests.items():
-                    short = repository.rsplit('/', 1)[1]
-                    image = receipt['images'][repository]
-                    ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
-                    with phase('pre_pull_inspection_' + short):
-                        missing = engine.sh(['image', 'inspect', image['config']], check=False)
-                        save(directory / (short + '-pre-image.json'), {
-                            'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
-                        require_missing_image(missing)
-                    with phase('pull_install_' + short):
-                        begin = len(portfolio.transfers)
-                        cp = engine.sh(['pull', ref], timeout=240, check=False)
-                        transfers = portfolio.transfers[begin:]
-                        result['pulls'].append({'ref': ref, 'exit': cp.returncode,
-                            'stdout': cp.stdout, 'stderr': cp.stderr, 'transfers': transfers})
-                        if cp.returncode:
-                            raise ValueError('pull failed')
-                        require_layers_transferred(image['layers'], portfolio.transfers[engine_transfer_start:])
-                    with phase('markers_' + short):
-                        markers = {item['digest']: item for item in receipt['layers']}
-                        selected = [markers[layer['digest']] for layer in image['layers']]
-                        container = runner.project_name(run, name, 'marker-' + short)
-                        try:
-                            marker_output = engine.sh(['run', '--rm', '--name', container, '--pull=never',
-                                '--label', 'dev.ctrs.campaign.run=' + run, '--entrypoint', 'cat', ref,
-                                *['/' + item['marker'] for item in selected]], timeout=90).stdout
-                            if marker_output != ''.join(receipt['seed_sha256'] + '\n' +
-                                    item['source_diff_id'] + '\n' for item in selected):
-                                raise ValueError('installed marker contents differ')
-                        finally:
-                            ci_jobs.cleanup(engine, container, run)
-                    refs[short] = ref
-                    save(directory / 'result.json', result)
+                context = w8_under_pull.baseline(engine, directory, run, contract, phase) if args.under_load else nullcontext(None)
+                with context as load:
+                    for repository, digest in portfolio.manifests.items():
+                        short = repository.rsplit('/', 1)[1]
+                        image = receipt['images'][repository]
+                        ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
+                        with phase('pre_pull_inspection_' + short):
+                            missing = engine.sh(['image', 'inspect', image['config']], check=False)
+                            save(directory / (short + '-pre-image.json'), {
+                                'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
+                            require_missing_image(missing)
+                        with phase('pull_install_' + short):
+                            begin = len(portfolio.transfers)
+                            if load is not None and load['process'].poll() is not None:
+                                raise RuntimeError('client finished before pull')
+                            interval = {'name': short, 'begin_monotonic': time.monotonic()}
+                            try:
+                                remaining = load['deadline_monotonic'] - time.monotonic() if load is not None else 240
+                                if remaining <= 0:
+                                    raise TimeoutError('client deadline expired before pull')
+                                cp = engine.sh(['pull', ref], timeout=min(240, remaining), check=False)
+                            finally:
+                                interval['end_monotonic'] = time.monotonic()
+                                if load is not None:
+                                    load['intervals'].append(interval)
+                            transfers = portfolio.transfers[begin:]
+                            result['pulls'].append({'ref': ref, 'exit': cp.returncode,
+                                'stdout': cp.stdout, 'stderr': cp.stderr, 'transfers': transfers})
+                            if cp.returncode:
+                                raise ValueError('pull failed')
+                            require_layers_transferred(image['layers'], portfolio.transfers[engine_transfer_start:])
+                        with phase('markers_' + short):
+                            markers = {item['digest']: item for item in receipt['layers']}
+                            selected = [markers[layer['digest']] for layer in image['layers']]
+                            container = runner.project_name(run, name, 'marker-' + short)
+                            try:
+                                marker_output = engine.sh(['run', '--rm', '--name', container, '--pull=never',
+                                    '--label', 'dev.ctrs.campaign.run=' + run, '--entrypoint', 'cat', ref,
+                                    *['/' + item['marker'] for item in selected]], timeout=90).stdout
+                                if marker_output != ''.join(receipt['seed_sha256'] + '\n' +
+                                        item['source_diff_id'] + '\n' for item in selected):
+                                    raise ValueError('installed marker contents differ')
+                            finally:
+                                ci_jobs.cleanup(engine, container, run)
+                        refs[short] = ref
+                        save(directory / 'result.json', result)
                 result['deployment'] = deploy(engine, refs, layout, directory, run, contract, phase=phase)
                 with phase('retained_identity'):
                     retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
