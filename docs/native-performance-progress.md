@@ -4,8 +4,32 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** published-port versus guest-peer profiling. Affinity diagnostics
-completed; [evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
+**Current action:** canonical observer confirmation, using the newly quiet host.
+Client-path and host-accounting probes are complete; see
+[the boundary evidence](evidence/native-w2-boundaries-2026-11-16.md).
+The client-path screen found no consistent 10% API CPU contrast; native V6
+observations put the ctrs VM above 95% performance-core time, without a credible
+QoS deficit. No forwarding or priority policy is selected. Host preflight now
+returns exit 0 with empty stderr and OrbStack has no running containers.
+
+**Exact continuation:** `TMPDIR=$PWD/.work/tmp python3.14 .work/tmp/w2-observer-clean-20261116/launch.py`.
+First inspect `.work/tmp/w2-observer-clean-20261116/job`: if it exists, inspect its
+spec/terminal receipt once and never duplicate the job. The saved coordinator
+predeclares ten 50k blocks, both engines/off-on with alternating engine/mode order,
+canonical 49Hz profiling, and strict external pre/post gates. It stops at the
+first invalid gate or workload failure, retaining partial/failed blocks without
+replacement. Deadline 3,600s, workload budget 3,300s, cleanup grace 240s.
+All source/assets in `inputs.json` are frozen until terminal. No V6 subprocess
+probe is added to this confirmation. Avoid local builds, tests and other loads.
+Then inspect every trial's host snapshots for unrelated work, require all ten
+valid whole pairs, and compute per-engine median on/off API CPU, engine CPU and
+wall ratios with paired 95% intervals against the 5% observer budget. This can
+qualify the observer only; it cannot qualify the full performance matrix.
+If host load or unresolved observer noise prevents selection, profile the
+default-build zlib boundary rather than repeat rejected kernel/client/QoS guesses.
+
+Affinity diagnostics completed;
+[evidence](evidence/native-affinity-2026-11-16.md) retains all nine blocks.
 The subsequent [LSE-only experiment](evidence/native-lse-2026-11-16.md) is REJECTED
 for promotion: three complete pairs/600k correct operations and valid actual-boot
 and runtime-LSE audits, but no required API/engine CPU reduction. All 84 input
@@ -14,14 +38,12 @@ exit 0, cleanup complete. Private kernel branch/assets are retained, unmerged;
 do not repeat or expand this weak candidate into resource/full-build confirmation.
 The earlier serial-audit failure remains separate and preserved in the evidence.
 
-**Active native job:** `.work/tmp/w2-client-path-explore-20261116/job`, durable ID
-`20c045e9e8f84ccbaf4c7fe98a4fc7a3`, fixed 5,400s deadline. Six blocks rotate host
+Completed native job `.work/tmp/w2-client-path-explore-20261116/job`, durable ID
+`20c045e9e8f84ccbaf4c7fe98a4fc7a3`, exits 0, cleanup complete. Six blocks rotate host
 and guest clients over three rounds, both engines and off/on modes, 50k operations
-per phase (24 planned phases/1.2M operations). Default affinity, stock live Image,
-17 vCPUs, 45,091MiB and host binary 37bec61b… remain fixed. `inputs.json` freezes
-all source/assets; do not edit/rebuild them until terminal. Inspect terminal status
-once, audit complete raw pairs, compare API CPU and latency/profile changes by
-client location, then choose the next boundary. The guest variant includes client
+per phase (all 24 phases/1.2M operations correct). Default affinity, stock live Image,
+17 vCPUs, 45,091MiB and host binary 37bec61b… stayed fixed. Frozen inputs are
+unchanged. The guest variant includes client
 CPU in aggregate engine totals, so host-to-guest engine-CPU ratios are invalid.
 Host Python 3.14 versus guest pinned 3.13.18 and changed delivery cadence also
 prevent treating this as pure forwarding-CPU isolation. All timings are unqualified.
