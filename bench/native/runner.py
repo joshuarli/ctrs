@@ -20,6 +20,7 @@ import watch_loop
 import collect
 import resource_cells
 import ci_jobs
+from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
 import base64
 import concurrent.futures
@@ -77,6 +78,7 @@ W1_DIR = FIXTURES / "w1"
 API_DOCKERFILE_DIR = W1_DIR / "api"
 COMPOSE_FILE = W1_DIR / "compose.yaml"
 LOAD_PY = FIXTURES / "w2" / "load.py"
+RATE_LOAD_PY = FIXTURES / "w2" / "v3.py"
 W8_DIR = FIXTURES / "w8"
 W11_CHURN_IMAGE = "python:3.13-slim"
 W3_IMAGE = "postgres:17-alpine"
@@ -924,9 +926,11 @@ def exact_w2_items(actual, writes):
 
 def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
              duration: float, write_ratio: float, seed: int,
-             operations: int | None = None, *,
+             operations: int | None = None, *, request_rate: float | None = None,
              allocation_paths: tuple[Path, ...] = ()) -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
+    span = planned_span(operations, request_rate) if request_rate is not None else None
+    client_source = RATE_LOAD_PY if request_rate is not None else LOAD_PY
     case_id = "W2"
     proj = project_name(ctx.run_id, engine.name, case_id)
     port = free_port()
@@ -937,6 +941,9 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
     trial_dir.mkdir(parents=True, exist_ok=True)
     load_out = trial_dir / "load.json"
     rec = ctx.new_record(engine, case_id, state, trial_dir)
+    if request_rate is not None:
+        rec.setdefault("inputs", {})["load_client"] = {
+            "path": str(client_source.relative_to(REPO)), "sha256": sha256_file(client_source)}
     sampler = trace = None
     t0 = time.monotonic()
     try:
@@ -970,12 +977,13 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             rec["resources"]["disk_allocation"]["before_work"] = resource_cells.allocation_snapshot(allocation_paths)
         with resource_phase(engine, rec, "workload"):
             load = subprocess.run(
-                [sys.executable, str(LOAD_PY), "--url", api,
+                [sys.executable, str(client_source), "--url", api,
                  "--concurrency", str(concurrency), "--duration", str(duration),
                  "--write-ratio", str(write_ratio), "--seed", str(seed),
                  "--out", str(load_out)] +
-                (["--operations", str(operations)] if operations is not None else []),
-                capture_output=True, text=True, timeout=duration + 120)
+                (["--operations", str(operations)] if operations is not None else []) +
+                (["--request-rate", str(request_rate)] if request_rate is not None else []),
+                capture_output=True, text=True, timeout=max(duration, span or 0) + 120)
         app_after = application_cpu()
         rec["resources"]["application_cpu"] = {"before": app_before, "after": app_after,
             "delta": {key: app_after[key] - value for key, value in app_before.items()
@@ -983,7 +991,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         if load_out.exists():
             summary = json.loads(load_out.read_text())
             rec["metrics"].update({
-                "fixture_version": "w2-v2-fixed-work",
+                "fixture_version": summary["fixture_version"],
                 "mode": summary["mode"],
                 "target_operations": operations,
                 "requests_ok": summary["requests_ok"],
@@ -1002,6 +1010,17 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             rec["validation_errors"].append(
                 f"load driver produced no summary: {load.stderr[-300:]}")
             return rec
+
+        if request_rate is not None:
+            rec["metrics"].update(latency_scope=summary["latency_scope"],
+                                  service_latency_ms=summary["service_latency_ms"])
+            rec["metrics"].update({key: summary[key] for key in (
+                "request_rate", "planned_span_s", "schedule_lag_budget_ms",
+                "planned_requests", "offered_requests", "delivered_requests",
+                "late_requests", "offered_rate_valid", "slots")})
+            rec["correctness"]["checks"]["offered_rate_valid"] = summary["offered_rate_valid"]
+            if not summary["offered_rate_valid"]:
+                rec["validation_errors"].append("fixed offered-rate schedule invalid")
 
         phase_cpu = rec["resources"]["phases"]["workload"]["cpu_seconds"]
         rec["metrics"]["workload_cpu_seconds"] = phase_cpu
@@ -1027,7 +1046,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         work_ok = operations is None or summary["requests_ok"] == operations
         rec["correctness"]["checks"]["fixed_work_complete"] = work_ok
         rec["correctness"]["ok"] = bool(count_ok and exact_ok and work_ok and
-                                              load.returncode == 0 and summary["errors"] == 0)
+                                              load.returncode == 0 and summary["errors"] == 0 and
+                                              (request_rate is None or summary["offered_rate_valid"]))
         return rec
     except Exception as exc:
         rec["correctness"]["ok"] = False
@@ -2743,6 +2763,7 @@ def cmd_run(args) -> int:
         kw["image_ref"] = args.image_ref
     if args.case == "W2":
         kw["operations"] = getattr(args, "operations", None)
+        kw["request_rate"] = getattr(args, "request_rate", None)
     if args.case in ("W6", "W7"):
         kw = {"driver": getattr(args, "driver", "default")}
     if args.case == "W8" and getattr(args, "under_load", False):
@@ -2784,6 +2805,7 @@ def cmd_baseline(args) -> int:
                     kw["image_ref"] = args.image_ref
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
+                    kw["request_rate"] = getattr(args, "request_rate", None)
                 if args.case in ("W6", "W7"):
                     kw = {"driver": getattr(args, "driver", "default")}
                 if args.case == "W8" and getattr(args, "under_load", False):
@@ -2943,6 +2965,7 @@ def main() -> int:
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--operations", type=int, default=None, help="W2 fixed total useful operations; omitted = saturation")
+    p.add_argument("--request-rate", type=float, default=None, help="W2 fixed offered requests per second; requires --operations")
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--under-load", action="store_true",
@@ -2966,6 +2989,7 @@ def main() -> int:
     p.add_argument("--concurrency", type=int, default=8)
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--operations", type=int, default=None, help="W2 fixed total useful operations; omitted = saturation")
+    p.add_argument("--request-rate", type=float, default=None, help="W2 fixed offered requests per second; requires --operations")
     p.add_argument("--write-ratio", type=float, default=0.3)
     p.add_argument("--under-load", action="store_true",
                    help="W8: serve W2-style load while images pull")
@@ -3017,6 +3041,16 @@ def main() -> int:
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
     args = ap.parse_args()
+    if getattr(args, "operations", None) is not None:
+        if args.case != "W2" or args.operations <= 0:
+            ap.error("--operations requires W2 and a positive value")
+    if getattr(args, "request_rate", None) is not None:
+        if args.case != "W2":
+            ap.error("--request-rate requires W2")
+        try:
+            planned_span(args.operations, args.request_rate)
+        except ValueError as exc:
+            ap.error(str(exc))
     try:
         manifest = validate_manifest()
     except (OSError, ValueError, KeyError) as exc:
