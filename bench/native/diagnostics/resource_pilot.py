@@ -6,9 +6,11 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import ci_jobs
 import diagnostic_signals
 import mixed_cycle
 import ownership
@@ -83,10 +85,16 @@ class ResourceEngine(runner.Engine):
 
 def warmup_api(engine, ref):
     command = "import json,hashlib,pathlib;print(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in ['/app/app.py','/app/requirements.txt']}))"
-    actual = json.loads(engine.sh(['run', '--rm', '--pull=never', ref, 'python', '-c', command], timeout=90).stdout)
-    if actual != mixed_cycle.PIN['api_files_sha256']:
-        raise ValueError('API contents differ from pin')
-    return actual
+    owner = 'np-resource-warmup-' + uuid.uuid4().hex
+    try:
+        actual = json.loads(engine.sh(['run', '--rm', '--pull=never', '--name', owner,
+            '--label', 'dev.ctrs.campaign.run=' + owner, '--network', 'none',
+            ref, 'python', '-c', command], timeout=90).stdout)
+        if actual != mixed_cycle.PIN['api_files_sha256']:
+            raise ValueError('API contents differ from pin')
+        return actual
+    finally:
+        ci_jobs.cleanup(engine, owner, owner)
 
 
 def main():
@@ -131,7 +139,7 @@ def main():
     source_hashes = {}
     for path in (Path(__file__), Path(runner.__file__), Path(resource_cycles.__file__),
                  Path(resource_cells.__file__), Path(ownership.__file__), runner.COLLECT,
-                 runner.BENCH / 'macos_counters.py', runner.LOAD_PY, Path(mixed_cycle.__file__),
+                 runner.BENCH / 'macos_counters.py', runner.LOAD_PY, Path(mixed_cycle.__file__), Path(ci_jobs.__file__),
                  runner.COMPOSE_FILE, runner.FIXTURES / 'w1/seed.sql',
                  runner.FIXTURES / 'w8-v2/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json'):
         data = path.read_bytes()
@@ -159,12 +167,12 @@ def main():
             (directory / 'containers-before.jsonl').write_text(inventory)
             if inventory.strip():
                 raise RuntimeError('active containers contaminate the resource interval; none were stopped')
+            verify_images(engine, refs, directory)
+            save(directory / 'api-source.json', warmup_api(engine, refs['api']))
             identity = ownership.discover(name, Path(engine.socket.removeprefix('unix://')), engine.dir)
             save(directory / 'running-engine.json', identity)
             if name == 'ctrs':
                 verify_binary(identity, binary_hash)
-            verify_images(engine, refs, directory)
-            save(directory / 'api-source.json', warmup_api(engine, refs['api']))
             paths = active_disk_paths(engine, identity, args.orbstack_storage_file if name == 'orbstack' else [])
 
             def trial(state, operations):
