@@ -23,7 +23,9 @@ success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
 the counters leaves ordinary wake frequency unresolved. The reduced
 wake-entry observer also completed exact work and remains parked because
 observer overhead is unresolved. Main's W2 component suite passes 108
-tests with zero skips. No campaign-owned measured job is active.
+tests with zero skips. Observer job `58086f0fccb04a1c94b4cb4320a4d961`
+owns the measured host. The W11 completed-cycle correction and W8
+retained-image checks are isolated from its frozen inputs.
 
 ## Accepted and verified
 
@@ -54,8 +56,14 @@ tests with zero skips. No campaign-owned measured job is active.
 
 ## Exact next action
 
-Next establish a valid observer comparison before selecting a kernel
-change. Use the pinned C8 fixed-work recipe from the
+Read the terminal status of `58086f0fccb04a1c94b4cb4320a4d961` at
+`.work/tmp/w2-observer-confirmation-20261117/job/status.json`. Preserve
+the 40 declared cells and the 40-minute deadline. Recheck frozen receipts
+and exact per-block payloads, then review the per-cell host and gate
+snapshots before interpreting the on/off paired intervals. The run's
+results are under `.work/native-perf/results/w2-observer-confirmation-20261117`.
+
+Establish a valid observer comparison before selecting a kernel change. Use the pinned C8 fixed-work recipe from the
 [W2 evidence](evidence/native-w2-equal-work-2026-11-17.md#reproduction),
 with the 17-vCPU resource-matched allocation declared above. Predeclare
 ten 50,000-operation blocks and alternate engine and observer order.
@@ -154,8 +162,10 @@ next-action paragraphs from that historical revision.
    cell contract, frozen readiness and 12-hour legs remain open.
    Growth capability
    `81e51d2` and counter-window fix `4fc901b` are already integrated.
-3. W8: strengthen comparable retained/content-absent evidence and complete
-   exclusive paired acceptance. Keep the identity guard, shared per-pair inputs,
+3. W8: the retained-image pin checks at `bc95d96` pass 13 focused tests
+   and validate eight archived native inspections. Integrate after the
+   active W2 job releases its frozen source. Complete exclusive paired
+   acceptance. Keep the identity guard, shared per-pair inputs,
    AB/BA order, actual transfer/deployment and source-state unknowns explicit.
    Never treat a deleted tag as a cold store or pool incompatible fixtures.
 4. Interleave resource-cycle acceptance with W2/W10: declared5 post-warmup cycles,
