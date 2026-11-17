@@ -272,6 +272,37 @@ Raw trial SHA-256
 Job status SHA-256
 `88588bda0251cb8251a7602cc5c31439a20bc85dc3e072cb2753022169b5cb2d`.
 
+## ctrs vCPU topology profile
+
+Job `69619497509b458d9ce16c406dbfcaa2` exited 0. All four cells had the
+same acknowledged writes and exact persisted state, with 200,000 successful
+operations, both private engines stopped and all 161 receipts unchanged.
+The profile replays C8 seed 8 with 1,000 warmup reads and 50,000 mixed
+requests per cell. Use the same two private ctrs daemons as the vCPU-count
+recipe and the 49 Hz profiler call above. Run 2 then 17 vCPUs in each mode.
+
+| vCPUs | Profile | API system, µs/op | API total, µs/op | Work wall, s |
+| ---: | --- | ---: | ---: | ---: |
+| 2 | Off | 57.8 | 276.0 | 15.59 |
+| 17 | Off | 102.8 | 368.2 | 19.10 |
+| 2 | On | 74.6 | 311.2 | 17.68 |
+| 17 | On | 125.8 | 394.4 | 19.91 |
+
+The 2-vCPU profile recorded 48 `wake_up_q` leaves out of 732 samples.
+All 48 landed at `ffff800080078fe4`. The 17-vCPU profile recorded 110
+out of 892, with 109 at the same instruction. The sample-weighted estimates
+were 20.5 and 50.3 µs per request for the whole leaf. These are estimates
+from the profiled runs. The raw and decoded counts matched with no loss or
+throttle records. All nine API threads were sampled on each side.
+
+The associated system CPU gap also appeared with the profiler disabled.
+Profiler-on total API CPU exceeded the off controls by 12.8% and 7.1%.
+The observer budget remains open. Sampled instruction addresses cannot
+distinguish additional wake calls from higher cost per call. Test that
+distinction with the pinned W2 counters and the same vCPU topology before
+selecting another product change. Earlier affinity and LSE results remain
+separate, including the [rejected LSE candidate](native-lse-2026-11-16.md).
+
 ## Reproduction
 
 Reconstruct the signed host and guest assets described in the campaign

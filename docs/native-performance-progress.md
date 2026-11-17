@@ -15,8 +15,9 @@ with no validity errors, while its profiler overhead remained unresolved.
 Capacity-matched fixed work verified all 500,000 operations. The median
 paired API system CPU ratio was 2.020 at 17 vCPUs on both sides.
 The ctrs-only comparison verified all 500,000 operations and put the
-17-vCPU versus 2-vCPU API system CPU ratio at 1.736. Topology profile
-`69619497509b458d9ce16c406dbfcaa2` owns the measured host.
+17-vCPU versus 2-vCPU API system CPU ratio at 1.736. The topology profile
+reproduced the wake leaf concentration at 17 vCPUs. W11 v4 functional
+job `a9856e75b2144596af2c5415301eee49` owns the measured host.
 
 ## Accepted and verified
 
@@ -47,16 +48,23 @@ The ctrs-only comparison verified all 500,000 operations and put the
 
 ## Exact next action
 
-Read the terminal status for profile `69619497509b458d9ce16c406dbfcaa2`
-at `.work/tmp/w2-vcpu-profile-20261117/job/status.json`. It compares ctrs
-at 2 and 17 vCPUs at the same 8,192 MiB ceiling, replaying 50,000 requests
-at concurrency 8 and seed 8 in each profiler-off and profiler-on cell.
-Recheck frozen inputs, exact writes, actual guest capacity, loaded boot
-assets and both profile traces. Compare API system task ticks and the
-`wake_up_q` leaf by instruction. Keep timer overhead and busy-host limits
-with the result. Then run the parked W11 v4 native observation proof in
-ready queue item 2. A separate W2 invocation-count experiment can test
-whether wake-call frequency changed without probing the exclusive sequence.
+Read W11 v4 functional job `a9856e75b2144596af2c5415301eee49` at
+`.work/tmp/w11-v4-functional-20261117/job/status.json`. It uses parked
+`campaign/w11-required-cells-20261117` at `8aa9b65`, two cycles per
+engine and a 30-second post-cleanup observer interval per cycle. Verify
+20,000 successful API operations, 800 queue jobs, 1,600 exact artifacts,
+64 build/test jobs, stable identities and complete teardown. Verify measured
+physical footprint and FD observations. OrbStack allocated storage
+stays unknown without an identified backing file, and five post-warmup
+cycles are required for a growth judgment.
+
+Resume W2 after the short W11 proof. Use the existing pinned counters to
+compare wake-call frequency per success on 2 and 17 ctrs vCPUs at an
+8,192 MiB memory ceiling. Reuse C8 seed 8 and off/on controls. Keep counts,
+sampled time, and off-CPU waits distinct. Preserve all profiler overhead
+and host interference. Probe syscall entry and return through the existing
+harness, outside the exclusive sequence. The completed topology profile
+does not establish exclusive-store retry counts.
 
 W11 v3's reviewed short proof is complete:
 [exact results and command](evidence/native-mixed-retention-2026-11-17.md).
