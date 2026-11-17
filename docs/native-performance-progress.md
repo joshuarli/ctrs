@@ -20,19 +20,27 @@ Image sizes are 18,800,648 and 19,324,936 bytes. Live guest assets are untouched
 Build receipts/scripts: `.work/wt/np-lse-only/.work/kernel-lse/`; job status SHA
 `e52ed87f972d55f79e9af45f6e6d2a0a6128df6acab4c706e1b223693ce76ce7`.
 
-**Active native job:** `.work/tmp/w2-lse-explore-20261116/job`, durable ID
-`d84c65c59c2c4547b0178afe639b1ac8`, 3,600s fixed deadline. It runs three balanced
+**Active native job:** `.work/tmp/w2-lse-explore-v2-20261116/job`, durable ID
+`7edd9d98fb3648d38b4750e8b955801d`, 3,600s fixed deadline. It runs three balanced
 stock/LSE pairs, 50k fixed operations per off/on phase, default API affinity,
 17 vCPUs, 45,091MiB and identical host binary 37bec61b…/application inputs.
 Private guest directories share unchanged initrd/template. The saved coordinator
 audits actual open kernel/initrd hashes, guest atomics advertisement and runtime
-LSE detection from the boot console; audit/workload failure stops without replacement.
+LSE detection from the full guest kernel log; audit/workload failure stops without replacement.
 Source and assets in `inputs.json` are frozen until terminal. Hardware/console
-capture landed as d9b723b/23ede66; 12 focused CPU tests and the 44-test W2 check
+capture landed as d9b723b/23ede66, full ring-log repair 09fb5a0; 12 focused CPU tests and the 44-test W2 check
 pass. On resume inspect terminal status once, audit complete raw pairs and CPU/
 wall/tail guards against the preregistered private `plan.md`, retain all failures,
 then decide the next confirmation/noise investigation. Timings are deliberately
 unqualified on this busy host. No kernel change is promoted.
+
+The original LSE job `d84c65c59c2c4547b0178afe639b1ac8` is terminal exit 1 with
+cleanup complete, preserved at `.work/tmp/w2-lse-explore-20261116/`. Its first
+stock/candidate pair completed all four exact 50k phases and matched actual boot
+hashes, but the candidate feature audit failed: serial capture begins after early
+boot feature messages. The original failure remains intact and is not pooled
+into the fresh batch. Source 09fb5a0 reads the bounded full kernel ring using
+non-clearing syslog actions READ_ALL/SIZE_BUFFER; the LSE runtime check is unchanged.
 
 Resume steering: storage repair, pinned W8 warmup, service-resource coverage and
 fixed under-pull work are accepted below. W8 paired execution/reporting is
