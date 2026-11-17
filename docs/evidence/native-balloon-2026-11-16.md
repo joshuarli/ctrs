@@ -224,6 +224,10 @@ computed from each scenario's before/after deltas, is -9,584,616 and 1,654,808
 bytes in the two pairs. Neither reaches the predeclared 512MiB minimum. Available
 memory remains 264–270MB and sampled physical peaks stay around 2.6–2.7GB.
 This diagnostic establishes no pressure-dependent reclaim or speed claim.
+All recorded `compact_*` vmstat counters remain zero in both conditions:
+the accepted sysctl write establishes no observed page scanning or migration.
+The result therefore rejects useful reclaim in this bounded case, without
+testing a fragmented workload that actually performs compaction.
 No compaction action or new wire message is added to the product. Continue
 pinned resource/installed-default acceptance rather than expanding this weak
 kernel hypothesis. Analysis SHA-256:

@@ -4,7 +4,7 @@
 
 **ACTIVE 2026-11-16 — owner authorized resume from HEAD. Campaign not complete.**
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
-**Current action:** freeze service inputs in the bounded resource-cycle fixture.
+**Current action:** measure pinned default-policy W2 resource growth and reclaim.
 The W2 observer job c8051c089948484b9de838819d6812fe exited 1 before its first
 block on the strict host gate. The attribution probe found active guest rustc
 processes; OrbStack also reports a running unrelated Linux machine. An empty
@@ -91,28 +91,33 @@ default resource gates remain open. The latest timing preflight reported hot
 unrelated Niceforge work and the OrbStack Linux machine remains running; timing
 is deferred, never a pass. Preserve user work.
 
-**Exact continuation:** inspect source worker
-`usrw_25d0ca4b-7cd8-4e5c-9708-1bbf4520ccd5` in
-`.work/wt/np-resource-pins`, branch `fix/np-resource-pins`, base
-`aa5b6741448204d93349a82d4b159127a3d80eb6`.
-Its watch is registered; do not launch a replacement. It owns only
-`bench/native/diagnostics/resource_pilot.py`, new
-`bench/native/test_resource_pilot.py`, and `bench/native/diagnostics/resources.md`.
-The task requires explicit frozen image refs and ctrs binary, pinned installed
-content/native architecture/API sources, no implicit pull/build, actual running
-binary checks, and focused nonempty no-skip tests. Resource budgets, cleanup,
-unknown accounting, engine-block ordering and diagnostic status must remain.
-No engines/native jobs/full suites/dependencies/shared runner redesign authorized
-for this lane. Parent must review its entire base diff including commits,
-untracked paths, scope and exact proof once, then run the narrow module as
-needed before integration. No measured native job is active.
+Resource source worker `usrw_25d0ca4b-7cd8-4e5c-9708-1bbf4520ccd5` is terminal
+with accepted scoped commits f33ed41 and 0783b43, integrated as e974f63/44901ff.
+Parent reviewed the initial diff and correction, including clean scope and proof.
+Pinned images/API/binary and owned warmup are enforced; discovery follows lazy
+VM boot. Shared Compose fallback now checks exact project labels/container IDs
+(22ef421). Bounded `runner.py check resources` passes 63 tests/zero skips in
+1.670s, including the new pin and cleanup regressions; full suites remain manual.
 
-After source acceptance, prepare the pinned portfolio in an owned isolated root
-if needed and run the smallest explicit native functional resource scenario.
+The [resource evidence](evidence/native-resource-cycles-2026-11-17.md) records
+native job 0431cc8761244eb6950637c7736a01fb: exit0, clean teardown, complete
+counter/application coverage for two 3-second cycles, all 87 receipts unchanged.
+It deliberately leaves growth unknown below five cycles. Explicit 2CPU/8192MiB
+and default sleep/quiet settings use candidate host fda62467/initrd6ae4d3ab;
+the existing isolated image/build cache is retained and disclosed.
+
+**Exact continuation:** consume the registered status watch for native job
+bc957b41bea04c02b46620b63b3f54f8, `.work/tmp/resource-five-cycles-20261117/job`.
+It runs the same frozen candidate/inputs with five cycles, 1,000 work and 200
+next-use operations, 30-second initial/reclaim intervals. It is diagnostic,
+not full qualification. Review summary/budget outcomes, counter completeness,
+actual running artifacts, pre/post host validity and all input receipts once.
+Keep any failed cell; do not rerun until green. Pursue demonstrated resource
+growth or installed-default sleep/wake accounting next. No source worker active.
+
 Do not stop user containers or silently adopt wrong binary/assets. Preserve
-failures, default-sleep/identity unknowns, active-disk ownership and installed-
-default versus resident controls. Then five-cycle/30s minimum resource evidence
-with frozen inputs and host validity; full qualification remains manual-only.
+default-sleep/identity unknowns, active-disk ownership and installed-default
+versus resident controls. Full qualification remains manual-only.
 Canonical W2 observer confirmation still needs a genuinely exclusive window.
 Do not repeat completed W7/build/compression/compaction matrices or unchanged
 short W11 proofs. Keep `/private/tmp/ctrs-w6-vendor-20261116` for provenance.
