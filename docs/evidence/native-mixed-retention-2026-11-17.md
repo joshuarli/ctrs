@@ -219,3 +219,34 @@ Use the configured `CTRS_GUEST_DIR` and keep the job directory short enough for
 its private Unix socket. For OrbStack, choose `--engine orbstack` and repeat
 `--orbstack-storage-file` for the covered backing files. Admit each leg with
 its own fresh host-conditions review and a new job directory.
+
+## Qualification coverage
+
+Parked `campaign/w11-bind-completed-cycles` at `c068fba` adds 342 mandatory
+W1–W10 cell identities in `bench/native/qualification-cells.json`. Together
+with `bench/native/w11-cells.json`, the admission gate requires 349 cells.
+Each identity specifies a workload, state, load, metric, dimension and unit.
+Use the actual pinned fixture version in each readiness cell. Keep additions
+such as extra offered-rate levels in the same reviewed, hashed contract. The
+status matrix must cover every identity. Set unsupported or unrun conditions
+to `unmeasured` and retain any evidence about why they remain open.
+
+| Workload | Evidence still needed before the review can freeze the contract |
+| --- | --- |
+| W1 | Equivalent engine-cold setup on both engines and verified read/write after restart. |
+| W2 | Pinned offered rates and full published-port and container-to-container coverage. Admit the observer and resource-cycle policy on the same workloads. |
+| W3 | Per-transaction p95, exact persisted rows and a comparable durability contract. |
+| W4 | Queue latency tails for 1, 4 and 16 workers with exact job and artifact verification. |
+| W5 | Paired bind and named-volume conditions with pinned inputs and phase resource receipts. |
+| W6 | Warm build-cache runs and proof of compilation in uncached runs. Both artifact hashes are pinned. |
+| W7 | Buildx import and first-use evidence for both apps and all three cache states. |
+| W8 | Retained and derived deployment, cancellation and owned allocation in both engines. |
+| W9 | Individual job completion times and fixed work at all four concurrency levels. |
+| W10 | Extend the API interruption proof to the database, queue and owned engine recovery conditions. Keep expected outage errors visible. |
+| W11 | Comparable durable-write evidence, owned storage scope and each finite 12-hour leg. |
+
+The tests remove individual W2, W6, W8 and W10 cells while leaving the workload
+and dimension represented elsewhere. Admission rejects each omission. The
+focused command above passes 46 tests on `c068fba`. The readiness lock remains
+in pilot status. The inventory can expose missing evidence and producers
+before the host is available for qualification.

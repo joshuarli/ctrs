@@ -26,9 +26,10 @@ observer overhead is unresolved. Main's W2 component suite passes 108
 tests with zero skips. The 49 Hz comparison completed all 40 exact
 trials. In all ten blocks an unrelated VM was active and the observer
 intervals exceeded the 5% acceptance band. W8 retained pin checks are
-integrated at `4c07c4e`. The parked W11 gate at `f41ba83` now requires
-seven concrete W11 cells and admits frozen legs through the finite
-supervisor. Complete mixed-work counts remain mandatory in each cycle.
+integrated at `4c07c4e`. The parked qualification gate at `c068fba`
+requires 349 named cells across W1–W11. Complete mixed-work counts remain
+mandatory in each W11 cycle. The W6 runner checks both compiled ARM64
+artifact hashes against `assets.lock`.
 The 19 Hz comparison completed all 12 exact trials and captured all API
 threads. Its lower rate did not reduce observed API CPU or wall in the
 four matched rate comparisons. `4bf9107` prepares a separate 49 Hz
@@ -76,11 +77,15 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, continue the W8 retained/derived content scopes or
-extend the parked W11 contract with the remaining W1–W10 cells. The
-[W11 cell and launch evidence](evidence/native-mixed-retention-2026-11-17.md#finite-frozen-launcher)
-records the executable W11 subset and prerequisites. Keep `assets.lock`
-in pilot status until the full contract and its evidence are ready for review.
+If the Mac stays shared, implement the W6 warm-build condition next. The
+current W6 `warm` state describes an already running engine with retained
+base images and an uncached build. Add a separate build-cache condition
+that primes an identical context outside the timed phase and verifies the
+resulting ARM64 artifacts against the new pins. Preserve the uncached
+default and keep default-driver and identical-builder controls distinct.
+The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
+lists the next fixture gaps. Keep `assets.lock` in pilot status until the
+contract, fixture versions and evidence are reviewed.
 
 The reduced observer proof is complete. Source `7184d42` remains on
 `experiment/w2-wake-entry-only`. Use the evidence record for its verified
@@ -161,7 +166,8 @@ next-action paragraphs from that historical revision.
    observation per cycle. The archived
    [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
    passed on both engines, with 181 frozen receipts unchanged. Complete
-   the canonical cell contract and frozen readiness. The parked
+   the fixture producers, conditions and evidence needed to freeze the
+   proposed cell contract. The parked
    `mixed_job.py` uses the finite supervisor for admitted qualification
    legs. Launch the two 12-hour legs after their admission requirements
    are satisfied.

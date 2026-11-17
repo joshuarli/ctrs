@@ -153,8 +153,12 @@ class WorkloadSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = FixtureContext(tmp)
             engine = fake_engine()
+            probe_hashes = {
+                "/src/target/release/hyperfine": "fcfbf31a7d309a79dba362d75310ead3eafc35d984248a197f5cfbd2dce09c3f",
+                "/src/libz.a": "6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b",
+            }
             engine.sh.side_effect = lambda args, **kw: completed(
-                "a" * 64 + "  /src/out\n" if args[0] == "run" else "")
+                f"{probe_hashes[args[-1]]}  {args[-1]}\n" if args[0] == "run" else "")
             fixture = Path(tmp) / "source"
             (fixture / "rust").mkdir(parents=True)
             shutil.copy(runner.W6_DIR / "Dockerfile", fixture / "Dockerfile")
@@ -172,10 +176,15 @@ class WorkloadSafetyTests(unittest.TestCase):
                     patch.object(runner, "W6_ZLIB_SOURCE", zlib_pin), \
                     patch.object(runner, "W6_RUST_SOURCE", rust_pin):
                 rec = runner.trial_w6(ctx, engine, "warm")
+                probe_hashes["/src/target/release/hyperfine"] = "a" * 64
+                bad_artifact = runner.trial_w6(ctx, engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)
+            self.assertFalse(bad_artifact["correctness"]["ok"], bad_artifact)
+            self.assertFalse(bad_artifact["correctness"]["checks"]["artifact_rust"])
+            self.assertTrue(bad_artifact["correctness"]["checks"]["artifact_zlib"])
             builds = [call.args[0] for call in engine.sh.call_args_list
                       if call.args[0][:2] == ["buildx", "build"]]
-            self.assertEqual(len(builds), 2)
+            self.assertEqual(len(builds), 4)
             self.assertTrue(all("--no-cache" in b for b in builds))
             base = Path(tmp) / "orbstack/W6"
             for name in ("ctx-rust", "ctx-zlib"):

@@ -57,3 +57,7 @@ gcc = "gcc:14.2.0-bookworm@sha256:b99b86a28812b1e6453a231a947dc43d76fe192788a12f
 rust = "rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea"
 python = "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
 runtime = "debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc"
+
+[artifacts.w6]
+rust = "fcfbf31a7d309a79dba362d75310ead3eafc35d984248a197f5cfbd2dce09c3f"
+zlib = "6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b"

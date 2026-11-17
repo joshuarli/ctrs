@@ -351,3 +351,18 @@ the declared0.90 threshold. The journey ratio is0.9297, with two slower candidat
 legs, and all paired footprint checks pass. Reject the backend change for this
 screen. It remains private and inactive on main. No SBOM change is required.
 Raw root: `.work/tmp/gzip-decoder-pilot-20261117/`.
+
+## W6 compiled artifact pins
+
+The archived W6 pilot records with both digests contain 452 successful trials.
+The default driver accounts for 190 ctrs and 242 OrbStack records. The
+identical-builder control accounts for ten records per engine. Across these
+records, the pinned hyperfine executable and zlib static library each have one
+SHA-256 value. `bench/native/assets.lock` records both digests.
+
+The W6 runner requires those digests after both builds and retains actual values
+and probe errors. A correctly formatted wrong digest passed the previous
+runner and now fails the regression. Run
+`PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
+All 50 tests passed. No new builds or timed trials ran. The archived records
+still describe pilot uncached builds with retained base images.

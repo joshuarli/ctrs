@@ -1584,7 +1584,7 @@ def trial_w6(ctx, engine: Engine, state: str,
     1.3.1 (C: configure -> make -j -> make check on
     gcc:14.2.0-bookworm). Each build ends with a run probe that sha256s
     the produced binary/lib. Base images are pulled untimed in setup if
-    absent (prepare also pulls them)."""
+    absent (prepare also pulls them). Artifact digests must match assets.lock."""
     case_id = "W6"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
@@ -1593,6 +1593,8 @@ def trial_w6(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     sampler = trace = None
     try:
+        with (BENCH / "assets.lock").open("rb") as lock:
+            artifact_pins = tomllib.load(lock)["artifacts"]["w6"]
         zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
         rust_src = ensure_pinned_source(W6_RUST_SOURCE, W6_DIR)
         engine.ensure_up()
@@ -1633,12 +1635,14 @@ def trial_w6(ctx, engine: Engine, state: str,
                 return
             run = engine.sh(["run", "--rm", tag, *probe],
                             timeout=120, check=False)
-            out = run.stdout.strip()
-            sha = out.split()[0] if run.returncode == 0 else ""
+            fields = run.stdout.split(maxsplit=1)
+            sha = fields[0] if run.returncode == 0 and fields else ""
             rec["metrics"][f"artifact_{name}_sha256"] = sha
-            checks[f"artifact_{name}"] = (
-                run.returncode == 0
-                and re.fullmatch(r"[0-9a-f]{64}", sha) is not None)
+            expected = artifact_pins[name]
+            checks[f"artifact_{name}"] = bool(sha and sha == expected)
+            if not checks[f"artifact_{name}"]:
+                rec["validation_errors"].append(
+                    f"{name} artifact probe rc={run.returncode}, expected {expected}, got {sha!r}")
 
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
         build_one(
