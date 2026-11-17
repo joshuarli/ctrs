@@ -416,7 +416,7 @@ fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Resul
                 VZDiskImageStorageDeviceAttachment::alloc(),
                 &disk_url,
                 false,
-                VZDiskImageCachingMode::Cached,
+                VZDiskImageCachingMode::Uncached,
                 VZDiskImageSynchronizationMode::Full,
             )
             .map_err(|e| io::Error::other(format!("data disk: {}", describe(&e))))?;
