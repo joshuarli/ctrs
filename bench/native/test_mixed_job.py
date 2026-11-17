@@ -13,19 +13,63 @@ import mixed_job
 
 
 class MixedJob(unittest.TestCase):
-    def test_qualification_refused_before_engine_or_inputs(self):
+    def test_qualification_requires_readiness_before_engine_or_inputs(self):
         command = [sys.executable, str(mixed_job.__file__), '--job', '/missing/job', '--duration', '43200',
                    '--engine', 'ctrs', '--portfolio-layout', '/missing', '--worker-layout', '/missing',
                    '--ctrs-binary', '/missing', '--compose-plugin', '/missing', '--qualification']
         result = subprocess.run(command, capture_output=True, text=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('readiness evidence schema/proof are missing', result.stderr)
+        self.assertIn('qualification requires --readiness', result.stderr)
         pilot = Path(mixed_job.__file__).parent / 'diagnostics/mixed_pilot.py'
         result = subprocess.run([sys.executable, str(pilot), '--portfolio-layout', '/missing',
                                  '--worker-layout', '/missing', '--ctrs-binary', '/missing',
                                  '--qualification'], capture_output=True, text=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('readiness evidence schema/proof are missing', result.stderr)
+        self.assertIn('--readiness must identify frozen candidate', result.stderr)
+
+    def test_qualification_hands_the_frozen_leg_to_the_finite_supervisor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            readiness = root / 'readiness.json'
+            readiness.write_text('{}')
+            backing = root / 'backing'
+            backing.touch()
+            executable = Path(sys.executable).resolve()
+            tool = {'artifact': mixed_job.durable_job.receipt(executable)}
+            frozen = {'inputs': [tool['artifact']], 'tools': {'docker': tool, 'compose': tool}}
+            frozen_receipt = mixed_job.durable_job.receipt(readiness)
+            duration = mixed_job.qualification.MINIMUM_WORK_SECONDS + 1800
+            argv = ['mixed_job', '--job', str(root / 'job'), '--duration', str(duration),
+                    '--engine', 'orbstack', '--portfolio-layout', str(root), '--worker-layout', str(root),
+                    '--ctrs-binary', str(executable), '--compose-plugin', str(executable),
+                    '--qualification', '--readiness', str(readiness), '--orbstack-storage-file', str(backing)]
+            with patch.object(sys, 'argv', argv), patch.object(mixed_job.sys, 'platform', 'darwin'), \
+                 patch.object(mixed_job.os, 'uname', return_value=type('U', (), {'machine': 'arm64'})()), \
+                 patch.dict(os.environ, {'CTRS_GUEST_DIR': str(root)}), \
+                 patch.object(mixed_job.shutil, 'which', return_value=str(executable)), \
+                 patch.object(mixed_job.time, 'time', return_value=1000), \
+                 patch.object(mixed_job.qualification, 'require_leg_readiness',
+                              return_value=(frozen, frozen_receipt)) as admit, \
+                 patch.object(mixed_job.durable_job, 'launch') as launch:
+                def inspect(job, deadline, receipt_file, child, **kwargs):
+                    self.assertEqual(job, root / 'job')
+                    self.assertEqual(deadline, 1000 + duration + 1800)
+                    self.assertEqual(json.loads(Path(receipt_file).read_text()), [tool['artifact'], frozen_receipt])
+                    self.assertIn('--qualification', child)
+                    self.assertEqual(child[child.index('--readiness') + 1], str(readiness.resolve()))
+                    self.assertEqual(child[child.index('--orbstack-storage-file') + 1], str(backing.resolve()))
+                    self.assertEqual(child[child.index('--resource-observation-seconds') + 1], '30')
+                launch.side_effect = inspect
+                self.assertEqual(mixed_job.main(), 0)
+                admit.assert_called_once_with(readiness, ctrs_binary=executable, guest=root,
+                                              portfolio_layout=root, worker_layout=root)
+                launch.assert_called_once()
+                launch.reset_mock()
+                admit.side_effect = mixed_job.qualification.ReadinessError('assets.lock is not frozen')
+                with patch('sys.stderr'), self.assertRaises(SystemExit) as exit:
+                    mixed_job.main()
+                self.assertEqual(exit.exception.code, 2)
+                launch.assert_not_called()
 
     def test_separate_deadlines_and_frozen_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

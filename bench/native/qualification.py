@@ -3,8 +3,10 @@ import json
 import hashlib
 import math
 from pathlib import Path
+import platform
 import re
 import socket
+import sys
 import time
 import tomllib
 
@@ -27,9 +29,8 @@ PREREQUISITES = ('representative_pinned_workloads', 'valid_resource_accounting',
 STATUSES = frozenset(('win', 'parity', 'loss', 'inconclusive', 'invalid', 'unmeasured'))
 COMPARISONS = frozenset(('installed-default', 'resource-matched-default-driver',
                         'identical-builder'))
-W11_REQUIRED_DIMENSIONS = frozenset((
-    'correctness', 'persistence', 'durability', 'resource_growth', 'reliability',
-))
+W11_CELLS_FILE = runner.BENCH / 'w11-cells.json'
+W11_CELLS = json.loads(W11_CELLS_FILE.read_text())
 MINIMUM_WORK_SECONDS = 12 * 60 * 60
 MAX_DIAGNOSTIC_WORK_SECONDS = 15 * 60
 MAX_EXCLUSIVITY_REVIEW_SECONDS = 5 * 60
@@ -215,9 +216,9 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
             workloads.add(workload); dimensions.add(dimension)
         if workloads != set(CASES) or dimensions != set(DIMENSIONS):
             raise ReadinessError('cell contract omits a required workload or dimension')
-        w11_dimensions = {dimension for workload, dimension, *_ in identities if workload == 'W11'}
-        if missing := W11_REQUIRED_DIMENSIONS - w11_dimensions:
-            raise ReadinessError('W11 is missing required dimensions: ' + ', '.join(sorted(missing)))
+        for name, specification in W11_CELLS.items():
+            if contract.get(name) != specification:
+                raise ReadinessError('missing or changed required W11 cell: ' + name)
         review_path = prerequisites['complete_cell_contract']['evidence']['path']
         review = _object(json.loads(Path(review_path).read_text(), object_pairs_hook=_unique), 'cell contract review')
         digest = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -245,6 +246,37 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         if isinstance(exc, ReadinessError):
             raise
         raise ReadinessError('invalid frozen readiness: ' + str(exc)) from exc
+
+
+def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_layout, admission_epoch=None):
+    assets = runner.BENCH / 'assets.lock'
+    template = guest / 'data.img'
+    artifacts = {'ctrs_binary': ctrs_binary, 'guest_kernel': guest / 'Image',
+                 'guest_initramfs': guest / 'initramfs.cpio'}
+    required = [Path(sys.executable), *artifacts.values(), template, runner.COMPOSE_FILE,
+                runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
+                runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w8-v2/portfolio.json',
+                ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
+                runner.BENCH / 'schema.json', W11_CELLS_FILE]
+    required += [file for file in runner.BENCH.glob('*.py') if not file.name.startswith('test_')]
+    required += list((runner.BENCH / 'diagnostics').glob('*.py'))
+    for layout in (portfolio_layout, worker_layout):
+        if not layout.is_dir():
+            raise ReadinessError(f'layout missing: {layout}')
+        required += [file for file in layout.rglob('*') if file.is_file()]
+    readiness_receipt = durable_job.receipt(path)
+    frozen = require_readiness(path, required_paths=required, assets_path=assets,
+                               sparse_paths=(template,), admission_epoch=admission_epoch)
+    durable_job.check_receipt(readiness_receipt)
+    if frozen['fixtures']['W11']['version'] != mixed_resources.VERSION:
+        raise ReadinessError('W11 fixture version differs from the observation runner')
+    for name, artifact in artifacts.items():
+        if frozen['artifacts'][name]['path'] != str(artifact.resolve(strict=True)):
+            raise ReadinessError('requested running artifact differs from the freeze: ' + name)
+    python = frozen['tools']['python']
+    if python['version'] != platform.python_version() or python['artifact']['path'] != str(Path(sys.executable).resolve()):
+        raise ReadinessError('running Python differs from the freeze')
+    return frozen, readiness_receipt
 
 
 def _completed_cycle_window(cycles, observations, phases):
