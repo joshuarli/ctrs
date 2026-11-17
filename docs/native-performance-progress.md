@@ -12,7 +12,9 @@ W8 receipt guard df1f418 passes66 component tests and two real37-layer receipts;
 Pinned W2 boundary-only/periodic controls pass two4000-operation native proofs with exact data and clean teardown.
 Review found cleanup and result-write errors could hide the original failure;76d77de/90c3bac preserve both and interruption status.
 The corrected W2 gate passes80 tests, zero skips. Each native proof retains155 unchanged frozen inputs; neither qualifies timing.
-Current action: repair offline scoring, which still labels a category-only partial footprint as a strict-win pilot cell.
+Scoring repair d0893fe rejects incomplete/category-only resource cells and derives W2 CPU/success from raw phases and counts.
+24 reporting tests pass; bounded W2 selection now includes them and passes105 tests, zero skips.
+Current candidate83ba0d1 bounds W11 retained state;6 focused tests pass. Independent review and short native proof are next.
 **Perf gate deferred: host busy**: scalar gate0 does not override hot Niceforge and the unrelated OrbStack VM.
 No scored batch or W11 is admitted. Full qualification, held-out app and resource/durability gates remain open.
 Cleanup:28 retired trees and `.work`195.3→21.0GiB allocated-size sum; completed new lane trees are retired after integration.
@@ -48,14 +50,16 @@ First resume command: `codex-campaign-closeout.py cancel` (already run); execute
 
 ## Exact next action
 
-Repair `bench/native/reporting.py` resource-cell admission before another timed
-batch. A ten-pair offline negative control with `ownership_verified=false`, a
-missing required VM, category-table Footprint and fabricated small physical total
-currently yields `strict-win`, ratio0.0001. Reject that resource cell, preserve
-the missing/error reason, and leave unrelated valid application cells separate.
-Recompute W2 CPU/success from valid raw workload boundaries and successful counts.
-Version affected scoring and keep old incomplete records unqualified. Run the
-focused reporting tests with zero skips before integration.
+Finish83ba0d1's bounded W11 working-state proof. The earlier cumulative fixture
+rewrites all historical rows every cycle. V3 verifies every acknowledged row
+before explicit transient-row cleanup, retaining the committed witness,500 seed
+rows and named-volume identity across cycles. Its separate version must never
+pool with v2. [Admission and command](evidence/native-mixed-retention-2026-11-17.md)
+require two cycles per engine,20,000 API operations total, exact queue/build
+artifacts and clean teardown. The finite job is
+`.work/tmp/w11-v3-functional-20261117/job`. Inspect/admit once, retain the terminal
+result, recheck frozen inputs before editing bench source, and finish independent
+review. This is not the12-hour qualification leg and does not close growth gates.
 
 The final c3775ce functional job13731c9782f64101a2425063857ddf49 exits0 with
 all four1000-operation trials correct,708 reads/292 writes each, complete phase
@@ -118,9 +122,8 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-1. Reject incomplete or mislabeled resource cells in offline scoring and derive
-   W2 efficiency from raw phase counters/counts. Retain failed/preflight receipts;
-   no qualification follows from a host-busy functional pass.
+1. Finish bounded W11 working-state review and short native proof. Retain
+   failed/preflight receipts; no qualification follows from a host-busy pass.
 2. In a genuinely exclusive window, confirm W2 CPU/success at equal useful work
    and observer budgets, then profile actual API user/system CPU, synchronization,
    scheduling and network costs. Separate fixed work/offered load, saturation,
