@@ -26,6 +26,9 @@ PREREQUISITES = ('representative_pinned_workloads', 'valid_resource_accounting',
 STATUSES = frozenset(('win', 'parity', 'loss', 'inconclusive', 'invalid', 'unmeasured'))
 COMPARISONS = frozenset(('installed-default', 'resource-matched-default-driver',
                         'identical-builder'))
+W11_REQUIRED_DIMENSIONS = frozenset((
+    'correctness', 'persistence', 'durability', 'resource_growth', 'reliability',
+))
 MINIMUM_WORK_SECONDS = 12 * 60 * 60
 MAX_DIAGNOSTIC_WORK_SECONDS = 15 * 60
 MAX_EXCLUSIVITY_REVIEW_SECONDS = 5 * 60
@@ -210,6 +213,9 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
             workloads.add(workload); dimensions.add(dimension)
         if workloads != set(CASES) or dimensions != set(DIMENSIONS):
             raise ReadinessError('cell contract omits a required workload or dimension')
+        w11_dimensions = {dimension for workload, dimension, *_ in identities if workload == 'W11'}
+        if missing := W11_REQUIRED_DIMENSIONS - w11_dimensions:
+            raise ReadinessError('W11 is missing required dimensions: ' + ', '.join(sorted(missing)))
         review_path = prerequisites['complete_cell_contract']['evidence']['path']
         review = _object(json.loads(Path(review_path).read_text(), object_pairs_hook=_unique), 'cell contract review')
         digest = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
