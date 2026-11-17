@@ -2912,7 +2912,7 @@ def main() -> int:
                    help="W6/W7: dc pins matching BuildKit images in "
                         "isolated per-engine builders")
 
-    p = sub.add_parser("w8-baseline", description="Paired W8 pilot using one derived artifact per pair.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
+    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
     p.add_argument("--pairs", type=int, default=10, help="number of pairs (1 to 100)")

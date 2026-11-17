@@ -35,6 +35,7 @@ class PairedBatch(unittest.TestCase):
                 def __init__(self, name, run):
                     self.name = name
                     self.stops = 0
+                    self.proc = object()
                     engines[name] = self
                 def stop(self):
                     self.stops += 1
@@ -46,7 +47,7 @@ class PairedBatch(unittest.TestCase):
                 def __init__(self, run):
                     self.run_id = run
                     self.results_dir = root
-                    self.jsonl = root / 'trials.jsonl'
+                    self.jsonl = root / (run + '-trials.jsonl')
                     self.provenance = {'source': 'fixed'}
                     self.rows = []
                     contexts.append(self)
@@ -57,14 +58,20 @@ class PairedBatch(unittest.TestCase):
                                 state=state, engine=engine.name, workload_params=dict(self.workload_params),
                                 provenance=dict(self.provenance), workload_id=self.workload_id,
                                 evidence_status='pilot', metrics={}, resources={}, validation_errors=[])
-                def write(self, row): self.rows.append(row)
+                def write(self, row):
+                    self.rows.append(row)
+                    with self.jsonl.open('a') as stream:
+                        stream.write(json.dumps(row) + '\n')
             contexts = []
             def prepare(source, contract, dest, seed):
                 return {'images': {'api': {'reference': 'api'}}, 'seed': seed.hex()}
             def measure(engine, directory, run, contract, portfolio, receipt, layout, server, under_load):
+                self.assertEqual(w8.os.environ['CTRS_IDLE_SECS'], '0')
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
                 return {'correctness': True, 'pull_to_health_s': 1, 'errors': [],
-                        'resources': {'status': 'ok', 'phase_summaries': {'whole_workflow':
+                        'resources': {'status': 'ok', 'ownership': {'required_processes': [{
+                            'pid': 1 if engine.name == 'ctrs' else 2, 'role': 'daemon', 'kernel_start_identity': 100}]},
+                            'phase_summaries': {'whole_workflow':
                             {'status': 'ok', 'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
             args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False)
             with mock.patch.object(w8.runner, 'RunContext', Context), \
@@ -107,6 +114,25 @@ class PairedBatch(unittest.TestCase):
             status = json.loads((root / 'status.json').read_text())
             self.assertEqual(status['completed_records'], status['planned_records'])
             self.assertFalse(status['timing_eligible'])
+            seen = []
+            def drifting(*arguments):
+                result = measure(*arguments)
+                if arguments[0].name == 'ctrs':
+                    seen.append(True)
+                    if len(seen) == 2:
+                        result['resources']['ownership']['required_processes'][0]['kernel_start_identity'] += 1
+                return result
+            previous_idle = w8.os.environ.get('CTRS_IDLE_SECS')
+            with mock.patch.object(w8.runner, 'RunContext', Context), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio'), \
+                 mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
+                 mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
+                 mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 4, 'mem_total_bytes': 100}):
+                code = w8.run_batch(args, engine_factory=Engine, measure=drifting, prepare=prepare,
+                                    serve=lambda *a: Server(), gate_fn=lambda *a: True)
+            self.assertEqual(code, 1)
+            self.assertIn('identity changed', ''.join(contexts[-1].rows[-1]['validation_errors']))
+            self.assertEqual(w8.os.environ.get('CTRS_IDLE_SECS'), previous_idle)
 
     def test_failed_leg_is_retained_and_ctrs_is_stopped(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -115,6 +141,7 @@ class PairedBatch(unittest.TestCase):
             class Engine:
                 def __init__(self, name, run):
                     self.name, self.stops = name, 0
+                    self.proc = object()
                     instances[name] = self
                 def stop(self): self.stops += 1
             class Server:

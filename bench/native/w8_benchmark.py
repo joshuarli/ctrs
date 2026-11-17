@@ -1,6 +1,7 @@
 """Canonical paired W8 pilot; native execution remains unqualified."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import secrets
 import threading
@@ -16,6 +17,14 @@ from diagnostics.resource_pilot import host_snapshot
 
 FIXTURE = reporting.W8_PAIRED_FIXTURE
 SCOPE = 'w8-whole-workflow-v1'
+
+
+def _warm_identity(result):
+    processes = result.get('resources', {}).get('ownership', {}).get('required_processes', [])
+    owned = [p for p in processes if p['role'] != 'fixture-coordinator']
+    if not owned:
+        raise ValueError('missing resident engine identity')
+    return sorted((p['pid'], p['role'], p['kernel_start_identity']) for p in owned)
 
 
 def gate(directory, label):
@@ -53,7 +62,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
-    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load}
+    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load,
+                           'comparison_lane': 'resource-matched-resident-control', 'ctrs_idle_seconds': 0}
     ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v2/portfolio.json'),
                            'w8_driver_sha256': runner.sha256_file(Path(__file__)),
                            'w8_pilot_sha256': runner.sha256_file(Path(pilot.__file__))})
@@ -65,12 +75,16 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         'resource_scope': SCOPE, 'source_layout': str(args.layout), 'provenance': ctx.provenance,
         'order': 'AB/BA', 'qualification_eligible': False})
     print(f'results: {ctx.jsonl}', flush=True)
-    engines = {name: engine_factory(name, run) for name in ('ctrs', 'orbstack')}
+    engines = {}
+    identities = {}
+    previous_idle = os.environ.get('CTRS_IDLE_SECS')
+    os.environ['CTRS_IDLE_SECS'] = '0'
     failed = False
     completed = 0
     finished = False
     stopped_reason = None
     try:
+        engines = {name: engine_factory(name, run) for name in ('ctrs', 'orbstack')}
         for pair in range(1, args.pairs + 1):
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
             layout = ctx.results_dir / f'pair-{pair}-layout'
@@ -95,6 +109,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                             busy_initial = True
                             raise RuntimeError('initial host gate busy; scored trial refused')
                         result = measure(engine, directory, f'{run}-p{pair:03d}', contract, portfolio, receipt, layout, server, args.under_load)
+                        if name == 'ctrs' and engine.proc is None:
+                            raise ValueError('resident control requires an owned daemon with verified idle policy')
                         rec['engine_server_version'] = runner.safe_version(engine)
                         info = runner.safe_engine_info(engine)
                         rec['resources'] = resource_metrics(result)
@@ -103,6 +119,10 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                         budgets = bool(info) and all(type(info.get(key)) is int and info[key] > 0
                                                     for key in ('ncpu', 'mem_total_bytes'))
                         ok = result.get('correctness') is True and result.get('resources', {}).get('status') == 'ok' and budgets and rec['engine_server_version'] != 'unreachable'
+                        if ok:
+                            current = _warm_identity(result)
+                            if identities.setdefault(name, current) != current:
+                                raise ValueError('resident engine identity changed between trials')
                         rec['correctness'] = {'ok': ok, 'checks': {'workload_and_resources': ok}}
                         rec['validation_errors'].extend(result.get('errors', []))
                         if ok:
@@ -136,13 +156,18 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                     thread.join(timeout=5)
                 if thread.is_alive():
                     raise RuntimeError('registry did not terminate')
+        analysis = reporting.analyze([json.loads(line) for line in ctx.jsonl.read_text().splitlines()])
+        pilot.save(ctx.results_dir / 'report.json', analysis)
+        if not args.diagnostic:
+            failed |= bool(analysis['input_issues']) or sum(c['valid_pairs'] for c in analysis['cohorts']) != args.pairs
         finished = True
         return int(failed)
     finally:
         primary = sys.exc_info()[1]
         cleanup_error = None
         try:
-            engines['ctrs'].stop()
+            if 'ctrs' in engines:
+                engines['ctrs'].stop()
         except Exception as exc:
             finished = False
             cleanup_error = repr(exc)
@@ -151,8 +176,14 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         finally:
             termination = sys.exc_info()[1] or primary
             interrupted = isinstance(termination, (SystemExit, KeyboardInterrupt))
-            pilot.save(ctx.results_dir / 'status.json', {'state': 'interrupted' if interrupted else 'complete' if finished and not failed else 'failed',
-                'completed_records': completed, 'planned_records': args.pairs * 2,
-                'stopped_reason': stopped_reason, 'error': repr(termination) if termination else None,
-                'cleanup_error': cleanup_error,
-                'timing_eligible': not args.diagnostic, 'qualification_eligible': False})
+            try:
+                pilot.save(ctx.results_dir / 'status.json', {'state': 'interrupted' if interrupted else 'complete' if finished and not failed else 'failed',
+                    'completed_records': completed, 'planned_records': args.pairs * 2,
+                    'stopped_reason': stopped_reason, 'error': repr(termination) if termination else None,
+                    'cleanup_error': cleanup_error,
+                    'timing_eligible': finished and not failed and not args.diagnostic, 'qualification_eligible': False})
+            finally:
+                if previous_idle is None:
+                    os.environ.pop('CTRS_IDLE_SECS', None)
+                else:
+                    os.environ['CTRS_IDLE_SECS'] = previous_idle

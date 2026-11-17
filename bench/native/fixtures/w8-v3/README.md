@@ -116,3 +116,11 @@ resource interval. Nested phases are diagnostic and must not be added to it.
 The sampled footprint is not a continuous peak; CLI and sampler resources,
 active storage allocation, metadata qualification and the full matrix remain
 open. This is a pilot, not qualification.
+
+This is a resource-matched resident control. Only the owned ctrs benchmark daemon
+uses `CTRS_IDLE_SECS=0`, preventing the normal 60-second idle shutdown between
+pairs. The caller's environment is restored, adopted daemons with unknown idle
+policy are refused, and changed engine process identities invalidate the batch.
+Product idle defaults, the installed-default lane, and idle/wake/reclaim cells
+remain separate. Diagnostic batches return zero for correct functional work;
+their report still rejects all timings. Legacy W8 records remain historical only.

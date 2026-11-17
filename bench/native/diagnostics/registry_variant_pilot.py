@@ -30,6 +30,14 @@ def require_missing_image(cp):
         raise ValueError('cannot establish derived image absence through image API')
 
 
+def require_variant_absent(engine, image, receipt_path):
+    kind, reference = w8_under_pull.baseline_image_reference(engine.name, image)
+    missing = engine.sh(['image', 'inspect', reference], check=False)
+    save(receipt_path, {'reference_kind': kind, 'reference': reference,
+        'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
+    require_missing_image(missing)
+
+
 def require_layers_transferred(layers, transfers):
     for layer in layers:
         delivered = sum(t['bytes'] for t in transfers if t['digest'] == layer['digest']
@@ -201,10 +209,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                     image = receipt['images'][repository]
                     ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
                     with phase('pre_pull_inspection_' + short):
-                        missing = engine.sh(['image', 'inspect', image['config']], check=False)
-                        save(directory / (short + '-pre-image.json'), {
-                            'exit': missing.returncode, 'stdout': missing.stdout, 'stderr': missing.stderr})
-                        require_missing_image(missing)
+                        require_variant_absent(engine, image, directory / (short + '-pre-image.json'))
                     with phase('pull_install_' + short):
                         begin = len(portfolio.transfers)
                         if load is not None and load['process'].poll() is not None:

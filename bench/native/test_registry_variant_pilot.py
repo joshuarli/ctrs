@@ -9,6 +9,21 @@ from diagnostics import registry_variant_pilot as pilot
 
 
 class VariantTransferProof(unittest.TestCase):
+    def test_cached_variant_is_rejected_using_each_stores_resolvable_id(self):
+        image = {'config': 'sha256:config', 'manifest': 'sha256:manifest'}
+        for name, kind in (('ctrs', 'config'), ('orbstack', 'manifest')):
+            engine = mock.Mock()
+            engine.name = name
+            engine.sh.side_effect = lambda args, **kw: subprocess.CompletedProcess(args,
+                0 if args[-1] == image[kind] else 1,
+                '[{}]' if args[-1] == image[kind] else '[]',
+                '' if args[-1] == image[kind] else 'No such image: wrong ID')
+            with self.subTest(engine=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'absence.json'
+                with self.assertRaisesRegex(ValueError, 'unexpectedly present'):
+                    pilot.require_variant_absent(engine, image, path)
+                self.assertEqual(json.loads(path.read_text())['reference_kind'], kind)
+
     def test_missing_image_requires_daemon_absence_response(self):
         absent = subprocess.CompletedProcess([], 1, '[]\n', 'Error response from daemon: No such image: sha256:abc\n')
         pilot.require_missing_image(absent)
