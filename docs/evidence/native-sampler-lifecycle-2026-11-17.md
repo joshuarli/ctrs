@@ -263,3 +263,31 @@ focused negative controls fail before correction and pass afterward. Run
 the accepted80-test, zero-skip component result. The mixed-cycle tests create
 their own ignored scratch parent, so a fresh checkout can run the gate.
 No product/default changes or new timing claims follow from these corrections.
+
+## Offline resource scoring
+
+The old reporter accepts numeric resource fields without their completeness
+metadata. A ten-pair negative control with an unmeasured required VM and
+category-table Footprint yields a physical-memory `strict-win` pilot ratio0.0001.
+This result is invalid even though the reporter globally disclaims promotion.
+
+Reviewed worker8ea61c4 is integrated as d0893fe. Physical ratios require verified
+ownership, an empty resource-error list and the actual `phys_footprint` field.
+Cumulative CPU additionally requires complete counters. Missing evidence leaves
+the entire affected resource comparison without a ratio or confidence interval.
+Each metric now includes `missing_reasons`, also rendered in Markdown. Correct
+application measurements stay separate. RSS keeps its explicit diagnostic name.
+
+W2 CPU/success is recomputed from raw workload-phase CPU and successful counts.
+Phase errors, mismatched read/write counts, failures or unequal paired useful
+work prevent a ratio. A deliberately poisoned published derived metric does
+not change the valid raw comparison. Historical incomplete metadata is not
+retroactively certified. The measurement revision is
+`2026-11-17-native-v4-resource-admission`.
+
+Parent reviews the full three-file worker diff and runs all24 reporting tests,
+zero skips, on the integrated tree. The exact negative control then returns
+`unmeasured`, ratio null, with all10 pairs and the missing-VM reason preserved.
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_reporting` to reproduce.
+Both bounded W2 and resource selectors now include reporting contracts.
+The W2 selector passes105 tests, zero skips, including the current mixed fixture.

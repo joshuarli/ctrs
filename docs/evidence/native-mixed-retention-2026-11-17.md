@@ -57,3 +57,40 @@ This is functional evidence only. The foreign host workload prevents timing
 qualification. No12-hour leg, frozen-candidate qualification, bounded-growth
 verdict or durability improvement is inferred. Independent review and the
 terminal native result are required before accepting this slice.
+
+## Native outcome
+
+Job `0a89d8f85f2145f4bb07488ec1ec824a` exits0 with complete local cleanup.
+Results are `w11-mixed-20261117T105538-5e64`. Both engines complete both cycles.
+Every cycle verifies1531 acknowledged writes, then explicitly deletes exactly
+those1531 rows and verifies all500 seed rows. The committed database/cache
+witness, named-volume identity, service IDs and running artifacts remain valid.
+All20,000 API operations,800 queue jobs,1600 artifacts and64 build/test jobs pass.
+Both periodic traces have complete owned CPU/physical coverage with no resource
+errors. All172 frozen input receipts recheck before the next source edit.
+
+The loaded signed host has the accepted db20b210 hash. The booted kernel and
+initrd match35087713 and6ae4d3ab respectively. Parent verifies that the private
+daemon and VM identities are gone and its files have no open consumers.
+The disposable `m3-20261117` store is removed, preserving all source and results.
+Its allocated-size sum was2,046,116KiB, not a unique APFS reclamation measurement.
+
+Independent reviewer `usrw_cdfedc1d-409f-4980-a6cc-257913f60d51` reviews83ba0d1
+and relevant callers read-only. It reports no demonstrated defect and passes
+the six mixed-cycle tests, zero skips. Its completed checkout is retired.
+
+Parent subsequently reproduces one existing producer/consumer mismatch: the
+mixed record's empty correctness-check map makes the reporter reject completed
+work.9310dbc publishes completed-cycle exact-state and bounded-retention checks.
+The actual reporter consumer fails before that metadata correction and passes
+afterward. The corrected W2 component gate passes105 tests, zero skips.
+The native proof above covers83ba0d1's workload behavior. The later metadata
+change has focused consumer verification, not another native run. Original raw
+records stay unchanged and retain their historical reporting limitation.
+
+Result SHA-256 receipts are
+`fcd35a47803a007c347f7dacf31ee4c64e2d0b7723cfbf395606b6f810bc1d26`
+for ctrs and
+`52debc5a4e9947de616bdc809125c2a3d42ca2f2192c4c8c87ef44c7663164ad`
+for OrbStack. The bounded working-state slice is accepted. W11 resource-growth
+accounting, frozen readiness and the12-hour legs remain open.
