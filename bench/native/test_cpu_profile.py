@@ -47,6 +47,14 @@ class CPUProfile(unittest.TestCase):
         self.assertEqual(result['sample_count'], 5)
         self.assertTrue(all(record['samples'] == 1 for record in result['per_thread'].values()))
 
+    def test_kernel_symbol_is_not_a_perf_throttle_diagnostic(self):
+        text = f'{TAG} 1/1 [000] 1.1: cpu-clock:\n\t1234 blkcg_maybe_throttle_current ([kernel.kallsyms])\n\n'
+        result = self.analyze(text, raw_events='PERF_RECORD_SAMPLE')
+        self.assertEqual(result['status'], 'ok', result)
+        self.assertEqual(result['sample_count'], 1)
+        self.assertEqual(self.analyze(text, diagnostics='THROTTLED')['status'], 'unknown')
+        self.assertEqual(self.analyze(text, raw_events='PERF_RECORD_SAMPLE\nPERF_RECORD_THROTTLE')['status'], 'unknown')
+
     def test_attachment_task_reuse_before_phase_is_rejected(self):
         warm = {'1': task('1', 0)}
         measured = {'1': task('1', 10)}

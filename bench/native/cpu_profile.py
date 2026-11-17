@@ -21,7 +21,7 @@ def check_attachment(attached_tasks, phase_tasks, clock_ticks):
 def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations, diagnostics='', raw_events=''):
     errors, samples = [], []
     current = None
-    if re.search(r'lost|throttl', text + diagnostics, re.IGNORECASE):
+    if re.search(r'lost|throttl', diagnostics, re.IGNORECASE):
         errors.append('loss/throttle diagnostic present')
     if raw_events:
         if re.search(r'PERF_RECORD_(?:LOST|THROTTLE|UNTHROTTLE)', raw_events):
@@ -45,6 +45,8 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
             address, symbol, dso = frame.groups()
             current['frames'].append({'ip': address, 'symbol': symbol, 'dso': dso})
         else:
+            if re.search(r'lost|throttl', line, re.IGNORECASE):
+                errors.append('loss/throttle diagnostic present')
             errors.append(f'unrecognized CPU trace line: {number}')
     if not samples or any(not sample['frames'] for sample in samples):
         errors.append('missing CPU samples or sample frames')
