@@ -122,3 +122,17 @@ The finite job lives at `.work/tmp/classic-builder-c-20261117/job` with a fixed
 20-minute deadline and frozen inputs, including explicit sparse-template receipt.
 No shared Docker daemon, user store or context is modified. Source remains the
 accepted product revision; no new candidate or instrumentation is introduced.
+
+Version1 job `ca5e3b0c3f054b57a36ae1e1a42e09c3` exits1 before any build.
+The base pull passes but does not boot the lazy VM. Ownership discovery rejects
+an absent disk-owning helper; no native-stop proof is established. The original
+failure and cleanup warning are preserved. This is a preparation defect, not an
+application result or a product failure. No campaign process remains afterward.
+
+Version2 adds an owned `gcc uname -m` bootstrap before ownership discovery and
+requires exact `aarch64` output. This boots the VM without starting a builder,
+so its first build remains builder-cold. It reuses only the stopped version1
+root's pinned GCC image (empty container index, no open-file/process consumer),
+not a previous build result. The five contexts and app checks are unchanged.
+Version2 has its own inputs/job under `.work/tmp/classic-builder-c-v2-20261117/`;
+never pool or replace the version1 receipt.
