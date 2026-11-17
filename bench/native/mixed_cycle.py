@@ -325,6 +325,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 'explicitly_deleted_writes': len(api_writes), 'retained_seed_rows': 500,
                 'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
             cycle += 1
+        rec['work_loop_ended_monotonic'] = time.monotonic()
         if not rec['cycles']:
             raise RuntimeError('work deadline expired before a complete cycle')
         rec['correctness']['checks'].update(

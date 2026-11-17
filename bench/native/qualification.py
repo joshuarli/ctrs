@@ -11,7 +11,7 @@ import tomllib
 import durable_job
 import mixed_resources
 import runner
-from mixed_cycle import PIN
+from mixed_cycle import OPERATIONS, PIN
 
 
 CASES = tuple(f'W{i}' for i in range(1, 12))
@@ -243,6 +243,35 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         raise ReadinessError('invalid frozen readiness: ' + str(exc)) from exc
 
 
+def _completed_cycle_window(cycles, observations, phases):
+    if (not isinstance(cycles, list) or not cycles
+            or not isinstance(observations, list) or len(cycles) != len(observations)
+            or not isinstance(phases, dict)):
+        raise ValueError('completed mixed cycles, resource observations and phase records are required')
+    first = last = None
+    for index, (cycle, observation) in enumerate(zip(cycles, observations, strict=True)):
+        if (not isinstance(cycle, dict) or type(cycle.get('cycle')) is not int or cycle['cycle'] != index
+                or cycle.get('exact_state') is not True
+                or type(cycle.get('successful_operations')) is not int or cycle['successful_operations'] != OPERATIONS
+                or not isinstance(observation, dict) or type(observation.get('cycle')) is not int
+                or observation['cycle'] != index):
+            raise ValueError('completed mixed work and resource observation differ for cycle ' + str(index))
+        work = phases.get(f'cycle_{index}_mixed_work')
+        resource = phases.get(f'cycle_{index}_observation')
+        if not isinstance(work, dict) or not isinstance(resource, dict):
+            raise ValueError('missing mixed-work or observation phase for cycle ' + str(index))
+        began, ended = (work.get(f'operation_{event}_monotonic') for event in ('started', 'ended'))
+        observed, finished = (resource.get(f'operation_{event}_monotonic') for event in ('started', 'ended'))
+        if (not all(type(value) in (int, float) and math.isfinite(value) for value in (began, ended, observed, finished))
+                or not began < ended <= observed < finished
+                or (last is not None and began < last)):
+            raise ValueError('invalid mixed-work or observation phase order for cycle ' + str(index))
+        if first is None:
+            first = began
+        last = finished
+    return first, last
+
+
 def leg_issues(record, *, work_deadline, completed_monotonic):
     """Check completed W11 hard requirements; independent scientific review remains required."""
     issues = []
@@ -269,19 +298,26 @@ def leg_issues(record, *, work_deadline, completed_monotonic):
             or (record.get('engine') == 'ctrs' and not any(process.get('role') == 'vm' for process in required))
             or growth.get('plan', {}).get('manifest') != identity):
         issues.append('incomplete or inconsistent running process identity')
+    observations = growth.get('observations')
+    try:
+        cycle_window = _completed_cycle_window(record.get('cycles'), observations, resources.get('phases'))
+    except ValueError as exc:
+        issues.append(str(exc))
+        cycle_window = None
     if (record.get('fixture_version') != mixed_resources.VERSION
             or growth.get('version') != mixed_resources.VERSION
             or growth.get('plan', {}).get('budgets') != mixed_resources.BUDGETS):
         issues.append('resource observation fixture or budgets differ from the frozen contract')
-    else:
-        checked = mixed_resources.summarize(growth['plan'], growth.get('observations', []))
+    elif cycle_window is not None:
+        checked = mixed_resources.summarize(growth['plan'], observations)
         if not checked['minimum_coverage_met'] or any(checked[key]['status'] != 'pass' for key in
                 ('physical_footprint', 'file_descriptors', 'active_disk_allocation')):
             issues.append('post-warmup resource growth failed or is unknown')
-    started = resources.get('phases', {}).get('cycle_0_mixed_work', {}).get('operation_started_monotonic')
-    if (type(started) not in (int, float) or type(work_deadline) not in (int, float)
-            or type(completed_monotonic) not in (int, float)
-            or not all(math.isfinite(value) for value in (started, work_deadline, completed_monotonic))
-            or not completed_monotonic >= work_deadline >= started + MINIMUM_WORK_SECONDS):
+    loop_end = record.get('work_loop_ended_monotonic')
+    clocks = (work_deadline, completed_monotonic, loop_end)
+    if (cycle_window is None
+            or not all(type(value) in (int, float) and math.isfinite(value) for value in clocks)
+            or not completed_monotonic >= loop_end >= work_deadline >= cycle_window[0] + MINIMUM_WORK_SECONDS
+            or cycle_window[1] > loop_end):
         issues.append('fewer than twelve hours of mixed-work exposure or incomplete deadline')
     return issues
