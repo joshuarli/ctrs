@@ -6,22 +6,33 @@
 `codex-campaign-closeout.py cancel` returned “Campaign closeout is not active”.
 **Current action:** affinity diagnostics completed; see
 [`native-affinity-2026-11-16.md`](evidence/native-affinity-2026-11-16.md).
-An isolated same-toolchain stock/LSE-only build is now active at
-`.work/wt/np-lse-only/.work/kernel-lse/job`, durable ID
-`989c31ff8d4040deb79f6f0a3255a813`. It starts only after the affinity job's
-successful terminal cleanup; no measured workload overlaps this build.
-Private branch `experiment/np-lse-only` f7ea791 adds only
-`CONFIG_ARM64_USE_LSE_ATOMICS=y`. Source/scripts are frozen by `inputs.json`;
-two CPUs, 4GiB, 1,200s build timeout and 1,800s supervisor deadline. A private
-volume copies the unused kernel cache read-only; live guest assets are untouched.
-On resume inspect terminal status once, verify compiler hashes/config differences
-and image hashes, then audit native LSE feature/actual boot identity before the
-saved three-pair default-affinity diagnostic in
-`.work/tmp/w2-lse-explore-20261116/run.py`. It has not launched. Prepare private
-baseline/candidate guest directories with unchanged initrd/template and freeze
-their receipts first. The launcher lacks a custom TERM handler: if interrupted
-outside its normal bounded timeout, inspect and stop only its saved labelled
-container ID before considering cleanup complete. No kernel change is promoted.
+Same-toolchain stock/LSE-only build `989c31ff8d4040deb79f6f0a3255a813` is terminal
+exit 0, cleanup complete; its labelled build container is stopped. It began only
+after affinity terminal cleanup. Private branch `experiment/np-lse-only` f7ea791
+adds only `CONFIG_ARM64_USE_LSE_ATOMICS=y`; generated configurations differ only
+by that symbol and derived `ARM64_LSE_ATOMICS`. Compiler SHA is unchanged:
+`fb051a6c58961fb6aec758acf50d7d0375eecff740d0706388092829e3fb7a41`.
+Private stock Image SHA:
+`e6a8cdb290e6bbcfeb92c810886312d4b42a2c4154041d37ba5f41128d920d54`;
+LSE Image:
+`6555028c558a8dbb786c758498f512320bae5403831f71337182902eefd8d7d2`.
+Image sizes are 18,800,648 and 19,324,936 bytes. Live guest assets are untouched.
+Build receipts/scripts: `.work/wt/np-lse-only/.work/kernel-lse/`; job status SHA
+`e52ed87f972d55f79e9af45f6e6d2a0a6128df6acab4c706e1b223693ce76ce7`.
+
+**Active native job:** `.work/tmp/w2-lse-explore-20261116/job`, durable ID
+`d84c65c59c2c4547b0178afe639b1ac8`, 3,600s fixed deadline. It runs three balanced
+stock/LSE pairs, 50k fixed operations per off/on phase, default API affinity,
+17 vCPUs, 45,091MiB and identical host binary 37bec61b…/application inputs.
+Private guest directories share unchanged initrd/template. The saved coordinator
+audits actual open kernel/initrd hashes, guest atomics advertisement and runtime
+LSE detection from the boot console; audit/workload failure stops without replacement.
+Source and assets in `inputs.json` are frozen until terminal. Hardware/console
+capture landed as d9b723b/23ede66; 12 focused CPU tests and the 44-test W2 check
+pass. On resume inspect terminal status once, audit complete raw pairs and CPU/
+wall/tail guards against the preregistered private `plan.md`, retain all failures,
+then decide the next confirmation/noise investigation. Timings are deliberately
+unqualified on this busy host. No kernel change is promoted.
 
 Resume steering: storage repair, pinned W8 warmup, service-resource coverage and
 fixed under-pull work are accepted below. W8 paired execution/reporting is
