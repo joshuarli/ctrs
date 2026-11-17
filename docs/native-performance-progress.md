@@ -81,9 +81,22 @@ layout `.work/native-perf/inputs/w8-portfolio-v3-warm-phases-20261116/`, seed
 host snapshots are under the run's engine directories. All verdicts remain
 functional: excludes registry/coordinator/CLI and active backing allocation;
 sampled footprint is not a continuous peak. No timing claim under foreign load.
-Next executable source action: extend the W8 sampler with verified coordinator/
-registry process identity and separately disclosed client costs, then add fixed
-application load during pulls with exact accepted payloads and complete teardown.
+Registry/coordinator coverage now passes native
+`w8-unique-20261116T170443-b0db` on both engines: all 20 phase summaries are
+complete with the fixture's self PID, kernel start identity, loaded interpreter
+and actual listener alongside the required engine processes. Scope version
+`w8-engine-fixture-v1` includes this coordinator's registry thread and harness
+work; do not pool old engine-only records. Missing engine discovery cannot be
+hidden by a live fixture PID. Phase-aligned boundaries and sampled aggregate
+footprint use the same native collector. Waited-child CPU deltas are separate
+diagnostics, not phase-aligned all-client costs; CLI footprint, live children,
+sampler overhead and allocated storage remain outside coverage. Both runs exit
+0, exact app/marker/retained-image checks and clean fixture teardown.
+Layout `.work/native-perf/inputs/w8-portfolio-v3-service-20261116/`, seed
+`ctrs-w8-v3-service-proof-20261116-1`; all 187 harness tests pass.
+Next executable source action: add fixed application load during pulls with
+proven overlap, exact accepted payloads and complete teardown. Keep the pinned
+W2 driver unchanged; use a distinct instrumented W8 fixture version for traces.
 Preserve unique per-pair inputs shared by both engines. Keep v2 history separate
 and require a new exclusive paired baseline before scoring v3. An async request
 for a quiet host window is pending; this does not block independent source work.

@@ -57,13 +57,19 @@ container to establish the declared warm-engine state. Daemon readiness alone
 does not establish a booted ctrs VM. Boot and preconditioning are outside the
 warm-phase resource scope and remain separate acceptance cells.
 
-The functional diagnostic records native owned-engine process CPU and sampled
+The functional diagnostic records native engine plus registry/coordinator CPU and sampled
 physical footprint for setup and image inspection, each pull/install and marker
 check, image identity, stack health, fixed load, persistence recovery, Marked
 verification, retained identity and owned cleanup. Docker combines transfer and
 guest installation in each pull. Phase boundaries, ownership and the sampler
 trace are retained with each engine result; missing counters or failed phases
 remain unknown and invalidate correctness for this resource diagnostic. The
-resource scope excludes the host registry, coordinator, CLI and active backing
-allocation. Sampled footprint is not a continuous peak. Host snapshots accompany
+registry thread lives in the coordinator, whose self PID, kernel start identity
+and loaded executable are recorded in the required-process manifest. Missing
+fixture counters invalidate the combined result. The scope version is
+`w8-engine-fixture-v1`; keep earlier engine-only records separate. Waited-child
+CPU deltas are disclosed per phase; they cover children reaped in that interval,
+exclude live children and are not phase-aligned client totals. CLI footprint,
+sampler overhead and active backing allocation remain excluded.
+Sampled footprint is not a continuous peak. Host snapshots accompany
 the run, which remains ineligible for qualification and makes no timing claim.

@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_jobs
 import diagnostic_signals
 import registry_portfolio
+import ownership
+import resource
 import resource_cycles
 import runner
 from diagnostics.registry_pilot import deploy, save
@@ -41,8 +43,10 @@ def measured_phase(engine, result, name):
     phase['status'] = 'partial'
     context = None
     entered = False
+    children_before = None
     try:
         try:
+            children_before = resource.getrusage(resource.RUSAGE_CHILDREN)
             context = runner.resource_phase(engine, result, name)
             context.__enter__()
             entered = True
@@ -56,6 +60,18 @@ def measured_phase(engine, result, name):
         else:
             phase['status'] = 'complete'
     finally:
+        phase['waited_child_cpu_seconds'] = None
+        try:
+            if children_before is not None:
+                children_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+                delta = (children_after.ru_utime + children_after.ru_stime -
+                         children_before.ru_utime - children_before.ru_stime)
+                if delta < 0:
+                    raise ValueError('waited-child CPU counter decreased')
+                phase['waited_child_cpu_seconds'] = delta
+        except Exception:
+            phase['measurement_error'] = traceback.format_exc()
+        phase['child_cpu_scope'] = 'children reaped during phase; excludes still-live children; not a phase-aligned all-client total'
         if entered:
             try:
                 context.__exit__(None, None, None)
@@ -167,7 +183,8 @@ def main():
     root.mkdir()
     save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v3',
         'receipt': receipt, 'reason': 'functional resource diagnostic; timing and guest pre-content absence unqualified',
-        'resource_scope': 'warm owned engine processes only; excludes boot/preconditioning, host registry, coordinator, CLI and active backing allocation'})
+        'resource_scope_version': 'w8-engine-fixture-v1',
+        'resource_scope': 'warm engine plus native registry/coordinator process; excludes boot/preconditioning, CLI footprint, sampler and active backing allocation; waited-child CPU disclosed separately'})
     (root / 'driver.py').write_bytes(Path(__file__).read_bytes())
     server = registry_portfolio.serve(portfolio, 0)
     thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
@@ -190,7 +207,10 @@ def main():
             try:
                 host_snapshot(directory, 'before')
                 prepare_warm_engine(engine, run)
-                sampler, trace = runner.start_sampler(engine, directory)
+                coordinator = ownership.current_coordinator()
+                coordinator['owned_service'] = {'kind': 'local-fixture-registry',
+                    'address': server.server_address, 'fd': server.fileno()}
+                sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
                 phase = lambda phase_name: measured_phase(engine, result, phase_name)
                 refs = {}
                 with phase('pre_pull_setup'):

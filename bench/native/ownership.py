@@ -1,5 +1,6 @@
 """Fail-closed macOS engine ownership from open socket and disk identities."""
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -48,6 +49,21 @@ def artifact(record, started):
         raise ValueError(f'artifact changed while hashing: {path}')
     return {'path': str(path), 'inode': st.st_ino, 'size': st.st_size,
             'sha256': digest.hexdigest()}
+
+
+def current_coordinator():
+    pid = os.getpid()
+    proc = dict(process_table()[pid], role='fixture-coordinator')
+    proc['kernel_start_identity'] = Counters().read(pid)['kernel_start_identity']
+    started = time.mktime(time.strptime(proc['start_identity'], '%a %b %d %H:%M:%S %Y'))
+    executable = [f for f in open_files(pid) if f['fd'] == 'txt' and f.get('n') == proc['comm']]
+    if len(executable) != 1:
+        raise ValueError('cannot identify loaded coordinator executable')
+    proc['executable'] = artifact(executable[0], started)
+    current = process_table()[pid]
+    if any(current[k] != proc[k] for k in ('pid', 'comm', 'start_identity')):
+        raise ValueError('coordinator identity changed during discovery')
+    return proc
 
 
 def discover(engine, socket_path, engine_dir):

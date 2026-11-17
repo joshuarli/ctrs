@@ -8,9 +8,40 @@ from unittest.mock import patch
 
 import collect
 import ownership
+import runner
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_fixture_process_cannot_hide_failed_engine_discovery(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runner.ownership, 'discover', side_effect=ValueError('missing VM')), \
+                patch.object(runner.subprocess, 'Popen') as spawn:
+            engine = Mock(name='engine')
+            engine.name = 'ctrs'
+            engine.socket = 'unix:///engine/docker.sock'
+            engine.dir = Path('/engine')
+            with self.assertRaisesRegex(ValueError, 'without verified engine ownership'):
+                runner.start_sampler(engine, Path(directory), fixture_processes=({'pid': 303},))
+        spawn.assert_not_called()
+
+    def test_current_coordinator_has_native_and_loaded_executable_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / 'python'
+            binary.write_bytes(b'coordinator interpreter')
+            os.utime(binary, (1, 1))
+            proc = {'pid': 303, 'comm': str(binary), 'start_identity': 'Sun Nov 15 21:24:06 2026'}
+            with patch.object(ownership.os, 'getpid', return_value=303), \
+                    patch.object(ownership, 'process_table', return_value={303: proc}), \
+                    patch.object(ownership, 'open_files', return_value=[{
+                        'fd': 'txt', 'n': str(binary), 'i': str(binary.stat().st_ino)}]), \
+                    patch.object(ownership, 'Counters') as counters:
+                counters.return_value.read.return_value = {'kernel_start_identity': 123}
+                result = ownership.current_coordinator()
+            self.assertEqual(result['role'], 'fixture-coordinator')
+            self.assertEqual(result['kernel_start_identity'], 123)
+            self.assertEqual(result['executable']['size'], len(b'coordinator interpreter'))
+
     def test_missing_vm_and_reused_pid_are_rejected(self):
         required = {1: {'comm': '/ctrs', 'start_identity': 'a'},
                     2: {'comm': '/VM', 'start_identity': 'b'}}

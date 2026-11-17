@@ -663,7 +663,7 @@ def http_json(url: str, timeout: float = 5.0):
         return status, body.decode(errors="replace")[:500]
 
 
-def start_sampler(engine: Engine, trial_dir: Path):
+def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=()):
     trace = trial_dir / "resources.jsonl"
     identity_path = trial_dir / "ownership.json"
     try:
@@ -671,6 +671,14 @@ def start_sampler(engine: Engine, trial_dir: Path):
                                       Path(engine.socket.removeprefix("unix://")), engine.dir)
     except Exception as exc:
         identity = {"required_processes": [], "error": str(exc)}
+    if fixture_processes:
+        if identity.get('error') or not identity['required_processes']:
+            raise ValueError('cannot add fixture processes without verified engine ownership')
+        processes = identity['required_processes'] + list(fixture_processes)
+        if len({p['pid'] for p in processes}) != len(processes):
+            raise ValueError('duplicate engine/fixture process identity')
+        identity['required_processes'] = processes
+        identity['method'] = identity.get('method', '') + '; explicit owned fixture process identities'
     identity_path.write_text(json.dumps(identity, indent=2) + "\n")
     engine.measurement_identity = identity
     proc = subprocess.Popen(

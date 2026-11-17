@@ -121,6 +121,16 @@ class PhaseAccounting(unittest.TestCase):
         pilot.summarize_resources(result, engine, None)
         self.assertEqual(result['resources']['status'], 'unknown')
 
+    def test_child_counter_failure_cannot_skip_cleanup_body(self):
+        engine = mock.Mock()
+        result = {'resources': {'phases': {}}, 'phase_status': {}}
+        with mock.patch.object(pilot.resource, 'getrusage', side_effect=OSError('child counter')):
+            with pilot.measured_phase(engine, result, 'owned_cleanup'):
+                cleaned = True
+        self.assertTrue(cleaned)
+        self.assertIsNone(result['phase_status']['owned_cleanup']['waited_child_cpu_seconds'])
+        self.assertIn('child counter', result['phase_status']['owned_cleanup']['measurement_error'])
+
     def test_summary_failure_stops_engine_persists_failure_and_rejects_result(self):
         engine = mock.Mock()
         result = {'correctness': True, 'errors': [], 'resources': {'phases': {}}, 'phase_status': {}}

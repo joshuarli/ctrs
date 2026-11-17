@@ -19,6 +19,27 @@ def manifest_and_boundary():
 
 
 class ResourceCycleTests(unittest.TestCase):
+    def test_fixture_service_is_included_and_cannot_silently_disappear(self):
+        manifest, phase = self.phase()
+        fixture = copy.deepcopy(phase['before']['procs'][0])
+        fixture.update(pid=303, role='fixture-coordinator', comm='python', start_identity='303',
+                       kernel_start_identity=303, footprint_bytes=2000)
+        manifest['required_processes'].append({k: fixture[k] for k in
+            ('pid', 'role', 'comm', 'start_identity', 'kernel_start_identity')})
+        phase['before']['procs'].append(fixture)
+        after = copy.deepcopy(fixture)
+        after.update(cputime_s=10.002, user_cpu_s=6.001, system_cpu_s=4.001)
+        phase['after']['procs'].append(after)
+        complete = cycles.phase_summary(manifest, phase, [])
+        self.assertEqual(complete['status'], 'ok')
+        self.assertAlmostEqual(complete['cpu_seconds'], .006)
+        self.assertEqual(complete['peak_phys_footprint_bytes'], 3008)
+        phase['after']['procs'].pop()
+        missing = cycles.phase_summary(manifest, phase, [])
+        self.assertEqual(missing['status'], 'unknown')
+        self.assertIsNone(missing['cpu_seconds'])
+        self.assertIsNone(missing['peak_phys_footprint_bytes'])
+
     def test_nonfinite_duration_never_starts_unbounded_collection(self):
         for seconds, interval in ((float('nan'), .2), (float('inf'), .2), (1, float('nan'))):
             with self.subTest(seconds=seconds, interval=interval), self.assertRaises(ValueError):
