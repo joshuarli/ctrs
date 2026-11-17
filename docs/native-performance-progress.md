@@ -78,12 +78,14 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, integrate current main into the parked
-`campaign/w11-bind-completed-cycles` branch. Resolve shared runner and
-mixed-fixture changes while preserving the seven required W11 cells, exact
-completed-cycle counts, and the finite launcher. Recheck the parked
-qualification suite against the new fixture sources and leave the asset
-lock in pilot status.
+If the Mac stays shared, add the container-to-container client path to
+the normal W2 runner. Reuse the diagnostic peer-container setup and
+preserve the published-port default. Keep fixed-work, saturation, and
+fixed-offered-rate inputs and result identities distinct. Verify the
+copied client and exact persisted outputs in both placements.
+The parked qualification branch has been refreshed through main
+`90491bf`. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
+pass on `3d3f3fb`. The asset lock remains in pilot status.
 The [W10 fixtures](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 now include an owned ctrs crash diagnostic. Native validation and a separate
 isolated OrbStack interruption target remain open.

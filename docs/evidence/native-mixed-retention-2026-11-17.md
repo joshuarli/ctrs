@@ -250,3 +250,16 @@ and dimension represented elsewhere. Admission rejects each omission. The
 focused command above passes 46 tests on `c068fba`. The readiness lock remains
 in pilot status. The inventory can expose missing evidence and producers
 before the host is available for qualification.
+
+## Qualification branch refresh
+
+Merge `3d3f3fb` brings main through `90491bf` into
+`campaign/w11-bind-completed-cycles`. It retains the interleaved W2
+observer controls and the current W4 timing fixture. Qualification keeps
+the pinned W11 worker and requires receipts for the shared runner's
+fixed-rate W2 and W4 timing imports.
+
+Run `python3.14 bench/native/runner.py check w11` from the parked checkout.
+All 47 tests passed with zero skips. The check covers qualification
+admission, mixed cycles, resource observations, and the finite
+supervisor. The pilot asset status still prevents qualification launch.
