@@ -259,6 +259,41 @@ class WorkloadSafetyTests(unittest.TestCase):
             self.assertIn("checksum-pinned", rec["validation_errors"][0])
             engine.ensure_up.assert_not_called()
 
+    def test_w9_completion_metrics_require_all_exact_jobs(self):
+        image = "example/marked@" + runner.ci_jobs.IMAGE_DIGEST
+        with tempfile.TemporaryDirectory() as tmp:
+            class Context(FixtureContext):
+                def new_record(self, *args):
+                    return super().new_record(*args) | {"trial_id": "w9-trial"}
+
+            engine = fake_engine()
+            engine.sh.side_effect = lambda args, **kwargs: completed(
+                json.dumps([{"Architecture": "arm64", "RepoDigests": [image]}])
+                if args[:2] == ["image", "inspect"] else "")
+            jobs = [{"name": f"owned-{n}", "completion_seconds": n / 10} for n in range(1, 17)]
+
+            @contextlib.contextmanager
+            def resource_phase(engine, record, name):
+                try:
+                    yield
+                finally:
+                    record["resources"].setdefault("phases", {})[name] = {"operation_wall_seconds": 2}
+
+            with patch.object(runner, "resource_phase", resource_phase), \
+                    patch.object(runner, "start_sampler", return_value=(None, None)), \
+                    patch.object(runner.ci_jobs, "run_condition", return_value=jobs) as condition:
+                successful = runner.trial_w9(Context(tmp), engine, "warm", image)
+                condition.side_effect = runner.ci_jobs.ConditionFailed([
+                    jobs[0] | {"job": 0, "error": "bad output"}])
+                failed = runner.trial_w9(Context(tmp), engine, "warm", image)
+            self.assertTrue(successful["correctness"]["ok"], successful)
+            self.assertEqual(successful["metrics"]["successful_jobs_per_minute_at_4"], 480)
+            self.assertEqual(successful["metrics"]["job_completion_p95_ms_at_4"], 1600)
+            self.assertFalse(failed["correctness"]["ok"])
+            self.assertNotIn("job_completion_p95_ms_at_1", failed["metrics"])
+            raw = Path(tmp) / "orbstack/W9/jobs-at-1.json"
+            self.assertEqual(json.loads(raw.read_text())[0]["completion_seconds"], .1)
+
     def test_w7_builds_two_real_apps_without_pruning(self):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "w7"

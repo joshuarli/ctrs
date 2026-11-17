@@ -3,6 +3,7 @@ import concurrent.futures
 import json
 from pathlib import Path
 import re
+import time
 import uuid
 
 FIXTURE = Path(__file__).parent / 'fixtures/w9-v2/jobs.json'
@@ -99,10 +100,12 @@ def run_condition(engine, image_digest_ref, project_prefix, concurrency, *, clea
                 cleanup(engine, name, owner, command=cleanup_command)
             except Exception as cleanup_exc:
                 result['cleanup_error'] = f'{type(cleanup_exc).__name__}: {cleanup_exc}'
+        result['completion_seconds'] = time.monotonic() - dispatched
         return result
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=concurrency)
     try:
+        dispatched = time.monotonic()
         results = list(pool.map(job, range(SPEC['fixed_jobs'])))
     finally:
         pool.shutdown(wait=True, cancel_futures=True)

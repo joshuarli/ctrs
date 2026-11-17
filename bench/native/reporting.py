@@ -12,8 +12,12 @@ import re
 import statistics
 from pathlib import Path
 
+import ci_jobs
+
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
+W9_CONCURRENCIES = ci_jobs.SPEC['concurrency']
+W9_THROUGHPUT = "successful_jobs_per_minute_at_"
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
@@ -25,13 +29,15 @@ CASE_METRICS = {
     "W7": [f"{app}_{state}_s" for app in ("hyperfine", "httpie")
            for state in ("uncached", "warm", "incr")],
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
-    "W9": ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s"],
+    "W9": [metric for concurrency in W9_CONCURRENCIES
+           for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",
+                          f"job_completion_p95_ms_at_{concurrency}")],
     # Legacy load_rps counts failed attempts during downtime, not useful work.
     "W10": ["recovery_s"],
     # Soak windows/requests/churn counts are reliability observations.
     "W11": [],
 }
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps"}
+HIGHER_BETTER = {"rps", "tx_tps", "load_rps"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")

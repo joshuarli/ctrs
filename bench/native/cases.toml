@@ -123,13 +123,17 @@ id = "W9"
 family = "parallel-ci-jobs"
 title = "16 fixed Marked TypeScript build/CLI-test jobs at concurrency 1/4/8/16"
 fixture = "fixtures/w9-v2 + pinned common W8 Marked image"
-fixture_version = "w9-v2-marked-fixed16"
+fixture_version = "w9-v3-marked-completion"
 status = "implemented"
-metrics = ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s"]
+metrics = ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_s",
+           "successful_jobs_per_minute_at_1", "successful_jobs_per_minute_at_4",
+           "successful_jobs_per_minute_at_8", "successful_jobs_per_minute_at_16",
+           "job_completion_p95_ms_at_1", "job_completion_p95_ms_at_4",
+           "job_completion_p95_ms_at_8", "job_completion_p95_ms_at_16"]
 states = ["warm"]
 params = {}
 correctness = ["16 complete jobs per declared concurrency", "exact tools/source lock", "identical pinned bundle hash", "all CLI goldens exact", "owned cleanup"]
-note = "jobs.json owns fixed work and concurrency. --image-ref must name the pinned preinstalled common Marked manifest. Warmup excludes VM boot; each job phase includes create/start/build/test/rm. Separate setup and cleanup counters. Old timed-loop records remain historical diagnostics and are not pooled."
+note = "jobs.json owns fixed work and concurrency. --image-ref must name the pinned preinstalled common Marked manifest. Each job phase includes create/start/build/test/rm. Job p95 uses nearest rank from batch dispatch through exact result verification. Separate setup and cleanup counters. Keep records from older fixture versions separate."
 
 [[case]]
 id = "W10"

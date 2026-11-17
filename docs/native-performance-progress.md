@@ -78,13 +78,14 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, implement W9 job completion tails next. Capture
-each job's terminal monotonic clock relative to the batch dispatch inside
-`ci_jobs.run_condition`. Keep the receipt for failed jobs and report
-successful jobs per minute and p95 per concurrency only after all 16
-jobs and their exact outputs pass.
+If the Mac stays shared, implement W7 first-use and per-cache-state correctness
+receipts next. After each uncached, warm and incremental build, probe the
+loaded tag before the next build can replace it. Check the application output
+and the exact expected note for that state. Capture first-use elapsed time
+separately from buildx and load.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
-is ready for native validation in the next eligible window.
+and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
+are ready for native validation in the next eligible window.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the
 contract, fixture versions and evidence are reviewed.

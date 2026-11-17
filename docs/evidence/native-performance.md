@@ -2784,6 +2784,22 @@ cleanup removes them, subsequent inspect fails, no cleanup errors. This is a fau
 probe, not the fixed-work fixture. All 123 integrated Python tests pass; missing
 W9 --image-ref exits 2 before engine access. No new dependency or build-driver change.
 
+### W9 job completion measurement
+
+`w9-v3-marked-completion` records each job's completion time from batch
+dispatch through exact output verification. The shared clock includes time
+waiting for a worker. Failed jobs retain their completion receipts and errors.
+The runner publishes successful jobs per minute and nearest-rank p95 only for
+a condition with all 16 exact jobs. At 16 observations the nearest-rank p95
+is the slowest completion. The reporter compares throughput and latency in
+their respective directions.
+
+Run `PYTHONPATH=bench/native python3.14 -m unittest test_ci_jobs test_safety
+test_reporting test_mixed_cycle`. The offline checks use a controlled clock,
+verify the metric derivation, and preserve the failed job's receipt without
+a p95. The job inputs, pinned artifacts and concurrency levels are unchanged.
+The new completion measurements need a native paired run.
+
 ## Existing-disk expansion criteria and bounded feasibility plan
 
 Current callers reuse any existing data.img; PID1 only mounts it. The 1 TiB sparse

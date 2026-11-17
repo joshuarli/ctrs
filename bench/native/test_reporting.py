@@ -57,6 +57,16 @@ def metric_result(report, metric="wall_seconds", cohort=0):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_w9_throughput_and_completion_latency_use_opposite_ratio_directions(self):
+        duration = "job_completion_p95_ms_at_4"
+        rate = "successful_jobs_per_minute_at_4"
+        records = pair(case="W9", metric=duration, ratio=.5)
+        records[0]["metrics"][rate] = 120
+        records[1]["metrics"][rate] = 60
+        report = reporting.analyze(records)
+        self.assertEqual(metric_result(report, duration)["ratio_median"], .5)
+        self.assertEqual(metric_result(report, rate)["ratio_median"], .5)
+
     def test_legacy_w8_without_parameters_is_historical_and_does_not_crash(self):
         records = pair(case='W8', metric='pull_wall_seconds')
         for record in records:

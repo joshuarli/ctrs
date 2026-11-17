@@ -27,6 +27,7 @@ import concurrent.futures
 import hashlib
 import inspect
 import json
+import math
 import os
 import random
 import re
@@ -1755,8 +1756,17 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
                 raise
             owned_jobs.extend(results)
             (trial_dir / f'jobs-at-{concurrency}.json').write_text(json.dumps(results, indent=2))
-            rec['metrics'][f'fixed16_at_{concurrency}_s'] = rec['resources']['phases'][f'jobs_at_{concurrency}']['operation_wall_seconds']
-            rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = len(results) == ci_jobs.SPEC['fixed_jobs']
+            if len(results) != ci_jobs.SPEC['fixed_jobs']:
+                raise ValueError(f'W9 returned incomplete fixed work at concurrency {concurrency}')
+            wall = rec['resources']['phases'][f'jobs_at_{concurrency}']['operation_wall_seconds']
+            latencies = sorted(row['completion_seconds'] for row in results)
+            if (wall <= 0 or not math.isfinite(wall)
+                    or not all(0 <= value <= wall for value in latencies)):
+                raise ValueError(f'W9 completion clocks are outside the phase at concurrency {concurrency}')
+            rec['metrics'][f'fixed16_at_{concurrency}_s'] = wall
+            rec['metrics'][f'successful_jobs_per_minute_at_{concurrency}'] = 60 * len(results) / wall
+            rec['metrics'][f'job_completion_p95_ms_at_{concurrency}'] = 1000 * latencies[math.ceil(.95 * len(latencies)) - 1]
+            rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = True
         rec['correctness']['ok'] = all(rec['correctness']['checks'].values())
         return rec
     except Exception as exc:
