@@ -23,7 +23,7 @@ Use one prebuilt artifact for both engines. A different seed changes every layer
 compressed digest and DiffID. This artifact targets a warm-engine unseen-content
 comparison; generation alone proves neither guest content absence nor an empty
 store or cold engine. Native content-absence and retained-state verification,
-matched transfer phases, and qualification remain pending. Never pool w8-v3
+and qualification remain pending. Never pool w8-v3
 results with v2 or other fixture histories.
 
 For native functional validation, generate a portfolio with an explicit fresh
@@ -51,3 +51,14 @@ cannot establish transfer. The labelled marker containers and application stack
 have owned cleanup. Derived images remain installed; use a new seed and new
 destination for a subsequent unseen-image trial. API absence does not prove
 absence from every guest content cache, and this command does not score timings.
+
+The functional diagnostic records native owned-engine process CPU and sampled
+physical footprint for setup and image inspection, each pull/install and marker
+check, image identity, stack health, fixed load, persistence recovery, Marked
+verification, retained identity and owned cleanup. Docker combines transfer and
+guest installation in each pull. Phase boundaries, ownership and the sampler
+trace are retained with each engine result; missing counters or failed phases
+remain unknown and invalidate correctness for this resource diagnostic. The
+resource scope excludes the host registry, coordinator, CLI and active backing
+allocation. Sampled footprint is not a continuous peak. Host snapshots accompany
+the run, which remains ineligible for qualification and makes no timing claim.
