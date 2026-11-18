@@ -132,6 +132,44 @@ wakeups aimed at idle vCPUs, not from idle polling. Plausible sources are
 wakeup placement or futex/scheduler behavior in 7.2 and wake latency in its
 VMM. None of these is established.
 
+## Installed-default lane (first measurement on this host)
+
+`5e42acb` adds `baseline --resource-lane installed-default`. ctrs runs its
+product defaults (2 vCPUs, 8 GiB), ambient `CTRS_CPUS`/`CTRS_MEMORY_MIB`
+are refused, and the lane is recorded in `workload_params`, so it never
+pools with the matched lane. The reporter's budget-parity gate applies
+only to the matched lane. OrbStack runs as installed (9 of 10 CPUs).
+
+```sh
+TMPDIR=$PWD/.work/tmp python3 bench/native/runner.py baseline --case W2 \
+  --a ctrs --b orbstack --pairs 10 --operations 50000 --concurrency 8 \
+  --write-ratio 0.3 --seed 7 --resource-lane installed-default
+```
+
+Run `base-20261118T090126-7b92`: clean tree, 20/20 correct, zero errors,
+load average 1.52 before and 2.92 after.
+
+| Metric | Median ratio | 95% CI | Pilot assessment |
+| --- | ---: | --- | --- |
+| rps (inverted) | 0.6450 | [0.6245, 0.6536] | strict win |
+| p50_ms | 0.6389 | [0.6140, 0.6458] | strict win |
+| p95_ms | 0.6203 | [0.5988, 0.6252] | strict win |
+| p99_ms | 0.5653 | [0.5508, 0.5744] | strict win |
+| cpu_seconds_per_success | 0.8742 | [0.8239, 0.8825] | strict win |
+| peak_total_rss_kb | 0.1038 | [0.1014, 0.1248] | strict win |
+| peak_phys_footprint_bytes | 0.1519 | [0.1389, 0.1694] | strict win |
+
+Medians per success: ctrs host 646 µs (VM 614, daemon 33), guest API
+system 87 µs; OrbStack host 740 µs, guest API system 62 µs. ctrs IPI1 is
+about 10.8 per success, against 23 at 9 vCPUs. The earlier
+`base-20261118T084511-97e4` used explicit `CTRS_CPUS=2
+CTRS_MEMORY_MIB=8192` without a declared lane. The reporter rejects it,
+and it remains a pilot only.
+
+This is a single same-day pilot batch, not qualification. It shows that
+the matched-lane CPU gap grows with guest vCPU count. It does not close the
+matched-lane cell.
+
 ## Next profiling boundary
 
 Measure which wakeups land on idle vCPUs, and from which API futex paths:

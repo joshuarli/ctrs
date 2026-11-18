@@ -44,6 +44,18 @@ earlier "missing provenance" note was a reporter defect (it ignored
 and guest-asset hashes. The installed-default ctrs lane (2 vCPUs) remains an open, separate
 cell. No campaign-owned measured job is active.
 
+Later 2026-11-18 ([W2 IPI evidence](evidence/native-w2-ipi-2026-11-18.md)):
+the quiet-window matched confirmation `base-20261118T081857-9b61` keeps all
+latency/throughput/footprint cells as strict wins. CPU per success is
+inconclusive (1.045 [1.015, 1.085]). An idle campaign `bootcheck2` daemon
+was co-resident during both matched batches and is disclosed there. The
+whole CPU gap is guest API system CPU, and new W2 guest counters (`7e88096`)
+show 4.4× more call-function IPIs per success than OrbStack. SCHED_MC was
+re-tested with those counters and rejected again: it raises the IPI count.
+The first declared installed-default lane batch (`5e42acb`,
+`base-20261118T090126-7b92`, ctrs 2 vCPUs vs OrbStack 9) is a strict win
+on every W2 cell, including CPU/success 0.874 [0.824, 0.883] (pilot).
+
 ## Accepted and verified
 
 All items below were measured on the old host (2026-11-15…17) and are not
@@ -76,6 +88,22 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
   and [preemption](evidence/native-preemption-2026-11-17.md) records preserve the decisions.
 
 ## Exact next action
+
+**Current (2026-11-18, after `5e42acb`):** attack the matched-lane W2
+CPU/success gap at its measured boundary. Collect a wakeup-placement trace
+on both engines at 9 vCPUs: per `sched_wakeup`/`sched_waking` target CPU,
+whether the target was idle, and the waker/wakee API TIDs. Use the
+existing profiler plumbing (`bench/native/diagnostics/w2-counters.md`,
+`sched_trace.py`) and one matched block with exact 50,000-op C8 work. Then
+choose between a scheduler-side guest candidate (for example, a newer
+stable kernel's wake placement) and a VMM-side idle/IPI candidate. Do not
+repeat SCHED_MC, LSE or HZ/PREEMPT. In parallel, re-baseline the other
+cells (W1, W3–W10) on this host in both resource lanes, starting with W8
+paired acceptance (queue item 3). Before launching any measured job, run
+`pgrep -fl "ctrs daemon"`. A leftover campaign daemon silently serves
+adopted trials.
+
+### Earlier next action (2026-11-18 morning, partly superseded)
 
 2026-11-18 host is reconstructed and the refreshed W2 matched-resource
 baseline is recorded (see evidence doc). Before any qualification claim, the
