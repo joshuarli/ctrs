@@ -231,3 +231,21 @@ These additional unmerged references complete the branch inventory:
 | `feat/np-w11-growth` | `49fe47a` | Patch-equivalent source integrated at81e51d2, followed by4fc901b. Checkout retired; branch preserves provenance. |
 | `fix/np-scoring-repair` | `8ea61c4` | Patch-equivalent source integrated atd0893fe. Checkout retired; no remaining implementation task. |
 | `fix/np-w8-receipt-guard` | `82734b4` | Patch-equivalent source integrated atdf1f418. Checkout retired; content-state limitations remain in evidence. |
+
+## Host migration 2026-11-17 (late)
+
+The development host is being replaced via a fresh clone, so the checkout
+retention above is superseded: every `.work/wt/` checkout (including the
+parked and rejected lanes listed here) was removed after its ignored files
+were inspected and discarded, and `.work/` was deleted outright (VM engines,
+raw results, W8 portfolio inputs and fixtures included). Every local branch
+was pushed to origin first, so all committed source work is reachable from
+`origin`; recreate a checkout with `git worktree add .work/wt/<name> <branch>`.
+Nothing was merged into main: each unintegrated branch remains parked,
+rejected or unreviewed per the dispositions above. The unrelated `stuf89`
+checkout was deleted at the owner's request; `fix/stuf89-help` is on origin.
+Raw artifacts are unrecoverable; the written record in `docs/evidence/` and
+this ledger survive. The W8 portfolio re-export path is documented in
+[bench/native/fixtures/w8-v2/README.md](../bench/native/fixtures/w8-v2/README.md).
+`.work/` itself, including the closeout lock, was removed; the closeout tool
+recreates its lock on demand. See [migration-handoff-2026-11-17.md](migration-handoff-2026-11-17.md).
