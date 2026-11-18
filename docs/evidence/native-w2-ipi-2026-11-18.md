@@ -170,6 +170,36 @@ This is a single same-day pilot batch, not qualification. It shows that
 the matched-lane CPU gap grows with guest vCPU count. It does not close the
 matched-lane cell.
 
+## Wakeup placement trace (matched lane)
+
+[`w2_wake_trace.py`](../../bench/native/diagnostics/w2-wake-trace.md), run
+`wake-20261118T091715`. One exact 50,000-op C8 trial per engine, 9 vCPUs
+each, a 2 s tracefs window 6 s into the workload, zero lost events, both
+trials correct. Per successful request (estimated from rps × window):
+
+| | ctrs | OrbStack |
+| --- | ---: | ---: |
+| `sched_waking` | 28.9 | 18.0 |
+| wakee on waker's CPU | 6.3 | 9.6 |
+| wakee on remote idle CPU | 21.5 | 7.5 |
+| wakee on remote busy CPU | 1.1 | 1.0 |
+| IPIs sent | 23.2 (`ttwu_queue_wakelist` 22.5) | 5.0 (`wake_up_q` 3.5) |
+| `sched_wake_idle_without_ipi` | 0 | 0.42 |
+| `sched_switch` | 55.6 | 29.1 |
+
+The largest waker→wakee pair is uvicorn→uvicorn: 18.4 per request on ctrs
+and 8.6 on OrbStack, from the same image and load. The remaining wakers are
+similar in size on both engines: postgres, plus each engine's port-forward
+relay (ctrs guest `init` and `kworker/0:1`; OrbStack process `7` and
+`orbstack-agent`). The extra CPU therefore comes from the API's own
+thread-handoff wakeups. Three quarters of them land on an idle vCPU, and
+each of those costs an IPI and a VM exit.
+OrbStack's 7.2 guest records `sched_wake_idle_without_ipi`, so some of its
+idle CPUs poll and accept a wakeup without an IPI. Stock arm64 6.18 cannot.
+Its IPI call sites also differ, which indicates a different wake path. This
+justifies a bounded kernel-series experiment: the same `ctrs.config` and
+patches on 7.3.5 stable.
+
 ## Next profiling boundary
 
 Measure which wakeups land on idle vCPUs, and from which API futex paths:
