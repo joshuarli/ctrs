@@ -272,3 +272,10 @@ mounted-input probe is part of the required freeze inputs.
 The W11 component passed 49 tests with zero skips, and the adjacent
 runner and reporting selection passed 81 tests. The asset lock remains
 in pilot status.
+
+Refresh `f0250a9` includes main through `99ca94d`, including the W2
+paired input checks and the native W2 and W4 correctness receipts. The
+parked checkout passed `runner.py check w11` and `runner.py check w2`
+with 49 and 117 tests respectively, zero skips. The reviewed evidence
+matrix, comparable durability evidence, identified storage scope and
+host admission are still required for the two 12-hour qualification legs.

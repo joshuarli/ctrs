@@ -104,10 +104,10 @@ The [W3 pinned transaction proof](evidence/native-performance.md#w3-commit-laten
 passed all 300 commit receipts and exact persisted rows on both engines.
 The [W9 fixed-work diagnostic](evidence/native-performance.md#w9-job-completion-measurement)
 passed all four concurrency conditions per engine.
-The parked W11 qualification branch `a135aa0` includes main through
-`a06632d` and verifies the declared fixture revisions against the case
-manifest. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
-passed 49 tests. The asset lock remains in pilot status.
+The parked W11 qualification branch `f0250a9` includes main through
+`99ca94d` and verifies the declared fixture revisions against the case
+manifest. Its [bounded checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
+passed 49 W11 tests and 117 W2 tests. The asset lock remains in pilot status.
 [W2 placement](../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof)
 verified exact persisted work on the published port and guest network
 in all twelve pinned trials. The two OrbStack offered-rate trials
