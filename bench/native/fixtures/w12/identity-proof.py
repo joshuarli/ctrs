@@ -33,18 +33,24 @@ try:
         raise RuntimeError('refusing to adopt a daemon')
     ctrs.sh(['image', 'load', '--input', str(archive)], timeout=600)
     ctrs_info = json.loads(ctrs.sh(['image', 'inspect', 'np-w12-kutt:proof']).stdout)[0]
+    if ctrs_info['Id'] != pinned['ctrs_id']:
+        raise RuntimeError('ctrs image differs from the pinned fixture')
     result = {'orbstack_id': orb_info['Id'], 'ctrs_id': ctrs_info['Id'],
               'orbstack_diffids': orb_info['RootFS']['Layers'],
               'ctrs_diffids': ctrs_info['RootFS']['Layers']}
-    for engine, other in ((orb, ctrs_info['Id']), (ctrs, orb_info['Id'])):
-        command = ['image', 'inspect', other]
-        cp = engine.sh(command, timeout=30, check=False)
-        result[engine.name + '_inspect_other'] = {'command': command,
-            'exit': cp.returncode, 'stdout': cp.stdout, 'stderr': cp.stderr}
-    print(json.dumps(result, indent=2))
+    source = json.loads((Path(__file__).parent / 'workload.json').read_text())['source']
+    for engine, info in ((orb, orb_info), (ctrs, ctrs_info)):
+        if info['Architecture'] != 'arm64':
+            raise RuntimeError('fixture image is not ARM64')
+        cp = engine.sh(['run', '--rm', '--label', f'dev.ctrs.campaign.run={run_id}',
+                        '--network', 'none', '--entrypoint', 'sha256sum', info['Id'],
+                        '/fixture/source.tar.gz', '/fixture/source/package-lock.json'], timeout=60)
+        hashes = [line.split()[0] for line in cp.stdout.splitlines()]
+        if hashes != [source['sha256'], source['lock_sha256']]:
+            raise RuntimeError(f'{engine.name} fixture source or lock mismatch')
+        result[engine.name + '_hashes'] = hashes
     if result['orbstack_diffids'] != result['ctrs_diffids']:
         raise RuntimeError('image layers differ')
-    if result['orbstack_id'] != result['ctrs_id']:
-        raise RuntimeError('identical exported image has different engine image IDs')
+    print(json.dumps(result, indent=2))
 finally:
     ctrs.stop()
