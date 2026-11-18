@@ -19,8 +19,8 @@ The Dockerfile expects `source.tar.gz` and `npm-cache/` in its build context.
 The preparation probe populated that cache with `npm ci --legacy-peer-deps`.
 
 The same exported image was loaded into both engines. The ordered DiffIDs
-match, but OrbStack and ctrs report different image IDs and cannot inspect
-one another's ID. The IDs and DiffIDs are recorded in `workload.json`.
-`identity-proof.py` reproduces that failure against the prepared OrbStack tag
-`np-w12-kutt:proof` and a fresh owned ctrs engine. This blocks the requested
-identical image-ID check; no workspace or watcher trials were run.
+and in-image source and lock hashes match. OrbStack's immutable image ID is
+`sha256:caefe5a0e5837c16b4f75eeff7dd97e1d67ca18d64f3899c483be50fba27ed85`;
+ctrs reports `sha256:684ca7f8387106aa1ab667d43147ba7141fed4c8b09178b3e419eeb227de79b1`.
+The IDs and DiffIDs are recorded in `workload.json`. `identity-proof.py`
+checks them against `np-w12-kutt:proof` and a fresh owned ctrs engine.
