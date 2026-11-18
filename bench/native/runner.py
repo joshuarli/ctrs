@@ -90,7 +90,7 @@ LOAD_PY = FIXTURES / "w2" / "load.py"
 RATE_LOAD_PY = FIXTURES / "w2" / "v3.py"
 W8_DIR = FIXTURES / "w8"
 W11_CHURN_IMAGE = "python:3.13-slim"
-W3_IMAGE = "postgres:17-alpine"
+W3_FIXTURE_VERSION = "w3-v3-pinned-commit-latency"
 W6_IMAGE = "gcc:14.2.0-bookworm"
 W6_RUST_IMAGE = "rust:1.100.0-bookworm"
 W6_DIR = FIXTURES / "w6"
@@ -2182,20 +2182,25 @@ def trial_w4(ctx, engine: Engine, state: str,
     return rec
 
 
-def trial_w3(ctx, engine: Engine, state: str) -> dict:
+def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_VERSION) -> dict:
     """W3: persistent transactional Postgres — real migrations, a
     deterministic 300-transaction mix, CHECKPOINT, `docker restart`,
     then exact row and counter verification on the persisted volume."""
+    from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
+
     case_id = "W3"
-    proj = project_name(ctx.run_id, engine.name, case_id)
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
+    trial_token = hashlib.sha256(rec["trial_id"].encode()).hexdigest()[:16]
+    proj = project_name(trial_token, engine.name, case_id)
     checks = rec["correctness"]["checks"]
     name = f"{proj}-db"
     vol = f"{proj}-pgdata"
     sampler = trace = None
+    volume_created = container_attempted = False
+    owner_label = f"dev.ctrs.campaign.run={ctx.run_id}"
 
-    rec["metrics"]["fixture_version"] = "w3-v2-commit-latency"
+    rec["metrics"]["fixture_version"] = fixture_version
     psql_cmd = ["exec", "-e", "LC_ALL=C", name, "psql", "-X", "-v", "ON_ERROR_STOP=1",
                 "-U", "postgres", "-d", "postgres"]
 
@@ -2248,16 +2253,32 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
             time.sleep(0.15)
         return None
 
+    def require_volume_owner():
+        info, = json.loads(engine.sh(["volume", "inspect", vol], timeout=30).stdout)
+        if info.get("Name") != vol or (info.get("Labels") or {}).get("dev.ctrs.campaign.run") != ctx.run_id:
+            raise ValueError("W3 database volume ownership mismatch")
+
     try:
+        if fixture_version != W3_FIXTURE_VERSION:
+            raise ValueError("W3 fixture version mismatch")
+        pin_path = FIXTURES / "w8-v2/portfolio.json"
+        contract = json.loads(pin_path.read_text())
+        pin = contract["images"]["np-v2/postgres"]
+        image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
-        engine.sh(["rm", "-f", name], check=False, timeout=30)
-        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=30)
+        inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
+        rec["inputs"] = {"images": require_baseline_images(engine.name, {"db": pin}, inspected),
+                         "portfolio_sha256": sha256_file(pin_path)}
+        engine.sh(["volume", "create", "--label", owner_label, vol], timeout=30)
+        volume_created = True
+        require_volume_owner()
 
         t0 = time.monotonic()
+        container_attempted = True
         run = engine.sh(
-            ["run", "-d", "--name", name,
+            ["run", "-d", "--pull=never", "--name", name, "--label", owner_label,
              "-e", f"POSTGRES_PASSWORD={W3_PASSWORD}",
-             "-v", f"{vol}:/var/lib/postgresql/data", W3_IMAGE],
+             "-v", f"{vol}:/var/lib/postgresql/data", image],
             timeout=120, check=False)
         checks["db_start"] = run.returncode == 0
         ready = wait_ready() if checks["db_start"] else None
@@ -2352,13 +2373,28 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         rec["validation_errors"].append(f"exception: {exc}")
         return rec
     finally:
-        if sampler is not None:
-            stop_sampler(sampler)
-        rec["resources"].update(summarize_trace(trace) if trace else {})
-        if trace:
-            rec["resources"]["trace"] = _trace_ref(trace)
-        engine.sh(["rm", "-f", name], check=False, timeout=60)
-        engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
+        try:
+            if sampler is not None:
+                stop_sampler(sampler)
+            rec["resources"].update(summarize_trace(trace) if trace else {})
+            if trace:
+                rec["resources"]["trace"] = _trace_ref(trace)
+        except Exception as exc:
+            rec["correctness"]["ok"] = False
+            rec["validation_errors"].append(f"W3 resource receipt: {exc}")
+
+        def remove_volume():
+            if volume_created:
+                require_volume_owner()
+                engine.sh(["volume", "rm", vol], timeout=60)
+
+        for action in (lambda: ci_jobs.cleanup(engine, name, ctx.run_id) if container_attempted else None,
+                       remove_volume):
+            try:
+                action()
+            except Exception as exc:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(f"W3 cleanup: {exc}")
 
 
 def w5_phase_receipts(identity, phases, samples, iterations):

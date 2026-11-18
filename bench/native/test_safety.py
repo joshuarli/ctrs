@@ -157,8 +157,21 @@ class WorkloadSafetyTests(unittest.TestCase):
                 "meta": [["txs", runner.W3_TXS]], "fsync": "on"}
         with tempfile.TemporaryDirectory() as tmp:
             engine = fake_engine()
+            pin = json.loads((runner.FIXTURES / "w8-v2/portfolio.json").read_text())["images"]["np-v2/postgres"]
+            volume_owner = "test-run-000001"
 
             def execute(args, **kwargs):
+                if args[:2] == ["image", "inspect"]:
+                    self.assertEqual(args[-1], pin["manifest"])
+                    return completed(json.dumps([{"Id": pin["manifest"], "Architecture": "arm64",
+                                                  "RootFS": {"Layers": pin["diff_ids"]}}]))
+                if args[:2] == ["volume", "inspect"]:
+                    return completed(json.dumps([{"Name": args[-1], "Labels": {"dev.ctrs.campaign.run": volume_owner}}]))
+                if args[0] == "inspect":
+                    return completed(json.dumps([{"Config": {"Labels": {"dev.ctrs.campaign.run": "test-run-000001"}}}]))
+                if args[0] == "run":
+                    self.assertIn("--pull=never", args)
+                    self.assertEqual(args[-1], pin["manifest"])
                 if "-tAc" in args:
                     return completed("1\n")
                 if "-tA" in args:
@@ -187,6 +200,13 @@ class WorkloadSafetyTests(unittest.TestCase):
                 bad_rows = runner.trial_w3(FixtureContext(tmp), engine, "warm")
                 timings = timings.replace("COMMIT", "ROLLBACK", 1)
                 bad_tx = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                volume_owner = "another-run"
+                engine.sh.reset_mock()
+                unowned = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                self.assertFalse(unowned["correctness"]["ok"])
+                self.assertIn("W3 database volume ownership mismatch", unowned["validation_errors"][0])
+                self.assertFalse(any(call.args[0][0] in ("run", "rm") or call.args[0][:2] == ["volume", "rm"]
+                                     for call in engine.sh.call_args_list))
 
             self.assertTrue(rec["correctness"]["ok"], rec)
             self.assertEqual(rec["metrics"]["transaction_p95_ms"], 285.125)

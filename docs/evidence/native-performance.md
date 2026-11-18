@@ -2861,11 +2861,15 @@ Run `PYTHONPATH=bench/native python3.14 -m unittest test_ci_jobs test_safety
 test_reporting test_mixed_cycle`. The offline checks use a controlled clock,
 verify the metric derivation, and preserve the failed job's receipt without
 a p95. The job inputs, pinned artifacts and concurrency levels are unchanged.
-The new completion measurements need a native paired run.
+Native diagnostic `w9-correctness-616a92400e2d` used the same pinned
+ARM64 Marked portfolio image on both engines. Each verified 16 complete
+jobs at each of 1, 4, 8 and 16 concurrency, with exact output and owned
+cleanup. All eight conditions retained their completion receipts.
+These standalone runs are ineligible for scoring.
 
 ## W3 commit latency and persisted rows
 
-`w3-v2-commit-latency` sends the 300 fixed transactions over one psql
+`w3-v3-pinned-commit-latency` sends the 300 fixed transactions over one psql
 connection. Each request contains the existing insert and counter update
 inside an explicit transaction. The runner requires the expected command
 statuses and one psql timing per commit. It retains raw output and publishes
@@ -2875,13 +2879,17 @@ checkpoint and restart retain distinct elapsed intervals. [PostgreSQL 17 psql re
 The transaction session enables synchronous commit. After restart, the fixture
 verifies all ordered keys and payloads, the exact counter, and the PostgreSQL
 `fsync` setting. A corrupted payload with the same count and key sum fails.
-The W3 proof still needs a pinned native service image and comparable
-engine-level durability evidence.
+W3 uses the common portfolio's PostgreSQL image with verified ARM64
+architecture and ordered DiffIDs. It uses a fresh labeled volume and
+disables image pulls during the trial. Comparable engine-level durability
+evidence remains open.
 
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
-All 54 tests passed. The new regression covers the generated transaction
-script, timing aggregation, failed commit receipts and corrupt persisted
-payloads. The altered psql path and resulting timings await native validation.
+Native diagnostic `w3-correctness-be68737716da` passed on ctrs and
+OrbStack. Each retained 300 commit timings and all exact persisted rows
+with the correct counter and `fsync=on` after restart. The combined
+W3/W9 focused suite passed 69 tests, including a corrupted persisted
+payload, an incomplete commit, and a foreign volume.
 
 ## Existing-disk expansion criteria and bounded feasibility plan
 

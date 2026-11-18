@@ -100,10 +100,13 @@ passed native compile-cache and artifact checks on the default builders.
 The [W7 import and first-use producer](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 now proves compile and note cache behavior. Both engines passed all three
 conditions for both apps with pair-specific note bytes.
-If the host stays shared, select the immutable PostgreSQL image from the
-common portfolio for W3, then validate all 300 commit receipts and exact
-persisted rows on both engines. Continue with W9's four fixed-work
-concurrency conditions using the common Marked image.
+The [W3 pinned transaction proof](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
+passed all 300 commit receipts and exact persisted rows on both engines.
+The [W9 fixed-work diagnostic](evidence/native-performance.md#w9-job-completion-measurement)
+passed all four concurrency conditions per engine.
+If the host stays shared, refresh the parked W11 qualification branch
+against current main and check its admission contract against these
+verified fixture revisions.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
@@ -111,9 +114,7 @@ The parked qualification branch has been refreshed through main
 pass on `3d3f3fb`. The asset lock remains in pilot status.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 still requires an isolated OrbStack target.
-The [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
-and [W3 commit latency receipts](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
-await native correctness validation. Scored W4, W6 and W7 runs remain open.
+Scored W3, W4, W6, W7 and W9 runs remain open.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the
 contract, fixture versions and evidence are reviewed.
