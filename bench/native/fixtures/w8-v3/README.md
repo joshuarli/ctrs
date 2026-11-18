@@ -1,8 +1,8 @@
 # W8 derived content-unique portfolio
 
 `registry_variant.prepare_variant(layout, contract, destination, seed)` verifies
-an existing pinned W8 v2 common OCI layout and creates a new destination directory.
-`contract` is the v2 portfolio object and `seed` is explicit bytes of length 1 to
+an existing pinned common OCI layout and creates a new destination directory.
+`contract` is the common portfolio object and `seed` is explicit bytes of length 1 to
 1024. The destination must not exist, must be separate from the source, and must
 be in caller-owned scratch. The function returns and writes `receipt.json` with
 source and derived identities, seed hash, method, and Python/zlib versions.
@@ -34,8 +34,8 @@ TMPDIR=$PWD/.work/tmp PYTHONPATH=bench/native python3.14 - <<'PY'
 import json
 from pathlib import Path
 from registry_variant import prepare_variant
-prepare_variant('.work/native-perf/inputs/w8-portfolio-v2/layout',
-    json.loads(Path('bench/native/fixtures/w8-v2/portfolio.json').read_text()),
+prepare_variant('.work/native-perf/inputs/w8-portfolio-v5/layout',
+    json.loads(Path('bench/native/fixtures/w8-v5/portfolio.json').read_text()),
     '.work/native-perf/inputs/w8-new-variant', b'explicit-fresh-comparison-seed')
 PY
 TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_variant_pilot.py \
@@ -104,7 +104,7 @@ The canonical paired pilot starts from the original pinned v2 layout:
 
 ```sh
 python3.14 bench/native/runner.py w8-baseline \
-  --layout .work/native-perf/inputs/w8-portfolio-v2/layout \
+  --layout .work/native-perf/inputs/w8-portfolio-v5/layout \
   --ctrs-binary /path/to/signed/ctrs --pairs 10
 ```
 

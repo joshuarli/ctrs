@@ -94,16 +94,16 @@ def baseline(engine, directory, run, contract, phase):
             state['hashes'] = {'w2_load': runner.sha256_file(runner.LOAD_PY),
                 'seed_sql': runner.sha256_file(runner.FIXTURES / 'w1/seed.sql'),
                 'client': runner.sha256_file(CLIENT), 'controller': runner.sha256_file(Path(__file__)),
-                'contract': runner.sha256_file(runner.FIXTURES / 'w8-v2/portfolio.json'),
+                'contract': runner.sha256_file(runner.FIXTURES / 'w8-v5/portfolio.json'),
                 'compose': runner.sha256_file(runner.COMPOSE_FILE)}
-            identity_kind, _ = baseline_image_reference(engine.name, contract['images']['np-v2/api'])
+            identity_kind, _ = baseline_image_reference(engine.name, contract['images']['np-v5/api'])
             state['baseline_image_id_kind'] = identity_kind
-            refs = {name: baseline_image_reference(engine.name, contract['images']['np-v2/' + name])[1]
+            refs = {name: baseline_image_reference(engine.name, contract['images']['np-v5/' + name])[1]
                     for name in ('api', 'postgres', 'redis')}
             images = {}
             for name, ref in refs.items():
                 inspected = json.loads(engine.sh(['image', 'inspect', ref]).stdout)
-                pin = contract['images']['np-v2/' + name]
+                pin = contract['images']['np-v5/' + name]
                 images.update(require_baseline_images(engine.name, {name: pin}, inspected))
             state['images'] = images
             save(override, {'services': {service: {'image': images[name]['Id']} for service, name in

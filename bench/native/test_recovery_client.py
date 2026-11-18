@@ -135,7 +135,7 @@ class PersistentProbeTests(unittest.TestCase):
                                            write_ratio=.5, kill_at=.4, down_for=.2, interrupt_service=interrupt_service)
                 self.assertTrue(rec['correctness']['ok'], rec)
                 self.assertEqual(provision.call_args.kwargs['layout'],
-                                 runner.WORK / 'inputs/w8-portfolio-v2/layout' if interrupt_service == 'engine' else None)
+                                 runner.WORK / 'inputs/w8-portfolio-v5/layout' if interrupt_service == 'engine' else None)
                 for call in engine.compose.call_args_list:
                     self.assertEqual(call.kwargs['override'].name, 'pinned-compose.json')
                 if interrupt_service == 'engine':

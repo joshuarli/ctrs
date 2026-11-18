@@ -1,3 +1,7 @@
+> **Superseded 2026-11-18.** The artifacts described here were not recoverable on the new
+> macOS host. The pins were refreshed as [w8-v5](../w8-v5/README.md); use that fixture for
+> any current work. This file and the v2 contract remain as the historical pin set.
+
 # W8 common multilayer portfolio
 
 `portfolio.json` pins four native ARM64 images: the real Python API, PostgreSQL,

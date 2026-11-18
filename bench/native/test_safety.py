@@ -157,7 +157,7 @@ class WorkloadSafetyTests(unittest.TestCase):
                 "meta": [["txs", runner.W3_TXS]], "fsync": "on"}
         with tempfile.TemporaryDirectory() as tmp:
             engine = fake_engine()
-            pin = json.loads((runner.FIXTURES / "w8-v2/portfolio.json").read_text())["images"]["np-v2/postgres"]
+            pin = json.loads((runner.FIXTURES / "w8-v5/portfolio.json").read_text())["images"]["np-v5/postgres"]
             volume_owner = "test-run-000001"
 
             def execute(args, **kwargs):

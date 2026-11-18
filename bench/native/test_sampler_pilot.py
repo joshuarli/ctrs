@@ -96,7 +96,7 @@ class ObserverControls(unittest.TestCase):
                 def run_trial(*args, **kwargs):
                     trial_events.append('measure')
                     return failed
-                portfolio = SimpleNamespace(manifests={'np-v2/' + name: 'sha256:' + 'a' * 64
+                portfolio = SimpleNamespace(manifests={'np-v5/' + name: 'sha256:' + 'a' * 64
                     for name in ('api', 'postgres', 'redis')})
                 identity = {'required_processes': [{'pid': 999999, 'start_identity': 'absent'}]}
                 save = pilot.resource_pilot.save

@@ -10,7 +10,7 @@ TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/storage_space_pilot.py
   --stage allocation \
   --fsync-binary .work/tmp/disk-expand-target/release/ctrs \
   --full-binary .work/tmp/full-sync-target/release/ctrs \
-  --portfolio-archive .work/native-perf/inputs/w8-portfolio-v2/portfolio.tar
+  --portfolio-archive .work/native-perf/inputs/w8-portfolio-v5/portfolio.tar
 ```
 
 Require FIEMAP unwritten extents, exact database contents and at most 8MiB of

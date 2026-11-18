@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "fixture_version": "w8-v5-common-portfolio",
+  "status": "refreshed 2026-11-18 on the new macOS host (M1 Max, macOS 27.2.1); postgres/redis are bit-identical to w8-v2 (pulled by the pinned manifest digests); api/marked rebuilt from the pinned upstream fixtures with digest-pinned bases",
+  "archive_sha256": "a875e1ed3c7e6b3d68432d1cc0b97c0f90682ad5f5c4a6d4cf8aa57cc6279197",
+  "archive_bytes": 389431808,
+  "images": {
+    "np-v5/api": {
+      "layout_reference": "np5-api",
+      "manifest": "sha256:2ea6a16856be80f519d5f1cea5b749c647dda8f8a41f4f9ec97b54d3fed74625",
+      "config": "sha256:7abba31910ce17034ed76bcf6a3a9fb12799885c2d100b0307932a75e30f1a60",
+      "layer_count": 8,
+      "diff_ids": [
+        "sha256:04e61ff9ed2c84e88795bf7562d69d0980188e2bb6d6152d6fe721383e10db9e",
+        "sha256:c8c33587c60cc1dd8d7b2cdba9a74e29190fdf1bae201ef39a7a4847d618d602",
+        "sha256:d16ce3ec0751594884f0f0576157ae498426695d87797ebaede9e2197faa282d",
+        "sha256:ca8a921086fad0ab07ba836693c942565d4837aaeab719b659cd1e4db9dae57c",
+        "sha256:deed32d5fa6e5abf74c0d5b3e087b1aac1582efc5ab39d982c9d67a632e4c5e9",
+        "sha256:4fb22f157a13913937727f892c484764a6dc05dc678311483278ec61b17d524f",
+        "sha256:158ee93fec3e4f508f72a01a73f1558e6bba4cea11bed0806238952002d9c04f",
+        "sha256:81d0ca2c2370aaca8b2fd908219e1ef2f43caac8393785e7819bea40bc419299"
+      ]
+    },
+    "np-v5/postgres": {
+      "layout_reference": "17-alpine",
+      "manifest": "sha256:93f3c32bafb7d4d20965c4df530899ae40923f0ccd63deede2f36681fa0aeceb",
+      "config": "sha256:97106b46c3da2dcd9bcdb89cfb4b9dec61ff62a6f17e77bee6c5487145696e46",
+      "layer_count": 10,
+      "diff_ids": [
+        "sha256:3d971ddbca237031066ab6609a11ae2e9e5b109da24d5c5d94d2e584dd94bd54",
+        "sha256:0d1b9203b8f9aecec0c3a1ff50fd5452b6a63f40279c6997d3b5338cbc6d02eb",
+        "sha256:db00988a5d84e286c90ec00f3947423769342fa30a75684ce753c25fe2604779",
+        "sha256:abcfac5942574b1a93eb31dcea3ee19506548fd0343398c3d5c252d2691f2376",
+        "sha256:6ab8a8438daad306e7b8a7e1e1f256f3d60a3abc2a6de3bfb73a7f48d8a9388b",
+        "sha256:ff05eb2ab3886f96ae4d060a7af10fd5758d33be2d61b1c95180d6c40a93c3aa",
+        "sha256:549277678d22d3d2ceada7281c8d48a0b348294e8b50758fbdfb4e893d4a32c6",
+        "sha256:c503d719809b5dce0754b156b4ef3531c2cf99763d3c61d8b157a9b72694db69",
+        "sha256:aa05a38c25e3a10dc76b55460729c2ad9baddbfd17e5ef3995879b2d0450cd8d",
+        "sha256:5adc7101ef8ad941a57b321d1617b02fb0a14793371c556443b59b9fbdbb926e"
+      ]
+    },
+    "np-v5/redis": {
+      "layout_reference": "7-alpine",
+      "manifest": "sha256:52d1ea8a654b10f06af3ecda4e9dbcd035c7868b5c49ee7975de917f81de13db",
+      "config": "sha256:eab78b9649d5ca8b91192621c91136c9c1465a81338fb686fbc02bac4dd851ae",
+      "layer_count": 7,
+      "diff_ids": [
+        "sha256:d0af45c05d06b9fef7731c3ddeeb7141f22477266bb3895a68d3492af49d191b",
+        "sha256:93400aefdfccfe29b403bf772292134ea61a24d3ebc119668c3decd0b6ed4f8e",
+        "sha256:ab491e6bfc2ac2d8778852ff91a742681854e5090c89f887dfef4e8828a29cd6",
+        "sha256:684b2f57c50caa9f0255cac3d146ffff3d35c8b221e6befb9df1ad6bf410c540",
+        "sha256:dbfd30c33c103e86ce6fa6c917aa501dbdc1bdfb207bfb13b652bd906d0b43a9",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:7d348f3c9a83a68210fa554dfe39ee2c4385a26c0709267421b73248b1491eed"
+      ]
+    },
+    "np-v5/marked": {
+      "layout_reference": "v5",
+      "manifest": "sha256:645f557cabf8cf8b27575195e97a495d6cf38baf6acb6269aa09538693577712",
+      "config": "sha256:93b31cbc0ffdacebd212c1c3a6441b097a27b545436bf8bb3c83dd61e3a3b7f9",
+      "layer_count": 12,
+      "diff_ids": [
+        "sha256:66a307619b8c32f57cf19fc334bb43ba2d3cfdda26f19dfc6e87b49b73e41be9",
+        "sha256:6cd99b062200821a3b44a2a4493276ef4051ecd3054cabadcfb44f21d906ae83",
+        "sha256:2c59c8911cd11be823e8ce3ad03d7080b099ce4cac2e72c5c2c391ccb3b263dd",
+        "sha256:04e40d50649aff1ef129a507d50f49b16f1aa7fd4929b541313950ba3c637c90",
+        "sha256:bf767b23dc4e1510fdfd81b1f8d09151f47523176bba1ebf2e92fdb34a2fb763",
+        "sha256:14d948cb3d191e7232fb9c9ab91e247c6a2e82c610d19e0ac120a0231b866d5a",
+        "sha256:4eed69e65bd3d95447471470f12679b90b79a89684fde8dba4f827ff02c757b5",
+        "sha256:c7affc605f78f4319429bd6651fb875f0ce8a5da7d2270f60494ec67768768ba",
+        "sha256:f2848c56d65578d624fe29f43d73f16333589d053a455e94a74f24da801438e6",
+        "sha256:5ccc950220d0da4ae4f6839ed3ff7263f9b1ffe4df68b09c00a22987060003d0",
+        "sha256:c7c828f2eb0d62de1c00e46616ab04fa5ede713d9a9a9d55f5b00e2e7f1fc71c",
+        "sha256:0d9c09e690d5f48443cf5e01990e4749e03d144b79c02b911f278ab1ebb69c5e"
+      ]
+    }
+  },
+  "runtime_versions": {
+    "python": "3.13.18",
+    "postgres": "17.12",
+    "redis": "7.4.12",
+    "node": "v22.15.0",
+    "npm": "10.9.2",
+    "esbuild": "0.25.3"
+  },
+  "marked_artifact_sha256": "0823c3960d93d71ea9b2e9bd1fe032659016ddf97b757cc35b38108ae677ef0b",
+  "marked_contract": "../w5-v2/workload.json",
+  "api_files_sha256": {
+    "/app/app.py": "d160d030f8598f37d3d1a0706c6d10acf5b1545d33a4ed667a06eaa5d9d7f351",
+    "/app/requirements.txt": "b9775ff8524dc8addc4c8fdafb7a86c5a2940ad5b557c2a47db2ee836c51f1b7"
+  },
+  "seed_sql_sha256": "0eb763cb8d0a9dcd093b6f364a56aa8f1e43e41d4d4d1dad853b4797d550210e",
+  "w2_load_sha256": "3bff357920dea4aed4b4e2eb52c3e978712963dfd476ab42e990fb1b348a0992"
+}

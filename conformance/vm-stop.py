@@ -44,7 +44,7 @@ def main():
     if sys.platform != 'darwin' or platform.machine() != 'arm64':
         parser.error('native ARM64 macOS only')
     binary, archive = args.ctrs_binary.resolve(strict=True), args.portfolio_archive.resolve(strict=True)
-    spec_path = REPO / 'bench/native/fixtures/w8-v2/portfolio.json'
+    spec_path = REPO / 'bench/native/fixtures/w8-v5/portfolio.json'
     spec = json.loads(spec_path.read_text())
     archive_hash = digest(archive)
     if archive_hash != spec['archive_sha256']:
@@ -104,7 +104,7 @@ def main():
             wait_for('daemon socket', ready, 120, proc)
             docker_run('load', '-i', str(archive), timeout=180)
             image = json.loads(docker_run('image', 'inspect', 'redis:7-alpine'))[0]
-            if image['Architecture'] != 'arm64' or image['RootFS']['Layers'] != spec['images']['np-v2/redis']['diff_ids']:
+            if image['Architecture'] != 'arm64' or image['RootFS']['Layers'] != spec['images']['np-v5/redis']['diff_ids']:
                 raise ValueError('loaded Redis image differs from pinned portfolio')
             guest()
             wait_for('idle VM stop', lambda: 'VM asleep: idle' in log_text(), 45, proc)

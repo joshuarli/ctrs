@@ -3,26 +3,30 @@
 # under .work/native-perf/results/prep-*/prepare.json.
 
 [freeze]
-date = "2026-11-14"
-status = "pilot — not yet frozen; versions below are observed, not yet locked"
+date = "2026-11-18"
+status = "pilot — refreshed for the new macOS host; versions below are observed, not yet locked"
+note = "2026-11-17 late: host replaced via fresh clone; raw results and VM assets unrecoverable. Host, tool and fixture pins refreshed 2026-11-18; common images re-pinned as w8-v5 (postgres/redis bit-identical, api/marked rebuilt). Never pool w8-v5 with w8-v2 history."
 
 [host]
-model = "MacBook Pro (Apple Silicon)"
+model = "MacBook Pro (Apple M1 Max)"
 arch = "arm64"
 kernel = "Darwin 27.2.0"
-mem_bytes = 51539607552
-cpus = 18
-macos = "27.2 (26B123)"
+mem_bytes = 68719476736
+cpus = 10
+macos = "27.2.1 (26B131)"
 
 [tools]
-python = "3.14"
-docker_cli = "29.9.3"
-docker_compose = "v2.29.7"
+python = "3.15.1"
+docker_cli = "29.8.2"
+docker_compose = "v5.5.0"
 
 [engines.ctrs]
-binary = "target/release/ctrs (cargo xtask host, ad-hoc signed + virtualization entitlement)"
+binary = ".work/tmp/readiness-main-target/release/ctrs (cargo build --release -p ctrs, ad-hoc signed + virtualization entitlement; SHA256 be929fe2a81b960d0b4e2d3a02da864d91349eb9d1438cd74cd24be13795e9f2 at 08cdce8)"
 api_version = "1.47"
 vm = "Virtualization.framework, guest kernel 6.18.58, allnoconfig"
+kernel_image_sha256 = "ea4853411fa057bc9a1ea164dbf2198d6a4f0e2590277eff2d4d86426cb4d589"
+kernel_note = "rebuilt 2026-11-18 from pinned source/config/patches; 18,800,648 bytes (same size as the 2026-11 accepted image); hash differs from 35087713… because kernel builds embed a build timestamp"
+initramfs_sha256 = "6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2"
 
 [engines.orbstack]
 version = "2.2.5"
@@ -33,9 +37,10 @@ socket = "unix://$HOME/.orbstack/run/docker.sock"
 [images]
 # Third-party images pulled by digest where the registry provides one;
 # tags recorded here are the exact references used by fixtures.
-postgres = "postgres:17-alpine"
-redis = "redis:7-alpine"
-api_base = "python:3.13-slim"
+postgres = "postgres:17-alpine@sha256:93f3c32bafb7d4d20965c4df530899ae40923f0ccd63deede2f36681fa0aeceb"
+redis = "redis:7-alpine@sha256:52d1ea8a654b10f06af3ecda4e9dbcd035c7868b5c49ee7975de917f81de13db"
+api_base = "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+common_portfolio = "bench/native/fixtures/w8-v5/portfolio.json (w8-v5-common-portfolio; refreshed 2026-11-18)"
 fixture_api = "np-fixture-api:<content-hash tag; see runner.py api_tag()>"
 
 [fixture_pins]

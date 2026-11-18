@@ -940,12 +940,12 @@ W1_FIXTURE_VERSION = "w1-v2-pinned-restart"
 def prepare_pinned_stack(engine, override, *, layout=None):
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
 
-    pin_path = FIXTURES / "w8-v2/portfolio.json"
+    pin_path = FIXTURES / "w8-v5/portfolio.json"
     source = json.loads(pin_path.read_text())
     seed_sha = sha256_file(W1_DIR / "seed.sql")
     if seed_sha != source["seed_sql_sha256"]:
         raise ValueError("stack seed differs from the pinned portfolio")
-    repositories = {"api": "np-v2/api", "db": "np-v2/postgres", "cache": "np-v2/redis"}
+    repositories = {"api": "np-v5/api", "db": "np-v5/postgres", "cache": "np-v5/redis"}
     pins = {service: source["images"][repository] for service, repository in repositories.items()}
     if layout is not None:
         import registry_portfolio
@@ -2285,9 +2285,9 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
     try:
         if fixture_version != W3_FIXTURE_VERSION:
             raise ValueError("W3 fixture version mismatch")
-        pin_path = FIXTURES / "w8-v2/portfolio.json"
+        pin_path = FIXTURES / "w8-v5/portfolio.json"
         contract = json.loads(pin_path.read_text())
-        pin = contract["images"]["np-v2/postgres"]
+        pin = contract["images"]["np-v5/postgres"]
         image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
         inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
@@ -2610,7 +2610,7 @@ def trial_w10(ctx, engine: Engine, state: str,
         engine.ensure_up()
         if crash_engine and (engine.proc is None or engine.proc.poll() is not None):
             raise ValueError("initial recovery daemon was not launched by this run")
-        layout = WORK / "inputs/w8-portfolio-v2/layout" if crash_engine else None
+        layout = WORK / "inputs/w8-portfolio-v5/layout" if crash_engine else None
         _, rec["inputs"] = prepare_pinned_stack(engine, override, layout=layout)
         stack_owned = True
         if not crash_engine:
@@ -3689,7 +3689,7 @@ def main() -> int:
         sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
                                          help="W10 target (default: api); engine requires a standalone ctrs run")
 
-    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-v2-layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
+    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v5/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
     p.add_argument("--pairs", type=int, default=10, help="number of pairs (1 to 100)")

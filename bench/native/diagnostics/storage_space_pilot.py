@@ -80,7 +80,7 @@ def main():
     (root / 'driver.py').write_bytes(Path(__file__).read_bytes())
     (root / 'guest.py').write_bytes(Path(__file__).with_name('storage_space_guest.py').read_bytes())
     (root / 'hypothesis.md').write_bytes(Path(__file__).with_name('storage-space.md').read_bytes())
-    spec = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
+    spec = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
     archive = args.portfolio_archive.resolve()
     if not (runner.sha256_file(archive) == spec['archive_sha256']):
         raise ValueError("diagnostic validation failed: runner.sha256_file(archive) == spec['archive_sha256']")
@@ -140,8 +140,8 @@ def main():
             engine.sh(['load', '-i', str(archive)], timeout=180)
             for name, reference in (('api', 'np-fixture-api:' + runner.API_TAG), ('postgres', 'postgres:17-alpine'), ('redis', 'redis:7-alpine')):
                 installed = json.loads(engine.sh(['image', 'inspect', reference]).stdout)[0]
-                if not (installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v2/' + name]['diff_ids']):
-                    raise ValueError("diagnostic validation failed: installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v2/' + name]['diff_ids']")
+                if not (installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v5/' + name]['diff_ids']):
+                    raise ValueError("diagnostic validation failed: installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v5/' + name]['diff_ids']")
             compose(['up', '-d', '--no-build', '--pull', 'never'])
             if not (runner.wait_health(base, 60)[0]):
                 raise ValueError('diagnostic validation failed: runner.wait_health(base, 60)[0]')

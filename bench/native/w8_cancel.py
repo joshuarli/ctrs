@@ -13,7 +13,7 @@ import registry_variant
 import runner
 
 
-REPOSITORY = 'np-v2/marked'
+REPOSITORY = 'np-v5/marked'
 
 
 def cancel_pull(engine, ref, portfolio, pause, layer, directory):
@@ -84,7 +84,7 @@ def remove_owned_image(engine, ref, image):
 
 
 def run_cancel(args):
-    contract = json.loads((runner.FIXTURES / 'w8-v2/portfolio.json').read_text())
+    contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
     target = {**contract, 'images': {REPOSITORY: contract['images'][REPOSITORY]}}
     run = 'w8-cancel-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)

@@ -75,7 +75,7 @@ def main():
     sources = root / 'source'; sources.mkdir()
     source_paths = (Path(__file__), Path(mixed_cycle.__file__), Path(runner.__file__), Path(registry_portfolio.__file__),
                     runner.BENCH / 'ci_jobs.py', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
-                    runner.FIXTURES / 'w8-v2/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json')
+                    runner.FIXTURES / 'w8-v5/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json')
     hashes = {}
     for index, path in enumerate(source_paths):
         target = sources / f'{index}-{path.name}'; target.write_bytes(path.read_bytes())

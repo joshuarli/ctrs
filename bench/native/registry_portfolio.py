@@ -263,9 +263,12 @@ class Portfolio:
         return Handler
 
 
+COMMON_PORTFOLIO_VERSIONS = frozenset({'w8-v2-common-portfolio', 'w8-v5-common-portfolio'})
+
+
 def prepare_pinned_portfolio(layout, contract):
     """Verify every selected manifest, config and diff ID against the pinned contract."""
-    if contract.get('schema_version') != 1 or contract.get('fixture_version') != 'w8-v2-common-portfolio':
+    if contract.get('schema_version') != 1 or contract.get('fixture_version') not in COMMON_PORTFOLIO_VERSIONS:
         raise ValueError('unsupported portfolio contract')
     images = contract.get('images')
     if not isinstance(images, dict) or not images:

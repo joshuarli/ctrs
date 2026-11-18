@@ -15,7 +15,7 @@ source bytes remain a preparation blocker or require a new version and baselines
 ```sh
 TMPDIR=$PWD/.work/tmp CTRS_CPUS=2 CTRS_MEMORY_MIB=4096 \
 python3.14 bench/native/diagnostics/mixed_pilot.py \
-  --portfolio-layout .work/native-perf/inputs/w8-portfolio-v2/layout \
+  --portfolio-layout .work/native-perf/inputs/w8-portfolio-v5/layout \
   --worker-layout .work/native-perf/inputs/w11-worker-v1/layout \
   --ctrs-binary .work/tmp/disk-expand-target/release/ctrs --cycles 2
 ```

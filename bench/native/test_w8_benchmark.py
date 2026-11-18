@@ -88,7 +88,7 @@ class PairedBatch(unittest.TestCase):
     def test_shared_layer_receipt_passes_batch_once_per_pair(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            fixture = root / 'w8-v2'
+            fixture = root / 'w8-v5'
             fixture.mkdir()
             shared = digest('shared')
             contract = {'fixture_version': 'source', 'images': {
@@ -331,7 +331,7 @@ class PairedBatch(unittest.TestCase):
     def test_measurement_does_not_swallow_cancellation(self):
         engine = mock.Mock(name='engine')
         engine.name = 'ctrs'
-        contract = {'images': {'np-v2/api': {'config': 'sha256:api'}}}
+        contract = {'images': {'np-v5/api': {'config': 'sha256:api'}}}
         with tempfile.TemporaryDirectory() as temp, \
              mock.patch.object(w8.pilot, 'prepare_warm_engine', side_effect=SystemExit(143)), \
              mock.patch.object(w8.pilot, 'finish_engine') as finish:
