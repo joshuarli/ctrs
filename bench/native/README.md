@@ -2,7 +2,7 @@
 
 Pilot harness for `docs/campaign-native-performance.md`.
 Paired trials, explicit correctness checks and JSONL records, no dashboards.
-Python ≥ 3.11 standard library + the docker CLI only (use `python3.14`).
+Python ≥ 3.11 standard library + the docker CLI only (use `python3`; the 2026-11-18 host provides 3.15.1).
 
 **Qualification is incomplete.** Read
 `docs/native-performance-progress.md` for the next task. Mutable image
@@ -14,12 +14,12 @@ Healthy soak/watch counters are not hillclimb progress.
 ## Offline checks (no Docker or macOS required)
 
 ```sh
-python3.14 bench/native/runner.py validate-manifest
-python3.14 bench/native/runner.py check w2
-python3.14 bench/native/runner.py check w8
-python3.14 bench/native/runner.py check resources
-python3.14 -m unittest discover -s bench/native -p test_checks.py -v
-python3.14 -m unittest discover -s bench/native -p 'test_*.py' -v
+python3 bench/native/runner.py validate-manifest
+python3 bench/native/runner.py check w2
+python3 bench/native/runner.py check w8
+python3 bench/native/runner.py check resources
+python3 -m unittest discover -s bench/native -p test_checks.py -v
+python3 -m unittest discover -s bench/native -p 'test_*.py' -v
 ```
 
 Manifest validation checks syntax/identity and records hashes. It does
@@ -77,14 +77,14 @@ Neither is an empty-store comparison.
 ## Usage
 
 ```sh
-python3.14 bench/native/runner.py preflight          # fail-closed G0 checks
-python3.14 bench/native/runner.py prepare            # pull images + build fixture API on both engines (untimed)
-python3.14 bench/native/runner.py baseline --case W1 --a ctrs --b orbstack --pairs 3
-python3.14 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack --pairs 3 --duration 20
-python3.14 bench/native/runner.py noop --engine ctrs --pairs 3   # same-engine A/B slot noise control
-python3.14 bench/native/runner.py report --noise --match '<run-id>'  # noise report, never engine scores
-python3.14 bench/native/runner.py holdout                       # independent real-app gate (once per engine)
-python3.14 bench/native/runner.py report --match '<exact-run-id>'
+python3 bench/native/runner.py preflight          # fail-closed G0 checks
+python3 bench/native/runner.py prepare            # pull images + build fixture API on both engines (untimed)
+python3 bench/native/runner.py baseline --case W1 --a ctrs --b orbstack --pairs 3
+python3 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack --pairs 3 --duration 20
+python3 bench/native/runner.py noop --engine ctrs --pairs 3   # same-engine A/B slot noise control
+python3 bench/native/runner.py report --noise --match '<run-id>'  # noise report, never engine scores
+python3 bench/native/runner.py holdout                       # independent real-app gate (once per engine)
+python3 bench/native/runner.py report --match '<exact-run-id>'
 ```
 
 Run these on the Mac after NP-01's isolation/provenance checks. Three
@@ -112,7 +112,7 @@ qualification. Holdouts and W11 counters do not become speed claims.
 It can also run independently:
 
 ```sh
-python3.14 bench/native/reporting.py --match '<exact-run-id>'
+python3 bench/native/reporting.py --match '<exact-run-id>'
 ```
 
 ## What a trial records

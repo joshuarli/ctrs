@@ -2,43 +2,51 @@
 
 ## Status
 
-**Active 2026-11-17 after owner resume.** Closeout cancellation succeeded.
-The product baseline remains `2f37d02`; parked `5bcf48a` stays separate.
-The primed W2 batch completed all 20 trials and one million successful
-requests, with matching payloads and complete CPU boundaries. Total API CPU
-did not reproduce a consistent ctrs deficit. The system component was higher
-on ctrs in all five boundary-only pairs.
-[W2 evidence and reproduction](evidence/native-w2-equal-work-2026-11-17.md).
-Saturation and the native API profile both completed. Saturation was
-inconclusive. The profile reproduced the `wake_up_q+0x64` concentration
-with no validity errors, while its profiler overhead remained unresolved.
-Capacity-matched fixed work verified all 500,000 operations. The median
-paired API system CPU ratio was 2.020 at 17 vCPUs on both sides.
-The ctrs-only comparison verified all 500,000 operations and put the
-17-vCPU versus 2-vCPU API system CPU ratio at 1.736. The topology profile
-reproduced the wake leaf concentration at 17 vCPUs. W11 v4 native
-observation passed bounded functional checks on both engines.
-The wake-count diagnostic completed cleanly. Counter-on wake calls per
-success rose from 21.897 to 29.787 at 17 vCPUs. The system CPU cost of
-the counters leaves ordinary wake frequency unresolved. The reduced
-wake-entry observer also completed exact work and remains parked because
-observer overhead is unresolved. Main's W2 component suite passes 108
-tests with zero skips. The 49 Hz comparison completed all 40 exact
-trials. In all ten blocks an unrelated VM was active and the observer
-intervals exceeded the 5% acceptance band. W8 retained pin checks are
-integrated at `4c07c4e`. The parked qualification gate at `c068fba`
-requires 349 named cells across W1–W11. Complete mixed-work counts remain
-mandatory in each W11 cycle. The W6 runner checks both compiled ARM64
-artifact hashes against `assets.lock` and checks compile-step cache evidence
-for uncached and warm builds.
-The 19 Hz comparison completed all 12 exact trials and captured all API
-threads. Its lower rate did not reduce observed API CPU or wall in the
-four matched rate comparisons. `4bf9107` prepares a separate 49 Hz
-leaf-only observer. The diagnostic passed offline checks and awaits
-native sample and overhead validation.
-No campaign-owned measured job is active.
+**Active 2026-11-18 after new-host migration.** The development host moved to
+a MacBook Pro (Apple M1 Max), 10 cores, 64 GiB (68,719,476,736 bytes), macOS
+27.2.1 (26B131), Darwin 27.2.0. OrbStack 2.2.5 (bf842321…) is unchanged.
+All raw results and VM assets from the old host are unrecoverable; every
+pre-2026-11-18 measurement is historical to that host.
+
+Reconstruction evidence is in [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.md).
+Rebuilt and verified 2026-11-18: guest initramfs with the exact accepted
+hash (`6ae4d3ab…`); guest kernel from pinned source/config/patches (`ea485341…`,
+18,800,648 bytes, same size as accepted; `35087713…` is unrecoverable by
+construction because builds embed a timestamp); sparse 1 TiB `data.img`;
+signed host binary `be929fe2…` from main at `19c3fc8` (includes c7b4b90);
+`conformance/smoke.sh` 21/21; offline Python discovery 318 tests OK with
+`TMPDIR=$PWD/.work/tmp`, 0 skips.
+
+The W8 common portfolio was refreshed as fixture **`w8-v5`** (never pool with
+v2): `np-v5/postgres` and `np-v5/redis` are bit-identical to the v2 pins;
+`np-v5/api` and `np-v5/marked` were rebuilt from the pinned fixtures with
+digest-pinned bases; fixture input hashes and the Marked artifact hash are
+unchanged (verified on both engines, 1,000 requests, exact payloads and
+HTML). `assets.lock` records the new host, tools (python 3.15.1, docker
+29.8.2, Compose v5.5.0), engines and rebuilt guest assets. Two stray
+100%-CPU benchmark-harness greps from an earlier session turn were found and
+killed on 2026-11-18; the user's own python-build session and OrbStack
+Helper (`vmgr -handoff`, 100% CPU for 6+ hours) were left running and are
+disclosed on every affected measurement. All code references now use w8-v5;
+docs/evidence history was not rewritten.
+
+The 2026-11-18 refreshed W2 matched-resource baseline
+(`base-20261118T040927-4162`, 10 pairs, 50,000 ops, C8, seed 7, AB/BA) is in
+[native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.md#refreshed-baseline-this-host):
+all 20 trials correct, zero errors; ctrs wins every latency/footprint cell
+(rps 0.744, p99 0.611, footprint 0.359 vs OrbStack) but loses ~8.5% on
+cpu_seconds_per_success (1.085, [1.052, 1.123]) — same direction as the old
+host's system-CPU finding. Pilot quality, not qualification: disclosed
+co-resident user load and missing ctrs-binary/kernel/initramfs provenance in
+the runner; a quiet-window confirmation batch is required before promotion
+use. The installed-default ctrs lane (2 vCPUs) remains an open, separate
+cell. No campaign-owned measured job is active.
 
 ## Accepted and verified
+
+All items below were measured on the old host (2026-11-15…17) and are not
+portable to the 2026-11-18 host; they remain as design/outcome history.
+See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.md).
 
 - Native accounting uses actual ri_phys_footprint and complete owned daemon/VM
   counters, kernel start identity and loaded executable/boot hashes. v4 adds
@@ -67,16 +75,19 @@ No campaign-owned measured job is active.
 
 ## Exact next action
 
-Check host availability with `perf-gate-ready` and actual process
-snapshots before the next scored run. The previous ten-block W2 observer
-run was shared with a Niceforge VM despite successful readiness exits.
-The 19 Hz comparison is complete and the lower-rate code stays parked.
+2026-11-18 host is reconstructed and the refreshed W2 matched-resource
+baseline is recorded (see evidence doc). Before any qualification claim, the
+entire per-cell matrix must be re-measured on this host against w8-v5 pins;
+only then do the 2026-11-17 decisions (e.g. the leaf-only 49 Hz observer
+validation plan at `experiment/w2-leaf-49hz` `4bf9107`) become actionable,
+again in an exclusive window:
 
-In a suitable host window, use the [leaf-only command and paired plan](evidence/native-w2-equal-work-2026-11-17.md#leaf-only-observer-preparation)
+Use the [leaf-only command and paired plan](evidence/native-w2-equal-work-2026-11-17.md#leaf-only-observer-preparation)
 from `experiment/w2-leaf-49hz` at `4bf9107`. First validate the guest
 capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
+All commands now reference `w8-v5` inputs (`.work/native-perf/inputs/w8-portfolio-v5/layout`).
 
 The [W8 backing-allocation diagnostic](evidence/native-w8-content-state-2026-11-17.md#backing-allocation-during-deployment)
 verified the three owned-file snapshots in a native diagnostic pair.
@@ -156,32 +167,36 @@ are explicit: new compressed identities/DiffIDs plus full delivery and runnable
 contents do not establish guest-cache or page-cache absence. Preserve the66-test
 component result and successful validation of two actual37-layer receipts.
 
-Reconstruct the accepted runtime from the repository, without retaining scratch:
+Reconstruct the runtime from the repository. On the 2026-11-18 host the
+reconstruction is done; the commands below reproduce it. Do not substitute
+old `target/release` artifacts for the verified ones. Note: `cargo xtask
+guest` rebuilds only the initramfs (hash must match `6ae4d3ab…`);
+`cargo xtask kernel` rebuilds the kernel (expect a *different* hash — builds
+embed a timestamp — but the same 18,800,648-byte size); `cargo xtask disk`
+creates the sparse 1 TiB `data.img` from Docker. The bench suite needs
+`TMPDIR=$PWD/.work/tmp`, and inline runner scripts must set
+`runner.DOCKER = runner.find_docker()` before creating an `Engine`.
 
 ```sh
 codex-campaign-closeout.py cancel
-CARGO_ENCODED_RUSTFLAGS='' CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=4 cargo xtask guest
+CARGO_ENCODED_RUSTFLAGS='' CARGO_BUILD_JOBS=4 cargo xtask guest
+CARGO_ENCODED_RUSTFLAGS='' CARGO_BUILD_JOBS=4 cargo xtask kernel
+cargo xtask disk
 CARGO_TARGET_DIR="$PWD/.work/tmp/readiness-main-target" \
-  CARGO_ENCODED_RUSTFLAGS='' CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=4 \
-  cargo build --offline --locked --release -p ctrs --bin ctrs
+  CARGO_ENCODED_RUSTFLAGS='' CARGO_BUILD_JOBS=4 \
+  cargo build --locked --release -p ctrs --bin ctrs
 codesign --force --sign - --entitlements crates/ctrs/ctrs.entitlements \
   .work/tmp/readiness-main-target/release/ctrs
 codesign --verify --strict --verbose=2 .work/tmp/readiness-main-target/release/ctrs
 ```
 
-Reuse the already verified artifacts when hashes match; rebuild only if missing. Keep the repository's pinned
-compiler and cached dependencies. The signed host at accepted source `2f37d02`
-is 6,615,920 bytes, SHA256
-`db20b2106a9faadf8760e65a11357155166b2ed77fb6de784d63defe0ddbaada`.
-The fresh main build already reproduced the exact tested candidate. The stock
-kernel is 18,800,648 bytes, SHA256
-`35087713fd7b1b152b1ac0333e42edbcee482c82c6e695f27a8f126c271eee43`;
-accepted guest initrd is 4,349,700 bytes, SHA256
-`6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2`.
-Verify all hashes before use; do not substitute old `target/release` or installed
-assets. The guest build reproduced this initrd earlier; the primary checkout's
-pre-existing `guest/out` was not overwritten during winddown. No deployment was
-performed. Sparse guest disks require sparse receipts, never whole-1TiB hashing.
+The 2026-11-18 signed host binary at main `19c3fc8` is SHA256
+`be929fe2a81b960d0b4e2d3a02da864d91349eb9d1438cd74cd24be13795e9f2`
+(6,617,104 bytes). The 2026-11-17 accepted binary (`2f37d02`,
+`db20b210…`) and accepted kernel (`35087713…`) are unrecoverable history.
+The guest initramfs hash is exact; the kernel hash is not asserted (see the
+refresh evidence doc). Sparse guest disks require sparse receipts, never
+whole-1TiB hashing.
 
 The [readiness evidence](evidence/native-builder-readiness-2026-11-17.md) records
 source invariants, native cases, comparison scope, binary identity and the
@@ -196,6 +211,13 @@ speed claims. Earlier detailed checkpoints remain recoverable with
 next-action paragraphs from that historical revision.
 
 ## Ready queue
+
+Note (2026-11-18): queue items below were written against the old host.
+None of their timing/reliability evidence transfers; every cell in the
+qualification matrix must be re-measured against w8-v5 before item 6 can
+close. The 2026-11-18 W2 matched-resource baseline batch is the first
+current-host baseline. Fixture commands now reference w8-v5
+(`.work/native-perf/inputs/w8-portfolio-v5/layout`).
 
 1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
