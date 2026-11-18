@@ -79,13 +79,14 @@ Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
 The [W8 backing-allocation diagnostic](evidence/native-w8-content-state-2026-11-17.md#backing-allocation-during-deployment)
-passes offline checks and awaits native verification of the three
-owned-file snapshots. The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
-passes offline component checks and is ready for native validation in
-separate retained and derived cells on each engine.
-If the Mac stays shared, check W5's bind and named-volume producers against
-the qualification coverage inventory. Complete the pinned-input and
-phase-resource receipts for each mount condition.
+verified the three owned-file snapshots in a native diagnostic pair.
+The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
+passed both native OrbStack conditions. Native ctrs reproduced a stalled
+registry body read after the last pull client disconnected. First prepare
+the narrow transport regression with the production stall deadline. Keep
+the W8 cutoff and exact retry acceptance. The next independent fixture
+slice is W5 pinned-input and phase-resource receipts for both bind and
+named-volume conditions.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main

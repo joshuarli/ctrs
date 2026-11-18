@@ -78,7 +78,33 @@ measurements invalid for scoring.
 
 The W8 component suite passed 74 tests with zero skips. It includes a real
 loopback transfer interrupted through an owned process and a completed retry.
-Native engine validation and attributable allocation evidence remain open.
+
+OrbStack passed retained (`w8-cancel-2debc4544403`) and derived
+(`w8-cancel-8f9bcfd81520`) on native ARM64. Each registry wrote 65,536
+bytes of the held layer before it observed the engine disconnect. The
+retry fully delivered the 120,861,274-byte retained-condition layer and the
+120,861,273-byte derived-condition layer, respectively. Exact identity,
+marker, retained-pin and cleanup checks passed. These are correctness runs.
+
+ctrs retained (`w8-cancel-7ec83f2a59ae` and `w8-cancel-0a9f047561ed`)
+failed with two signed binaries. The client exited with `context canceled`.
+The daemon registered the last client leaving about half a second into the
+pull, then exited the pull when the registry's 10-second hold expired.
+The body read in `crates/ctrs-image/src/transport.rs` has a 60-second
+production stall deadline. The cancel flag is checked after that blocking
+read returns. The existing Rust test uses a 1-second transport timeout,
+so it allows the timeout to wake the read. ctrs derived and retry proof
+remain open. Keep the fixture cutoff and require a transport regression
+that wakes a blocked body read on cancellation with the production
+stall deadline in force.
+
+The failing ctrs run `w8-cancel-0a9f047561ed` used binary SHA256
+`db20b2106a9faadf8760e65a11357155166b2ed77fb6de784d63defe0ddbaada`.
+Its daemon logged the last client leaving at `00:15:14.091Z` and the
+pull stopping at `00:15:23.588Z`. The transport uses
+`h12tiny-client-sync` 0.9.0. The crate's current source is in the
+smolith workspace. Its blocking response body exposes a read timeout
+but does not expose a connection shutdown handle.
 
 ## Backing allocation during deployment
 
@@ -95,5 +121,15 @@ The receipt reports allocated blocks for the declared files and changes
 relative to the first snapshot. It includes retained images and other
 allocation in those files. Exclusive extents and isolated cache allocation
 remain unknown. Missing ownership and changed file identities invalidate
-the receipt. Native validation is open. The W8 component suite passed
-75 tests with zero skips.
+the receipt. The W8 component suite passed 75 tests with zero skips.
+
+One native diagnostic pair (`w8-paired-6c16ce569449`) completed the
+derived deployment and verified all three owned-file observations on
+both engines. All values below are bytes allocated in the declared
+backing file at that boundary. Both records are marked ineligible for
+timing and qualification.
+
+| Engine | Before pull | Before app cleanup | After app cleanup |
+| --- | ---: | ---: | ---: |
+| ctrs | 1,489,813,504 | 2,677,981,184 | 2,678,620,160 |
+| OrbStack | 328,923,557,888 | 330,461,614,080 | 330,460,717,056 |
