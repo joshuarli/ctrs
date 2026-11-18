@@ -44,8 +44,9 @@ CASE_METRICS = {
     # Watch latency is observed through host exec polling; missed/stale counts are reported, not scored.
     "W12-watch": [],
     "W13": ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"],
+    "W14": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"],
 }
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "goodput_bytes_per_second"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
+HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "goodput_bytes_per_second", "successes"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")

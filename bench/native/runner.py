@@ -31,6 +31,7 @@ import recovery_trace
 import ci_jobs
 import w2_peer
 from transfer import trial_w13
+from lifecycle import trial_w14
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
@@ -3288,7 +3289,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
               "W10": trial_w10, "W11": trial_w11, "W12": workspace.trial_w12,
-              "W12-watch": workspace.trial_w12_watch, "W13": trial_w13,
+              "W12-watch": workspace.trial_w12_watch, "W13": trial_w13, "W14": trial_w14,
               "HOLDOUT": trial_holdout}
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
@@ -3609,6 +3610,9 @@ def cmd_baseline(args) -> int:
                     kw = {"path": args.transfer_path, "direction": args.direction,
                           "streams": args.streams, "size_bytes": args.size_bytes,
                           "repeats": args.repeats}
+                if args.case == "W14":
+                    kw = {"mode": args.lifecycle_mode, "clients": args.lifecycle_clients,
+                          "idle_seconds": args.idle_seconds}
                 rec = run_one(ctx, eng, args.case, args.state,
                               cold=args.cold and eng == "ctrs",
                               pair_id=pair, order_index=idx, keep_warm=True,
@@ -3755,7 +3759,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -3776,7 +3780,7 @@ def main() -> int:
                         "control for builder topology)")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
@@ -3817,6 +3821,10 @@ def main() -> int:
     p.add_argument("--streams", type=int, choices=(1, 4), default=1, help="W13 parallel streams")
     p.add_argument("--size-bytes", type=int, default=1 << 30, help="W13 bytes per transfer")
     p.add_argument("--repeats", type=int, default=3, help="W13 transfers per trial")
+
+    p.add_argument("--lifecycle-mode", choices=("fresh", "persistent", "streaming", "cancel", "idle-resume", "reconnect"), default="fresh")
+    p.add_argument("--lifecycle-clients", type=int, default=32)
+    p.add_argument("--idle-seconds", type=float, default=30)
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v5/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")

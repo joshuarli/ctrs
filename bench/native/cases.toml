@@ -228,3 +228,16 @@ params = { ops = 240, repos = 8, issues_per_repo = 5, clones = 4, seed = 1 }
 correctness = ["healthz", "admin_created", "repos_exact", "issues_exact",
                "workload_zero_errors", "clones_exact"]
 note = "EXCLUDED from the scored W-matrix. Declared pilot parameters require input/version qualification before final confirmation. Run once per engine for the frozen candidate; if a failure is used for tuning, retire it as independent evidence and choose a fresh holdout. Different stack from W fixtures (Go forge + git protocol + Postgres)."
+
+[[case]]
+id = "W14"
+family = "connection-lifecycle"
+title = "Published port connection lifecycle"
+fixture = "fixtures/w14 (stdlib newline JSON; pinned API image)"
+fixture_version = "w14-v1"
+status = "implemented"
+metrics = ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"]
+states = ["warm"]
+params = { mode = "fresh", clients = 32, operations = 100, idle_seconds = 30 }
+correctness = ["exact responses", "all operations complete", "zero leaked sessions", "owned cleanup"]
+note = "Modes and parameters form separate cohorts. Idle durations above 300 seconds measure relay timeout behavior."
