@@ -56,6 +56,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
 | macOS OrbStack performance hillclimb (current contract) | `docs/campaign-native-performance.md` |
 | Performance work queue and continuation checkpoint | `docs/native-performance-progress.md` |
+| Performance acceptance matrix (status per cell) | `docs/native-acceptance-matrix.md` |
 | Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
 | Evidence: gate B | `docs/evidence/gate-b.md` |

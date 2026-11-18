@@ -89,6 +89,16 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
+**Current (2026-11-18, owner steering):** W2 tuning is parked. Status per cell
+lives in [native-acceptance-matrix.md](native-acceptance-matrix.md). Next
+milestone: one trustworthy W12 shared-workspace comparison and one W13
+bulk-transfer comparison on this host, then a ranked deficit list. Then W14
+connection lifecycle and the W3-v4 storage extension. Fixture work runs in
+parallel worktrees, and measured jobs run serially on the Mac. Freeze a
+small representative matrix before tuning.
+
+### Superseded W2 next action
+
 **Current (2026-11-18, after `5e42acb`):** attack the matched-lane W2
 CPU/success gap at its measured boundary. Collect a wakeup-placement trace
 on both engines at 9 vCPUs: per `sched_wakeup`/`sched_waking` target CPU,
