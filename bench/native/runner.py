@@ -3474,6 +3474,8 @@ def main() -> int:
     p.add_argument("--under-load", action="store_true", help="run fixed background application work during pulls")
     p.add_argument("--seed", type=int, default=1, help="integer incorporated into unique per-pair seeds")
     p.add_argument("--diagnostic", action="store_true", help="functional checks only; timings are invalid")
+    p.add_argument("--orbstack-storage-file", type=Path, action="append", default=[],
+                   help="diagnostic only: explicit backing file open by OrbStack; repeat for multiple files")
 
     p = sub.add_parser("w8-cancel", help="verify interrupted W8 delivery and retry on one engine")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
@@ -3554,6 +3556,8 @@ def main() -> int:
     if args.cmd in ("w8-baseline", "w8-cancel"):
         if args.cmd == "w8-baseline" and not 1 <= args.pairs <= 100:
             ap.error("--pairs must be between 1 and 100")
+        if args.cmd == "w8-baseline" and args.orbstack_storage_file and not args.diagnostic:
+            ap.error("--orbstack-storage-file requires --diagnostic")
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
             ap.error(f"{args.cmd} requires native ARM64 macOS")
         global CTRS_BIN

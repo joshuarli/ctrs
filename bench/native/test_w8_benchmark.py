@@ -366,6 +366,25 @@ class PairedBatch(unittest.TestCase):
         result['resources']['phase_summaries']['whole_workflow'] = {'status': 'unknown'}
         self.assertEqual(w8.resource_metrics(result), {})
 
+    def test_allocation_receipt_requires_three_snapshots_of_the_same_backing_file(self):
+        def sample(allocated, inode=23, status='ok'):
+            return {'status': status, 'allocated_bytes': allocated,
+                    'files': [{'path': '/engine/data', 'device': 1, 'inode': inode}]}
+
+        snapshots = {'before_pull': sample(4096), 'before_app_cleanup': sample(16384),
+                     'after_app_cleanup': sample(8192)}
+        receipt = w8.pilot.allocation_receipt(snapshots)
+        self.assertEqual(receipt['status'], 'ok')
+        self.assertEqual(receipt['deployment_delta_bytes'], 12288)
+        self.assertEqual(receipt['after_app_cleanup_delta_bytes'], 4096)
+        for bad in ({}, {'after_app_cleanup': sample(16384, inode=42)},
+                    {'after_app_cleanup': sample(None, status='unknown')}):
+            base = snapshots if bad else {k: v for k, v in snapshots.items() if k != 'after_app_cleanup'}
+            receipt = w8.pilot.allocation_receipt(base | bad)
+            self.assertEqual(receipt['status'], 'unknown')
+            self.assertIsNone(receipt['deployment_delta_bytes'])
+            self.assertIsNone(receipt['after_app_cleanup_delta_bytes'])
+
     def test_completion_union_counts_each_completion_once(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)

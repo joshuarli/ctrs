@@ -1,4 +1,5 @@
 """Canonical paired W8 pilot; native execution remains unqualified."""
+from functools import partial
 import hashlib
 import json
 import os
@@ -107,6 +108,11 @@ def validate_receipt(receipt, contract, source, seed, previous_digests, previous
 def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=None, gate_fn=None):
     engine_factory = engine_factory or runner.Engine
     measure = measure or pilot.measure_engine
+    storage_files = getattr(args, 'orbstack_storage_file', ())
+    if storage_files:
+        if not args.diagnostic:
+            raise ValueError('W8 backing allocation requires diagnostic mode')
+        measure = partial(measure, orbstack_storage_files=storage_files)
     prepare = prepare or registry_variant.prepare_variant
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
@@ -125,6 +131,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     pilot.save(ctx.results_dir / 'plan.json', {'pairs': args.pairs, 'seed': args.seed,
         'under_load': args.under_load, 'diagnostic': args.diagnostic, 'fixture_version': FIXTURE,
         'resource_scope': SCOPE, 'source_layout': str(args.layout), 'provenance': ctx.provenance,
+        'orbstack_storage_files': [str(path.absolute()) for path in storage_files],
         'order': 'AB/BA', 'qualification_eligible': False})
     print(f'results: {ctx.jsonl}', flush=True)
     engines = {}
@@ -170,9 +177,13 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                         rec['resources'] = resource_metrics(result)
                         rec['resources']['engine'] = info or {}
                         rec['resources']['detail'] = result.get('resources', {})
+                        if storage_files:
+                            rec['resources']['allocation'] = result.get('allocation', {})
                         budgets = bool(info) and all(type(info.get(key)) is int and info[key] > 0
                                                     for key in ('ncpu', 'mem_total_bytes'))
                         ok = result.get('correctness') is True and result.get('resources', {}).get('status') == 'ok' and budgets and rec['engine_server_version'] != 'unreachable'
+                        if storage_files:
+                            ok = ok and rec['resources']['allocation'].get('status') == 'ok'
                         if ok:
                             current = _warm_identity(result)
                             if identities.setdefault(name, current) != current:

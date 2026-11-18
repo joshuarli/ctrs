@@ -79,3 +79,21 @@ measurements invalid for scoring.
 The W8 component suite passed 74 tests with zero skips. It includes a real
 loopback transfer interrupted through an owned process and a completed retry.
 Native engine validation and attributable allocation evidence remain open.
+
+## Backing allocation during deployment
+
+Run the paired pilot with `--diagnostic --orbstack-storage-file PATH` to
+collect allocation receipts. Repeat the flag for each explicit OrbStack
+backing file. ctrs uses the data disk under its benchmark engine directory.
+The producer checks open device and inode identity across the three
+snapshots and ties each open file to an engine process with a verified
+start identity. It collects snapshots before the first pull, after
+deployment verification, and after cleanup of the application containers
+and volumes. It records the running-container inventory before and after.
+
+The receipt reports allocated blocks for the declared files and changes
+relative to the first snapshot. It includes retained images and other
+allocation in those files. Exclusive extents and isolated cache allocation
+remain unknown. Missing ownership and changed file identities invalidate
+the receipt. Native validation is open. The W8 component suite passed
+75 tests with zero skips.

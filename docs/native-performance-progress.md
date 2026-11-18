@@ -78,12 +78,14 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, prepare W8 allocation evidence around deployment
-and cleanup. Reuse the backing-file identity and allocation checks from
-the resource-cycle diagnostic. Keep exclusive extents and isolated cache
-bytes unknown. The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
+The [W8 backing-allocation diagnostic](evidence/native-w8-content-state-2026-11-17.md#backing-allocation-during-deployment)
+passes offline checks and awaits native verification of the three
+owned-file snapshots. The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
 passes offline component checks and is ready for native validation in
 separate retained and derived cells on each engine.
+If the Mac stays shared, check W5's bind and named-volume producers against
+the qualification coverage inventory. Complete the pinned-input and
+phase-resource receipts for each mount condition.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
