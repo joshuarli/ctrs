@@ -42,7 +42,7 @@ OrbStack's). Never pool lanes.
 
 | ID | Workflow | Spec | Impl | Functional | Compared | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| W12 | Shared workspace (Kutt v2.7.4, 2,830 packages, 92,306 files, 532 MB): offline `npm ci`, tsc + Next.js build, typecheck, Jest discovery, warm rebuild, ten-file change, branch restore; layouts full-bind / bind-source + volume deps / all-volume | yes | yes (`w12-v1`) | yes, all three layouts, D lane, exact receipts | D full-bind `base-20261118T120818-c079`; D all-volume `base-20261118T125148-c6aa`; M all-volume running | critical. **Loss.** D full-bind workflow 1.62 [1.59, 1.64] (install 2.34, test discovery 2.39); D all-volume 1.29 [1.28, 1.29] with host CPU 0.81. Bind-source + volume deps unmeasured ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
+| W12 | Shared workspace (Kutt v2.7.4, 2,830 packages, 92,306 files, 532 MB): offline `npm ci`, tsc + Next.js build, typecheck, Jest discovery, warm rebuild, ten-file change, branch restore; layouts full-bind / bind-source + volume deps / all-volume | yes | yes (`w12-v1`) | yes, all three layouts, D lane, exact receipts | D full-bind `base-20261118T120818-c079`; D all-volume `base-20261118T125148-c6aa`; M all-volume `base-20261118T144740-4485` | critical. **Loss.** D full-bind workflow 1.62 [1.59, 1.64] (install 2.34, test discovery 2.39); D all-volume 1.29 [1.28, 1.29] with host CPU 0.81; **M all-volume parity 1.02 [0.96, 1.04]** (the D gap is the 2-vCPU default). Bind-source + volume deps unmeasured ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
 | W12-watch | `tsc --watch` (fs.watch backend): save, atomic replace, create+import, rename, delete, five-file bursts, 140 results per trial | yes | yes (`w12-watch-v2`) | v1 proof both mounts; v2 oracle not yet run | no | critical. **ctrs bind: 140/140 missed** (no Mac→guest notifications). Volume: 23 burst results missed on both engines (engine-independent). Latency is exec-poll limited and not scored; esbuild polling stays the W5 condition |
 | W13 | Artifact transfer up/down: published port, container↔container, container→Mac; 1 and 4 streams; byte-exact receivers | yes | yes (`w13-v2`) | yes | D: seven cells; M: published-port upload; rx64 (patch 0005): three host→guest cells | critical. **Guest→host loss:** container→Mac upload 7.0×, published-port download 5.1× (VZ vsock ceiling, bounded). Host→guest after patch 0005: published-port upload 1.02 (parity), Mac→container 1.03, 4-stream upload 1.25 loss. Container↔container **win** 0.82 ([evidence](evidence/native-w12-w13-2026-11-18.md)). Controlled egress unsupported (no owned endpoint) |
 | W13-overlap | One transfer condition alongside W2: interactive latency | yes | no | no | no | depends on W13 |
@@ -89,7 +89,7 @@ Mbps only. It is not reusable as a verified-transfer metric.
 1. W13 guest→host transfer: container→Mac upload 7.0×, published-port
    download 5.1× (VZ vsock device ceiling; needs a different device path).
 2. W12 full-bind workflow 1.62× (install, test discovery on the Mac share).
-3. W12 all-volume workflow 1.29× in the D lane (M lane pending).
+3. W12 all-volume workflow 1.29× in the D lane only; M lane parity. The cause is the 2-vCPU product default, an owner decision.
 4. W13 4-stream published-port upload 1.25× after patch 0005.
 5. W2 M-lane CPU per success: inconclusive, +4.5% median. Parked.
 6. Unmeasured on this host: W1, W3–W11, W3-v4, W12 bind-source + volume
