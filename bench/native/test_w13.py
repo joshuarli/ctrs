@@ -98,3 +98,18 @@ class TransferTests(unittest.TestCase):
     def test_capacity_limit(self):
         self.assertFalse(tool_limited(50, 100, 200))
         self.assertTrue(tool_limited(51, 100, 200))
+
+
+class GuestCpuDeltaTests(unittest.TestCase):
+    def test_delta_attributes_threads_and_modes(self):
+        import importlib.util, pathlib
+        spec = importlib.util.spec_from_file_location('w13cpu', pathlib.Path(__file__).parent / 'diagnostics/w13_guest_cpu.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        stat = lambda user, system, softirq: {'user': user, 'nice': 0, 'system': system, 'idle': 0, 'iowait': 0, 'irq': 0, 'softirq': softirq, 'steal': 0}
+        before = {'hz': 100, 'stat': stat(100, 50, 10), 'threads': {'1': ['relay', 10, 20], '2': ['old', 5, 5]}}
+        after = {'hz': 100, 'stat': stat(150, 90, 30), 'threads': {'1': ['relay', 30, 60], '3': ['new', 7, 3], '2': ['reused', 1, 1]}}
+        modes, comms = module.delta(before, after)
+        self.assertEqual((modes['user'], modes['system'], modes['softirq']), (0.5, 0.4, 0.2))
+        self.assertEqual((comms[('relay', 'user')], comms[('relay', 'system')]), (0.2, 0.4))
+        self.assertEqual(comms[('new', 'user')], 0.07)
+        self.assertEqual(comms[('reused', 'system')], 0.01)
