@@ -38,8 +38,9 @@ CASE_METRICS = {
     "W10": ["recovery_s", "recovered_p99_ms"],
     # Soak windows/requests/churn counts are reliability observations.
     "W11": [],
+    "W13": ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"],
 }
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
+HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "goodput_bytes_per_second"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")

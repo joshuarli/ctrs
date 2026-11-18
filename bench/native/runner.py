@@ -3593,6 +3593,10 @@ def cmd_baseline(args) -> int:
                     kw["build_cache"] = args.build_cache
                 if args.case == "W8" and getattr(args, "under_load", False):
                     kw["under_load"] = True
+                if args.case == "W13":
+                    kw = {"path": args.transfer_path, "direction": args.direction,
+                          "streams": args.streams, "size_bytes": args.size_bytes,
+                          "repeats": args.repeats}
                 rec = run_one(ctx, eng, args.case, args.state,
                               cold=args.cold and eng == "ctrs",
                               pair_id=pair, order_index=idx, keep_warm=True,
@@ -3739,7 +3743,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W13"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -3790,6 +3794,13 @@ def main() -> int:
                                          help="W6 build-cache condition (default: uncached); warm primes the same context")
         sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
                                          help="W10 target (default: api); engine requires a standalone ctrs run")
+    p = sub.choices["baseline"]
+    p.add_argument("--transfer-path", choices=("published-port", "container-to-container", "container-to-mac"),
+                   default="published-port", help="W13 network path")
+    p.add_argument("--direction", choices=("upload", "download"), default="upload", help="W13 direction")
+    p.add_argument("--streams", type=int, choices=(1, 4), default=1, help="W13 parallel streams")
+    p.add_argument("--size-bytes", type=int, default=1 << 30, help="W13 bytes per transfer")
+    p.add_argument("--repeats", type=int, default=3, help="W13 transfers per trial")
 
     p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v5/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")

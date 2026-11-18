@@ -1,4 +1,5 @@
 import json
+import statistics
 from contextlib import nullcontext
 from pathlib import Path
 import subprocess
@@ -159,6 +160,15 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
             attempt['engine_cpu_seconds_per_verified_gib'] = cpu / (attempt['verified_bytes'] / 1024**3) if cpu is not None and attempt['ok'] else None
             attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second']) if attempt['ok'] else None
             record_attempt(rec, attempt)
+        attempts = rec['metrics']['attempts']
+        if all(x['ok'] for x in attempts):
+            rec['metrics'].update(
+                goodput_bytes_per_second=statistics.median(x['goodput_bytes_per_second'] for x in attempts),
+                completion_seconds=statistics.median(x['seconds'] for x in attempts),
+                tool_limited=any(x['tool_limited'] for x in attempts))
+            cpu = [x['engine_cpu_seconds_per_verified_gib'] for x in attempts]
+            if all(value is not None for value in cpu):
+                rec['metrics']['cpu_seconds_per_verified_gib'] = statistics.median(cpu)
         return rec
     except Exception as exc:
         rec['correctness']['ok'] = False

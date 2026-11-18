@@ -174,6 +174,19 @@ correctness = ["engine_alive", "errors_zero", "load_windows_valid",
 note = "LEGACY DIAGNOSTIC only; these request-window/churn metrics cannot qualify W11. Representative v2 short cycles now live in diagnostics/mixed_pilot.py and fixtures/w11-v2: persistent API/DB/cache, fixed real queue artifacts and build/test jobs, exact cumulative state and process identity. Do not pool v1/v2 records. Durable finite 12-hour execution, frozen inputs and resource-growth qualification remain open."
 
 [[case]]
+id = "W13"
+family = "artifact-transfer"
+title = "Verified bulk transfer: published port, container-to-container, container-to-Mac; upload and download; 1 and 4 streams"
+fixture = "fixtures/w13 (stdlib framed TCP tool; pinned API image)"
+fixture_version = "w13-v1"
+status = "implemented"
+metrics = ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"]
+states = ["warm"]
+params = { size_bytes = 1073741824, repeats = 3 }
+correctness = ["receiver SHA-256 and byte count exact per stream", "partial bytes, stalls and errors recorded", "loopback capacity controls on host and in container", "owned cleanup"]
+note = "Controlled egress unsupported: no owned external endpoint. Goodput above half the slower capacity control is flagged tool_limited. Each path, direction and stream count is its own cohort via workload_params."
+
+[[case]]
 id = "HOLDOUT"
 family = "holdout-real-app"
 title = "real third-party app never tuned against: Gitea 1.24.7 + Postgres 17 — REST API seed + timed read workload + git smart-HTTP clones over the published port"
