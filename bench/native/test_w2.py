@@ -291,6 +291,50 @@ class PersistedStateTests(unittest.TestCase):
             self.assertFalse(runner.exact_w2_items(corrupt, writes))
 
 
+PROC_STAT = """cpu  100 0 50 900 1 2 3 4 0 0
+cpu0 50 0 25 450 0 1 1 2 0 0
+intr 5000 0 0
+ctxt 7000
+btime 1
+processes 30
+"""
+PROC_MEMINFO = """MemTotal:       61181000 kB
+MemFree:        60000000 kB
+"""
+PROC_INTERRUPTS = """           CPU0       CPU1
+ 11:        120         80     GICv3  27 Level     arch_timer
+IPI0:        30         10       Rescheduling interrupts
+IPI1:         5          7       Function call interrupts
+"""
+
+
+class GuestKernelCounterTests(unittest.TestCase):
+    def test_ipi_rows_and_scheduler_totals_diff_across_the_workload(self):
+        import runner
+        before = runner.parse_guest_kernel_counters(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
+        after = runner.parse_guest_kernel_counters(
+            PROC_STAT.replace("ctxt 7000", "ctxt 9500").replace("cpu  100 0 50", "cpu  160 0 90")
+            + PROC_MEMINFO + PROC_INTERRUPTS.replace("30         10", "70         15"))
+        self.assertEqual(before["interrupts"]["IPI0"],
+                         {"total": 40, "description": "Rescheduling interrupts"})
+        self.assertEqual(before["interrupts"]["11"],
+                         {"total": 200, "description": "GICv3 27 Level arch_timer"})
+        delta = runner.guest_kernel_counter_delta(before, after)["delta"]
+        self.assertEqual(delta["ctxt"], 2500)
+        self.assertEqual(delta["interrupts"], {"11": 0, "IPI0": 45, "IPI1": 0})
+        self.assertEqual((delta["cpu_ticks"]["user"], delta["cpu_ticks"]["system"]), (60, 40))
+        self.assertEqual(runner.guest_kernel_counter_delta(before, after)["guest_capacity"],
+                         {"online_cpus": 1, "mem_total_kb": 61181000})
+
+    def test_unreadable_counters_stay_missing_not_zero(self):
+        import runner
+        with self.assertRaises(ValueError):
+            runner.parse_guest_kernel_counters("usage_usec 42\n")
+        good = runner.parse_guest_kernel_counters(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
+        result = runner.guest_kernel_counter_delta(good, {"error": "masked"})
+        self.assertIsNone(result["delta"])
+
+
 class GuestPlacementTests(unittest.TestCase):
     def test_pinned_trial_rejects_image_drift_before_compose_or_sampling(self):
         import runner
@@ -345,6 +389,13 @@ class GuestPlacementTests(unittest.TestCase):
                     elif args[0] == "inspect":
                         return completed(json.dumps([{"Id": args[1], "Image": image,
                                                        "Config": {"Image": image, "Labels": {"dev.ctrs.campaign.run": "test-run-000001"}}}]))
+                    elif args[0] == "run" and "--privileged" in args:
+                        events.append("reader-start")
+                        self.assertEqual(args[args.index("--network") + 1], "none")
+                    elif args[1:2] == [runner.project_name("test-run-000001", engine.name, "W2") + "-counters"] \
+                            and args[0] == "exec":
+                        events.append("guest-counters")
+                        return completed(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
                     elif args[:2] == ["exec", "api-id"]:
                         events.append("api-cpu")
                         return completed("usage_usec 42\n")
@@ -368,7 +419,7 @@ class GuestPlacementTests(unittest.TestCase):
                             events.append("copy")
                             return completed(files[Path(args[-1]).name])
                     elif args[:2] == ["rm", "-f"]:
-                        events.append("remove-peer")
+                        events.append("remove-reader" if args[2].endswith("-counters") else "remove-peer")
                     return completed()
 
                 @contextlib.contextmanager
@@ -394,6 +445,7 @@ class GuestPlacementTests(unittest.TestCase):
                     self.assertEqual(rec["paired_inputs"]["api_files_sha256"], {"app.py": "app"})
                     self.assertEqual(rec["paired_inputs"]["load_client_sha256"], runner.sha256_file(runner.RATE_LOAD_PY))
                 self.assertIn("remove-peer", events)
+                self.assertEqual("remove-reader" in events, "reader-start" in events)
                 self.assertEqual(rec["correctness"]["ok"], mode not in ("corrupt", "source-mismatch"), rec)
                 if mode == "source-mismatch":
                     self.assertNotIn("guest-load", events)
@@ -402,7 +454,9 @@ class GuestPlacementTests(unittest.TestCase):
                     self.assertEqual(args_seen["--url"], "http://api:8000")
                     self.assertEqual(args_seen.get("--operations"), str(operations) if operations else None)
                     self.assertEqual(args_seen.get("--request-rate"), str(rate) if rate else None)
-                    self.assertEqual(events[:4], ["api-cpu", "guest-load", "api-cpu", "copy"])
+                    self.assertEqual(events[:7], ["reader-start", "guest-counters", "api-cpu",
+                                                  "guest-load", "api-cpu", "guest-counters", "copy"])
+                    self.assertEqual(rec["resources"]["guest_kernel_counters"]["delta"]["ctxt"], 0)
                     source = runner.RATE_LOAD_PY if rate else runner.LOAD_PY
                     self.assertEqual(files["source"], source.read_text())
                     self.assertEqual(rec["correctness"]["checks"]["exact_persisted_items"], mode != "corrupt")

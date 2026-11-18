@@ -116,6 +116,14 @@ class ReportingTests(unittest.TestCase):
         self.assertNotIn("provenance.build_outputs.guest_kernel_sha256", gaps)
         self.assertFalse(report["promotion_eligible"])
 
+    def test_engine_table_shows_each_engines_guest_vcpus(self):
+        records = pair()
+        for record, cpus in zip(records, (9, 2)):
+            record.setdefault("resources", {})["guest_kernel_counters"] = {
+                "guest_capacity": {"online_cpus": cpus, "mem_total_kb": 1}}
+        engines = reporting.analyze(records)["cohorts"][0]["engines"]
+        self.assertEqual(sorted(info["guest_cpus"] for info in engines.values()), [["2"], ["9"]])
+
     def test_runner_build_outputs_close_binary_and_guest_provenance(self):
         records = pair()
         build = {key: c * 64 for key, c in (("ctrs_binary_sha256", "1"),

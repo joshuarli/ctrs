@@ -53,6 +53,12 @@ def workload_params(record: dict):
     return record.get("workload_params", record.get("parameters", record.get("params")))
 
 
+def _guest_capacity(record: dict) -> dict:
+    counters = record.get("resources", {}).get("guest_kernel_counters")
+    capacity = counters.get("guest_capacity") if isinstance(counters, dict) else None
+    return capacity if isinstance(capacity, dict) else {}
+
+
 def cohort_identity(record: dict) -> dict:
     identity = {key: record.get(key) for key in IDENTITY_FIELDS}
     params = workload_params(record)
@@ -187,6 +193,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             "trials": len(rows), "correct": sum(_correct(r) for r in rows),
             "failed": sum(not _correct(r) for r in rows),
             "versions": sorted({str(r.get("engine_server_version", "missing")) for r in rows}),
+            "guest_cpus": sorted({str(_guest_capacity(r).get("online_cpus", "missing")) for r in rows}),
         }
     for key in ("workload_params", "provenance"):
         if not isinstance(identity.get(key), dict) or not identity[key]:
@@ -410,10 +417,11 @@ def render_markdown(report: dict) -> str:
         lines += ["", f"## {ident['case']} / {ident['state']} / {ident['run_id']}", "",
                   f"Host: `{ident['host_id']}` (`{ident['arch']}`); source: `{ident['git_sha']}`.",
                   f"Builder: `{ident['builder_driver']}`; parameters: `{_canonical(ident['workload_params'])}`.", "",
-                  "| Engine | Trials | Correct | Failed | Server versions |",
-                  "| --- | ---: | ---: | ---: | --- |"]
+                  "| Engine | Trials | Correct | Failed | Server versions | Guest vCPUs |",
+                  "| --- | ---: | ---: | ---: | --- | --- |"]
         for engine, info in cohort["engines"].items():
-            lines.append(f"| {engine} | {info['trials']} | {info['correct']} | {info['failed']} | {', '.join(info['versions'])} |")
+            lines.append(f"| {engine} | {info['trials']} | {info['correct']} | {info['failed']} | "
+                         f"{', '.join(info['versions'])} | {', '.join(info['guest_cpus'])} |")
         if cohort["metadata_gaps"]:
             lines += ["", "Missing qualification metadata: " + ", ".join(cohort["metadata_gaps"]) + "."]
         if cohort["rejections"]:

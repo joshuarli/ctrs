@@ -410,6 +410,87 @@ def guest_provenance() -> dict:
     return out
 
 
+GUEST_COUNTER_METHOD = ("guest-wide /proc/stat, /proc/meminfo and /proc/interrupts read from an owned, idle, "
+                        "privileged, network-less reader of the API image outside the workload "
+                        "phase and the API cpu.stat delta; diagnostic only")
+
+
+def parse_guest_kernel_counters(text: str) -> dict:
+    stat: dict = {}
+    interrupts: dict = {}
+    cpus = 0
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if all(field.startswith("CPU") for field in fields):
+            cpus = len(fields)
+        elif fields[0] == "MemTotal:" and len(fields) > 1 and fields[1].isdigit():
+            stat["mem_total_kb"] = int(fields[1])
+        elif re.fullmatch(r"cpu[0-9]+", fields[0]):
+            stat["online_cpus"] = stat.get("online_cpus", 0) + 1
+        elif fields[0] == "cpu":
+            stat["cpu_ticks"] = dict(zip(
+                ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal"),
+                map(int, fields[1:9])))
+        elif fields[0] in ("ctxt", "intr", "processes") and fields[1].isdigit():
+            stat[fields[0]] = int(fields[1])
+        elif cpus and fields[0].endswith(":") and fields[1:1 + cpus] and all(
+                value.isdigit() for value in fields[1:1 + cpus]):
+            interrupts[fields[0][:-1]] = {
+                "total": sum(map(int, fields[1:1 + cpus])),
+                "description": " ".join(fields[1 + cpus:])}
+    if not {"cpu_ticks", "ctxt", "online_cpus", "mem_total_kb"} <= stat.keys() or not interrupts:
+        raise ValueError("incomplete guest /proc/stat, /proc/meminfo or /proc/interrupts")
+    return {"stat": stat, "interrupts": interrupts}
+
+
+def start_guest_counter_reader(engine: "Engine", name: str, owner: str, api_id: str) -> str | None:
+    """Docker and ctrs both mask /proc/interrupts in unprivileged containers,
+    so a separate privileged reader exposes it. Returns an error that keeps
+    the counters missing, never zero; the caller always cleans up `name`."""
+    try:
+        info, = json.loads(engine.sh(["inspect", api_id], timeout=30).stdout)
+        engine.sh(["run", "-d", "--pull", "never", "--privileged", "--network", "none",
+                   "--name", name, "--label", "dev.ctrs.campaign.run=" + owner,
+                   "--entrypoint", "python", info["Image"], "-c",
+                   "import time; time.sleep(86400)"], timeout=60)
+        return None
+    except Exception as exc:
+        return f"counter reader: {exc}"
+
+
+def guest_kernel_counters(engine: "Engine", container: str, reader_error: str | None) -> dict:
+    if reader_error is not None:
+        return {"error": reader_error}
+    try:
+        cp = engine.sh(["exec", container, "cat", "/proc/stat", "/proc/meminfo", "/proc/interrupts"],
+                       timeout=30)
+        if cp.returncode != 0:
+            raise ValueError(f"exit {cp.returncode}: {cp.stderr.strip()[:200]}")
+        return parse_guest_kernel_counters(cp.stdout)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def guest_kernel_counter_delta(before: dict, after: dict) -> dict:
+    result = {"before": before, "after": after, "method": GUEST_COUNTER_METHOD}
+    if "error" in before or "error" in after:
+        result["delta"] = None
+        return result
+    ticks = {key: after["stat"]["cpu_ticks"][key] - value
+             for key, value in before["stat"]["cpu_ticks"].items()}
+    stat = {key: after["stat"][key] - before["stat"][key]
+            for key in ("ctxt", "intr", "processes")
+            if key in before["stat"] and key in after["stat"]}
+    interrupts = {label: after["interrupts"][label]["total"] - row["total"]
+                  for label, row in before["interrupts"].items()
+                  if label in after["interrupts"]}
+    result["delta"] = {"cpu_ticks": ticks, **stat, "interrupts": interrupts}
+    result["guest_capacity"] = {key: after["stat"][key] for key in ("online_cpus", "mem_total_kb")}
+    return result
+
+
 def fixture_sha256() -> str:
     digest = hashlib.sha256()
     for path in sorted(FIXTURES.rglob("*")):
@@ -1122,6 +1203,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         "path": str(client_source.relative_to(REPO)), "sha256": client_sha}
     rec["metrics"]["client_location"] = client_location
     peer = None
+    counter_reader = None
     get = http_json
     sampler = trace = None
     measurement_started = False
@@ -1191,10 +1273,13 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
 
         api_id = compose(["ps", "-q", "api"], timeout=30).stdout.strip()
+        counter_reader = f"{proj}-counters"
+        reader_error = start_guest_counter_reader(engine, counter_reader, ctx.run_id, api_id)
         def application_cpu():
             cp = engine.sh(["exec", api_id, "cat", "/sys/fs/cgroup/cpu.stat"], timeout=30)
             return {key: int(value) for key, value in
                     (line.split() for line in cp.stdout.splitlines())}
+        guest_before = guest_kernel_counters(engine, counter_reader, reader_error)
         app_before = application_cpu()
         if allocation_paths:
             rec["resources"]["disk_allocation"]["before_work"] = resource_cells.allocation_snapshot(allocation_paths)
@@ -1216,6 +1301,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         rec["resources"]["application_cpu"] = {"before": app_before, "after": app_after,
             "delta": {key: app_after[key] - value for key, value in app_before.items()
                       if key in app_after}, "method": "API cgroup v2 cpu.stat; includes counter-reader exec"}
+        rec["resources"]["guest_kernel_counters"] = guest_kernel_counter_delta(
+            guest_before, guest_kernel_counters(engine, counter_reader, reader_error))
         if peer is not None:
             w2_peer.copy_results(engine, peer, trial_dir, "load")
         if load_out.exists():
@@ -1293,12 +1380,14 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             if allocation_paths:
                 rec["resources"].setdefault("disk_allocation", {})["after_work"] = resource_cells.allocation_snapshot(allocation_paths)
             with resource_phase(engine, rec, "cleanup") if measurement_started else nullcontext():
-                if peer is not None:
+                for owned in (peer, counter_reader):
+                    if owned is None:
+                        continue
                     try:
-                        ci_jobs.cleanup(engine, peer, ctx.run_id)
+                        ci_jobs.cleanup(engine, owned, ctx.run_id)
                     except BaseException as exc:
                         rec["correctness"]["ok"] = False
-                        rec["validation_errors"].append(f"peer cleanup {type(exc).__name__}: {exc}")
+                        rec["validation_errors"].append(f"{owned} cleanup {type(exc).__name__}: {exc}")
                         if not isinstance(exc, Exception) and interrupted is None:
                             interrupted = exc
                 if cleanup_needed:
