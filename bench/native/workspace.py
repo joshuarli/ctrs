@@ -39,6 +39,11 @@ def observed_stale(actual, expected, previous, diagnostic_ok, deleted):
     return changed_wrong or changed_without_valid_diagnostics or retained_after_delete
 
 
+def verify_burst(seconds):
+    if not 0 <= seconds <= .05:
+        raise ValueError('W12 burst writes exceeded 50 ms')
+
+
 def edit_plan(paths, edits=60):
     if len(paths) < 10 or len(set(paths)) != len(paths) or edits < 60:
         raise ValueError('W12 watch requires 60 edits across at least 10 distinct files')
@@ -299,7 +304,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                 temporary.replace(target)
             else:
                 target.write_text(action['content'])
-        return starts
+        return starts, time.monotonic() - starts[0]
 
     def apply(actions):
         if mount == 'bind':
@@ -307,8 +312,9 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         else:
             script = (FIXTURE / 'watch-edit.js').read_text()
             started = time.monotonic()
-            offsets = json.loads(run(['node', '-e', script, json.dumps(actions)]).stdout)
-            return [started + offset / 1000 for offset in offsets]
+            receipt = json.loads(run(['node', '-e', script, json.dumps(actions)]).stdout)
+            starts = [started + offset / 1000 for offset in receipt['starts_ms']]
+            return starts, (receipt['completed_ms'] - receipt['starts_ms'][0]) / 1000
 
     def evaluate(items):
         script = (FIXTURE / 'watch-eval.js').read_text()
@@ -415,10 +421,10 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                 previous = evaluate(items)
                 log_offset = len(run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout)
                 started = time.monotonic()
-                write_starts = apply(actions)
+                write_starts, write_span = apply(actions)
                 applied = time.monotonic()
-                if kind == 'burst' and write_starts[-1] - write_starts[0] > .05:
-                    raise ValueError('W12 burst transport exceeded 50 ms')
+                if kind == 'burst':
+                    verify_burst(write_span)
                 deadline = time.monotonic() + 3
                 stale = [False] * len(items)
                 first_correct = [None] * len(items)
@@ -442,10 +448,14 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                     status = classify_result(True, True if first_correct[index] is not None else (False if stale[index] else None), True)
                     if status != 'correct':
                         rec['metrics'][status] += 1
+                    action_index = next((i for i, action in enumerate(actions)
+                                         if item['path'] in (action['path'], action.get('from'))), 0)
+                    host_start = write_starts[action_index] if mount == 'bind' else started
                     rec['metrics']['edits'].append({'sequence': event['sequence'], 'kind': kind,
-                        'path': item['path'], 'host_started_monotonic': started,
+                        'path': item['path'], 'host_started_monotonic': host_start,
                         'host_applied_monotonic': applied,
                         'observed_monotonic': first_correct[index] or observed,
+                        'write_span_seconds': write_span,
                         'write_start_offsets_seconds': [value - write_starts[0] for value in write_starts],
                         'status': status, 'output': item})
         rec['correctness']['checks']['watch_run_completed'] = len(rec['metrics']['edits']) >= edits

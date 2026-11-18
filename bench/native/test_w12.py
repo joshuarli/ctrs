@@ -16,6 +16,9 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(len({event['token'] for event in plan}), 60)
         with self.assertRaises(ValueError):
             workspace.edit_plan(paths, edits=59)
+        workspace.verify_burst(.05)
+        with self.assertRaises(ValueError):
+            workspace.verify_burst(.051)
 
     def test_output_mismatch_fails(self):
         expected = {'server': {'sha256': 'a'}, 'tests': ['a', 'b']}
