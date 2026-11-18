@@ -41,39 +41,43 @@ def send(sock, path, ident, size, digest):
     sock.shutdown(socket.SHUT_WR)
 
 
-def receive(sock, ident, size, digest):
+def receive(sock, ident, size, digest, expected_path):
     start = time.monotonic()
     total = 0
     gaps = []
     first = None
     error = None
-    actual = hashlib.sha256()
+    exact = True
+    buffer = bytearray(CHUNK)
     try:
         header = line(sock)
         if header != {'id': ident, 'bytes': size, 'sha256': digest}:
             raise ValueError('header mismatch')
         last = time.monotonic()
-        while True:
-            block = sock.recv(CHUNK)
-            now = time.monotonic()
-            if not block:
-                break
-            if first is None:
-                first = now - start
-            gaps.append(now - last)
-            last = now
-            total += len(block)
-            actual.update(block)
-            if total > size:
-                raise ValueError('excess bytes')
-        if total != size or actual.hexdigest() != digest:
-            raise ValueError('byte count or hash mismatch')
+        with open(expected_path, 'rb') as expected:
+            while True:
+                count = sock.recv_into(buffer)
+                now = time.monotonic()
+                if not count:
+                    break
+                if first is None:
+                    first = now - start
+                gaps.append(now - last)
+                last = now
+                total += count
+                if total > size:
+                    raise ValueError('excess bytes')
+                block = buffer if count == CHUNK else buffer[:count]
+                if block != expected.read(count):
+                    exact = False
+        if total != size or not exact:
+            raise ValueError('byte count or content mismatch')
     except Exception as exc:
         error = f'{type(exc).__name__}: {exc}'
         if 'last' in locals():
             gaps.append(time.monotonic() - last)
     elapsed = time.monotonic() - start
-    return {'id': ident, 'bytes': total, 'sha256': actual.hexdigest(), 'seconds': elapsed,
+    return {'id': ident, 'bytes': total, 'sha256': digest if error is None else None, 'seconds': elapsed,
             'first_byte_seconds': first, 'stall_count': sum(g >= 1 for g in gaps),
             'longest_gap_seconds': max(gaps, default=0), 'error': error}
 
@@ -89,7 +93,7 @@ def serve(bind, port, direction, count, path, size, digest, output):
                 request = line(conn)
                 ident = request['id']
                 if direction == 'upload':
-                    result = receive(conn, ident, size, digest)
+                    result = receive(conn, ident, size, digest, path)
                     try:
                         conn.sendall((json.dumps(result) + '\n').encode())
                     except OSError as exc:
@@ -128,7 +132,7 @@ def client(host, port, direction, count, path, size, digest):
                 if direction == 'upload':
                     send(sock, path, ident, size, digest)
                     return line(sock)
-                return receive(sock, ident, size, digest)
+                return receive(sock, ident, size, digest, path)
         except Exception as exc:
             return {'id': ident, 'bytes': None, 'seconds': time.monotonic() - started,
                     'error': f'{type(exc).__name__}: {exc}'}

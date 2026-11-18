@@ -58,7 +58,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
     resources = []
     sampler = trace = None
     image = getattr(engine, 'w13_image_id', None)
-    rec['metrics'].update(fixture_version='w13-v1', path=path, direction=direction,
+    rec['metrics'].update(fixture_version='w13-v2', path=path, direction=direction,
                           streams=streams, size_bytes=size_bytes, repeats=repeats,
                           controlled_egress='unsupported: no owned external endpoint', attempts=[])
     try:

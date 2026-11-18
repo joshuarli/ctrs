@@ -60,3 +60,12 @@ class BaselineCliTests(unittest.TestCase):
             cp = subprocess.run([sys.executable, 'runner.py', 'baseline', '--a', 'ctrs', '--b', 'orbstack',
                                  *extra, '--help'], capture_output=True, text=True)
             self.assertEqual(cp.returncode, 0, cp.stderr)
+
+    def test_script_run_shares_runner_module_with_trial_modules(self):
+        import subprocess
+        import sys
+        script = ("import runpy, sys\nsys.argv = ['runner.py', '--help']\ntry:\n"
+                  "    runpy.run_path('runner.py', run_name='__main__')\nexcept SystemExit:\n    pass\n"
+                  "print(sys.modules['runner'].__name__)")
+        cp = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True)
+        self.assertEqual(cp.stdout.strip().splitlines()[-1], '__main__', cp.stderr)

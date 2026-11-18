@@ -14,6 +14,11 @@ Requires Python >= 3.11 (tomllib). See README.md.
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__":
+    sys.modules.setdefault("runner", sys.modules[__name__])
+
 import argparse
 import ownership
 import watch_loop

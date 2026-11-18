@@ -8,7 +8,20 @@ from transfer import tool_limited, transfer_result, record_attempt
 
 
 class TransferTests(unittest.TestCase):
-    def run_receive(self, payload, declared, digest, delay=0):
+    def setUp(self):
+        import tempfile
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+
+    def expected(self, payload):
+        import os
+        path = os.path.join(self.scratch.name, 'expected')
+        with open(path, 'wb') as f:
+            f.write(payload)
+        return path
+
+    def run_receive(self, payload, declared, digest, delay=0, expected=None):
+        expected_path = self.expected(expected if expected is not None else payload)
         left, right = socket.socketpair()
         def writer():
             with left:
@@ -19,7 +32,7 @@ class TransferTests(unittest.TestCase):
         thread = threading.Thread(target=writer)
         thread.start()
         with right:
-            result = tool.receive(right, '0', declared, digest)
+            result = tool.receive(right, '0', declared, digest, expected_path)
         thread.join()
         return result
 
@@ -28,7 +41,17 @@ class TransferTests(unittest.TestCase):
         self.assertIsNone(self.run_receive(payload, len(payload), digest)['error'])
         partial = self.run_receive(payload[:-1], len(payload), digest)
         self.assertIsNotNone(partial['error']); self.assertEqual(partial['bytes'], len(payload)-1)
-        self.assertIsNotNone(self.run_receive(b'PAYLOAD', len(payload), digest)['error'])
+        self.assertIsNotNone(self.run_receive(b'PAYLOAD', len(payload), digest, expected=payload)['error'])
+
+    def test_multi_chunk_exactness(self):
+        payload = bytes(range(256)) * (10 * 1024 + 17)
+        digest = hashlib.sha256(payload).hexdigest()
+        result = self.run_receive(payload, len(payload), digest)
+        self.assertIsNone(result['error']); self.assertEqual(result['sha256'], digest)
+        corrupt = payload[:-1] + bytes([payload[-1] ^ 1])
+        result = self.run_receive(corrupt, len(payload), digest, expected=payload)
+        self.assertEqual(result['error'], 'ValueError: byte count or content mismatch')
+        self.assertIsNone(result['sha256'])
 
     def test_short_transfer_survives_trial_record(self):
         payload = b'payload'
@@ -64,7 +87,7 @@ class TransferTests(unittest.TestCase):
         left, right = socket.socketpair()
         with left, right:
             left.sendall(b'{"id":"wrong","bytes":0,"sha256":"x"}\n')
-            self.assertEqual(tool.receive(right, '0', 0, 'x')['error'], 'ValueError: header mismatch')
+            self.assertEqual(tool.receive(right, '0', 0, 'x', self.expected(b''))['error'], 'ValueError: header mismatch')
 
     def test_stall(self):
         payload = b'x'; digest = hashlib.sha256(payload).hexdigest()
