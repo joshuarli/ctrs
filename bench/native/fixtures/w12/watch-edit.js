@@ -20,4 +20,4 @@ for (const edit of edits) {
     fs.writeFileSync(target, edit.content);
   }
 }
-console.log(JSON.stringify(starts));
+console.log(JSON.stringify({starts_ms: starts, completed_ms: Number(process.hrtime.bigint() - begin) / 1e6}));
