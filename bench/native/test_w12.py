@@ -31,3 +31,6 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(workspace.classify_result('new', None, True), 'missed')
         self.assertEqual(workspace.classify_result(None, 'old-output', True), 'stale')
         self.assertEqual(workspace.classify_result(None, None, False), 'correct')
+        self.assertFalse(workspace.observed_stale(None, None, None, False, True))
+        self.assertTrue(workspace.observed_stale('old', None, 'old', True, True))
+        self.assertTrue(workspace.observed_stale('wrong', 'expected', 'old', True, False))

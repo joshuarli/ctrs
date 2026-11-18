@@ -32,6 +32,13 @@ def classify_result(expected, observed, timed_out):
     return 'stale'
 
 
+def observed_stale(actual, expected, previous, diagnostic_ok, deleted):
+    changed_wrong = actual is not None and actual != previous and actual != expected
+    changed_without_valid_diagnostics = actual == expected and actual != previous and not diagnostic_ok
+    retained_after_delete = deleted and diagnostic_ok and actual is not None
+    return changed_wrong or changed_without_valid_diagnostics or retained_after_delete
+
+
 def edit_plan(paths, edits=60):
     if len(paths) < 10 or len(set(paths)) != len(paths) or edits < 60:
         raise ValueError('W12 watch requires 60 edits across at least 10 distinct files')
@@ -411,11 +418,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                     for index, (item, old) in enumerate(zip(current, previous)):
                         if item['actual'] == item['expected'] and diagnostic_ok and first_correct[index] is None:
                             first_correct[index] = observed
-                        if item['actual'] is not None and item['actual'] != old['actual'] and item['actual'] != item['expected']:
-                            stale[index] = True
-                        if item['actual'] == item['expected'] and not diagnostic_ok:
-                            stale[index] = True
-                        if items[index].get('deleted') and diagnostic_ok and item['actual'] is not None:
+                        if observed_stale(item['actual'], item['expected'], old['actual'], diagnostic_ok, items[index].get('deleted', False)):
                             stale[index] = True
                     if all(value is not None for value in first_correct):
                         break
