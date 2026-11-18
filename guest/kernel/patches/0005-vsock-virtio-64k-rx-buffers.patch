@@ -1,0 +1,17 @@
+Subject: [PATCH] vsock/virtio: post 64 KiB receive buffers
+
+With 4 KiB receive buffers every host-to-guest vsock packet carries at
+most 4 KiB, so bulk streams pay per-packet device and interrupt cost
+sixteen times as often as the 64 KiB packets the transport allows.
+
+--- a/include/linux/virtio_vsock.h
++++ b/include/linux/virtio_vsock.h
+@@ -135,7 +135,7 @@
+  * rounding up to the next page order and also means that we
+  * don't leave higher-order pages sitting around in the RX queue.
+  */
+-#define VIRTIO_VSOCK_DEFAULT_RX_BUF_SIZE	SKB_WITH_OVERHEAD(1024 * 4)
++#define VIRTIO_VSOCK_DEFAULT_RX_BUF_SIZE	SKB_WITH_OVERHEAD(1024 * 64)
+ #define VIRTIO_VSOCK_MAX_BUF_SIZE		0xFFFFFFFFUL
+ #define VIRTIO_VSOCK_MAX_PKT_BUF_SIZE		(1024 * 64)
+ 
