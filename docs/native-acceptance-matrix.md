@@ -54,8 +54,30 @@ Existing DNS, UDP, IPv6 and host-access checks are correctness tests
 (CTRS-17) streams a repeating pattern without content hashes and reports
 Mbps only. It is not reusable as a verified-transfer metric.
 
+## Correctness findings from fixture work (2026-11-18)
+
+- **Bind-mount file-change notification (open, critical).** Mac-side edits under
+  a ctrs bind mount produce no guest inotify events at all. A raw inotify
+  probe tried save, atomic replace, create, rename and delete on a
+  `-v <mac dir>:/w` mount. OrbStack delivered events for all five; ctrs
+  delivered none. Native watchers (chokidar/nodemon, `tsc --watch`,
+  webpack, vite) therefore never react to Mac edits on ctrs unless they
+  poll. Virtualization.framework virtiofs carries no host change
+  notifications, and ctrs has no forwarding mechanism. A fix needs a host
+  file watcher and a host→guest event message (a wire-protocol addition).
+  W12-watch quantifies the effect.
+- **Container→Mac half-close (fixed, `9940611`).** Over
+  `host.docker.internal`, a container's half-close after about 1 MiB or more
+  of data never reached the Mac service. Virtualization.framework drops the
+  guest's vsock half-close after bulk data. Request/response protocols that
+  half-close hung until timeout: Python at 1–256 MiB, busybox `nc` at
+  64 MiB. Host-bound relays now frame the container's bytes on vsock port
+  1032. The e2e check `host-internal-upload-eof` covers it. Guest
+  initramfs and host binary identities change from this commit on.
+
 ## Ranked OrbStack deficits (this host)
 
+0. Bind-mount file-change notification: missing on ctrs (correctness).
 1. W2 M-lane CPU per success: inconclusive, +4.5% median. Parked.
 2. Every other cell is **unmeasured** on this host. W6/W7 default-build
    losses are historical only and must be re-measured.
