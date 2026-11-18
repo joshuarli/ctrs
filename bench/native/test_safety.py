@@ -586,7 +586,7 @@ class ExitStatusTests(unittest.TestCase):
     def test_w2_baseline_serializes_sampling_mode_and_requires_pins(self):
         engine = fake_engine()
         engine.system_df.return_value = None
-        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine})
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched")
 
         def trial(ctx, engine, state, sampling=runner.SamplingMode.PERIODIC, pinned_stack=False):
             self.assertIs(sampling, runner.SamplingMode.PERIODIC)
@@ -603,7 +603,7 @@ class ExitStatusTests(unittest.TestCase):
 
     def test_record_captures_executed_defaults_and_post_trial_version(self):
         engine = fake_engine()
-        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine})
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched")
 
         def trial(ctx, engine, state, duration=300.0, window=30.0, seed=1):
             return {"correctness": {"ok": True}, "resources": {}, "validation_errors": []}
@@ -614,7 +614,8 @@ class ExitStatusTests(unittest.TestCase):
             rec = runner.run_one(context, "orbstack", "W11", "warm",
                                  pair_id=1, order_index=0, duration=10.0, seed=4)
         self.assertEqual(context.workload_params,
-                         {"cold": False, "duration": 10.0, "window": 30.0, "seed": 4})
+                         {"cold": False, "duration": 10.0, "window": 30.0, "seed": 4,
+                          "resource_lane": "matched"})
         self.assertEqual(rec["engine_server_version"], "observed-after-start")
         self.assertEqual(context.workload_id, "one-run:W11:pair-1")
 

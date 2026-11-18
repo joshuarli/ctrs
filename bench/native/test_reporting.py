@@ -119,10 +119,21 @@ class ReportingTests(unittest.TestCase):
     def test_engine_table_shows_each_engines_guest_vcpus(self):
         records = pair()
         for record, cpus in zip(records, (9, 2)):
-            record.setdefault("resources", {})["guest_kernel_counters"] = {
-                "guest_capacity": {"online_cpus": cpus, "mem_total_kb": 1}}
-        engines = reporting.analyze(records)["cohorts"][0]["engines"]
+            record.setdefault("resources", {})["engine"] = {"ncpu": cpus, "mem_total_bytes": 1 << 33}
+        report = reporting.analyze(records)
+        engines = report["cohorts"][0]["engines"]
         self.assertEqual(sorted(info["guest_cpus"] for info in engines.values()), [["2"], ["9"]])
+        self.assertEqual(report["cohorts"][0]["valid_pairs"], 0)
+
+    def test_installed_default_lane_pairs_unequal_budgets_in_its_own_cohort(self):
+        matched = pair()
+        default = pair()
+        for record, cpus in zip(default, (2, 9)):
+            record["workload_params"]["resource_lane"] = "installed-default"
+            record.setdefault("resources", {})["engine"] = {"ncpu": cpus, "mem_total_bytes": cpus << 30}
+        cohorts = reporting.analyze(matched + default)["cohorts"]
+        self.assertEqual(len(cohorts), 2)
+        self.assertEqual(sorted(c["valid_pairs"] for c in cohorts), [1, 1])
 
     def test_runner_build_outputs_close_binary_and_guest_provenance(self):
         records = pair()

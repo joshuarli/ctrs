@@ -53,12 +53,6 @@ def workload_params(record: dict):
     return record.get("workload_params", record.get("parameters", record.get("params")))
 
 
-def _guest_capacity(record: dict) -> dict:
-    counters = record.get("resources", {}).get("guest_kernel_counters")
-    capacity = counters.get("guest_capacity") if isinstance(counters, dict) else None
-    return capacity if isinstance(capacity, dict) else {}
-
-
 def cohort_identity(record: dict) -> dict:
     identity = {key: record.get(key) for key in IDENTITY_FIELDS}
     params = workload_params(record)
@@ -193,7 +187,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             "trials": len(rows), "correct": sum(_correct(r) for r in rows),
             "failed": sum(not _correct(r) for r in rows),
             "versions": sorted({str(r.get("engine_server_version", "missing")) for r in rows}),
-            "guest_cpus": sorted({str(_guest_capacity(r).get("online_cpus", "missing")) for r in rows}),
+            "guest_cpus": sorted({str((r.get("resources", {}).get("engine") or {}).get("ncpu", "missing"))
+                                  for r in rows}),
         }
     for key in ("workload_params", "provenance"):
         if not isinstance(identity.get(key), dict) or not identity[key]:
@@ -235,7 +230,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "failed correctness or validation"
         elif version_drift:
             reason = "engine version drift within run"
-        elif _resource_mismatch(a[0], b[0]):
+        elif (not isinstance(params, dict) or params.get("resource_lane") != "installed-default") \
+                and _resource_mismatch(a[0], b[0]):
             reason = "engine resource budgets differ"
         elif {a[0].get("order_index"), b[0].get("order_index")} != {0, 1}:
             reason = "missing or duplicated trial order"

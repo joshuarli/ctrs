@@ -410,7 +410,7 @@ def guest_provenance() -> dict:
     return out
 
 
-GUEST_COUNTER_METHOD = ("guest-wide /proc/stat, /proc/meminfo and /proc/interrupts read from an owned, idle, "
+GUEST_COUNTER_METHOD = ("guest-wide /proc/stat and /proc/interrupts read from an owned, idle, "
                         "privileged, network-less reader of the API image outside the workload "
                         "phase and the API cpu.stat delta; diagnostic only")
 
@@ -425,10 +425,6 @@ def parse_guest_kernel_counters(text: str) -> dict:
             continue
         if all(field.startswith("CPU") for field in fields):
             cpus = len(fields)
-        elif fields[0] == "MemTotal:" and len(fields) > 1 and fields[1].isdigit():
-            stat["mem_total_kb"] = int(fields[1])
-        elif re.fullmatch(r"cpu[0-9]+", fields[0]):
-            stat["online_cpus"] = stat.get("online_cpus", 0) + 1
         elif fields[0] == "cpu":
             stat["cpu_ticks"] = dict(zip(
                 ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal"),
@@ -440,8 +436,8 @@ def parse_guest_kernel_counters(text: str) -> dict:
             interrupts[fields[0][:-1]] = {
                 "total": sum(map(int, fields[1:1 + cpus])),
                 "description": " ".join(fields[1 + cpus:])}
-    if not {"cpu_ticks", "ctxt", "online_cpus", "mem_total_kb"} <= stat.keys() or not interrupts:
-        raise ValueError("incomplete guest /proc/stat, /proc/meminfo or /proc/interrupts")
+    if "cpu_ticks" not in stat or "ctxt" not in stat or not interrupts:
+        raise ValueError("incomplete guest /proc/stat or /proc/interrupts")
     return {"stat": stat, "interrupts": interrupts}
 
 
@@ -464,8 +460,7 @@ def guest_kernel_counters(engine: "Engine", container: str, reader_error: str | 
     if reader_error is not None:
         return {"error": reader_error}
     try:
-        cp = engine.sh(["exec", container, "cat", "/proc/stat", "/proc/meminfo", "/proc/interrupts"],
-                       timeout=30)
+        cp = engine.sh(["exec", container, "cat", "/proc/stat", "/proc/interrupts"], timeout=30)
         if cp.returncode != 0:
             raise ValueError(f"exit {cp.returncode}: {cp.stderr.strip()[:200]}")
         return parse_guest_kernel_counters(cp.stdout)
@@ -487,8 +482,10 @@ def guest_kernel_counter_delta(before: dict, after: dict) -> dict:
                   for label, row in before["interrupts"].items()
                   if label in after["interrupts"]}
     result["delta"] = {"cpu_ticks": ticks, **stat, "interrupts": interrupts}
-    result["guest_capacity"] = {key: after["stat"][key] for key in ("online_cpus", "mem_total_kb")}
     return result
+
+
+RESOURCE_LANES = ("matched", "installed-default")
 
 
 def fixture_sha256() -> str:
@@ -557,9 +554,13 @@ def orbstack_resources() -> tuple[int, int] | None:
 class Engine:
     """One competitor engine: socket, env, and (for ctrs) daemon lifecycle."""
 
-    def __init__(self, name: str, run_id: str, fresh_dir: Path | None = None):
+    def __init__(self, name: str, run_id: str, fresh_dir: Path | None = None,
+                 resource_lane: str = "matched"):
         if name not in ("ctrs", "orbstack"):
             raise ValueError(f"unknown engine {name!r}")
+        if resource_lane not in RESOURCE_LANES:
+            raise ValueError(f"unknown resource lane {resource_lane!r}")
+        self.resource_lane = resource_lane
         self.name = name
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
@@ -735,7 +736,11 @@ class Engine:
         # OrbStack (46,324,359,168 vs 46,278,524,928 bytes). If guest
         # assets change the reservation, pairs fail closed on the
         # reporter's 1% budget gate rather than silently mismatching.
-        res = orbstack_resources()
+        res = orbstack_resources() if self.resource_lane == "matched" else None
+        if self.resource_lane == "installed-default":
+            overrides = sorted(key for key in ("CTRS_CPUS", "CTRS_MEMORY_MIB") if key in env)
+            if overrides:
+                raise ValueError(f"installed-default lane forbids {', '.join(overrides)}")
         if res is not None:
             env.setdefault("CTRS_CPUS", str(res[0]))
             env.setdefault("CTRS_MEMORY_MIB",
@@ -3197,6 +3202,7 @@ class RunContext:
         # slot repeat used only to size measurement noise, never scored
         # as engine performance.
         self.design = "paired"
+        self.resource_lane = "matched"
 
     def trial_dir(self, engine: str, case: str, state: str) -> Path:
         self._seq += 1
@@ -3290,6 +3296,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         name: value.value if isinstance(value, Enum) else value
         for name, value in {"cold": cold, **defaults, **kw}.items()
     }
+    ctx.workload_params["resource_lane"] = ctx.resource_lane
     if case_id == "W10" and kw.get("interrupt_service") == "engine":
         if engine_name != "ctrs" or cold or keep_warm:
             raise ValueError("engine interruption requires a standalone ctrs recovery run")
@@ -3300,7 +3307,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         # dirs short and outside the deep results tree.
         short = f"{engine_name}-cold-{ctx.run_id[-6:]}-{time.time_ns() % 100000:05d}"
         engine = Engine(engine_name, ctx.run_id,
-                        fresh_dir=WORK / "engines" / short)
+                        fresh_dir=WORK / "engines" / short,
+                        resource_lane=ctx.resource_lane)
         stop = True
     else:
         # Warm trials share one daemon/VM per engine for the whole batch so
@@ -3308,7 +3316,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         # always hot; ctrs must not be restarted per trial).
         engine = ctx.engines.get(engine_name)
         if engine is None:
-            engine = Engine(engine_name, ctx.run_id)
+            engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane)
             ctx.engines[engine_name] = engine
         stop = not keep_warm
     try:
@@ -3549,6 +3557,7 @@ def cmd_baseline(args) -> int:
                      f"{random.randint(0, 0xffff):04x}")
     ctx.design = ("noise-control" if getattr(args, "noise_control", False)
                   else "paired")
+    ctx.resource_lane = getattr(args, "resource_lane", "matched")
     a, b = args.a, args.b
     rng = random.Random(args.seed)
     failed = False
@@ -3764,6 +3773,9 @@ def main() -> int:
     p.add_argument("--operations", type=int, default=None, help="W2 fixed total useful operations; omitted = saturation")
     p.add_argument("--request-rate", type=float, default=None, help="W2 fixed offered requests per second; requires --operations")
     p.add_argument("--write-ratio", type=float, default=0.3)
+    p.add_argument("--resource-lane", choices=RESOURCE_LANES, default="matched",
+                   help="matched: ctrs gets OrbStack's vCPUs/memory; installed-default: "
+                        "ctrs product defaults, no CTRS_CPUS/CTRS_MEMORY_MIB")
     p.add_argument("--under-load", action="store_true",
                    help="W8: serve W2-style load while images pull")
     p.add_argument("--driver", default="default",

@@ -298,9 +298,6 @@ ctxt 7000
 btime 1
 processes 30
 """
-PROC_MEMINFO = """MemTotal:       61181000 kB
-MemFree:        60000000 kB
-"""
 PROC_INTERRUPTS = """           CPU0       CPU1
  11:        120         80     GICv3  27 Level     arch_timer
 IPI0:        30         10       Rescheduling interrupts
@@ -311,10 +308,10 @@ IPI1:         5          7       Function call interrupts
 class GuestKernelCounterTests(unittest.TestCase):
     def test_ipi_rows_and_scheduler_totals_diff_across_the_workload(self):
         import runner
-        before = runner.parse_guest_kernel_counters(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
+        before = runner.parse_guest_kernel_counters(PROC_STAT + PROC_INTERRUPTS)
         after = runner.parse_guest_kernel_counters(
             PROC_STAT.replace("ctxt 7000", "ctxt 9500").replace("cpu  100 0 50", "cpu  160 0 90")
-            + PROC_MEMINFO + PROC_INTERRUPTS.replace("30         10", "70         15"))
+            + PROC_INTERRUPTS.replace("30         10", "70         15"))
         self.assertEqual(before["interrupts"]["IPI0"],
                          {"total": 40, "description": "Rescheduling interrupts"})
         self.assertEqual(before["interrupts"]["11"],
@@ -323,16 +320,30 @@ class GuestKernelCounterTests(unittest.TestCase):
         self.assertEqual(delta["ctxt"], 2500)
         self.assertEqual(delta["interrupts"], {"11": 0, "IPI0": 45, "IPI1": 0})
         self.assertEqual((delta["cpu_ticks"]["user"], delta["cpu_ticks"]["system"]), (60, 40))
-        self.assertEqual(runner.guest_kernel_counter_delta(before, after)["guest_capacity"],
-                         {"online_cpus": 1, "mem_total_kb": 61181000})
 
     def test_unreadable_counters_stay_missing_not_zero(self):
         import runner
         with self.assertRaises(ValueError):
             runner.parse_guest_kernel_counters("usage_usec 42\n")
-        good = runner.parse_guest_kernel_counters(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
+        good = runner.parse_guest_kernel_counters(PROC_STAT + PROC_INTERRUPTS)
         result = runner.guest_kernel_counter_delta(good, {"error": "masked"})
         self.assertIsNone(result["delta"])
+
+
+class ResourceLaneTests(unittest.TestCase):
+    def test_installed_default_lane_refuses_resource_overrides_and_skips_parity(self):
+        import runner
+        with tempfile.TemporaryDirectory() as directory:
+            engine = runner.Engine("ctrs", "lane-test", fresh_dir=Path(directory),
+                                   resource_lane="installed-default")
+            with patch.object(runner.Engine, "sh", side_effect=RuntimeError("down")), \
+                    patch.object(runner, "orbstack_resources",
+                                 side_effect=AssertionError("parity lookup")), \
+                    patch.dict(runner.os.environ, {"CTRS_CPUS": "9"}), \
+                    self.assertRaisesRegex(ValueError, "forbids CTRS_CPUS"):
+                engine.ensure_up(timeout=1)
+        with self.assertRaises(ValueError):
+            runner.Engine("ctrs", "lane-test", resource_lane="custom")
 
 
 class GuestPlacementTests(unittest.TestCase):
@@ -395,7 +406,7 @@ class GuestPlacementTests(unittest.TestCase):
                     elif args[1:2] == [runner.project_name("test-run-000001", engine.name, "W2") + "-counters"] \
                             and args[0] == "exec":
                         events.append("guest-counters")
-                        return completed(PROC_STAT + PROC_MEMINFO + PROC_INTERRUPTS)
+                        return completed(PROC_STAT + PROC_INTERRUPTS)
                     elif args[:2] == ["exec", "api-id"]:
                         events.append("api-cpu")
                         return completed("usage_usec 42\n")
