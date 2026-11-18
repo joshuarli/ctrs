@@ -95,9 +95,15 @@ The [W10 recovery proofs](../bench/native/diagnostics/recovery-client.md)
 passed API, database and queue interruption on both engines. The private
 ctrs engine diagnostic passed with pinned images, a durable startup auth
 file and exact acknowledged rows after the daemon and VM restarted.
-If the host stays shared, exercise the W6 warm and uncached producers
-and the W7 import and first-use producers as bounded native correctness
-checks. Retain each fixture's cache and artifact assertions.
+The [W6 warm and uncached producers](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
+passed native compile-cache and artifact checks on the default builders.
+The [W7 import and first-use producer](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
+now proves compile and note cache behavior. Both engines passed all three
+conditions for both apps with pair-specific note bytes.
+If the host stays shared, select the immutable PostgreSQL image from the
+common portfolio for W3, then validate all 300 commit receipts and exact
+persisted rows on both engines. Continue with W9's four fixed-work
+concurrency conditions using the common Marked image.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
@@ -105,12 +111,9 @@ The parked qualification branch has been refreshed through main
 pass on `3d3f3fb`. The asset lock remains in pilot status.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 still requires an isolated OrbStack target.
-The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
-and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
-and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
-and [W3 commit latency](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
-and [W4 queue latency](evidence/native-performance.md#w4-queue-latency)
-are ready for native validation in the next eligible window.
+The [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)
+and [W3 commit latency receipts](evidence/native-performance.md#w3-commit-latency-and-persisted-rows)
+await native correctness validation. Scored W4, W6 and W7 runs remain open.
 The [qualification coverage inventory](evidence/native-mixed-retention-2026-11-17.md#qualification-coverage)
 lists the next fixture gaps. Keep `assets.lock` in pilot status until the
 contract, fixture versions and evidence are reviewed.

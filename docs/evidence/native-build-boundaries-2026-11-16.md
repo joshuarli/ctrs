@@ -391,26 +391,52 @@ python3.14 bench/native/runner.py baseline --case W6 --a ctrs --b orbstack \
 ```
 
 The offline regression covers matching prime and replay contexts, prime work
-outside sampling, both artifact pins and a cache miss that exits zero. Native
-proof on the campaign's two builders and scored timings remain open.
+outside sampling, both artifact pins and a cache miss that exits zero.
+Native diagnostic `w6-cache-native-f14c03c1db77` passed on both default
+builders. Each of the Rust and C primes produced a started, completed
+compile-and-test vertex. Each replay produced a completed cache-hit vertex
+and the expected loaded artifact digest. Standalone uncached diagnostic
+`w6-build-native-6c95acb70c24` also passed both default builders with
+four started, completed compile-and-test vertices and the same two
+artifact pins. Both are correctness diagnostics. Scored timings remain
+open.
 
 ## W7 per-build first-use receipts
 
-`w7-v2-loaded-first-use` measures buildx with image load for both apps in
+`w7-v3-cache-first-use` measures buildx with image load for both apps in
 all three cache states. Each build uses a fresh ARM64 output tag and a
 paired workload label. The next command runs the installed app with pulls
 disabled and measures time to its version output. The runner then checks the
 exact version and note bytes before continuing to the next cache state.
 The raw probe receipt retains both outputs, their exit statuses and the tag.
 
-The uncached and warm contexts both contain `incremental-0`. The incremental
-context changes only the note to `incremental-1`. First-use time excludes
-the separate note probe. A failed build or incorrect result stops that app's
-sequence. Cleanup checks ownership before removing output tags and leaves
-builder cache intact.
+The uncached and warm contexts both contain `incremental-0` and the
+same pair-specific stamp. The incremental context changes only the note
+revision to `incremental-1` and retains the stamp. Raw BuildKit progress must
+show that both the compile and note steps execute uncached and both are
+cached on replay. In the incremental build the compile step stays cached
+while the note step executes. The
+runner retains the terminal vertices and leaves first-use time separate
+from the note probe. A failed build, cache assertion, or output check
+stops that app's sequence. Cleanup checks ownership before removing
+output tags and leaves builder cache intact.
 
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
-All 53 tests passed. The regression proves build/probe ordering, exact output
-checks, failed warm-probe handling, and cleanup ownership on the offline
-fixture. Native execution and cache-vertex confirmation for both applications
-remain open. Keep the new phases separate from the previous W7 profiles.
+All 55 tests passed. They cover build/probe ordering, exact output checks,
+a successful incremental build that unexpectedly recompiles, failed warm
+probes, and cleanup ownership. Keep the new phases separate from the
+previous W7 profiles.
+
+The first native diagnostic, `w7-build-native-81208241ba55`, rejected
+OrbStack's incremental legs for both apps. BuildKit reported completed
+cache hits for the changed-note steps because the fixed `incremental-1`
+input was reusable across runs. Pair-specific note bytes preserve warm
+replay and require fresh tail work for each pair's incremental solve.
+
+Native correctness diagnostic `w7-build-native-9d7d20e7ba8e` passed
+all twelve default-driver builds across the two engines. In both
+incremental conditions on each engine, the upstream compile or wheel
+step was cached and the note step executed. Each loaded image returned
+the exact tool version and note bytes with pulls disabled. These checks
+do not qualify timing. Reproduce one engine with
+`python3.14 bench/native/runner.py run --case W7 --engine ctrs --driver default`.

@@ -297,7 +297,7 @@ class WorkloadSafetyTests(unittest.TestCase):
         for vertices in ([], [dict(vertex, error="test failed")], [dict(vertex, completed=None)],
                          [dict(vertex, cached=True)], [vertex, dict(vertex, digest="sha256:" + "b" * 64)]):
             with self.subTest(vertices=vertices), self.assertRaises(ValueError):
-                runner._w6_compile_vertex(json.dumps({"vertexes": vertices}), instruction, cached=False)
+                runner._buildkit_vertex(json.dumps({"vertexes": vertices}), instruction, cached=False)
 
     def test_missing_w6_asset_fails_before_starting_engine(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -361,7 +361,9 @@ class WorkloadSafetyTests(unittest.TestCase):
             (fixture / "httpie-3.2.4.tar.gz").write_bytes(httpie)
             engine = fake_engine()
             loaded = {}
+            notes = []
             corrupt_warm = False
+            miscached = False
             lost_ownership = False
 
             def respond(args, **kw):
@@ -370,7 +372,20 @@ class WorkloadSafetyTests(unittest.TestCase):
                     owner = args[args.index("--label") + 1].split("=", 1)[1]
                     context = Path(args[args.index("-f") + 1]).parent
                     loaded[tag] = owner, (context / "stamp/note.txt").read_text()
-                    return completed()
+                    notes.append(loaded[tag][1])
+                    app = "hyperfine" if "hyperfine" in tag else "httpie"
+                    compile_cached = not tag.endswith("-uncached")
+                    if miscached and app == "hyperfine" and tag.endswith("-incr"):
+                        compile_cached = False
+                    progress = {"vertexes": [
+                        {"name": instruction, "digest": "sha256:" + digit * 64, "cached": cached,
+                         "started": "2026-11-17T12:00:00Z", "completed": "2026-11-17T12:00:02Z"}
+                        for instruction, digit, cached in (
+                            (apps[app]["compile_step"], "a", compile_cached),
+                            (runner.W7_NOTE_STEP, "b", tag.endswith("-warm")))]}
+                    result = completed()
+                    result.stderr = json.dumps(progress)
+                    return result
                 if args[0] == "run":
                     tag = args[3]
                     self.assertIn("--pull=never", args)
@@ -403,8 +418,16 @@ class WorkloadSafetyTests(unittest.TestCase):
                     patch.object(runner, "start_sampler",
                                  return_value=(None, None)):
                 rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                stamp = hashlib.sha256(FixtureContext(tmp).workload_id.encode()).hexdigest()
+                self.assertEqual(notes, [f"incremental-{i}:{stamp}\n" for i in (0, 0, 1)] * 2)
                 commands = [call.args[0] for call in engine.sh.call_args_list]
                 self.assertEqual(loaded, {})
+                miscached = True
+                bad_cache = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                self.assertFalse(bad_cache["correctness"]["ok"])
+                self.assertIn("did not prove cached=True", bad_cache["validation_errors"][0])
+                self.assertNotIn("hyperfine_incr_first_use_s", bad_cache["metrics"])
+                miscached = False
                 corrupt_warm = lost_ownership = True
                 bad = runner.trial_w7(FixtureContext(tmp), engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)

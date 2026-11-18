@@ -1613,12 +1613,15 @@ def build_args(engine: Engine, driver: str, extra: list[str]) -> list[str]:
 # W7 real apps: builder image, runtime base, source pin, Dockerfile,
 # version probe argv. Each gets uncached/warm/incremental builds through
 # the default or dc builder, then run probes.
+W7_FIXTURE_VERSION = "w7-v3-cache-first-use"
+W7_NOTE_STEP = "RUN mkdir -p /out && cat /stamp/note.txt > /out/note.txt"
 W7_APPS = {
     "hyperfine": {
         "builder_image": W6_RUST_IMAGE,
         "runtime_image": W7_DEBIAN_IMAGE,
         "source": W6_RUST_SOURCE,
         "dockerfile": W7_DIR / "hyperfine" / "Dockerfile",
+        "compile_step": "RUN cargo build --release --locked",
         "probe": ["hyperfine", "--version"],
         "expect": "hyperfine 2.0.0",
     },
@@ -1627,6 +1630,7 @@ W7_APPS = {
         "runtime_image": W7_PYTHON_IMAGE,
         "source": W7_HTTPIE_SOURCE,
         "dockerfile": W7_DIR / "httpie" / "Dockerfile",
+        "compile_step": "RUN pip wheel --no-cache-dir -w /wheels /tmp/httpie-3.2.4.tar.gz",
         "probe": ["http", "--version"],
         "expect": "3.2.4",
     },
@@ -1634,7 +1638,7 @@ W7_APPS = {
 
 
 def trial_w7(ctx, engine: Engine, state: str,
-             driver: str = "default") -> dict:
+             driver: str = "default", fixture_version: str = W7_FIXTURE_VERSION) -> dict:
     """W7: default buildx -> loaded runnable images for two real apps
     (hyperfine 2.0.0 Rust, httpie 3.2.4 Python). Per app: uncached (--no-cache)
     / warm (identical context) / incremental (one-file stamp bump)
@@ -1650,11 +1654,13 @@ def trial_w7(ctx, engine: Engine, state: str,
     label_value = hashlib.sha256(ctx.workload_id.encode()).hexdigest()
     tags = []
     try:
+        if fixture_version != W7_FIXTURE_VERSION:
+            raise ValueError("W7 fixture version mismatch")
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
-        rec["metrics"]["fixture_version"] = "w7-v2-loaded-first-use"
+        rec["metrics"]["fixture_version"] = fixture_version
         sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
                    for name, spec in W7_APPS.items()}
         for spec in W7_APPS.values():
@@ -1676,9 +1682,8 @@ def trial_w7(ctx, engine: Engine, state: str,
                         ctx_dir / spec["source"]["file"])
             (ctx_dir / "stamp").mkdir(exist_ok=True)
 
-            for condition, expected_note in (("uncached", "incremental-0\n"),
-                                             ("warm", "incremental-0\n"),
-                                             ("incr", "incremental-1\n")):
+            for condition, note_revision in (("uncached", 0), ("warm", 0), ("incr", 1)):
+                expected_note = f"incremental-{note_revision}:{label_value}\n"
                 cell = f"{name}_{condition}"
                 tag = f"npw7/{name}:{owner}-{condition}"
                 tags.append(tag)
@@ -1686,14 +1691,26 @@ def trial_w7(ctx, engine: Engine, state: str,
                 flags = ["--no-cache"] if condition == "uncached" else []
                 with resource_phase(engine, rec, f"{cell}_build"):
                     build = engine.sh(build_args(engine, driver, [
-                        *flags, "-q", "--platform", "linux/arm64", "--label", f"{label}={label_value}",
+                        *flags, "--progress=rawjson", "--platform", "linux/arm64", "--label", f"{label}={label_value}",
                         "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
                     ]), timeout=1800, check=False)
                 rec["metrics"][f"{cell}_s"] = rec["resources"]["phases"][f"{cell}_build"]["operation_wall_seconds"]
+                (trial_dir / f"{cell}-progress.jsonl").write_text(build.stderr)
                 checks[cell] = build.returncode == 0
                 if build.returncode:
                     rec["validation_errors"].append(f"{cell} build failed: {(build.stderr or build.stdout)[-400:]}")
                     break
+                try:
+                    cache = {
+                        "compile": _buildkit_vertex(build.stderr, spec["compile_step"], cached=condition != "uncached"),
+                        "note": _buildkit_vertex(build.stderr, W7_NOTE_STEP, cached=condition == "warm"),
+                    }
+                except ValueError as exc:
+                    checks[f"{cell}_cache"] = False
+                    rec["validation_errors"].append(f"{cell} cache evidence: {exc}")
+                    break
+                (trial_dir / f"{cell}-cache.json").write_text(json.dumps(cache, indent=2) + "\n")
+                checks[f"{cell}_cache"] = True
                 with resource_phase(engine, rec, f"{cell}_first_use"):
                     version = engine.sh(["run", "--rm", "--pull=never", tag, *spec["probe"]],
                                         timeout=60, check=False)
@@ -1739,7 +1756,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                     rec["validation_errors"].append(f"{tag} cleanup: {exc}")
 
 
-def _w6_compile_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
+def _buildkit_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
     matches = {}
     for line in progress.splitlines():
         if not line.lstrip().startswith("{"):
@@ -1749,16 +1766,16 @@ def _w6_compile_vertex(progress: str, instruction: str, *, cached: bool) -> dict
             if name != instruction and not name.endswith("] " + instruction):
                 continue
             if vertex.get("error"):
-                raise ValueError(f"compile vertex failed: {vertex['error']}")
+                raise ValueError(f"{instruction}: build vertex failed: {vertex['error']}")
             if vertex.get("completed"):
                 digest = vertex.get("digest", "")
                 if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-                    raise ValueError("completed compile vertex has no valid digest")
+                    raise ValueError(f"{instruction}: completed build vertex has no valid digest")
                 if vertex.get("cached", False) is not cached or (not cached and not vertex.get("started")):
-                    raise ValueError(f"compile and test vertex did not prove cached={cached}")
+                    raise ValueError(f"{instruction}: build vertex did not prove cached={cached}")
                 matches[digest] = vertex
     if len(matches) != 1:
-        raise ValueError("expected exactly one completed compile and test vertex")
+        raise ValueError(f"{instruction}: expected exactly one completed build vertex")
     return next(iter(matches.values()))
 
 
@@ -1828,7 +1845,7 @@ def trial_w6(ctx, engine: Engine, state: str,
                 if result.returncode:
                     raise ValueError(f"build exited {result.returncode}: {(result.stderr or result.stdout)[-400:]}")
                 _, instruction = contexts[name]
-                vertex = _w6_compile_vertex(result.stderr, instruction, cached=cached)
+                vertex = _buildkit_vertex(result.stderr, instruction, cached=cached)
                 (trial_dir / f"{name}-{phase}-compile.json").write_text(json.dumps(vertex, indent=2) + "\n")
             except ValueError as exc:
                 checks[f"{phase}_{name}"] = False
