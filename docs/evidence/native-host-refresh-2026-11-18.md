@@ -127,12 +127,18 @@ evidence:
   the batch, and OrbStack Helper (`vmgr -handoff`) has pinned 100% CPU for
   6+ hours (unverified attribution, left running). AB/BA interleaving limits
   but does not eliminate the bias.
-- Missing qualification metadata: `provenance.ctrs_binary_sha256`,
-  `provenance.guest_kernel_sha256`, `provenance.guest_initramfs_sha256`,
-  `provenance.guest_data_sha256` (the runner does not record them). Source
-  hash is recorded; signed-binary and guest-asset hashes are in this doc.
-- A quiet-window confirmation batch is required before these numbers feed the
-  promotion gates, together with the provenance fix or manual hash recording.
+- Provenance correction (2026-11-18, later): the runner *did* record
+  `ctrs_binary_sha256` (`be929fe2…`), `guest_kernel_sha256` (`ea485341…`),
+  `guest_initramfs_sha256` (`6ae4d3ab…`) and `guest_data_sha256`
+  (`9ded055a…`) under `provenance.build_outputs` in every trial; the
+  reporter looked for them at the top level of `provenance` and reported
+  false gaps. `reporting.py` now reads `provenance.build_outputs` and
+  `python3 bench/native/reporting.py --match base-20261118T040927-4162`
+  shows no metadata gaps. The records carry `worktree_dirty: true` (an
+  uncommitted docs edit at launch); disclose it, it does not change the
+  recorded source or binary hashes.
+- A quiet-window confirmation batch, launched from a clean worktree, is
+  required before these numbers feed the promotion gates.
 
 ## Open items introduced on the new host
 

@@ -37,9 +37,11 @@ all 20 trials correct, zero errors; ctrs wins every latency/footprint cell
 (rps 0.744, p99 0.611, footprint 0.359 vs OrbStack) but loses ~8.5% on
 cpu_seconds_per_success (1.085, [1.052, 1.123]) — same direction as the old
 host's system-CPU finding. Pilot quality, not qualification: disclosed
-co-resident user load and missing ctrs-binary/kernel/initramfs provenance in
-the runner; a quiet-window confirmation batch is required before promotion
-use. The installed-default ctrs lane (2 vCPUs) remains an open, separate
+co-resident user load and a dirty worktree at launch; a quiet-window
+confirmation batch from a clean tree is required before promotion use. The
+earlier "missing provenance" note was a reporter defect (it ignored
+`provenance.build_outputs`), fixed 2026-11-18; the trials carry all binary
+and guest-asset hashes. The installed-default ctrs lane (2 vCPUs) remains an open, separate
 cell. No campaign-owned measured job is active.
 
 ## Accepted and verified

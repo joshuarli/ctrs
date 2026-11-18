@@ -192,12 +192,19 @@ def _analyze_cohort(identity: dict, records: list[dict],
         if not isinstance(identity.get(key), dict) or not identity[key]:
             result["metadata_gaps"].append(key)
     provenance = identity.get("provenance")
-    for key in ("cases_sha256", "assets_sha256", "fixture_sha256",
-                "runner_sha256", "ctrs_binary_sha256", "guest_kernel_sha256",
-                "guest_initramfs_sha256", "guest_data_sha256"):
-        value = provenance.get(key) if isinstance(provenance, dict) else None
-        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
-            result["metadata_gaps"].append(f"provenance.{key}")
+    provenance = provenance if isinstance(provenance, dict) else {}
+    build_outputs = provenance.get("build_outputs")
+    build_outputs = build_outputs if isinstance(build_outputs, dict) else {}
+    for scope, source, keys in (
+            ("provenance", provenance, ("cases_sha256", "assets_sha256",
+                                        "fixture_sha256", "runner_sha256")),
+            ("provenance.build_outputs", build_outputs,
+             ("ctrs_binary_sha256", "guest_kernel_sha256",
+              "guest_initramfs_sha256", "guest_data_sha256"))):
+        for key in keys:
+            value = source.get(key)
+            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                result["metadata_gaps"].append(f"{scope}.{key}")
     paired: dict[int, list[dict]] = {}
     for record in records:
         pair_id = record.get("pair_id")

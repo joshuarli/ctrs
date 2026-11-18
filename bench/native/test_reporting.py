@@ -103,15 +103,31 @@ class ReportingTests(unittest.TestCase):
         records = pair()
         for record in records:
             record["workload_params"] = {}
-            record["provenance"] = {"ctrs_binary_sha256": None,
-                                    "runner_sha256": "a" * 64}
+            record["provenance"] = {"runner_sha256": "a" * 64,
+                                    "build_outputs": {"ctrs_binary_sha256": None,
+                                                      "guest_kernel_sha256": "b" * 64}}
         report = reporting.analyze(records)
         gaps = report["cohorts"][0]["metadata_gaps"]
         self.assertIn("workload_params", gaps)
-        self.assertIn("provenance.ctrs_binary_sha256", gaps)
+        self.assertIn("provenance.build_outputs.ctrs_binary_sha256", gaps)
+        self.assertIn("provenance.build_outputs.guest_initramfs_sha256", gaps)
         self.assertIn("provenance.assets_sha256", gaps)
         self.assertNotIn("provenance.runner_sha256", gaps)
+        self.assertNotIn("provenance.build_outputs.guest_kernel_sha256", gaps)
         self.assertFalse(report["promotion_eligible"])
+
+    def test_runner_build_outputs_close_binary_and_guest_provenance(self):
+        records = pair()
+        build = {key: c * 64 for key, c in (("ctrs_binary_sha256", "1"),
+                                            ("guest_kernel_sha256", "2"),
+                                            ("guest_initramfs_sha256", "3"),
+                                            ("guest_data_sha256", "4"))}
+        for record in records:
+            record["provenance"] = {**{key: "f" * 64 for key in (
+                "cases_sha256", "assets_sha256", "fixture_sha256", "runner_sha256")},
+                "build_outputs": dict(build)}
+        gaps = reporting.analyze(records)["cohorts"][0]["metadata_gaps"]
+        self.assertFalse([gap for gap in gaps if gap.startswith("provenance")])
 
     def test_run_ids_never_pool_or_cross_pair(self):
         records = pair(run_id="run-a", ratio=0.5) + pair(run_id="run-b", ratio=2.0)
