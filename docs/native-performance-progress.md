@@ -89,7 +89,32 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-18, owner steering):** W2 tuning is parked. Status per cell
+**Current (2026-11-18 afternoon, after `19d4eb2`):** the frozen first
+comparison matrix is running serially on the Mac. Live assets are main's
+`d9465bc2…` binary and `f3ab7344…` initramfs (half-close fix). Every cell is
+10 AB/BA pairs, warm, `--resource-lane installed-default`, run from the repo
+root with `TMPDIR=$PWD/.work/tmp`:
+
+```sh
+python3 bench/native/runner.py baseline --a ctrs --b orbstack --pairs 10 \
+  --resource-lane installed-default --case W13 \
+  --transfer-path {published-port|container-to-container|container-to-mac} \
+  --direction {upload|download} --streams {1|4}
+python3 bench/native/runner.py baseline --a ctrs --b orbstack --pairs 10 \
+  --resource-lane installed-default --case W12 \
+  --workspace-layout {full-bind|all-volume}
+```
+
+Frozen D-lane cells, in order: W13 published-port upload/1, download/1,
+container-to-container upload/1, container-to-Mac upload/1 and download/1,
+published-port upload/4; W12 full-bind and all-volume. W12 needs
+`.work/tmp/kutt.tar.gz` and `.work/tmp/w12-image.tar` from
+`bench/native/fixtures/w12/prepare.py`. Next: report each cell with
+`reporting.py`, then rerun the M lane for the losing W13 path(s) and W12
+all-volume to separate the 2-vCPU default from engine cost, then rank the
+deficits in the matrix. Expand only to answer a concrete question.
+
+**Earlier (2026-11-18, owner steering):** W2 tuning is parked. Status per cell
 lives in [native-acceptance-matrix.md](native-acceptance-matrix.md). Next
 milestone: one trustworthy W12 shared-workspace comparison and one W13
 bulk-transfer comparison on this host, then a ranked deficit list. Then W14

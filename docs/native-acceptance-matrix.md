@@ -42,9 +42,9 @@ OrbStack's). Never pool lanes.
 
 | ID | Workflow | Spec | Impl | Functional | Compared | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| W12 | Shared workspace: offline dependency materialization, build/typecheck/test discovery, warm rebuild, multi-file change/branch switch; layouts full-bind / bind-source + volume deps / all-volume | yes (this doc) | no | no | no | critical, missing |
-| W12-watch | Real watcher: save, atomic replace, create, rename, delete, bursts across files; backend recorded; missed/stale counts | yes | no | no | no | critical, missing; esbuild polling stays the W5 condition |
-| W13 | Artifact transfer up/down: published port, container↔container, container→Mac; 1 stream and modest parallel; exact hashes | yes | no | no | no | critical, missing; controlled egress unavailable unless an owned endpoint exists |
+| W12 | Shared workspace (Kutt v2.7.4, 2,830 packages, 92,306 files, 532 MB): offline `npm ci`, tsc + Next.js build, typecheck, Jest discovery, warm rebuild, ten-file change, branch restore; layouts full-bind / bind-source + volume deps / all-volume | yes | yes (`w12-v1`) | yes, all three layouts, D lane, exact receipts | running: D full-bind, D all-volume | critical. Functional D-lane single runs: ctrs full-bind install 40.8 s vs 16.9 s, build 26.7 s vs 16.8 s; all-volume build 21.4 s vs 16.0 s with less host CPU (2 vs 9 vCPUs). Pilot only |
+| W12-watch | `tsc --watch` (fs.watch backend): save, atomic replace, create+import, rename, delete, five-file bursts, 140 results per trial | yes | yes (`w12-watch-v2`) | v1 proof both mounts; v2 oracle not yet run | no | critical. **ctrs bind: 140/140 missed** (no Mac→guest notifications). Volume: 23 burst results missed on both engines (engine-independent). Latency is exec-poll limited and not scored; esbuild polling stays the W5 condition |
+| W13 | Artifact transfer up/down: published port, container↔container, container→Mac; 1 and 4 streams; byte-exact receivers | yes | yes (`w13-v2`) | yes (v1 24/24 at 256 MiB; v2 smoke pair) | running: D lane, six cells | critical. Smoke pair (D, 256 MiB): published-port upload ctrs 0.69 GB/s vs 1.70 GB/s, CPU/GiB 3.2 s vs 1.1 s. Controlled egress unsupported (no owned endpoint) |
 | W13-overlap | One transfer condition alongside W2: interactive latency | yes | no | no | no | depends on W13 |
 | W14 | Connection lifecycle: fresh, persistent/streaming, cancel, idle→resume, reconnect | yes | no | no | no | missing; preserve protective session limits |
 | W3-v4 | Persistent storage: meaningful dataset, sustained read/write/checkpoint, declared working set and durability | yes | no (W3 v3 exists) | no | no | missing; durability/allocation limits stay explicit |
@@ -74,6 +74,13 @@ Mbps only. It is not reusable as a verified-transfer metric.
   64 MiB. Host-bound relays now frame the container's bytes on vsock port
   1032. The e2e check `host-internal-upload-eof` covers it. Guest
   initramfs and host binary identities change from this commit on.
+
+- **W13 v1 capacity controls were invalid.** This host's Python is an
+  OpenSSL-free build with software SHA-256 near 320 MiB/s. Receiver-side
+  hashing capped host receivers and the host loopback control at 330 MB/s,
+  below the measured paths, so every trial was tool-limited. v2 compares
+  received bytes with the identical local artifact. Controls are now
+  3.6–3.7 GB/s on the host and 4.7–6.3 GB/s in containers.
 
 ## Ranked OrbStack deficits (this host)
 
