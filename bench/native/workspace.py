@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'w12'
@@ -91,6 +92,11 @@ walk('/app');packages('/app/node_modules');console.log(JSON.stringify({files:cou
     if counts['dependency_count'] < 400:
         raise ValueError('W12 installed fewer than 400 dependencies')
     return counts
+
+
+def discard_source(engine, container, source):
+    if source.exists() and engine.sh(['inspect', container], check=False, timeout=60).returncode != 0:
+        shutil.rmtree(source)
 
 
 def ready_image(engine, image, label, spec):
@@ -270,6 +276,7 @@ fs.writeFileSync(p,next)}'''
         if sampler is not None:
             runner.stop_sampler(sampler)
             rec['resources'].update(runner.summarize_trace(trace) if trace else {})
+        discard_source(engine, name, source)
     return rec
 
 
@@ -501,4 +508,5 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         if sampler is not None:
             runner.stop_sampler(sampler)
             rec['resources'].update(runner.summarize_trace(trace) if trace else {})
+        discard_source(engine, name, source)
     return rec
