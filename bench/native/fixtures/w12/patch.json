@@ -1,0 +1,62 @@
+[
+  {
+    "path": "server/handlers/auth.ts",
+    "base_sha256": "8834a41877938cdb5f49de1c6236a551fe8a4932f96972ee38c2637570a36c58",
+    "changed_sha256": "c83041badbc12ac96284f1313e363059536516140d6c630467a958a51ecca44a",
+    "append": "\nexport const w12FixtureValue0 = \"w12-change-0\";\n"
+  },
+  {
+    "path": "server/handlers/users.ts",
+    "base_sha256": "cd5cc0dc3c76539eb5a5f80609956e4b47783cf129b1bdd6d557ea082704c9b5",
+    "changed_sha256": "6add643ff55a4c605620eaf1f8ea1c79282f512717e77405c93b3e691b53c693",
+    "append": "\nexport const w12FixtureValue1 = \"w12-change-1\";\n"
+  },
+  {
+    "path": "server/handlers/links.ts",
+    "base_sha256": "0b41018e26a8a43287b3cd19ce13c73889b33a417d779a8bc9266531afb6be47",
+    "changed_sha256": "31f4f5d869b348a73eeef38451f3842a030bdc45470e529f2e27922311a933b9",
+    "append": "\nexport const w12FixtureValue2 = \"w12-change-2\";\n"
+  },
+  {
+    "path": "server/routes/auth.ts",
+    "base_sha256": "f9e0658d74dc1837d195a2c5c15c390fd11f68f276c95490539ecb2e92eb8429",
+    "changed_sha256": "8bddddf35333ca6d28cffbb8d40618c254bce303ee3331902741d0d79206b1a0",
+    "append": "\nexport const w12FixtureValue3 = \"w12-change-3\";\n"
+  },
+  {
+    "path": "server/routes/users.ts",
+    "base_sha256": "35e341f074adce8eae72fd0455ca7cbfc7098de7808c2e0716f59f88bf69d16c",
+    "changed_sha256": "db1209e9fd5c0a020114beb4aced0452fea014fcfa9c764fb6dc9af9a2672d96",
+    "append": "\nexport const w12FixtureValue4 = \"w12-change-4\";\n"
+  },
+  {
+    "path": "server/models/link.ts",
+    "base_sha256": "a0e6c3e0652b4fc23290a2b3c026d2471ae4f748ba68e59686454e06c96e3e43",
+    "changed_sha256": "6209c9a26b71896e0ef230588ef14dd8995a746b77ce0c743fb7bafc713b064d",
+    "append": "\nexport const w12FixtureValue5 = \"w12-change-5\";\n"
+  },
+  {
+    "path": "server/models/user.ts",
+    "base_sha256": "bd6a290a321a459e4873c082fc6d9a1eba71d9deebae7134fe63d97b7c9401d4",
+    "changed_sha256": "45b2a424bdbb8865366c205e2b358018b5068e078d0bfe990b79ce2523dbbe80",
+    "append": "\nexport const w12FixtureValue6 = \"w12-change-6\";\n"
+  },
+  {
+    "path": "server/queries/link.ts",
+    "base_sha256": "bf7fdb3da5f880868f44e983ea3004e2de095593c677d802ef9b665c3586b314",
+    "changed_sha256": "74e52646627903fbf03721245f7f08c44905b68edeebb7c80cfa150d42773ff3",
+    "append": "\nexport const w12FixtureValue7 = \"w12-change-7\";\n"
+  },
+  {
+    "path": "server/queries/user.ts",
+    "base_sha256": "f4a64d335793dc6c6b2971c7cc29f76d258c5e6a0e8c6e493b7869524930ec71",
+    "changed_sha256": "d9ce2e43ebcbb1d97072f4c3562e972254b396d9486eec6792bd0360bc46f7b0",
+    "append": "\nexport const w12FixtureValue8 = \"w12-change-8\";\n"
+  },
+  {
+    "path": "server/queues/visit.ts",
+    "base_sha256": "0b2c08f11b7bd999ae57d868d857d164205f5d703e89ffe6785753036cc2c428",
+    "changed_sha256": "c2d1511ef4289ce13f7378c3051b7c413a12d5c814e611361e43f16a85c38ff7",
+    "append": "\nexport const w12FixtureValue9 = \"w12-change-9\";\n"
+  }
+]

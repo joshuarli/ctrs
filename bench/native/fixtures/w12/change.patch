@@ -1,0 +1,50 @@
+--- a/server/handlers/auth.ts
++++ b/server/handlers/auth.ts
+@@ -296,0 +297,2 @@
++
++export const w12FixtureValue0 = "w12-change-0";
+--- a/server/handlers/users.ts
++++ b/server/handlers/users.ts
+@@ -19,0 +20,2 @@
++
++export const w12FixtureValue1 = "w12-change-1";
+--- a/server/handlers/links.ts
++++ b/server/handlers/links.ts
+@@ -420,0 +421,2 @@
++
++export const w12FixtureValue2 = "w12-change-2";
+--- a/server/routes/auth.ts
++++ b/server/routes/auth.ts
+@@ -52,0 +53,2 @@
++
++export const w12FixtureValue3 = "w12-change-3";
+--- a/server/routes/users.ts
++++ b/server/routes/users.ts
+@@ -27,0 +28,2 @@
++
++export const w12FixtureValue4 = "w12-change-4";
+--- a/server/models/link.ts
++++ b/server/models/link.ts
+@@ -51,0 +52,2 @@
++
++export const w12FixtureValue5 = "w12-change-5";
+--- a/server/models/user.ts
++++ b/server/models/user.ts
+@@ -37,0 +38,2 @@
++
++export const w12FixtureValue6 = "w12-change-6";
+--- a/server/queries/link.ts
++++ b/server/queries/link.ts
+@@ -196,0 +197,2 @@
++
++export const w12FixtureValue7 = "w12-change-7";
+--- a/server/queries/user.ts
++++ b/server/queries/user.ts
+@@ -85,0 +86,2 @@
++
++export const w12FixtureValue8 = "w12-change-8";
+--- a/server/queues/visit.ts
++++ b/server/queues/visit.ts
+@@ -40,0 +41,2 @@
++
++export const w12FixtureValue9 = "w12-change-9";

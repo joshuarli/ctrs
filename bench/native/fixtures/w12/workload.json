@@ -25,5 +25,39 @@
       "sha256:f1d056096d78822b45971c27c4f92b46dd76bf870bb2ecb640c94dbc2100349b",
       "sha256:7f5fc76f0428273b0e3c045aa693bea3a85ea2c2d4cfd8b69263f6881b5e1fd9"
     ]
+  },
+  "receipts": {
+    "base": {
+      "server": {
+        "sha256": "6bad94face77f007869dd8dba4f520ca71a426049e515f84c7881c6d8babfb57",
+        "files": 121,
+        "bytes": 425189
+      },
+      "client_manifest_sha256": "f5450ad2c4c14087abdd0bbfc116cb9f80486ff3abe6d3ff9e2ccbf078e7a9ae",
+      "runtime": {
+        "main": "56b2f01fd1baae509df10d72e70ec1ae5dd3b8cce05cfd73e278c0398e312d40",
+        "polyfills": "bbe7b6de14c3b2433f449ed428290d6f4efd58efa6602cb70e42f609a5f82300"
+      }
+    },
+    "changed": {
+      "server": {
+        "sha256": "07e9957c9014ad968dc6ec6cff578cb93a1937e3c1f9da35606c8e0489c964fc",
+        "files": 121,
+        "bytes": 426236
+      },
+      "client_manifest_sha256": "f5450ad2c4c14087abdd0bbfc116cb9f80486ff3abe6d3ff9e2ccbf078e7a9ae",
+      "runtime": {
+        "main": "56b2f01fd1baae509df10d72e70ec1ae5dd3b8cce05cfd73e278c0398e312d40",
+        "polyfills": "bbe7b6de14c3b2433f449ed428290d6f4efd58efa6602cb70e42f609a5f82300"
+      }
+    },
+    "tests": [
+      "client/components/__tests__/footer.test.tsx",
+      "client/components/__tests__/shortener.test.tsx"
+    ]
+  },
+  "patch": {
+    "change.patch": "ea1d34b616ec7266968a28ecdf3cb4bcceb07069844e729645f6395776016c47",
+    "patch.json": "d7b5713a56957160bff4678d196181176f3ba637bc323d01242d277919d81bc3"
   }
 }

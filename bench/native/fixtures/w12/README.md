@@ -1,26 +1,51 @@
-# W12 candidate: Kutt
+# W12 shared workspace
 
-Kutt v2.7.4 is an MIT-licensed URL shortener. It has a TypeScript server,
-a Next.js client, a Jest test-discovery command, and an npm lockfile. Its
-real build compiles the server and client. In the initial offline probe,
-`npm ci --offline --legacy-peer-deps` installed 2,830 packages. The lockfile
-predates current npm, so the same peer-dependency option is needed when
-filling and using the cache. Node 22 requires
-`NODE_OPTIONS=--openssl-legacy-provider` for this version of webpack.
+W12 uses Kutt v2.7.4, an MIT-licensed URL shortener with a TypeScript server,
+Next.js client and Jest tests. The locked install contains 2,830 packages.
+The source archive, lockfile, Node image, patch and expected output receipts
+are pinned in `workload.json`. The fixture adds no product dependencies.
 
-`workload.json` records the candidate source, lockfile and Node image pins.
-These are candidate inputs only: the fixture image, patch, output receipts,
-watch plan, runner integration and cross-engine proof do not yet exist. Do
-not use this directory to score a workload.
+Cache preparation and offline installation both use `--legacy-peer-deps`.
+Node 22 requires `NODE_OPTIONS=--openssl-legacy-provider` for Kutt's webpack.
+The fixture uses both settings on both engines. The fixture Dockerfile embeds
+an npm cache populated from the lockfile and checks the archive and lock hashes.
+`identity-proof.py` checks the ordered image DiffIDs and in-image hashes on
+both engines. The engines report different immutable image IDs; both are
+recorded in `workload.json` and used on their respective engine.
 
-The preliminary fixture image uses the cached lockfile dependencies in
-`/fixture/npm-cache` and the verified archive in `/fixture/source.tar.gz`.
-The Dockerfile expects `source.tar.gz` and `npm-cache/` in its build context.
-The preparation probe populated that cache with `npm ci --legacy-peer-deps`.
+W12 runs a cold offline `npm ci` with the container network disabled. It
+builds the server with `tsc` and copies the mail templates, then runs the
+Next.js client build. These are Kutt's build steps, without the initial
+`rimraf` of the server output mount. It checks typecheck output, Jest's sorted
+test list, a warm rebuild, a ten-file patch, and the restored branch.
+The server receipt hashes sorted regular-file paths, sizes and contents.
+The client receipt hashes the build manifest after replacing Next.js build
+IDs, generated 40-character chunk identifiers, and runtime filenames derived
+from numeric chunk IDs. It separately hashes the main and polyfills runtime
+contents after replacing those numeric IDs. Other content hashes remain in
+the manifest receipt. Counts cover regular files and bytes under `/app` after
+installation, and installed packages under `node_modules`.
 
-The same exported image was loaded into both engines. The ordered DiffIDs
-and in-image source and lock hashes match. OrbStack's immutable image ID is
-`sha256:caefe5a0e5837c16b4f75eeff7dd97e1d67ca18d64f3899c483be50fba27ed85`;
-ctrs reports `sha256:684ca7f8387106aa1ab667d43147ba7141fed4c8b09178b3e419eeb227de79b1`.
-The IDs and DiffIDs are recorded in `workload.json`. `identity-proof.py`
-checks them against `np-w12-kutt:proof` and a fresh owned ctrs engine.
+W12-watch uses Kutt's TypeScript compiler in watch mode with
+`TSC_WATCHFILE=UseFsEvents` and `TSC_WATCHDIRECTORY=UseFsEvents`. It records
+`fs.watch` as the configured backend. It verifies emitted JavaScript against
+TypeScript's `transpileModule` for the exact edited content and waits for a
+zero-error watch cycle. Bind edits use host filesystem operations. Volume
+edits use `docker exec`. Each burst writes five files within 50 ms. Missed and
+stale results are recorded separately. No polling fallback is enabled.
+
+Prepare the pinned image and run the functional proof from the repository root:
+
+```sh
+TMPDIR="$PWD/.work/tmp" PYTHONDONTWRITEBYTECODE=1 python3 bench/native/fixtures/w12/prepare.py
+TMPDIR="$PWD/.work/tmp" PYTHONDONTWRITEBYTECODE=1 python3 bench/native/fixtures/w12/identity-proof.py
+TMPDIR="$PWD/.work/tmp" PYTHONDONTWRITEBYTECODE=1 python3 bench/native/fixtures/w12/proof.py --all
+```
+
+Preparation saves the image at `.work/tmp/w12-image.tar` and the source archive
+at `.work/tmp/kutt.tar.gz`. If the pinned image is unavailable, preparation
+builds a candidate and fails if its identity differs from the recorded pin.
+
+The proof driver uses the pinned signed ctrs binary and a fresh private engine.
+It writes complete records under `.work/native-perf/results/` and prints one
+summary per condition. These runs are functional checks, not comparisons.

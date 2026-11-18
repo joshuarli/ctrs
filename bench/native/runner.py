@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import ownership
 import watch_loop
+import workspace
 import collect
 import resource_cells
 import resource_cycles
@@ -3280,7 +3281,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
-              "W10": trial_w10, "W11": trial_w11, "HOLDOUT": trial_holdout}
+              "W10": trial_w10, "W11": trial_w11, "W12": workspace.trial_w12,
+              "W12-watch": workspace.trial_w12_watch, "HOLDOUT": trial_holdout}
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
     trial = trials[case_id]
