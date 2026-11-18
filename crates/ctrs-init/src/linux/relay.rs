@@ -23,6 +23,9 @@ pub const FRAMED_PORT: u32 = 1030;
 /// Largest UDP payload.
 const MAX_DATAGRAM: usize = 65_507;
 const BUF: usize = 64 * 1024;
+/// Bytes one relay direction may move per wakeup before the agent loop
+/// serves its other descriptors.
+const STEP_BUDGET: usize = 16 * BUF;
 
 pub fn listen() -> io::Result<OwnedFd> {
     listen_vsock(PORT)
@@ -98,14 +101,14 @@ fn read_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
     if room == 0 {
         return Ok(1); // not EOF; just full
     }
-    buf.resize(start + room, 0);
-    // SAFETY: reading into the spare part of a buffer we own.
-    let n = unsafe { libc::read(fd, buf[start..].as_mut_ptr().cast(), room) };
+    buf.reserve(room);
+    // SAFETY: reading into reserved spare capacity; only the bytes read become part of the buffer.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().add(start).cast(), room) };
     if n < 0 {
-        buf.truncate(start);
         return Err(io::Error::last_os_error());
     }
-    buf.truncate(start + n as usize);
+    // SAFETY: `read` initialized `n` bytes after `start`.
+    unsafe { buf.set_len(start + n as usize) };
     Ok(n as usize)
 }
 
@@ -116,15 +119,15 @@ fn read_frame_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize
     if max <= start + 4 {
         return Ok(1); // not EOF; just full
     }
-    buf.resize(max, 0);
-    // SAFETY: reading into the spare part of a buffer we own, after the frame's length.
-    let n = unsafe { libc::read(fd, buf[start + 4..].as_mut_ptr().cast(), max - start - 4) };
+    buf.reserve(max - start);
+    // SAFETY: reading into reserved spare capacity after the frame's length; only the bytes read become part of the buffer.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().add(start + 4).cast(), max - start - 4) };
     if n < 0 {
-        buf.truncate(start);
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: the length is written below and `read` initialized the `n` bytes after it.
+    unsafe { buf.set_len(start + 4 + n as usize) };
     buf[start..start + 4].copy_from_slice(&(n as u32).to_be_bytes());
-    buf.truncate(start + 4 + n as usize);
     Ok(n as usize)
 }
 
@@ -276,22 +279,34 @@ impl Relay {
     }
 }
 
-/// Moves bytes from `from` to `to` through `pipe`, passing EOF on as a
+/// Moves bytes from `from` to `to` through `pipe` until neither side can
+/// make progress or `STEP_BUDGET` bytes have moved, passing EOF on as a
 /// half-close once everything read has been written.
 fn pump(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()> {
-    if !pipe.eof && pipe.buf.len() < BUF {
-        let read = if framed { read_frame_into(from, &mut pipe.buf, BUF) } else { read_into(from, &mut pipe.buf, BUF) };
-        match read {
-            Ok(0) => pipe.eof = true,
-            Ok(_) => {}
+    let mut moved = 0;
+    loop {
+        let held = pipe.buf.len();
+        let was_eof = pipe.eof;
+        if !pipe.eof && pipe.buf.len() < BUF {
+            let read = if framed { read_frame_into(from, &mut pipe.buf, BUF) } else { read_into(from, &mut pipe.buf, BUF) };
+            match read {
+                Ok(0) => pipe.eof = true,
+                Ok(_) => {}
+                Err(e) if would_block(&e) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        let read = pipe.buf.len() > held || pipe.eof != was_eof;
+        let before = pipe.buf.len();
+        match write_from(to, &mut pipe.buf) {
+            Ok(()) => {}
             Err(e) if would_block(&e) => {}
             Err(e) => return Err(e),
         }
-    }
-    match write_from(to, &mut pipe.buf) {
-        Ok(()) => {}
-        Err(e) if would_block(&e) => {}
-        Err(e) => return Err(e),
+        moved += before - pipe.buf.len();
+        if !(read || pipe.buf.len() < before) || moved >= STEP_BUDGET {
+            break;
+        }
     }
     if pipe.eof && pipe.buf.is_empty() && !pipe.shut {
         // SAFETY: half-closing a socket we own.
@@ -576,5 +591,44 @@ mod tests {
         // No room for a frame: not read, and not taken for EOF.
         let full = buf.len() + 4;
         assert_eq!(super::read_frame_into(r.as_raw_fd(), &mut buf, full).unwrap(), 1);
+    }
+
+    #[test]
+    fn one_pump_moves_more_than_a_buffer_and_ends_on_eof() {
+        let pair = || {
+            let mut fds = [0; 2];
+            // SAFETY: `fds` has room for the two descriptors socketpair writes.
+            assert_eq!(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) }, 0);
+            // SAFETY: socketpair succeeded, so both are fresh and ours.
+            unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) }
+        };
+        let (src_w, src_r) = pair();
+        let (dst_w, dst_r) = pair();
+        for fd in [&src_w, &src_r, &dst_w, &dst_r] {
+            super::sys::sock_buffers(fd.as_raw_fd(), 1 << 20);
+        }
+        let data: Vec<u8> = (0..3 * super::BUF).map(|i| i as u8).collect();
+        let mut sent = 0;
+        while sent < data.len() {
+            // SAFETY: writing a local buffer to a socket we own.
+            let n = unsafe { libc::write(src_w.as_raw_fd(), data[sent..].as_ptr().cast(), data.len() - sent) };
+            assert!(n > 0);
+            sent += n as usize;
+        }
+        drop(src_w);
+        let mut pipe = super::Pipe::new();
+        super::pump(src_r.as_raw_fd(), dst_w.as_raw_fd(), &mut pipe, false).unwrap();
+        assert!(pipe.eof && pipe.shut && pipe.buf.is_empty());
+        let mut got = vec![0u8; data.len() + 1];
+        let mut have = 0;
+        loop {
+            // SAFETY: reading into a local buffer from a socket we own.
+            let n = unsafe { libc::read(dst_r.as_raw_fd(), got[have..].as_mut_ptr().cast(), got.len() - have) };
+            if n <= 0 {
+                break;
+            }
+            have += n as usize;
+        }
+        assert_eq!(&got[..have], &data[..]);
     }
 }
