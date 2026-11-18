@@ -263,3 +263,12 @@ Run `python3.14 bench/native/runner.py check w11` from the parked checkout.
 All 47 tests passed with zero skips. The check covers qualification
 admission, mixed cycles, resource observations, and the finite
 supervisor. The pilot asset status still prevents qualification launch.
+
+Refresh `a135aa0` brings main through `a06632d` into the same parked
+branch. Admission requires fixture versions from `cases.toml` and
+rejects stale declarations even when the cells agree. W2 fixed offered
+rate and W8 cancelled delivery use explicit producer versions. W5's
+mounted-input probe is part of the required freeze inputs.
+The W11 component passed 49 tests with zero skips, and the adjacent
+runner and reporting selection passed 81 tests. The asset lock remains
+in pilot status.

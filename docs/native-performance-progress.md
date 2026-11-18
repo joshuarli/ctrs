@@ -104,14 +104,14 @@ The [W3 pinned transaction proof](evidence/native-performance.md#w3-commit-laten
 passed all 300 commit receipts and exact persisted rows on both engines.
 The [W9 fixed-work diagnostic](evidence/native-performance.md#w9-job-completion-measurement)
 passed all four concurrency conditions per engine.
-If the host stays shared, refresh the parked W11 qualification branch
-against current main and check its admission contract against these
-verified fixture revisions.
-The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
-now covers fixed-work, saturation, and fixed offered rate offline.
-The parked qualification branch has been refreshed through main
-`90491bf`. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
-pass on `3d3f3fb`. The asset lock remains in pilot status.
+The parked W11 qualification branch `a135aa0` includes main through
+`a06632d` and verifies the declared fixture revisions against the case
+manifest. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
+passed 49 tests. The asset lock remains in pilot status.
+If the host stays shared, run [W2 placement and offered-rate correctness](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
+against the common pinned stack on both engines. Use 10,000 operations,
+concurrency 4 and 500 requests per second for the offered-rate condition.
+Verify the exact persisted work on the published-port and guest paths.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 still requires an isolated OrbStack target.
 Scored W3, W4, W6, W7 and W9 runs remain open.
