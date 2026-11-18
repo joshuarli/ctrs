@@ -398,8 +398,11 @@ pub fn listen_host_bound(port: u16) -> io::Result<OwnedFd> {
     }
 }
 
-/// The host side listens on this vsock port for host-bound connections.
-pub const HOST_VSOCK_PORT: u32 = 1026;
+/// The host side listens on this vsock port for host-bound connections
+/// whose container bytes arrive framed, as on `FRAMED_PORT`: after bulk
+/// data Virtualization.framework drops the guest's vsock half-close, and
+/// the Mac service would wait for an end that never comes.
+pub const HOST_FRAMED_VSOCK_PORT: u32 = 1032;
 
 /// Accepts one redirected connection, finds the port the container meant,
 /// dials the Mac and returns a relay between the two. Only connections that
@@ -426,7 +429,7 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4]) -> Option<Relay
         }
         u16::from_be(dst.sin_port)
     };
-    let Ok(host) = dial_host(HOST_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
+    let Ok(host) = dial_host(HOST_FRAMED_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
     // The Mac connects to its own loopback: services bound to 127.0.0.1 work.
     let mut header = [127, 0, 0, 1, 0, 0];
     header[4..].copy_from_slice(&port.to_be_bytes());
@@ -446,7 +449,7 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4]) -> Option<Relay
         down: Pipe::new(),
         dead: false,
         udp: false,
-        framed: false,
+        framed: true,
         refusing: false,
     })
 }

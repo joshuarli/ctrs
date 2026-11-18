@@ -406,6 +406,17 @@ t host-internal "Directory listing" $D run --rm alpine wget -qO- http://host.doc
 t host-gateway "Directory listing" $D run --rm --add-host mac:host-gateway alpine wget -qO- http://mac:18999/
 t host-internal-hostnet "Directory listing" $D run --rm --network host alpine wget -qO- http://host.docker.internal:18999/
 kill $HTTP_PID
+python3 -c '
+import socket
+l = socket.socket(); l.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); l.bind(("127.0.0.1", 18998)); l.listen(1)
+c, _ = l.accept(); n = 0
+while (b := c.recv(1 << 20)): n += len(b)
+c.sendall(f"received {n}\n".encode()); c.close()
+' >/dev/null 2>&1 &
+EOF_PID=$!
+sleep 0.5
+t host-internal-upload-eof "received 67108864" $D run --rm alpine sh -c 'head -c 67108864 /dev/zero | nc host.docker.internal 18998'
+kill $EOF_PID 2>/dev/null
 
 section "volumes and bind mounts"
 BIND=$(mktemp -d); echo "from the mac" > "$BIND/hello.txt"

@@ -1063,18 +1063,29 @@ fn socket_timeouts(fd: std::os::fd::RawFd) -> io::Result<()> {
 
 /// What containers reach as `host.docker.internal`.
 pub const HOST_ADDR: &str = "198.19.248.254";
-/// vsock port the guest dials for host-bound connections.
+/// vsock port a guest dials for host-bound connections whose container
+/// bytes arrive unframed (guests before `HOST_BOUND_FRAMED_PORT`).
 pub const HOST_BOUND_PORT: u32 = 1026;
+/// vsock port the guest dials for host-bound connections: the container's
+/// bytes arrive as `RELAY_FRAMED_PORT` frames, because Virtualization.framework
+/// drops the guest's vsock half-close after bulk data.
+pub const HOST_BOUND_FRAMED_PORT: u32 = 1032;
 
 /// One host-bound connection from a container: the guest sends
 /// `ip[4] port[2]` (always 127.0.0.1 today), and we connect there on the Mac.
 pub fn serve_host_bound(stream: ctrs_vmm::VsockStream) {
     let _ = std::thread::Builder::new().name("ctrs-host-bound".into()).spawn(move || {
-        let _ = host_bound(stream);
+        let _ = host_bound(stream, false);
     });
 }
 
-fn host_bound(stream: ctrs_vmm::VsockStream) -> io::Result<()> {
+pub fn serve_host_bound_framed(stream: ctrs_vmm::VsockStream) {
+    let _ = std::thread::Builder::new().name("ctrs-host-bound".into()).spawn(move || {
+        let _ = host_bound(stream, true);
+    });
+}
+
+fn host_bound(stream: ctrs_vmm::VsockStream, framed: bool) -> io::Result<()> {
     let mut from_guest = std::fs::File::from(stream.fd.try_clone()?);
     let mut header = [0u8; 6];
     from_guest.read_exact(&mut header)?;
@@ -1098,7 +1109,7 @@ fn host_bound(stream: ctrs_vmm::VsockStream) -> io::Result<()> {
         // SAFETY: half-closing a socket we own.
         unsafe { libc::shutdown(to_guest.as_raw_fd(), libc::SHUT_WR) };
     })?;
-    let _ = copy(&mut from_guest, &mut target_write);
+    let _ = if framed { copy_frames(&mut from_guest, &mut target_write).map(|_| ()) } else { copy(&mut from_guest, &mut target_write) };
     let _ = target_write.shutdown(Shutdown::Write);
     let _ = down.join();
     drop(stream);

@@ -655,6 +655,7 @@ impl Engine {
         })?);
         // host.docker.internal: the guest dials back for each connection.
         vm.listen(super::ports::HOST_BOUND_PORT, Box::new(super::ports::serve_host_bound))?;
+        vm.listen(super::ports::HOST_BOUND_FRAMED_PORT, Box::new(super::ports::serve_host_bound_framed))?;
         // SSH agent forwarding, for containers that mount /run/host-services/ssh-auth.sock.
         vm.listen(super::ports::SSH_AGENT_PORT, Box::new(super::ports::serve_ssh_agent))?;
         // The engine's API, for containers that mount /var/run/docker.sock
