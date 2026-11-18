@@ -52,3 +52,30 @@ from the two native pairs validate on the new code. Negative cases
 cover missing images, wrong order and unchanged IDs with wrong layers
 or architecture. The W8 component suite passed 68 tests, zero skips.
 The native results retain the original measurements and cache scope.
+
+## Interrupted delivery and retry
+
+The W8 cancellation diagnostic runs one of two content conditions. Both
+start with the complete pinned W8 v2 portfolio installed. The retained
+condition derives the largest Marked layer and keeps the other layers
+byte-identical to the source. The derived condition changes every layer.
+
+```sh
+python3.14 bench/native/runner.py w8-cancel \
+  --layout "$W8_COMMON_LAYOUT" --ctrs-binary "$CTRS_BINARY" \
+  --engine ctrs --content retained
+```
+
+Run each content condition separately on each engine. The registry sends a
+partial blob and holds the rest while the harness interrupts the owned pull
+client. Success requires a failed client exit, a registry-observed disconnect
+after interruption, the candidate image still absent, and unchanged retained
+pins. A separate registry endpoint must fully deliver the held layer on retry.
+The harness checks the resulting image identity, ordered DiffIDs, architecture
+and marker contents, then removes the generated reference without pruning.
+Its `result.json` tracks cancellation and retry transfers and marks all
+measurements invalid for scoring.
+
+The W8 component suite passed 74 tests with zero skips. It includes a real
+loopback transfer interrupted through an owned process and a completed retry.
+Native engine validation and attributable allocation evidence remain open.

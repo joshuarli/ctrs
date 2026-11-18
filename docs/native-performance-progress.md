@@ -78,11 +78,12 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, prepare the W8 cancelled-delivery condition.
-Use an owned pull against the pinned registry and interrupt it during
-a verified blob transfer. Check the staged image, owned cleanup, and
-retained portfolio before attempting a fresh exact pull. Keep retained
-and derived inputs in separate cells.
+If the Mac stays shared, prepare W8 allocation evidence around deployment
+and cleanup. Reuse the backing-file identity and allocation checks from
+the resource-cycle diagnostic. Keep exclusive extents and isolated cache
+bytes unknown. The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
+passes offline component checks and is ready for native validation in
+separate retained and derived cells on each engine.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main

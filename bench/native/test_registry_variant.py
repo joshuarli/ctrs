@@ -68,6 +68,23 @@ class VariantTests(unittest.TestCase):
     def snapshot(self, root):
         return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
 
+    def test_cancel_retained_variant_changes_only_the_largest_layer(self):
+        contract = copy.deepcopy(self.contract)
+        contract['images'].pop('tool')
+        largest = max(range(2), key=lambda index: self.layers[index]['size'])
+        retained = 1 - largest
+        receipt = variant.prepare_variant(self.source, contract, self.root / 'partial', b'cancel',
+                                          retain_other_layers=True)
+        image = receipt['images']['app']
+        self.assertEqual(receipt['fixture_version'], 'w8-v3-retained-cancel')
+        self.assertEqual(len(receipt['layers']), 1)
+        self.assertEqual(image['layers'][retained], self.layers[retained])
+        self.assertEqual(image['diff_ids'][retained], digest(self.raw[retained]))
+        self.assertNotEqual(image['layers'][largest]['digest'], self.layers[largest]['digest'])
+        self.assertNotEqual(image['diff_ids'][largest], digest(self.raw[largest]))
+        portfolio = registry.prepare_layout(self.root / 'partial', {'app': 'app'})
+        self.assertEqual(portfolio.manifests['app'], image['manifest'])
+
     def test_deterministic_unique_shared_and_preserved(self):
         before = self.snapshot(self.source)
         for path in self.source.rglob('*'):

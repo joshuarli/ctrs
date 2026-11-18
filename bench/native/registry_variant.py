@@ -153,7 +153,7 @@ def _layer(blob, media, diff_id, seed_hash, root):
             'diff_id': 'sha256:' + output_hash.hexdigest(), 'marker': marker}
 
 
-def prepare_variant(layout, contract, destination, seed):
+def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=False):
     """Create a new w8-v3 layout and receipt; seed is 1..1024 explicit bytes."""
     if not isinstance(seed, bytes) or not 1 <= len(seed) <= 1024:
         raise ValueError('seed must contain 1..1024 bytes')
@@ -165,6 +165,7 @@ def prepare_variant(layout, contract, destination, seed):
         if parent.is_symlink():
             raise ValueError('symlink in destination path')
     portfolio = registry.prepare_pinned_portfolio(source, contract)
+    version = 'w8-v3-retained-cancel' if retain_other_layers else 'w8-v3'
     dest.mkdir()
     try:
         (dest / 'blobs' / 'sha256').mkdir(parents=True)
@@ -180,10 +181,20 @@ def prepare_variant(layout, contract, destination, seed):
             config = registry._json(portfolio.routes[(name, 'blobs', image['config'])][2].metadata())
             layers = []
             diff_ids = []
+            changed_digest = max(manifest['layers'], key=lambda layer: layer['size'])['digest'] if retain_other_layers else None
             for descriptor, diff_id in zip(manifest['layers'], image['diff_ids'], strict=True):
+                blob = portfolio.routes[(name, 'blobs', descriptor['digest'])][2]
+                if retain_other_layers and descriptor['digest'] != changed_digest:
+                    target = dest / 'blobs' / 'sha256' / descriptor['digest'].removeprefix('sha256:')
+                    if not target.exists():
+                        with blob.open() as original, target.open('xb') as retained:
+                            shutil.copyfileobj(original, retained)
+                    layers.append(copy.deepcopy(descriptor))
+                    diff_ids.append(diff_id)
+                    continue
                 key = (descriptor['digest'], diff_id, descriptor.get('mediaType'))
                 if key not in derived:
-                    derived[key] = _layer(portfolio.routes[(name, 'blobs', descriptor['digest'])][2], key[2], diff_id, seed_hash, dest)
+                    derived[key] = _layer(blob, key[2], diff_id, seed_hash, dest)
                 item = derived[key]
                 layer = copy.deepcopy(descriptor)
                 layer.update(mediaType='application/vnd.oci.image.layer.v1.tar+gzip', digest=item['digest'], size=item['size'])
@@ -198,7 +209,7 @@ def prepare_variant(layout, contract, destination, seed):
                 labels = config['config']['Labels'] = {}
             if LABEL in labels:
                 raise ValueError('fixture label already exists')
-            labels[LABEL] = 'w8-v3'
+            labels[LABEL] = version
             manifest['config'] = _put(dest, _encoded(config), manifest['config'])
             manifest['layers'] = layers
             source_descriptor = next(d for d in source_index['manifests'] if d.get('annotations', {}).get('org.opencontainers.image.ref.name') == image['layout_reference'])
@@ -206,7 +217,7 @@ def prepare_variant(layout, contract, destination, seed):
             index['manifests'].append(descriptor)
             images[name] = {'reference': image['layout_reference'], 'source_manifest': image['manifest'], 'manifest': descriptor['digest'], 'config': manifest['config']['digest'], 'layers': layers, 'diff_ids': diff_ids}
         (dest / 'index.json').write_bytes(_encoded(index))
-        receipt = {'schema_version': 1, 'fixture_version': 'w8-v3', 'source_fixture_version': contract['fixture_version'], 'source_contract_sha256': hashlib.sha256(_encoded(contract)).hexdigest(), 'method': 'append owned marker to each source tar before terminal records; gzip level 9 mtime 0', 'seed_sha256': seed_hash, 'python': sys.version, 'zlib_version': zlib.ZLIB_VERSION, 'zlib_runtime_version': zlib.ZLIB_RUNTIME_VERSION, 'images': images, 'layers': [{'source_digest': key[0], 'source_diff_id': key[1], **value} for key, value in sorted(derived.items())]}
+        receipt = {'schema_version': 1, 'fixture_version': version, 'source_fixture_version': contract['fixture_version'], 'source_contract_sha256': hashlib.sha256(_encoded(contract)).hexdigest(), 'method': 'append owned marker to each selected source tar before terminal records; gzip level 9 mtime 0' if retain_other_layers else 'append owned marker to each source tar before terminal records; gzip level 9 mtime 0', 'seed_sha256': seed_hash, 'python': sys.version, 'zlib_version': zlib.ZLIB_VERSION, 'zlib_runtime_version': zlib.ZLIB_RUNTIME_VERSION, 'images': images, 'layers': [{'source_digest': key[0], 'source_diff_id': key[1], **value} for key, value in sorted(derived.items())]}
         registry.prepare_layout(dest, {name: image['layout_reference'] for name, image in contract['images'].items()})
         (dest / 'receipt.json').write_bytes(_encoded(receipt) + b'\n')
         return receipt

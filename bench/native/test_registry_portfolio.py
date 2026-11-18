@@ -2,11 +2,16 @@ import hashlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 import urllib.request
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import registry_portfolio as registry
 
@@ -128,6 +133,50 @@ class RegistryTests(unittest.TestCase):
             self.request(portfolio, 'GET', f'/v2/app/blobs/{self.layers[0]["digest"]}')
         self.assertFalse(portfolio.transfers[-1]['complete'])
         self.assertEqual(portfolio.transfers[-1]['bytes'], 0)
+
+    def test_owned_pull_cancels_after_partial_blob_and_fresh_endpoint_delivers_full_blob(self):
+        import w8_cancel
+
+        portfolio = registry.prepare_layout(self.root, {'app': 'app'})
+        retry = registry.prepare_layout(self.root, {'app': 'app'})
+        layer = self.layers[0]
+        pause = registry.TransferPause('app', layer['digest'], timeout=3)
+        path = f'/v2/app/blobs/{layer["digest"]}'
+        popen = subprocess.Popen
+
+        def launch(args, **kwargs):
+            script = 'import sys,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=5).read()'
+            return popen([sys.executable, '-c', script, args[-1]], **kwargs)
+
+        with w8_cancel.registry(portfolio, pause=pause) as server, \
+                patch.object(w8_cancel.subprocess, 'Popen', side_effect=launch):
+            url = f'http://127.0.0.1:{server.server_port}{path}'
+            result = w8_cancel.cancel_pull(SimpleNamespace(env=os.environ.copy), url, portfolio, pause, layer, self.root)
+        self.assertEqual(len(result['transfers']), 1)
+        transfer = result['transfers'][0]
+        self.assertEqual(transfer['bytes'], layer['size'] - 1)
+        self.assertFalse(transfer['complete'])
+        self.assertGreaterEqual(result['peer_disconnected_monotonic'], result['signal_sent_monotonic'])
+        with w8_cancel.registry(retry) as server:
+            with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}{path}', timeout=2) as response:
+                self.assertEqual(response.read(), b'first layer')
+        self.assertTrue(retry.transfers[-1]['complete'])
+
+    def test_partial_delivery_ended_before_interruption_is_rejected(self):
+        import w8_cancel
+
+        portfolio = registry.prepare_layout(self.root, {'app': 'app'})
+        layer = self.layers[0]
+        pause = registry.TransferPause('app', layer['digest'])
+        pause.started.set()
+        pause.finished.set()
+        child = Mock()
+        child.poll.return_value = None
+        with patch.object(w8_cancel.subprocess, 'Popen', return_value=child):
+            with self.assertRaisesRegex(ValueError, 'ended before the planned interruption'):
+                w8_cancel.cancel_pull(SimpleNamespace(env=os.environ.copy), 'unused', portfolio, pause, layer, self.root)
+        child.send_signal.assert_not_called()
+        child.kill.assert_called_once()
 
     def test_pin_mismatch_cannot_silently_select_another_portfolio(self):
         image = {'layout_reference': 'app', 'manifest': self.manifest['digest'],

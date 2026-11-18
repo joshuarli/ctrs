@@ -3475,6 +3475,13 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=1, help="integer incorporated into unique per-pair seeds")
     p.add_argument("--diagnostic", action="store_true", help="functional checks only; timings are invalid")
 
+    p = sub.add_parser("w8-cancel", help="verify interrupted W8 delivery and retry on one engine")
+    p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
+    p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
+    p.add_argument("--engine", choices=("ctrs", "orbstack"), required=True, help="engine for this functional check")
+    p.add_argument("--content", choices=("retained", "derived"), required=True,
+                   help="reuse original layers except the interrupted layer, or derive every layer")
+
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
@@ -3544,21 +3551,24 @@ def main() -> int:
         return cmd_report(args)
     if getattr(args, "case", None) == "W8" and args.cmd in ("run", "baseline", "noop"):
         ap.error("legacy W8 proxy is not scoreable; use w8-baseline --layout PATH --ctrs-binary PATH")
-    if args.cmd == "w8-baseline":
-        if not 1 <= args.pairs <= 100:
+    if args.cmd in ("w8-baseline", "w8-cancel"):
+        if args.cmd == "w8-baseline" and not 1 <= args.pairs <= 100:
             ap.error("--pairs must be between 1 and 100")
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
-            ap.error("w8-baseline requires native ARM64 macOS")
+            ap.error(f"{args.cmd} requires native ARM64 macOS")
         global CTRS_BIN
         CTRS_BIN = args.ctrs_binary.resolve()
         if not CTRS_BIN.is_file():
             ap.error("--ctrs-binary must name an existing signed binary")
         sys.modules["runner"] = sys.modules[__name__]
-        import w8_benchmark
         import diagnostic_signals
         DOCKER = find_docker()
         RESULTS.mkdir(parents=True, exist_ok=True)
         diagnostic_signals.install_cleanup_signals()
+        if args.cmd == "w8-cancel":
+            import w8_cancel
+            return w8_cancel.run_cancel(args)
+        import w8_benchmark
         return w8_benchmark.run_batch(args)
     if getattr(args, 'case', None) == 'W9':
         try:
