@@ -1,0 +1,15 @@
+{
+  "fixture_version": "w12-v1",
+  "source": {
+    "name": "kutt",
+    "version": "2.7.4",
+    "url": "https://codeload.github.com/thedevs-network/kutt/tar.gz/refs/tags/v2.7.4",
+    "sha256": "862d34f41327889f09a81860aa00b81ebe583a5fc7158212925d22a0209cb966",
+    "lock_sha256": "c69b3bf74df203f046f6db3f143f17f9ec0f019bf40273c2054e6340420d4876"
+  },
+  "tools": {
+    "node": "v22.15.0",
+    "npm": "10.9.2",
+    "image": "node:22.15.0-bookworm-slim@sha256:557e52a0fcb928ee113df7e1fb5d4f60c1341dbda53f55e3d815ca10807efdce"
+  }
+}
