@@ -19,7 +19,7 @@ engine_root = runner.WORK / 'engines' / run_id
 archive = root / '.work/tmp' / (run_id + '.tar')
 if engine_root.exists() or archive.exists():
     raise RuntimeError('proof paths already exist')
-subprocess.run(['pgrep', '-fl', '^/.*ctrs daemon$'], check=False)
+subprocess.run(['pgrep', '-fl', 'ctrs daemon'], check=False)
 orb = runner.Engine('orbstack', run_id)
 ctrs = runner.Engine('ctrs', run_id, fresh_dir=engine_root, resource_lane='installed-default')
 try:
