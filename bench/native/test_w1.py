@@ -53,6 +53,8 @@ class W1Tests(unittest.TestCase):
 
         def write(url, obj):
             persisted[obj["key"]] = obj["value"]
+            if fault == "HTTP rejection":
+                return 503, b"database \xff unavailable"
             return (200, {"stored": "wrong"}) if fault == "wrong acknowledgment" else (200, {"stored": obj["key"]})
 
         def read(url, timeout):
@@ -88,6 +90,7 @@ class W1Tests(unittest.TestCase):
             ("wrong seed", "initial DB/cache roundtrip differs", []),
             ("wrong owner", "wrong identity for W1 db", []),
             ("wrong acknowledgment", "did not acknowledge the exact key", []),
+            ("HTTP rejection", "did not acknowledge the exact key", []),
             ("no restart", "did not observe the owned database restart", ["db-id"]),
             ("wrong read key", "did not return the exact database and cache record", ["db-id"]),
             ("cleanup failed", "W1 cleanup", ["db-id"]),
@@ -98,6 +101,7 @@ class W1Tests(unittest.TestCase):
                 self.assertIn(reason, record["validation_errors"][0])
                 self.assertEqual(restarted, expected_restarts)
                 self.assertEqual(any("down" in command for command in commands), fault != "wrong image")
+                json.dumps(record)
 
 
 if __name__ == "__main__":

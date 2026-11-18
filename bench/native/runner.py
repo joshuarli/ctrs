@@ -984,7 +984,8 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
 
     def write_record(stage, key, value):
         status, body = http_json_write(f"{base}/records", {"key": key, "value": value})
-        recovery[stage] = {"status": status, "body": body}
+        recovery[stage] = {"status": status, "body": body.decode(errors="replace")
+                           if isinstance(body, bytes) else body}
         if status != 200 or body != {"stored": key}:
             raise ValueError(f"W1 {stage} did not acknowledge the exact key")
         checks[stage] = True
