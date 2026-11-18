@@ -177,6 +177,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
                  and params.get('fixture_version') == W8_PAIRED_FIXTURE)
     paired_w5 = (identity['case'] == 'W5' and isinstance(params, dict)
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
+    paired_w2 = (identity['case'] == 'W2' and isinstance(params, dict)
+                 and params.get('pinned_stack') is True)
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
               "metrics": [], "metadata_gaps": []}
@@ -226,7 +228,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "missing or duplicated trial order"
         elif workload_params(a[0]) != workload_params(b[0]):
             reason = "executed parameters or seeds differ"
-        elif (paired_w5 or paired_w8) and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
+        elif (paired_w2 or paired_w5 or paired_w8) and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"

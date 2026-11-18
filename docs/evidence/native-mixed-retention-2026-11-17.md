@@ -234,9 +234,9 @@ to `unmeasured` and retain any evidence about why they remain open.
 | Workload | Evidence still needed before the review can freeze the contract |
 | --- | --- |
 | W1 | Equivalent engine-cold setup on both engines and verified read/write after restart. |
-| W2 | Pinned offered rates and full published-port and container-to-container coverage. Admit the observer and resource-cycle policy on the same workloads. |
+| W2 | Admit the pinned offered rate on both paths and engines. All twelve [placement diagnostics](../../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof) verified exact data, with two OrbStack pacing failures. Admit the observer and resource-cycle policy on the same workloads. |
 | W3 | Per-transaction p95, exact persisted rows and a comparable durability contract. |
-| W4 | Queue latency tails for 1, 4 and 16 workers with exact job and artifact verification. |
+| W4 | Score queue latency tails for 1, 4 and 16 workers. The [v4 native diagnostic](native-performance.md#w4-queue-latency) has exact job, artifact and timing receipts on both engines. |
 | W5 | Paired bind and named-volume conditions with pinned inputs and phase resource receipts. |
 | W6 | Warm build-cache runs and proof of compilation in uncached runs. Both artifact hashes are pinned. |
 | W7 | Buildx import and first-use evidence for both apps and all three cache states. |
@@ -264,14 +264,11 @@ All 47 tests passed with zero skips. The check covers qualification
 admission, mixed cycles, resource observations, and the finite
 supervisor. The pilot asset status still prevents qualification launch.
 
-The next refresh brings main through `a06632d` into the parked branch.
-Admission now requires the workload fixture versions declared in
-`cases.toml`. W2 offered-rate and W8 cancelled-delivery cells require
-their own producer versions. A stale version fails even when every
-cell for that workload repeats it. The required input list also includes
-the W5 mounted-input probe.
-
-The refreshed W11 component check passed 49 tests with zero skips.
-The adjacent runner, reporting, W1, W5, W9 and registry checks passed
-81 tests. The 349-cell contract still requires a reviewed asset lock
-and comparison evidence before either long leg can launch.
+Refresh `a135aa0` brings main through `a06632d` into the same parked
+branch. Admission requires fixture versions from `cases.toml` and
+rejects stale declarations even when the cells agree. W2 fixed offered
+rate and W8 cancelled delivery use explicit producer versions. W5's
+mounted-input probe is part of the required freeze inputs.
+The W11 component passed 49 tests with zero skips, and the adjacent
+runner and reporting selection passed 81 tests. The asset lock remains
+in pilot status.

@@ -49,11 +49,12 @@ TMPDIR=$PWD/.work/tmp PYTHONDONTWRITEBYTECODE=1 python3.14 \
   --operations 10000 --concurrency 4 --request-rate 500
 ```
 
-That command alone does not freeze images, binary, residency or host ownership.
-Campaign native diagnostics must additionally enforce digest-pinned Compose
-inputs, checked API sources, actual signed binary/boot hashes and explicit
-resource settings, as the resource-cycle pilot does. Host timing qualification
-also requires pre/post readiness and genuine exclusivity.
+Standalone `run` uses the exploratory Compose inputs. W2 `baseline` requires
+the common W8 v2 images preinstalled. It checks image IDs, ordered DiffIDs,
+the seed and the running API image's source files. Priming the API image
+starts the VM before sampling. The paired report requires matching input
+receipts. Timing qualification also requires signed binary and boot
+identities, explicit resource settings, pre/post readiness and exclusivity.
 
 `runner.py check w2` covers actual local HTTP counts and exact writes, a
 deliberately delayed server's visible backlog, and controlled-clock pacing that
@@ -86,5 +87,55 @@ write against PostgreSQL.
 
 `runner.py check w2` passed 113 tests with zero skips. The offline placement
 test covers all three modes, rejects a wrong client hash and a corrupt
-persisted payload, and verifies owned peer cleanup. Native validation and
-comparative measurements remain open.
+persisted payload, and verifies owned peer cleanup.
+
+### Native placement proof
+
+Source `98b9445` ran all three modes on both engines and both client paths
+with the common W8 v2 stack. The controller validated the preinstalled
+image IDs, architecture, ordered DiffIDs and seed with
+`runner.prepare_pinned_stack`. It supplied the resulting override to
+`Engine.compose` and started each stack with `up -d --no-build --pull never`.
+Reinstall the pinned inputs with the [portfolio instructions](../fixtures/w8-v2/README.md).
+
+Use a distinct owned run ID and call `runner.trial_w2` with concurrency 4,
+write ratio 0.3 and seed 7 for each engine and location. Use
+`operations=10000, request_rate=500, duration=20` for offered rate,
+`operations=10000, duration=5` for fixed work, and `duration=5` for
+saturation. Save the trial record and the client and PostgreSQL receipts
+for every outcome. These diagnostics used the signed host and guest
+artifacts from the [W8 cancellation proof](../../../docs/evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry).
+
+In `w2-placement-2026-11-18T013135640+0000`, each leg delivered all
+10,000 requests with zero request errors. All four verified 6,987 reads,
+3,013 writes and the exact 3,513 persisted rows. The PostgreSQL receipt
+SHA-256 was identical across all legs,
+`c748066181e937e6896f8eb4d59964ea9ea2b34b249cb0bfc4306de23b2b9f15`.
+Both ctrs paths stayed within the 10 ms scheduling-lag budget.
+OrbStack exceeded that budget for 367 slots on the published port and
+3,447 slots on the guest path. Both OrbStack schedules failed rate
+validation. The first ctrs trial began before the owned VM helper appeared
+in process discovery, leaving its host resource receipt incomplete.
+
+In `w2-closed-loop-placement-2026-11-18T013442483+0000`, both engines
+passed exact-data verification on both paths in fixed-work and saturation
+modes. All four fixed-work legs again delivered 10,000 requests and
+verified 3,513 persisted rows. Each saturation leg verified its own
+acknowledged writes and seed rows with zero request errors. The shared host
+leaves the entire placement batch ineligible for scoring.
+
+The paired runner now prepares the same pinned stack and verifies the API
+files before starting resource sampling. Its receipts identify the shared
+portfolio, seed, API files and load client. The native CLI path also exposed
+a JSON serialization failure for the sampling mode. Trial records now write
+the mode's string value. Run `python3.14 bench/native/runner.py check w2` to
+verify missing or mismatched pins are rejected and the workload parameters
+serialize. All 117 tests passed.
+
+Native `w2-pair-2026-11-18T014125275+0000` used the ordinary paired W2
+runner dispatch. Both placements on both engines passed the 10,000-operation
+fixed-work check with the same PostgreSQL digest as above. Each pair's
+portfolio, seed, API and client receipts matched. All four trials had
+verified process ownership and complete resource-phase receipts, including
+the first ctrs trial after VM startup. Each record was marked ineligible
+for scoring before it was written.

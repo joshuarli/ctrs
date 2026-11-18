@@ -92,6 +92,11 @@ pairs are a pilot. The current harness uses resource-matched ctrs VM
 settings; a separately implemented default-settings lane remains required
 by the campaign. Preflight is an initial check, not full G0 qualification.
 
+W2 baselines require the [common pinned ARM64 stack](fixtures/w8-v2/README.md)
+preinstalled on both endpoints. Before each trial the runner verifies the
+image IDs, layer identities, seed and API files and primes the VM. The
+paired report requires matching input receipts from both endpoints.
+
 `run --case W1 --engine orbstack --state warm` executes a single trial.
 Baseline order alternates AB/BA per pair (`--randomize` for seeded
 shuffle); `pair_id`/`order_index` are recorded per trial. A/B uses the

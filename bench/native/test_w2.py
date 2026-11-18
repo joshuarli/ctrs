@@ -292,6 +292,22 @@ class PersistedStateTests(unittest.TestCase):
 
 
 class GuestPlacementTests(unittest.TestCase):
+    def test_pinned_trial_rejects_image_drift_before_compose_or_sampling(self):
+        import runner
+        from test_safety import FixtureContext, fake_engine
+
+        with tempfile.TemporaryDirectory() as directory:
+            engine = fake_engine()
+            with patch.object(runner, "prepare_pinned_stack", side_effect=ValueError("image differs from pin")), \
+                    patch.object(runner, "start_sampler") as sampler, patch.object(runner, "compose_down") as down:
+                rec = runner.trial_w2(FixtureContext(directory), engine, "warm", 2, 20, .5, 7,
+                                      2, pinned_stack=True)
+        self.assertFalse(rec["correctness"]["ok"])
+        self.assertEqual(rec["validation_errors"], ["ValueError: image differs from pin"])
+        engine.compose.assert_not_called()
+        sampler.assert_not_called()
+        down.assert_not_called()
+
     def test_guest_uses_verified_peer_for_each_workload_mode(self):
         import hashlib
         import runner
@@ -303,6 +319,8 @@ class GuestPlacementTests(unittest.TestCase):
                                        (2, None, "source-mismatch")):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 engine = fake_engine()
+                engine.measurement_identity = {"required_processes": []}
+                pinned = mode == "fixed-rate"
                 engine.compose.side_effect = lambda _, args, **kw: completed(f"{args[-1]}-id") if "ps" in args else completed()
                 args_seen = {}
                 events = []
@@ -362,10 +380,20 @@ class GuestPlacementTests(unittest.TestCase):
                 engine.sh.side_effect = command
                 with patch.object(runner, "start_sampler", return_value=(None, None)), \
                         patch.object(runner, "resource_phase", phase), patch.object(runner, "compose_down") as down, \
+                        patch.object(runner, "prepare_pinned_stack", return_value=(
+                            {"api": image}, {"portfolio_sha256": "portfolio", "seed_sha256": "seed"})), \
+                        patch("diagnostics.resource_pilot.warmup_api", return_value={"app.py": "app"}) as warmup, \
                         patch.object(runner.subprocess, "run", side_effect=AssertionError("host load")):
                     rec = runner.trial_w2(FixtureContext(directory), engine, "warm", 2, 20, .5, 7,
-                                           operations, request_rate=rate, client_location="guest")
+                                           operations, request_rate=rate, client_location="guest", pinned_stack=pinned)
                 self.assertEqual(down.call_count, 2)
+                if pinned:
+                    warmup.assert_called_once_with(engine, image)
+                    first = engine.compose.call_args_list[0]
+                    self.assertEqual(first.args[1], ["up", "-d", "--no-build", "--pull", "never"])
+                    self.assertEqual(first.kwargs["override"].name, "pinned-compose.json")
+                    self.assertEqual(rec["paired_inputs"]["api_files_sha256"], {"app.py": "app"})
+                    self.assertEqual(rec["paired_inputs"]["load_client_sha256"], runner.sha256_file(runner.RATE_LOAD_PY))
                 self.assertIn("remove-peer", events)
                 self.assertEqual(rec["correctness"]["ok"], mode not in ("corrupt", "source-mismatch"), rec)
                 if mode == "source-mismatch":

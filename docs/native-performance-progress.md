@@ -104,14 +104,21 @@ The [W3 pinned transaction proof](evidence/native-performance.md#w3-commit-laten
 passed all 300 commit receipts and exact persisted rows on both engines.
 The [W9 fixed-work diagnostic](evidence/native-performance.md#w9-job-completion-measurement)
 passed all four concurrency conditions per engine.
-If the host stays shared, refresh the parked W11 qualification branch
-against current main and check its admission contract against these
-verified fixture revisions.
-The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
-now covers fixed-work, saturation, and fixed offered rate offline.
-The parked qualification branch has been refreshed through main
-`90491bf`. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
-pass on `3d3f3fb`. The asset lock remains in pilot status.
+The parked W11 qualification branch `a135aa0` includes main through
+`a06632d` and verifies the declared fixture revisions against the case
+manifest. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
+passed 49 tests. The asset lock remains in pilot status.
+[W2 placement](../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof)
+verified exact persisted work on the published port and guest network
+in all twelve pinned trials. The two OrbStack offered-rate trials
+completed all operations but exceeded the scheduling-lag budget.
+W2 baselines now require the same pinned stack and prime the VM before
+sampling. Both engines and both paths verified exact fixed work again
+with matching input receipts and complete phase counters. Repeat pacing
+admission in an exclusive window with the pinned baseline. Preserve the
+10 ms budget and both failed receipts.
+The [W4 v4 queue diagnostic](evidence/native-performance.md#w4-queue-latency)
+verified the job and timing receipts at 1, 4 and 16 workers on both engines.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 still requires an isolated OrbStack target.
 Scored W3, W4, W6, W7 and W9 runs remain open.

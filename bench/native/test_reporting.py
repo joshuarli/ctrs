@@ -57,6 +57,18 @@ def metric_result(report, metric="wall_seconds", cohort=0):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_pinned_w2_requires_matching_input_receipts(self):
+        records = pair(case="W2")
+        for record in records:
+            record["workload_params"]["pinned_stack"] = True
+            record["paired_inputs"] = {"portfolio_sha256": "same", "seed_sha256": "same"}
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 1)
+        for receipt in ({"portfolio_sha256": "different", "seed_sha256": "same"}, {}):
+            records[1]["paired_inputs"] = receipt
+            result = reporting.analyze(records)["cohorts"][0]
+            self.assertEqual(result["valid_pairs"], 0)
+            self.assertEqual(result["rejections"][0]["reason"], "paired inputs differ or are missing")
+
     def test_w5_receipts_require_equal_observed_inputs_for_pairing(self):
         records = pair(case='W5', metric='bind_edit_to_result_median_s')
         for record in records:

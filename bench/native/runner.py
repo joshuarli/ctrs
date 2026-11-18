@@ -1110,7 +1110,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
              duration: float, write_ratio: float, seed: int,
              operations: int | None = None, *, request_rate: float | None = None,
              allocation_paths: tuple[Path, ...] = (),
-             sampling=SamplingMode.PERIODIC, client_location: str = "host") -> dict:
+             sampling=SamplingMode.PERIODIC, client_location: str = "host",
+             pinned_stack: bool = False) -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
     if client_location not in ("host", "guest"):
         raise ValueError("W2 client location must be host or guest")
@@ -1133,10 +1134,32 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
     get = http_json
     sampler = trace = None
     measurement_started = False
+    cleanup_needed = not pinned_stack
+    override = trial_dir / "pinned-compose.json" if pinned_stack else None
     t0 = time.monotonic()
+
+    def compose(args, timeout=300):
+        if override is None:
+            return engine.compose(proj, args, env_extra=cenv, timeout=timeout)
+        return engine.compose(proj, args, env_extra=cenv, timeout=timeout, override=override)
+
     try:
         engine.ensure_up()
+        if pinned_stack:
+            from diagnostics.resource_pilot import warmup_api
+
+            refs, inputs = prepare_pinned_stack(engine, override)
+            rec["inputs"].update(inputs)
+            rec["paired_inputs"] = {
+                "portfolio_sha256": inputs["portfolio_sha256"],
+                "seed_sha256": inputs["seed_sha256"],
+                "load_client_sha256": client_sha,
+                "api_files_sha256": warmup_api(engine, refs["api"]),
+            }
+        cleanup_needed = True
         compose_down(engine, proj)
+        if pinned_stack:
+            t0 = time.monotonic()
         sampler, trace = start_sampler(engine, trial_dir, sampling=sampling)
         measurement_started = True
         rec['running_identity'] = engine.measurement_identity
@@ -1145,14 +1168,14 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             rec["resources"]["disk_allocation"] = {
                 "before_setup": resource_cells.allocation_snapshot(allocation_paths)}
         with resource_phase(engine, rec, "setup"):
-            up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
+            up = compose(["up", "-d", "--no-build", "--pull", "never"] if pinned_stack else ["up", "-d"])
             if up.returncode != 0:
                 rec["correctness"]["ok"] = False
                 rec["validation_errors"].append(
                     f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
                 return rec
             if client_location == "guest":
-                api_id = engine.compose(proj, ["ps", "-q", "api"], timeout=30).stdout.strip()
+                api_id = compose(["ps", "-q", "api"], timeout=30).stdout.strip()
                 api_info, = json.loads(engine.sh(["inspect", api_id], timeout=30).stdout)
                 image_id = api_info["Image"]
                 if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
@@ -1177,7 +1200,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                 return rec
             rec["metrics"]["setup_seconds"] = round(t_ready - t0, 3)
 
-        api_id = engine.compose(proj, ["ps", "-q", "api"], timeout=30).stdout.strip()
+        api_id = compose(["ps", "-q", "api"], timeout=30).stdout.strip()
         def application_cpu():
             cp = engine.sh(["exec", api_id, "cat", "/sys/fs/cgroup/cpu.stat"], timeout=30)
             return {key: int(value) for key, value in
@@ -1253,7 +1276,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             summary["errors"] == 0)
         expected_writes = [json.loads(line) for line in
                            Path(str(load_out) + ".writes.jsonl").read_text().splitlines()]
-        db_id = engine.compose(proj, ["ps", "-q", "db"], timeout=30).stdout.strip()
+        db_id = compose(["ps", "-q", "db"], timeout=30).stdout.strip()
         rows = engine.sh(["exec", db_id, "psql", "-U", "app", "-d", "app", "-At", "-c",
                           "SELECT json_build_array(name,payload)::text FROM items ORDER BY name,payload"], timeout=60)
         actual = [json.loads(line) for line in rows.stdout.splitlines()]
@@ -1288,7 +1311,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                         rec["validation_errors"].append(f"peer cleanup {type(exc).__name__}: {exc}")
                         if not isinstance(exc, Exception) and interrupted is None:
                             interrupted = exc
-                compose_down(engine, proj)
+                if cleanup_needed:
+                    compose_down(engine, proj)
             if allocation_paths:
                 rec["resources"]["disk_allocation"]["after_cleanup"] = resource_cells.allocation_snapshot(allocation_paths)
         except BaseException as exc:
@@ -3205,11 +3229,16 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     trial = trials[case_id]
     if case_id == "W4":
         kw.setdefault("fixture_version", W4_LATENCY_VERSION)
+    if case_id == "W2" and pair_id is not None:
+        kw["pinned_stack"] = True
     defaults = {name: parameter.default
                 for name, parameter in inspect.signature(trial).parameters.items()
                 if parameter.default is not inspect.Parameter.empty}
     ctx.workload_id = workload_id(ctx.run_id, case_id, pair_id, ctx._seq + 1)
-    ctx.workload_params = {"cold": cold, **defaults, **kw}
+    ctx.workload_params = {
+        name: value.value if isinstance(value, Enum) else value
+        for name, value in {"cold": cold, **defaults, **kw}.items()
+    }
     if case_id == "W10" and kw.get("interrupt_service") == "engine":
         if engine_name != "ctrs" or cold or keep_warm:
             raise ValueError("engine interruption requires a standalone ctrs recovery run")
