@@ -108,10 +108,14 @@ The parked W11 qualification branch `a135aa0` includes main through
 `a06632d` and verifies the declared fixture revisions against the case
 manifest. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
 passed 49 tests. The asset lock remains in pilot status.
-If the host stays shared, run [W2 placement and offered-rate correctness](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
-against the common pinned stack on both engines. Use 10,000 operations,
-concurrency 4 and 500 requests per second for the offered-rate condition.
-Verify the exact persisted work on the published-port and guest paths.
+[W2 placement](../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof)
+verified exact persisted work on the published port and guest network
+in all twelve pinned trials. The two OrbStack offered-rate trials
+completed all operations but exceeded the scheduling-lag budget.
+Repeat pacing admission in an exclusive window after priming the owned
+VM with the pinned API. Preserve the 10 ms budget and both failed receipts.
+The [W4 v4 queue diagnostic](evidence/native-performance.md#w4-queue-latency)
+verified the job and timing receipts at 1, 4 and 16 workers on both engines.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
 still requires an isolated OrbStack target.
 Scored W3, W4, W6, W7 and W9 runs remain open.

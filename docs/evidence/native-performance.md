@@ -2240,8 +2240,26 @@ Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4 test_w4_lifecycle
 test_mixed_cycle test_reporting`. All 42 tests passed. The local HTTP and
 RESP fixture covers enqueue, worker execution and exact artifact verification.
 Negative cases reject missing timing files, reversed clocks, mismatched
-clock identities, and incorrect job IDs. The two native engine images and
-paired measurements still need validation.
+clock identities, and incorrect job IDs.
+
+Native diagnostic `w4-correctness-2026-11-18T013350421+0000` exercised
+`w4-v4-boot-clock` at 1, 4 and 16 workers on both engines from `98b9445`.
+Every condition verified 200 jobs, 12,800 events, 400 exact artifacts and
+200 same-boot timing receipts. Both trial records contained all six queue
+percentiles and complete resource-phase counters. Owned cleanup passed.
+The shared host leaves the batch ineligible for scoring.
+
+Reproduce with the [common v4 image preparation](../../bench/native/diagnostics/recovery-client.md#queue-service-recovery)
+and the pinned W8 v2 Redis image. Inspect the one exported ARM64 worker on
+both endpoints and require identical ordered DiffIDs. This diagnostic used
+ctrs config `sha256:1fd6830c1a6431896a4a5fa2de46d9c967d06c388c01054ceed0c7d1cda68177`
+and OrbStack image ID
+`sha256:08a898c1c06021dbe1dfc051f227973a380cb9a49a9209ae7b92f62a5a570405`.
+Pass those resolved worker and Redis IDs as `image_ref` and `redis_ref` to
+`runner.trial_w4(ctx, engine, "warm", (1, 4, 16), runner.W4_LATENCY_VERSION)`.
+Run it once per engine with the signed artifacts from the W8 cancellation
+proof. The focused W4, mixed-cycle and reporting command above passed
+45 tests on this revision.
 
 ## W8 preparation state-preservation repair
 

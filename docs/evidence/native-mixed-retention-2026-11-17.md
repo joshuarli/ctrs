@@ -234,9 +234,9 @@ to `unmeasured` and retain any evidence about why they remain open.
 | Workload | Evidence still needed before the review can freeze the contract |
 | --- | --- |
 | W1 | Equivalent engine-cold setup on both engines and verified read/write after restart. |
-| W2 | Pinned offered rates and full published-port and container-to-container coverage. Admit the observer and resource-cycle policy on the same workloads. |
+| W2 | Admit the pinned offered rate on both paths and engines. All twelve [placement diagnostics](../../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof) verified exact data, with two OrbStack pacing failures. Admit the observer and resource-cycle policy on the same workloads. |
 | W3 | Per-transaction p95, exact persisted rows and a comparable durability contract. |
-| W4 | Queue latency tails for 1, 4 and 16 workers with exact job and artifact verification. |
+| W4 | Score queue latency tails for 1, 4 and 16 workers. The [v4 native diagnostic](native-performance.md#w4-queue-latency) has exact job, artifact and timing receipts on both engines. |
 | W5 | Paired bind and named-volume conditions with pinned inputs and phase resource receipts. |
 | W6 | Warm build-cache runs and proof of compilation in uncached runs. Both artifact hashes are pinned. |
 | W7 | Buildx import and first-use evidence for both apps and all three cache states. |
