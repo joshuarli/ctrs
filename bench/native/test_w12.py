@@ -48,3 +48,15 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(metrics['workflow_seconds'], sum(range(2, 9)))
         with self.assertRaises(KeyError):
             workspace.phase_metrics({'install': {'operation_wall_seconds': 1.0}})
+
+
+class BaselineCliTests(unittest.TestCase):
+    def test_baseline_accepts_new_cases_and_condition_flags(self):
+        import subprocess
+        import sys
+        for extra in (['--case', 'W12', '--workspace-layout', 'all-volume'],
+                      ['--case', 'W12-watch', '--watch-mount', 'volume'],
+                      ['--case', 'W13', '--transfer-path', 'container-to-mac']):
+            cp = subprocess.run([sys.executable, 'runner.py', 'baseline', '--a', 'ctrs', '--b', 'orbstack',
+                                 *extra, '--help'], capture_output=True, text=True)
+            self.assertEqual(cp.returncode, 0, cp.stderr)
