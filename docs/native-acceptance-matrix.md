@@ -63,9 +63,10 @@ Mbps only. It is not reusable as a verified-transfer metric.
   delivered none. Native watchers (chokidar/nodemon, `tsc --watch`,
   webpack, vite) therefore never react to Mac edits on ctrs unless they
   poll. Virtualization.framework virtiofs carries no host change
-  notifications, and ctrs has no forwarding mechanism. A fix needs a host
-  file watcher and a host→guest event message (a wire-protocol addition).
-  W12-watch quantifies the effect.
+  notifications, and ctrs has no forwarding mechanism. Proposed fix (needs
+  owner approval: wire-protocol addition plus guest kernel patch):
+  [design-bind-notify.md](design-bind-notify.md). W12-watch quantifies the
+  effect.
 - **Container→Mac half-close (fixed, `9940611`).** Over
   `host.docker.internal`, a container's half-close after about 1 MiB or more
   of data never reached the Mac service. Virtualization.framework drops the
