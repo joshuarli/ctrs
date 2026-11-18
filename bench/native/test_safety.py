@@ -583,6 +583,24 @@ class W6SourceTests(unittest.TestCase):
 
 
 class ExitStatusTests(unittest.TestCase):
+    def test_w2_baseline_serializes_sampling_mode_and_requires_pins(self):
+        engine = fake_engine()
+        engine.system_df.return_value = None
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine})
+
+        def trial(ctx, engine, state, sampling=runner.SamplingMode.PERIODIC, pinned_stack=False):
+            self.assertIs(sampling, runner.SamplingMode.PERIODIC)
+            self.assertTrue(pinned_stack)
+            json.dumps(ctx.workload_params)
+            return {"correctness": {"ok": True}, "resources": {}, "validation_errors": []}
+
+        with patch.object(runner, "trial_w2", trial), \
+                patch.object(runner, "safe_version", return_value="observed"), \
+                patch.object(runner, "safe_engine_info", return_value=None):
+            runner.run_one(context, "orbstack", "W2", "warm", pair_id=1)
+        self.assertEqual(context.workload_params["sampling"], "periodic")
+        self.assertTrue(context.workload_params["pinned_stack"])
+
     def test_record_captures_executed_defaults_and_post_trial_version(self):
         engine = fake_engine()
         context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine})

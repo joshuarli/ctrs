@@ -49,11 +49,12 @@ TMPDIR=$PWD/.work/tmp PYTHONDONTWRITEBYTECODE=1 python3.14 \
   --operations 10000 --concurrency 4 --request-rate 500
 ```
 
-That command alone does not freeze images, binary, residency or host ownership.
-Campaign native diagnostics must additionally enforce digest-pinned Compose
-inputs, checked API sources, actual signed binary/boot hashes and explicit
-resource settings, as the resource-cycle pilot does. Host timing qualification
-also requires pre/post readiness and genuine exclusivity.
+Standalone `run` uses the exploratory Compose inputs. W2 `baseline` requires
+the common W8 v2 images preinstalled. It checks image IDs, ordered DiffIDs,
+the seed and the running API image's source files. Priming the API image
+starts the VM before sampling. The paired report requires matching input
+receipts. Timing qualification also requires signed binary and boot
+identities, explicit resource settings, pre/post readiness and exclusivity.
 
 `runner.py check w2` covers actual local HTTP counts and exact writes, a
 deliberately delayed server's visible backlog, and controlled-clock pacing that
@@ -122,3 +123,19 @@ modes. All four fixed-work legs again delivered 10,000 requests and
 verified 3,513 persisted rows. Each saturation leg verified its own
 acknowledged writes and seed rows with zero request errors. The shared host
 leaves the entire placement batch ineligible for scoring.
+
+The paired runner now prepares the same pinned stack and verifies the API
+files before starting resource sampling. Its receipts identify the shared
+portfolio, seed, API files and load client. The native CLI path also exposed
+a JSON serialization failure for the sampling mode. Trial records now write
+the mode's string value. Run `python3.14 bench/native/runner.py check w2` to
+verify missing or mismatched pins are rejected and the workload parameters
+serialize. All 117 tests passed.
+
+Native `w2-pair-2026-11-18T014125275+0000` used the ordinary paired W2
+runner dispatch. Both placements on both engines passed the 10,000-operation
+fixed-work check with the same PostgreSQL digest as above. Each pair's
+portfolio, seed, API and client receipts matched. All four trials had
+verified process ownership and complete resource-phase receipts, including
+the first ctrs trial after VM startup. Each record was marked ineligible
+for scoring before it was written.

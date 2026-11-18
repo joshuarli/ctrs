@@ -112,8 +112,11 @@ passed 49 tests. The asset lock remains in pilot status.
 verified exact persisted work on the published port and guest network
 in all twelve pinned trials. The two OrbStack offered-rate trials
 completed all operations but exceeded the scheduling-lag budget.
-Repeat pacing admission in an exclusive window after priming the owned
-VM with the pinned API. Preserve the 10 ms budget and both failed receipts.
+W2 baselines now require the same pinned stack and prime the VM before
+sampling. Both engines and both paths verified exact fixed work again
+with matching input receipts and complete phase counters. Repeat pacing
+admission in an exclusive window with the pinned baseline. Preserve the
+10 ms budget and both failed receipts.
 The [W4 v4 queue diagnostic](evidence/native-performance.md#w4-queue-latency)
 verified the job and timing receipts at 1, 4 and 16 workers on both engines.
 An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
