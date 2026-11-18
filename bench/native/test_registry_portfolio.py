@@ -148,7 +148,7 @@ class RegistryTests(unittest.TestCase):
             script = 'import sys,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=5).read()'
             return popen([sys.executable, '-c', script, args[-1]], **kwargs)
 
-        with w8_cancel.registry(portfolio, pause=pause) as server, \
+        with registry.running_registry(portfolio, pause=pause) as server, \
                 patch.object(w8_cancel.subprocess, 'Popen', side_effect=launch):
             url = f'http://127.0.0.1:{server.server_port}{path}'
             result = w8_cancel.cancel_pull(SimpleNamespace(env=os.environ.copy), url, portfolio, pause, layer, self.root)
@@ -157,7 +157,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(transfer['bytes'], layer['size'] - 1)
         self.assertFalse(transfer['complete'])
         self.assertGreaterEqual(result['peer_disconnected_monotonic'], result['signal_sent_monotonic'])
-        with w8_cancel.registry(retry) as server:
+        with registry.running_registry(retry) as server:
             with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}{path}', timeout=2) as response:
                 self.assertEqual(response.read(), b'first layer')
         self.assertTrue(retry.transfers[-1]['complete'])

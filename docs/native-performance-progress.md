@@ -91,19 +91,20 @@ pass native correctness on both engines. The [W1 warm restart proof](evidence/na
 passed on both engines with pinned images, exact writes and reads, and
 the same owned database container and volume across the restart. Engine-cold
 parity still requires an isolated OrbStack environment.
-The [W10 database and queue recovery proofs](../bench/native/diagnostics/recovery-client.md)
-passed on both engines with pinned diagnostic inputs. The W4 v4 fixture
-normalizes time-namespace offsets to a verified common guest boot clock.
-If the host stays shared, seed a new private ctrs recovery root with the
-common portfolio, then verify W10 owned-engine interruption and recovery.
+The [W10 recovery proofs](../bench/native/diagnostics/recovery-client.md)
+passed API, database and queue interruption on both engines. The private
+ctrs engine diagnostic passed with pinned images, a durable startup auth
+file and exact acknowledged rows after the daemon and VM restarted.
+If the host stays shared, exercise the W6 warm and uncached producers
+and the W7 import and first-use producers as bounded native correctness
+checks. Retain each fixture's cache and artifact assertions.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
 `90491bf`. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
 pass on `3d3f3fb`. The asset lock remains in pilot status.
-The [W10 fixtures](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
-now include an owned ctrs crash diagnostic. Native validation and a separate
-isolated OrbStack interruption target remain open.
+An equivalent [W10 engine interruption](../bench/native/diagnostics/recovery-client.md#owned-engine-recovery)
+still requires an isolated OrbStack target.
 The [W6 warm and uncached fixture](evidence/native-build-boundaries-2026-11-16.md#w6-build-cache-conditions)
 and [W7 first-use receipts](evidence/native-build-boundaries-2026-11-16.md#w7-per-build-first-use-receipts)
 and [W9 completion metrics](evidence/native-performance.md#w9-job-completion-measurement)

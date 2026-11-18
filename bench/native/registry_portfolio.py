@@ -3,6 +3,7 @@ import hashlib
 import os
 import stat
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import re
@@ -285,3 +286,17 @@ def prepare_pinned_portfolio(layout, contract):
 def serve(portfolio, port, *, pause=None):
     """Construct a loopback server; its owner controls serving and shutdown."""
     return HTTPServer(("127.0.0.1", port), portfolio.handler(pause))
+
+
+@contextmanager
+def running_registry(portfolio, *, pause=None):
+    with serve(portfolio, 0, pause=pause) as server:
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .05})
+        thread.start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            if thread.is_alive():
+                raise RuntimeError("fixture registry did not stop")

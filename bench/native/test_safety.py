@@ -38,7 +38,7 @@ class FixtureContext:
         return path
 
     def new_record(self, *_):
-        return {"metrics": {}, "correctness": {"ok": True, "checks": {}},
+        return {"trial_id": self.run_id, "metrics": {}, "correctness": {"ok": True, "checks": {}},
                 "resources": {}, "validation_errors": [], "notes": []}
 
 

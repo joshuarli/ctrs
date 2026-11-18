@@ -1,11 +1,9 @@
 """Interrupt one owned W8 pull after partial blob delivery and verify retry."""
-from contextlib import contextmanager
 import json
 from pathlib import Path
 import secrets
 import signal
 import subprocess
-import threading
 import time
 
 import ci_jobs
@@ -16,20 +14,6 @@ import runner
 
 
 REPOSITORY = 'np-v2/marked'
-
-
-@contextmanager
-def registry(portfolio, *, pause=None):
-    with registry_portfolio.serve(portfolio, 0, pause=pause) as server:
-        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
-        thread.start()
-        try:
-            yield server
-        finally:
-            server.shutdown()
-            thread.join(timeout=5)
-            if thread.is_alive():
-                raise RuntimeError('W8 cancel registry did not stop')
 
 
 def cancel_pull(engine, ref, portfolio, pause, layer, directory):
@@ -124,7 +108,8 @@ def run_cancel(args):
         engine.ensure_up()
         retained(engine, contract['images'], directory / 'retained-before.json')
         pilot.require_variant_absent(engine, image, directory / 'candidate-before.json')
-        with registry(cancellation, pause=pause) as cancel_server, registry(retry) as retry_server:
+        with registry_portfolio.running_registry(cancellation, pause=pause) as cancel_server, \
+                registry_portfolio.running_registry(retry) as retry_server:
             cancel_ref = f'127.0.0.1:{cancel_server.server_port}/{REPOSITORY}@{image["manifest"]}'
             retry_ref = f'127.0.0.1:{retry_server.server_port}/{REPOSITORY}@{image["manifest"]}'
             pilot.require_missing_image(engine.sh(['image', 'inspect', cancel_ref], check=False))

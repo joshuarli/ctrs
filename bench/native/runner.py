@@ -164,6 +164,7 @@ DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
 W4_IMAGE = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
 W4_LATENCY_VERSION = "w4-v4-boot-clock"
 W4_LATENCY_IMAGE = "np-w4-events:v4"
+W10_FIXTURE_VERSION = "w10-v4-recovery"
 W4_FIXED_WORK = {"jobs": w4_fixture.JOBS, "events": w4_fixture.JOBS * w4_fixture.EVENTS,
                  "artifacts": w4_fixture.JOBS * len(w4_fixture.filenames(0))}
 # Holdout: a real third-party app never used for tuning — Gitea +
@@ -542,9 +543,12 @@ class Engine:
 
     def compose(self, project: str, args: list[str],
                 env_extra: dict | None = None,
-                timeout: float = 300) -> subprocess.CompletedProcess:
+                timeout: float = 300, *, override: Path | None = None) -> subprocess.CompletedProcess:
+        files = ["-f", str(COMPOSE_FILE)]
+        if override is not None:
+            files += ["-f", str(override)]
         return self.sh(
-            ["compose", "-f", str(COMPOSE_FILE), "-p", project, *args],
+            ["compose", *files, "-p", project, *args],
             env_extra=env_extra, timeout=timeout, check=False)
 
     def server_version(self) -> str:
@@ -933,10 +937,37 @@ def wait_health(base: str, deadline_s: float, *, request=None):
 W1_FIXTURE_VERSION = "w1-v2-pinned-restart"
 
 
-def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_VERSION) -> dict:
-    """Verify startup and DB/cache recovery with a preinstalled pinned stack."""
+def prepare_pinned_stack(engine, override, *, layout=None):
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
 
+    pin_path = FIXTURES / "w8-v2/portfolio.json"
+    source = json.loads(pin_path.read_text())
+    seed_sha = sha256_file(W1_DIR / "seed.sql")
+    if seed_sha != source["seed_sql_sha256"]:
+        raise ValueError("stack seed differs from the pinned portfolio")
+    repositories = {"api": "np-v2/api", "db": "np-v2/postgres", "cache": "np-v2/redis"}
+    pins = {service: source["images"][repository] for service, repository in repositories.items()}
+    if layout is not None:
+        import registry_portfolio
+
+        if not layout.is_dir():
+            raise ValueError(f"pinned portfolio is required at {layout}")
+        portfolio = registry_portfolio.prepare_pinned_portfolio(
+            layout, {**source, "images": {name: source["images"][name] for name in repositories.values()}})
+        with registry_portfolio.running_registry(portfolio) as server:
+            for repository in repositories.values():
+                ref = f"127.0.0.1:{server.server_port}/{repository}@{portfolio.manifests[repository]}"
+                engine.sh(["pull", ref], timeout=180)
+    refs = {service: baseline_image_reference(engine.name, pin)[1] for service, pin in pins.items()}
+    installed = json.loads(engine.sh(["image", "inspect", *refs.values()]).stdout)
+    images = require_baseline_images(engine.name, pins, installed)
+    override.write_text(json.dumps({"services": {service: {"image": ref}
+                                                for service, ref in refs.items()}}) + "\n")
+    return refs, {"images": images, "seed_sha256": seed_sha, "portfolio_sha256": sha256_file(pin_path)}
+
+
+def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_VERSION) -> dict:
+    """Verify startup and DB/cache recovery with a preinstalled pinned stack."""
     case_id = "W1"
     port = free_port()
     base = f"http://127.0.0.1:{port}"
@@ -1001,20 +1032,8 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
     try:
         if fixture_version != W1_FIXTURE_VERSION:
             raise ValueError("W1 fixture version mismatch")
-        pin_path = FIXTURES / "w8-v2/portfolio.json"
-        source = json.loads(pin_path.read_text())
-        seed_sha = sha256_file(W1_DIR / "seed.sql")
-        if seed_sha != source["seed_sql_sha256"]:
-            raise ValueError("W1 seed differs from the pinned portfolio")
         engine.ensure_up()
-        pins = {service: source["images"]["np-v2/" + image] for service, image in
-                (("api", "api"), ("db", "postgres"), ("cache", "redis"))}
-        refs = {service: baseline_image_reference(engine.name, pin)[1] for service, pin in pins.items()}
-        installed = json.loads(engine.sh(["image", "inspect", *refs.values()]).stdout)
-        rec["inputs"] = {"images": require_baseline_images(engine.name, pins, installed),
-                         "seed_sha256": seed_sha, "portfolio_sha256": sha256_file(pin_path)}
-        override.write_text(json.dumps({"services": {service: {"image": ref}
-                                                    for service, ref in refs.items()}}) + "\n")
+        refs, rec["inputs"] = prepare_pinned_stack(engine, override)
         sampler, trace = start_sampler(engine, trial_dir)
         started = True
         t0 = time.monotonic()
@@ -2099,7 +2118,7 @@ def trial_w4(ctx, engine: Engine, state: str,
         rec["metrics"].update(W4_FIXED_WORK, fixture_version=fixture_version)
         if queue_interruption is not None:
             rec["metrics"].update({key: value * len(conditions) for key, value in W4_FIXED_WORK.items()})
-            rec["metrics"].update(recovery, fixture_version="w10-v3-exact-recovery", interrupt_service="queue",
+            rec["metrics"].update(recovery, fixture_version=W10_FIXTURE_VERSION, interrupt_service="queue",
                                   queue_fixture_version=fixture_version,
                                   recovered_p99_ms=rec["metrics"]["queue_p99_ms_at_recovered"])
         rec["correctness"]["ok"] = all(checks.values())
@@ -2422,12 +2441,24 @@ def _w10_crash_engine(engine, before, deadline):
     raise TimeoutError("old owned VM helper did not exit after interruption")
 
 
+def _w10_auth_digest(engine, db, *, sync_startup=False):
+    command = 'sha256sum "$PGDATA/pg_hba.conf"'
+    if sync_startup:
+        command = 'sync "$PGDATA/pg_hba.conf"\n' + command
+    output = engine.sh(["exec", db, "sh", "-ec", command], timeout=15).stdout.split()
+    if len(output) != 2 or not re.fullmatch(r"[0-9a-f]{64}", output[0]):
+        raise ValueError("W10 database authentication file digest unavailable")
+    return output[0]
+
+
 def trial_w10(ctx, engine: Engine, state: str,
               duration: float = 20.0, concurrency: int = 8,
               write_ratio: float = 0.3, seed: int = 1,
               kill_at: float = 6.0, down_for: float = 3.0, *,
-              interrupt_service: str = "api") -> dict:
+              interrupt_service: str = "api", fixture_version: str = W10_FIXTURE_VERSION) -> dict:
     """Interrupt one owned service during persistent load and verify recovery."""
+    if fixture_version != W10_FIXTURE_VERSION:
+        raise ValueError("W10 fixture version mismatch")
     if interrupt_service == "queue":
         if not all(math.isfinite(value) and value > 0 for value in (duration, down_for)) or concurrency <= 0:
             raise ValueError("W10 queue recovery requires positive duration, downtime and worker count")
@@ -2442,14 +2473,15 @@ def trial_w10(ctx, engine: Engine, state: str,
             or concurrency <= 0 or not 0 <= write_ratio <= 1
             or kill_at <= 0 or down_for <= 0 or duration <= kill_at + down_for):
         raise ValueError("W10 load must cover both sides of a positive outage")
-    proj = project_name(ctx.run_id, engine.name, "W10")
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
     trial_dir = ctx.trial_dir(engine.name, "W10", state)
     rec = ctx.new_record(engine, "W10", state, trial_dir)
+    proj = project_name(hashlib.sha256(rec["trial_id"].encode()).hexdigest()[:16], engine.name, "W10")
+    override = trial_dir / "pinned-compose.json"
     checks = rec["correctness"]["checks"]
-    rec["metrics"].update(fixture_version="w10-v3-exact-recovery", interrupt_service=interrupt_service)
+    rec["metrics"].update(fixture_version=fixture_version, interrupt_service=interrupt_service)
     sampler = trace = None
     stop = threading.Event()
     attempts, probes, timeline = [], [], {}
@@ -2458,8 +2490,11 @@ def trial_w10(ctx, engine: Engine, state: str,
     if crash_engine:
         rec.update(measurement_valid=False, measurement_invalidation="owned ctrs engine recovery diagnostic")
 
+    def compose(args, timeout=300):
+        return engine.compose(proj, args, env_extra=cenv, timeout=timeout, override=override)
+
     def service_id(service):
-        found = engine.compose(proj, ["ps", "-q", service], timeout=30)
+        found = compose(["ps", "-q", service], timeout=30)
         ids = found.stdout.split()
         if found.returncode or len(ids) != 1:
             raise ValueError(f"cannot establish the owned {service} container identity")
@@ -2498,11 +2533,12 @@ def trial_w10(ctx, engine: Engine, state: str,
         engine.ensure_up()
         if crash_engine and (engine.proc is None or engine.proc.poll() is not None):
             raise ValueError("initial recovery daemon was not launched by this run")
+        layout = WORK / "inputs/w8-portfolio-v2/layout" if crash_engine else None
+        _, rec["inputs"] = prepare_pinned_stack(engine, override, layout=layout)
         stack_owned = True
-        compose_down(engine, proj)
         if not crash_engine:
             sampler, trace = start_sampler(engine, trial_dir)
-        up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
+        up = compose(["up", "-d", "--no-build", "--pull", "never"])
         if up.returncode:
             raise RuntimeError(f"compose up failed: {(up.stderr or up.stdout)[-300:]}")
         ready, _ = wait_health(base, HEALTH_DEADLINE_S)
@@ -2513,6 +2549,7 @@ def trial_w10(ctx, engine: Engine, state: str,
         db = service_id("db")
         target = db if interrupt_service == "db" else service_id("api")
         if crash_engine:
+            auth = rec["database_startup_auth"] = {"before": _w10_auth_digest(engine, db, sync_startup=True)}
             binary_sha = sha256_file(CTRS_BIN)
             before, disk_before = _w10_engine_identity(engine, binary_sha)
             (trial_dir / "engine-before.json").write_text(json.dumps({
@@ -2544,13 +2581,17 @@ def trial_w10(ctx, engine: Engine, state: str,
                         remaining = load_t0 + duration - time.monotonic()
                         if remaining <= 0:
                             raise TimeoutError("owned engine did not return before the load deadline")
-                        restored = engine.compose(proj, ["up", "-d", "--no-build", "--pull", "never"],
-                                                  env_extra=cenv, timeout=remaining)
+                        restored = compose(["up", "-d", "--no-build", "--pull", "never"], timeout=remaining)
                         if restored.returncode:
                             raise RuntimeError(f"owned stack recovery failed: {(restored.stderr or restored.stdout)[-300:]}")
                     else:
                         engine.sh(["start", target], timeout=120)
                     timeline["start_command_returned_ns"] = time.monotonic_ns()
+                    if crash_engine:
+                        auth["after"] = _w10_auth_digest(engine, db)
+                        if auth["after"] != auth["before"]:
+                            raise ValueError("W10 database authentication file changed across VM restart")
+                        checks["database_startup_auth_preserved"] = True
                     timeline["first_success_ns"] = wait_for_exact_read(load_t0 + duration)
                     for future in futures:
                         future.result()
@@ -2593,9 +2634,15 @@ def trial_w10(ctx, engine: Engine, state: str,
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(str(exc))
     finally:
+        def cleanup_stack():
+            if stack_owned:
+                down = compose(["down", "-v", "--remove-orphans"], timeout=90)
+                if down.returncode:
+                    raise RuntimeError((down.stderr or down.stdout)[-300:])
+
         for label, action in (
                 ("sampler shutdown", lambda: stop_sampler(sampler) if sampler is not None else None),
-                ("owned stack cleanup", lambda: compose_down(engine, proj) if stack_owned else None)):
+                ("owned stack cleanup", cleanup_stack)):
             try:
                 action()
             except Exception as exc:

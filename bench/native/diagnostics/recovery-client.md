@@ -34,10 +34,12 @@ candidate comparison; the 250ms product default is unchanged.
 ## Exact API and database recovery
 
 `runner.py run` and `baseline` accept `--interrupt-service api|db` for
-`w10-v3-exact-recovery`. The default interrupts the owned API container.
+`w10-v4-recovery`. The default interrupts the owned API container.
 The database condition interrupts only the database container from the
-trial's Compose project. Both conditions use the same persistent read and
-write workload. Use `--duration` greater than the planned outage and warmup.
+trial's Compose project. Both conditions use the preinstalled common
+portfolio and the same persistent read and write workload. Compose uses
+the verified image IDs with builds and pulls disabled. Use `--duration`
+greater than the planned outage and warmup.
 
 ```sh
 python3.14 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
@@ -77,9 +79,10 @@ the retained correctness receipts.
 | ctrs | 11,953 | 20 | 60 |
 | OrbStack | 7,210 | 28 | 65 |
 
-The independent diagnostic used a pinned Compose override. The normal
-W10 entry point still uses fixture tags. Native v3 API and owned-engine
-interruption remain open.
+The normal W10 entry point now produces the same pinned Compose override
+used for the database diagnostic. Both native API trials in
+`w10-pinned-native-28aed3bcf647` passed with this entry point, exact rows
+and zero unexpected errors.
 
 ## Queue-service recovery
 
@@ -131,7 +134,9 @@ and all 800 artifacts. These runs are correctness evidence.
 ## Owned-engine recovery
 
 The `engine` target is a standalone ctrs diagnostic. The runner creates its
-own data root and socket, then warms the stack before the interruption.
+own data root and socket and seeds its private store from the validated
+OCI layout at `.work/native-perf/inputs/w8-portfolio-v2/layout`. It then
+warms the stack before the interruption.
 It proves the socket belongs to the launched daemon and the VM holds the
 private guest disk. It sends SIGKILL only to its own daemon child and waits
 for both old processes to exit before restarting.
@@ -148,9 +153,27 @@ guest disk and API/database container identities. The exact PostgreSQL
 row check and post-recovery load checks still apply. Results stay in the
 private run directory. They carry no comparative timing or CPU verdict.
 
+The first native trial `w10-engine-native-0fc25e6388b0` restarted the
+owned processes and containers, then timed out waiting for the API.
+Guest-local probes reached PostgreSQL. Application logs showed rejection
+because the generated authentication rule was missing. In the control
+`w10-engine-boundary-cae58a0bfe46`, the bytes of that rule at the end of
+`pg_hba.conf` became zeros after the crash. Syncing only that file in
+`w10-engine-boundary-a7bf0df9f908` preserved its bytes and restored reads.
+
+The warmed fixture now syncs `pg_hba.conf` before the load starts and
+requires identical SHA-256 digests before and after the restart. This
+establishes durable startup configuration before the test begins.
+The successful native engine leg in `w10-pinned-native-28aed3bcf647`
+verified new daemon and VM identities, unchanged guest disk and auth
+configuration, 18,925 exact acknowledged rows and zero unexpected
+request errors. It ran for 30 seconds with two clients and seed 7.
+The archived run precedes the fixture version label update.
+
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
-test_recovery_trace test_w4_lifecycle test_safety test_reporting`. All 74
-focused tests passed. They cover a simulated engine interruption on the
-local HTTP fixture, identity and artifact rejection, refusal to signal a
-foreign daemon, and waiting for the old VM. Native crash validation and
-an isolated OrbStack interruption target remain open.
+test_recovery_trace test_w4_lifecycle test_w1 test_safety test_reporting
+test_registry_portfolio test_w4`. All 91 focused tests passed. They cover
+a simulated engine interruption on the local HTTP fixture, identity and
+artifact rejection, refusal to signal a foreign daemon, and waiting for
+the old VM. An equivalent OrbStack engine interruption still requires
+an isolated target.
