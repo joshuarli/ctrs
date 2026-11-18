@@ -3596,6 +3596,10 @@ def cmd_baseline(args) -> int:
                     kw["build_cache"] = args.build_cache
                 if args.case == "W8" and getattr(args, "under_load", False):
                     kw["under_load"] = True
+                if args.case == "W12":
+                    kw = {"layout": args.workspace_layout}
+                if args.case == "W12-watch":
+                    kw = {"mount": args.watch_mount, "edits": args.watch_edits}
                 if args.case == "W13":
                     kw = {"path": args.transfer_path, "direction": args.direction,
                           "streams": args.streams, "size_bytes": args.size_bytes,
@@ -3746,7 +3750,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W13"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -3798,6 +3802,10 @@ def main() -> int:
         sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
                                          help="W10 target (default: api); engine requires a standalone ctrs run")
     p = sub.choices["baseline"]
+    p.add_argument("--workspace-layout", choices=("full-bind", "bind-source-volume-deps", "all-volume"),
+                   default="full-bind", help="W12 layout")
+    p.add_argument("--watch-mount", choices=("bind", "volume"), default="bind", help="W12-watch mount")
+    p.add_argument("--watch-edits", type=int, default=60, help="W12-watch edit events per trial (at least 60)")
     p.add_argument("--transfer-path", choices=("published-port", "container-to-container", "container-to-mac"),
                    default="published-port", help="W13 network path")
     p.add_argument("--direction", choices=("upload", "download"), default="upload", help="W13 direction")

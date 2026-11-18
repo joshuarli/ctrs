@@ -174,6 +174,34 @@ correctness = ["engine_alive", "errors_zero", "load_windows_valid",
 note = "LEGACY DIAGNOSTIC only; these request-window/churn metrics cannot qualify W11. Representative v2 short cycles now live in diagnostics/mixed_pilot.py and fixtures/w11-v2: persistent API/DB/cache, fixed real queue artifacts and build/test jobs, exact cumulative state and process identity. Do not pool v1/v2 records. Durable finite 12-hour execution, frozen inputs and resource-growth qualification remain open."
 
 [[case]]
+id = "W12"
+family = "shared-workspace"
+title = "Kutt v2.7.4 workspace: offline npm ci, tsc + Next.js build, typecheck, Jest discovery, warm rebuild, ten-file change, branch restore"
+fixture = "fixtures/w12 (pinned source, lockfile, npm cache image)"
+fixture_version = "w12-v1"
+status = "implemented"
+metrics = ["workflow_seconds", "install_seconds", "build_seconds", "typecheck_seconds",
+           "test_discovery_seconds", "warm_rebuild_seconds", "multi_file_change_seconds",
+           "branch_switch_seconds"]
+states = ["warm"]
+params = { layout = "full-bind" }
+correctness = ["source, lock and image DiffIDs pinned", "network none during install", "server tree, client manifest and runtime receipts exact", "sorted Jest test list exact", "mount identities match the declared layout", "owned cleanup"]
+note = "Layouts full-bind, bind-source-volume-deps and all-volume are separate cohorts via workload_params. Setup and cleanup are recorded, not scored."
+
+[[case]]
+id = "W12-watch"
+family = "shared-workspace"
+title = "tsc --watch (fs.watch backend) on the Kutt workspace: save, atomic replace, create+import, rename, delete, five-file bursts"
+fixture = "fixtures/w12"
+fixture_version = "w12-watch-v2"
+status = "implemented"
+metrics = ["missed", "stale", "correct", "results", "edit_to_result_p50_s", "edit_to_result_p95_s"]
+states = ["warm"]
+params = { mount = "bind", edits = 60, deadline_seconds = 10 }
+correctness = ["emitted JavaScript equals transpileModule of the exact edit", "zero-error watch cycle", "bursts written within 50 ms"]
+note = "Bind edits are Mac filesystem operations; volume edits use docker exec, so mounts differ in edit transport. Removed sources are scored through their importer because tsc keeps emitted output of deleted inputs. Latency includes host exec polling round trips and is diagnostic."
+
+[[case]]
 id = "W13"
 family = "artifact-transfer"
 title = "Verified bulk transfer: published port, container-to-container, container-to-Mac; upload and download; 1 and 4 streams"

@@ -9,8 +9,8 @@ const hash = x => crypto.createHash('sha256').update(x).digest('hex');
 const result = [];
 for (const item of spec) {
   const target = path.join('/app/production-server', item.path.replace(/^server\//, '').replace(/\.ts$/, '.js'));
-  const expected = item.deleted ? null : ts.transpileModule(item.content, {compilerOptions: options, fileName: path.basename(item.path)}).outputText;
+  const expected = ts.transpileModule(item.content, {compilerOptions: options, fileName: path.basename(item.path)}).outputText;
   const actual = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
-  result.push({path: item.path, expected: expected === null ? null : hash(expected), actual: actual === null ? null : hash(actual)});
+  result.push({path: item.path, expected: hash(expected), actual: actual === null ? null : hash(actual)});
 }
 console.log(JSON.stringify(result));

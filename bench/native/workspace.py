@@ -6,6 +6,10 @@ import json
 from pathlib import Path
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'w12'
+INPUTS = Path(__file__).resolve().parents[2] / '.work' / 'tmp'
+WATCH_DEADLINE_SECONDS = 10.0
+BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild',
+                'multi-file-change', 'branch-switch')
 
 
 def source_contract():
@@ -32,11 +36,27 @@ def classify_result(expected, observed, timed_out):
     return 'stale'
 
 
-def observed_stale(actual, expected, previous, diagnostic_ok, deleted):
+def observed_stale(actual, expected, previous, diagnostic_ok):
     changed_wrong = actual is not None and actual != previous and actual != expected
     changed_without_valid_diagnostics = actual == expected and actual != previous and not diagnostic_ok
-    retained_after_delete = deleted and diagnostic_ok and actual is not None
-    return changed_wrong or changed_without_valid_diagnostics or retained_after_delete
+    return changed_wrong or changed_without_valid_diagnostics
+
+
+def phase_metrics(phases):
+    walls = {name: phases[name]['operation_wall_seconds'] for name in BUILD_PHASES}
+    metrics = {name.replace('-', '_') + '_seconds': value for name, value in walls.items()}
+    metrics['workflow_seconds'] = sum(walls.values())
+    return metrics
+
+
+def ensure_image(engine, image, spec):
+    cp = engine.sh(['image', 'inspect', image], check=False, timeout=60)
+    if cp.returncode != 0:
+        engine.sh(['image', 'load', '--input', str(INPUTS / 'w12-image.tar')], timeout=900)
+        cp = engine.sh(['image', 'inspect', image], timeout=60)
+    inspected = json.loads(cp.stdout)[0]
+    if inspected['Id'] != image or inspected['Architecture'] != 'arm64' or inspected['RootFS']['Layers'] != spec['prepared_image']['diff_ids']:
+        raise ValueError('W12 image identity mismatch')
 
 
 def verify_burst(seconds):
@@ -100,17 +120,11 @@ def trial_w12(ctx, engine, state, layout='full-bind'):
     sampler = trace = None
     image = spec['prepared_image'][engine.name + '_id']
     source = trial_dir / 'source'
-    archive = Path(os.environ['TMPDIR']) / 'kutt.tar.gz'
+    archive = INPUTS / 'kutt.tar.gz'
     phase = lambda name: runner.resource_phase(engine, rec, name)
 
     def run(args, timeout=900):
         return engine.sh(['exec', name, *args], timeout=timeout)
-
-    def check_image():
-        inspected = json.loads(engine.sh(['image', 'inspect', image]).stdout)[0]
-        if inspected['Id'] != image or inspected['Architecture'] != 'arm64' or inspected['RootFS']['Layers'] != spec['prepared_image']['diff_ids']:
-            raise ValueError('W12 image identity mismatch')
-        return inspected
 
     def add_volume(suffix, destination, mounts):
         volume = name + '-' + suffix
@@ -145,7 +159,7 @@ fs.writeFileSync(p,next)}'''
         if not archive.is_file() or digest(archive.read_bytes()) != spec['source']['sha256']:
             raise ValueError('W12 source archive missing or differs from pin')
         engine.ensure_up()
-        check_image()
+        ensure_image(engine, image, spec)
         ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
         if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
@@ -231,6 +245,7 @@ fs.writeFileSync(p,next)}'''
             typecheck()
             verify_output(output(), expected['base'])
         rec['correctness']['checks']['exact_outputs'] = True
+        rec['metrics'].update(phase_metrics(rec['resources']['phases']))
         rec['correctness']['ok'] = True
     except Exception as exc:
         rec['correctness']['ok'] = False
@@ -269,7 +284,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         raise ValueError('unknown W12 watch mount')
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
-    rec['metrics'].update(fixture_version='w12-v1', mount=mount, backend='fs.watch',
+    rec['metrics'].update(fixture_version='w12-watch-v2', mount=mount, backend='fs.watch',
                           edit_transport='host filesystem' if mount == 'bind' else 'docker exec',
                           missed=0, stale=0, edits=[])
     spec = source_contract()
@@ -326,13 +341,11 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         return original + f'\nexport const {symbol} = "{token}";\n'
 
     try:
-        archive = Path(os.environ['TMPDIR']) / 'kutt.tar.gz'
+        archive = INPUTS / 'kutt.tar.gz'
         if not archive.is_file() or digest(archive.read_bytes()) != spec['source']['sha256']:
             raise ValueError('W12 source archive missing or differs from pin')
         engine.ensure_up()
-        inspected = json.loads(engine.sh(['image', 'inspect', image]).stdout)[0]
-        if inspected['Id'] != image or inspected['Architecture'] != 'arm64' or inspected['RootFS']['Layers'] != spec['prepared_image']['diff_ids']:
-            raise ValueError('W12 image identity mismatch')
+        ensure_image(engine, image, spec)
         ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
         if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
@@ -411,13 +424,11 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                     actions = [{'kind': 'rename', 'from': 'server/w12watch/created.ts', 'path': 'server/w12watch/renamed.ts', 'content': content},
                                {'kind': 'write', 'path': base_importer, 'content': importer}]
                     items = [{'path': action['path'], 'content': action['content']} for action in actions]
-                    items.append({'path': 'server/w12watch/created.ts', 'deleted': True})
                 else:
                     importer = f'export const value = "{marker}";\n'
                     actions = [{'kind': 'delete', 'path': 'server/w12watch/renamed.ts'},
                                {'kind': 'write', 'path': base_importer, 'content': importer}]
-                    items = [{'path': 'server/w12watch/renamed.ts', 'deleted': True},
-                             {'path': base_importer, 'content': importer}]
+                    items = [{'path': base_importer, 'content': importer}]
                 previous = evaluate(items)
                 log_offset = len(run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout)
                 started = time.monotonic()
@@ -425,7 +436,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                 applied = time.monotonic()
                 if kind == 'burst':
                     verify_burst(write_span)
-                deadline = time.monotonic() + 3
+                deadline = time.monotonic() + WATCH_DEADLINE_SECONDS
                 stale = [False] * len(items)
                 first_correct = [None] * len(items)
                 while True:
@@ -437,7 +448,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                     for index, (item, old) in enumerate(zip(current, previous)):
                         if item['actual'] == item['expected'] and diagnostic_ok and first_correct[index] is None:
                             first_correct[index] = observed
-                        if observed_stale(item['actual'], item['expected'], old['actual'], diagnostic_ok, items[index].get('deleted', False)):
+                        if observed_stale(item['actual'], item['expected'], old['actual'], diagnostic_ok):
                             stale[index] = True
                     if all(value is not None for value in first_correct):
                         break
@@ -458,6 +469,13 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                         'write_span_seconds': write_span,
                         'write_start_offsets_seconds': [value - write_starts[0] for value in write_starts],
                         'status': status, 'output': item})
+        latencies = sorted(item['observed_monotonic'] - item['host_started_monotonic']
+                           for item in rec['metrics']['edits'] if item['status'] == 'correct')
+        rec['metrics'].update(results=len(rec['metrics']['edits']), correct=len(latencies),
+                              deadline_seconds=WATCH_DEADLINE_SECONDS,
+                              observation='host docker exec poll every 0.1 s; latency includes exec round trips',
+                              edit_to_result_p50_s=latencies[len(latencies) // 2] if latencies else None,
+                              edit_to_result_p95_s=latencies[int(.95 * (len(latencies) - 1))] if latencies else None)
         rec['correctness']['checks']['watch_run_completed'] = len(rec['metrics']['edits']) >= edits
         rec['correctness']['ok'] = rec['correctness']['checks']['watch_run_completed']
     except Exception as exc:

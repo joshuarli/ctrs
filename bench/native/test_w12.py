@@ -34,6 +34,17 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(workspace.classify_result('new', None, True), 'missed')
         self.assertEqual(workspace.classify_result(None, 'old-output', True), 'stale')
         self.assertEqual(workspace.classify_result(None, None, False), 'correct')
-        self.assertFalse(workspace.observed_stale(None, None, None, False, True))
-        self.assertTrue(workspace.observed_stale('old', None, 'old', True, True))
-        self.assertTrue(workspace.observed_stale('wrong', 'expected', 'old', True, False))
+        self.assertFalse(workspace.observed_stale('old', 'expected', 'old', True))
+        self.assertTrue(workspace.observed_stale('wrong', 'expected', 'old', True))
+        self.assertTrue(workspace.observed_stale('expected', 'expected', 'old', False))
+        self.assertFalse(workspace.observed_stale('expected', 'expected', 'old', True))
+
+    def test_phase_metrics_cover_scored_workflow(self):
+        phases = {name: {'operation_wall_seconds': float(i + 1)}
+                  for i, name in enumerate(('setup',) + workspace.BUILD_PHASES + ('cleanup',))}
+        metrics = workspace.phase_metrics(phases)
+        self.assertEqual(metrics['install_seconds'], 2.0)
+        self.assertEqual(metrics['branch_switch_seconds'], 8.0)
+        self.assertEqual(metrics['workflow_seconds'], sum(range(2, 9)))
+        with self.assertRaises(KeyError):
+            workspace.phase_metrics({'install': {'operation_wall_seconds': 1.0}})
