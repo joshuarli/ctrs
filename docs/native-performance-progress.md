@@ -82,11 +82,12 @@ The [W8 backing-allocation diagnostic](evidence/native-w8-content-state-2026-11-
 verified the three owned-file snapshots in a native diagnostic pair.
 The [W8 cancellation diagnostic](evidence/native-w8-content-state-2026-11-17.md#interrupted-delivery-and-retry)
 passed both native OrbStack conditions. Native ctrs reproduced a stalled
-registry body read after the last pull client disconnected. First prepare
-the narrow transport regression with the production stall deadline. Keep
-the W8 cutoff and exact retry acceptance. The next independent fixture
-slice is W5 pinned-input and phase-resource receipts for both bind and
-named-volume conditions.
+registry body read after the last pull client disconnected. The transport
+fix wakes that read and passes the production-deadline regression with
+the published 0.9.0 source plus the shutdown backport. Both native ctrs
+cancellation and retry conditions now pass on the signed candidate.
+If the host stays shared, complete W5 pinned-input and phase-resource
+receipts for both bind and named-volume conditions.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main

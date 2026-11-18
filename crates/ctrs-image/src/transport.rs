@@ -23,6 +23,7 @@ use std::time::Duration;
 /// is resumed from where it got to.
 const STALL: Duration = Duration::from_secs(60);
 
+use crate::cancel::{Cancel, RegisteredBody};
 use crate::registry::Error;
 
 pub(crate) enum Body {
@@ -57,6 +58,17 @@ pub(crate) struct Response {
     pub status: u16,
     headers: Vec<(String, String)>,
     body: Option<Box<dyn Read + Send>>,
+}
+
+struct ResponseReader {
+    body: h12tiny_client_sync::ResponseBody,
+    _registered: Option<RegisteredBody>,
+}
+
+impl Read for ResponseReader {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        self.body.read(output)
+    }
 }
 
 impl Response {
@@ -245,10 +257,6 @@ fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
 
         let status = response.status().as_u16();
         let response_headers: Vec<(String, String)> = response.headers().iter().map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned())).collect();
-        let mut it = response.into_body();
-        let _ = it.set_read_timeout(Some(h12.stall));
-        let reader: Box<dyn Read + Send> = Box::new(it);
-
         if matches!(status, 301 | 302 | 303 | 307 | 308)
             && let Some(location) = response_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.clone())
         {
@@ -268,6 +276,10 @@ fn h12tiny_send(h12: &H12TinyClient, req: Request) -> Result<Response, Error> {
             continue;
         }
 
+        let mut body = response.into_body();
+        let _ = body.set_read_timeout(Some(h12.stall));
+        let registered = if body.is_complete() { None } else { Cancel::register_body(&body)? };
+        let reader = Box::new(ResponseReader { body, _registered: registered });
         return Ok(Response { status, headers: response_headers, body: Some(reader) });
     }
     Err(Error::Http(format!("too many redirects (more than {H12_MAX_REDIRECTS})")))

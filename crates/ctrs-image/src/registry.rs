@@ -1444,44 +1444,38 @@ mod tests {
         never_arrives_case(test_client());
     }
 
-    fn cancelled_case(client: Client) {
-        let (data, digest) = blob();
+    #[test]
+    fn a_cancelled_download_closes_a_stalled_body_and_removes_the_partial_blob() {
+        let client = Client::new();
+        let data = vec![0x5a; 1024 * 1024];
+        let digest = sha256_digest(&data);
         let body = data.clone();
+        let (closed_tx, closed_rx) = std::sync::mpsc::sync_channel(1);
         let (host, served) = blob_server(move |_, c| {
-            // Half the blob, then silence with the connection open.
-            let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
-            let _ = c.write_all(&body[..body.len() / 2]);
-            std::thread::sleep(Duration::from_secs(5));
+            write!(c, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+            c.write_all(&body[..body.len() / 2]).unwrap();
+            c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            closed_tx.send(c.read(&mut [0])).unwrap();
         });
         let root = tmp_root("cancel");
         let store = Store::open(&root).unwrap();
         let r = Reference::parse(&format!("{host}/test/blob:1")).unwrap();
-        // Stalls only give up after a while: the cancel must not wait for that.
         let cancel = Cancel::new();
-        let c = cancel.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            c.cancel();
-        });
-        let started = Instant::now();
         let result = {
             let _on = cancel.enter();
-            client.download_with(&store, &r, &digest, u64::MAX, &|_| {}, &cancel)
+            client.download_with(&store, &r, &digest, u64::MAX, &|_| cancel.cancel(), &cancel)
         };
-        assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
-        assert!(!store.has_blob(&digest, data.len() as u64));
-        assert_eq!(std::fs::read_dir(root.join("tmp")).unwrap().count(), 0, "the partial blob is removed");
+        let peer_closed = closed_rx.recv_timeout(Duration::from_secs(1));
         quit(&host);
-        assert_eq!(served.join().unwrap(), [0]);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_cancelled_download_stops_at_once_and_leaves_nothing() {
-        // The h12tiny body read wakes at the stall; 1 s keeps the test quick.
-        let client = Client { transport: Transport::test_h12tiny(Duration::from_secs(1)), credentials: None };
-        cancelled_case(client);
+        let requests = served.join().unwrap();
+        let has_blob = store.has_blob(&digest, data.len() as u64);
+        let partial_files = std::fs::read_dir(root.join("tmp")).unwrap().count();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+        assert!(matches!(peer_closed, Ok(Ok(0))), "{peer_closed:?}");
+        assert!(!has_blob);
+        assert_eq!(partial_files, 0);
+        assert_eq!(requests, [0]);
     }
 
     #[test]

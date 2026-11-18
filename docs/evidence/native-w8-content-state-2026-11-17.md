@@ -92,19 +92,54 @@ The daemon registered the last client leaving about half a second into the
 pull, then exited the pull when the registry's 10-second hold expired.
 The body read in `crates/ctrs-image/src/transport.rs` has a 60-second
 production stall deadline. The cancel flag is checked after that blocking
-read returns. The existing Rust test uses a 1-second transport timeout,
-so it allows the timeout to wake the read. ctrs derived and retry proof
-remain open. Keep the fixture cutoff and require a transport regression
-that wakes a blocked body read on cancellation with the production
-stall deadline in force.
+read returns. The old Rust test used a 1-second transport timeout,
+which let the timeout wake the read.
 
 The failing ctrs run `w8-cancel-0a9f047561ed` used binary SHA256
 `db20b2106a9faadf8760e65a11357155166b2ed77fb6de784d63defe0ddbaada`.
 Its daemon logged the last client leaving at `00:15:14.091Z` and the
 pull stopping at `00:15:23.588Z`. The transport uses
 `h12tiny-client-sync` 0.9.0. The crate's current source is in the
-smolith workspace. Its blocking response body exposes a read timeout
-but does not expose a connection shutdown handle.
+smolith workspace. The published response body exposes only a read
+timeout. The fix pins smolith's `448a24c7e799681d1a6a33b7668e47bbceb06587`,
+a backport to the exact published 0.9.0 source. The newer smolith tree
+also changes TLS session resumption. The backport leaves the normalizer,
+trust code and locked dependency versions identical to the published
+source. [Upstream shutdown API](https://github.com/laputa-systems/smolith/pull/12)
+
+ctrs registers a shutdown handle for each active pull response body.
+The handle is released with the body. When the last client leaves,
+the cancellation flag and registration lock cover new and existing
+bodies, and shutdown wakes any blocked read. The transport retains the
+60-second stall deadline for normal responses.
+
+The refreshed registry regression uses the production client and a
+server that writes a partial blob then waits for peer closure. It
+failed on the published transport with a server read timeout and
+passed on the pinned backport, including one GET, no completed blob
+and no partial file. All 49 ctrs-image tests, four daemon pull tests,
+and 16 backport tests with TLS enabled passed on macOS.
+
+Native ctrs passed retained (`w8-cancel-d3b47275ea2f`) and derived
+(`w8-cancel-8700473d1919`) with the locked backport. Each run interrupted
+after 65,536 bytes and observed peer closure before the fixture cutoff.
+Retry delivered 120,861,275 and 120,861,276 bytes for the held layer,
+respectively. Both runs verified the final image identity and marker
+contents, retained portfolio, and owned cleanup. The first candidate
+run pointed at an initramfs-only asset directory and failed the retry
+marker boot. The final runs used a complete verified guest directory.
+
+The signed binary SHA256 was
+`ac052ccea903ae53986345d67706159ced469f980ff993d3208c6c78714e352e`
+(6,617,104 bytes). It used the campaign kernel SHA256
+`35087713fd7b1b152b1ac0333e42edbcee482c82c6e695f27a8f126c271eee43`
+and initramfs SHA256
+`6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2`.
+Rebuild the binary with `cargo build --locked --release -p ctrs --bin ctrs`,
+sign it with `crates/ctrs/ctrs.entitlements` and set `CTRS_GUEST_DIR` to a
+directory containing the verified `Image`, `initramfs.cpio` and data-disk
+template. Run the cancellation command above for both content states.
+The runs were correctness checks with scoring disabled.
 
 ## Backing allocation during deployment
 
