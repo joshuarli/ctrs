@@ -1,5 +1,5 @@
 import json
-import os
+from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -105,7 +105,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         rec['inputs'].update(seed='w13-v1-seed-2026', sha256_per_stream=digest,
                              sender_storage='host local disk or container tmpfs', image_id=image)
         sampler, trace = runner.start_sampler(engine, directory)
-        def transfer(server_where, client_where, host, bind, run_direction):
+        def transfer(server_where, client_where, host, bind, run_direction, phase=nullcontext):
             server_file = str(host_file) if server_where == 'host' else guest_file
             client_file = str(host_file) if client_where == 'host' else guest_file
             result = str(directory / (uuid.uuid4().hex + '.json')) if server_where == 'host' else '/w13/' + uuid.uuid4().hex + '.json'
@@ -115,8 +115,9 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 time.sleep(1)
                 if proc.poll() is not None:
                     raise RuntimeError('server exited: ' + proc.communicate()[1])
-                data = json.loads(invoke(client_where, ['client', host, port, run_direction, streams, client_file, part, digest], timeout=600))
-                out, err = proc.communicate(timeout=120)
+                with phase():
+                    data = json.loads(invoke(client_where, ['client', host, port, run_direction, streams, client_file, part, digest], timeout=600))
+                    out, err = proc.communicate(timeout=120)
                 if proc.returncode:
                     raise RuntimeError(f'server exit {proc.returncode}: {err}')
                 received = json.loads(Path(result).read_text() if server_where == 'host' else engine.sh(['exec', server_where, 'cat', result]).stdout)
@@ -141,20 +142,20 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         elif path == 'container-to-container':
             server_where, client_where, host, bind = server, client, server, '0.0.0.0'
         else:
-            server_where, client_where, host, bind = 'host', client, 'host.docker.internal', '0.0.0.0'
+            server_where, client_where, host, bind = 'host', client, 'host.docker.internal', '127.0.0.1'
         rec['metrics']['server_bind_address'] = bind
         for i in range(repeats):
             started = time.monotonic()
             try:
-                with runner.resource_phase(engine, rec, f'transfer_{i + 1}'):
-                    attempt = transfer(server_where, client_where, host, bind, direction)
+                attempt = transfer(server_where, client_where, host, bind, direction,
+                                   lambda: runner.resource_phase(engine, rec, f'transfer_{i + 1}'))
             except Exception as exc:
                 attempt = {'ok': False, 'seconds': time.monotonic() - started,
                            'verified_bytes': 0, 'partial_bytes': None,
                            'partial_bytes_complete': False, 'receivers': [],
                            'errors': [f'{type(exc).__name__}: {exc}'],
                            'goodput_bytes_per_second': None}
-            cpu = rec['resources']['phases'][f'transfer_{i + 1}']['cpu_seconds']
+            cpu = rec['resources'].get('phases', {}).get(f'transfer_{i + 1}', {}).get('cpu_seconds')
             attempt['engine_cpu_seconds_per_verified_gib'] = cpu / (attempt['verified_bytes'] / 1024**3) if cpu is not None and attempt['ok'] else None
             attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second']) if attempt['ok'] else None
             record_attempt(rec, attempt)
@@ -180,5 +181,4 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 if removed.returncode:
                     rec['correctness']['ok'] = False
                     rec['validation_errors'].append('cleanup failed: ' + name)
-        if host_file.exists() if 'host_file' in locals() else False:
-            host_file.unlink()
+        (directory / 'artifact.bin').unlink(missing_ok=True)
