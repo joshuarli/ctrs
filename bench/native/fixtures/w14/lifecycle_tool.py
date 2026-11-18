@@ -2,11 +2,15 @@ import concurrent.futures
 from contextlib import nullcontext
 import errno
 import json
+import signal
 import socket
 import socketserver
 import sys
 import threading
 import time
+import uuid
+
+RECONNECT_DEADLINE_SECONDS = 60
 
 
 def send(sock, value):
@@ -30,8 +34,10 @@ def response(ident, chunk=0):
 
 
 def verify(value, ident, chunk=0):
+    instance = value.pop('instance', None) if isinstance(value, dict) else None
     if value != response(ident, chunk):
         raise ValueError('wrong data')
+    return instance
 
 
 def classify(exc):
@@ -64,6 +70,7 @@ class Server(socketserver.ThreadingTCPServer):
     def __init__(self, address):
         self.lock = threading.Lock()
         self.open_clients = 0
+        self.instance = uuid.uuid4().hex
         super().__init__(address, Handler)
 
 
@@ -82,7 +89,7 @@ class Handler(socketserver.BaseRequestHandler):
                         self.server.open_clients += 1
                     active = True
                 if req['op'] == 'get':
-                    send(self.request, response(req['id']))
+                    send(self.request, {**response(req['id']), 'instance': self.server.instance})
                 elif req['op'] in ('stream', 'cancel'):
                     for i in range(req['chunks']):
                         time.sleep(req['interval'])
@@ -103,7 +110,7 @@ def connect(host, port, timeout):
 
 def get(sock, ident):
     send(sock, {'op': 'get', 'id': ident})
-    verify(receive(sock), ident)
+    return verify(receive(sock), ident)
 
 
 def count(host, port, timeout=2):
@@ -130,31 +137,35 @@ def run(host, port, mode, clients=32, operations=100, chunks=50, interval=0.02,
     def worker(i):
         result = {'id': i, 'latencies_ms': [], 'lateness_ms': [], 'successes': 0, 'errors': [], 'chunks_received': 0}
         sock = None
+        instance = None
         def failure(exc):
             result['errors'].append(classify(exc))
-        def reconnect(start):
-            deadline = time.monotonic() + timeout
+        def reconnect(start, previous=None):
+            window = result.setdefault('window_errors', [])
+            deadline = start + RECONNECT_DEADLINE_SECONDS
             while time.monotonic() < deadline:
                 try:
                     with connect(host, port, min(1, timeout)) as s:
-                        get(s, i)
-                    result['reconnect_ms'] = (time.monotonic() - start) * 1000
-                    return
+                        seen = get(s, i)
+                    if previous is None or seen != previous:
+                        result['reconnect_ms'] = (time.monotonic() - start) * 1000
+                        return
+                    window.append('previous_instance')
                 except (OSError, ValueError) as exc:
-                    failure(exc)
-                    time.sleep(0.02)
+                    window.append(classify(exc))
+                time.sleep(0.02)
+            result['errors'].append('reconnect_deadline')
         try:
             if mode != 'fresh':
                 sock = connect(host, port, timeout)
-                get(sock, i)
+                instance = get(sock, i)
             barrier.wait(timeout=timeout + 10)
             if mode == 'reconnect':
-                barrier.wait(timeout=150)
+                barrier.wait(timeout=timeout + 10)
                 sock.close(); sock = None
+                reconnect(restart_at[0], instance)
                 if restart_error[0]:
                     result['errors'].append('restart_failed')
-                else:
-                    reconnect(restart_at[0])
                 return result
             if mode == 'idle-resume':
                 time.sleep(idle_seconds)
@@ -207,14 +218,15 @@ def run(host, port, mode, clients=32, operations=100, chunks=50, interval=0.02,
             try:
                 barrier.wait(timeout=timeout + 10)
                 restart_at[0] = time.monotonic()
-                restart()
-            except Exception as exc:
-                restart_error[0] = str(exc)
-            finally:
+                barrier.wait(timeout=timeout + 10)
+            except threading.BrokenBarrierError as exc:
+                restart_error[0] = 'barrier: ' + str(exc)
+                barrier.abort()
+            else:
                 try:
-                    barrier.wait(timeout=150)
-                except threading.BrokenBarrierError:
-                    pass
+                    restart()
+                except Exception as exc:
+                    restart_error[0] = str(exc)
         results = [f.result() for f in futures]
     try:
         cleanup_ms, leaked = wait_closed(host, port, timeout)
@@ -241,10 +253,12 @@ def run(host, port, mode, clients=32, operations=100, chunks=50, interval=0.02,
     latencies = [x for r in results for x in r['latencies_ms']]
     late = [x for r in results for x in r['lateness_ms']]
     reconnects = [r['reconnect_ms'] for r in results if 'reconnect_ms' in r]
+    window = [e for r in results for e in r.get('window_errors', [])]
     expected = clients * operations if mode in ('fresh', 'persistent') else clients
     successes = sum(r['successes'] for r in results) if mode != 'reconnect' else len(reconnects)
     return {'clients': results, 'successes': successes, 'expected_successes': expected,
-            'errors': {key: errors.count(key) for key in ('refused', 'reset', 'timeout', 'wrong_data', 'other', 'restart_failed')},
+            'errors': {key: errors.count(key) for key in ('refused', 'reset', 'timeout', 'wrong_data', 'other', 'restart_failed', 'reconnect_deadline')},
+            'restart_window_errors': {key: window.count(key) for key in sorted(set(window))},
             'latency_p50_ms': percentile(latencies, 50), 'latency_p95_ms': percentile(latencies, 95),
             'latency_p99_ms': percentile(latencies, 99), 'chunk_lateness_p99_ms': percentile(late, 99),
             'chunks_received': sum(r['chunks_received'] for r in results),
@@ -255,5 +269,6 @@ def run(host, port, mode, clients=32, operations=100, chunks=50, interval=0.02,
 
 if __name__ == '__main__':
     if sys.argv[1] == 'server':
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         with Server((sys.argv[2], int(sys.argv[3]))) as server:
             server.serve_forever()

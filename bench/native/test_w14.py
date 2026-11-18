@@ -52,18 +52,34 @@ class LifecycleTests(unittest.TestCase):
                 if mode == 'cancel':
                     self.assertIsNotNone(result['post_cancel_latency_ms'])
 
-    def test_reconnect_restart_callable(self):
+    def replace_server(self):
+        old = self.server
+        old.shutdown()
+        old.server_close()
+        self.thread.join()
+        self.server = tool.Server(('127.0.0.1', self.port))
+        self.thread = threading.Thread(target=self.server.serve_forever)
+        self.thread.start()
+
+    def test_reconnect_requires_new_instance(self):
         calls = []
-        result = tool.run('127.0.0.1', self.port, 'reconnect', clients=3, timeout=2,
-                          restart=lambda: calls.append('restart'))
+        def restart():
+            calls.append('restart')
+            threading.Timer(0.2, self.replace_server).start()
+        result = tool.run('127.0.0.1', self.port, 'reconnect', clients=3, timeout=2, restart=restart)
         self.assertEqual(calls, ['restart'])
         self.assertTrue(result['ok'], result)
         self.assertEqual(result['successes'], 3)
-        self.assertIsNotNone(result['reconnect_p99_ms'])
+        self.assertGreaterEqual(result['reconnect_p99_ms'], 200)
+        self.assertGreater(result['restart_window_errors'].get('previous_instance', 0), 0)
 
     def test_restart_failure_is_preserved(self):
         def restart():
             raise RuntimeError('failure')
+        original = tool.RECONNECT_DEADLINE_SECONDS
+        tool.RECONNECT_DEADLINE_SECONDS = 0.3
+        self.addCleanup(setattr, tool, 'RECONNECT_DEADLINE_SECONDS', original)
         result = tool.run('127.0.0.1', self.port, 'reconnect', clients=2, timeout=2, restart=restart)
         self.assertFalse(result['ok'])
+        self.assertEqual(result['errors']['reconnect_deadline'], 2)
         self.assertEqual(result['errors']['restart_failed'], 2)
