@@ -12,7 +12,8 @@ image's shell and the guest's tracefs.
 
 ```sh
 TMPDIR=$PWD/.work/tmp python3 bench/native/diagnostics/w2_wake_trace.py \
-  [--engines ctrs,orbstack] [--operations 50000] [--resource-lane matched]
+  [--engines ctrs,orbstack] [--operations 50000] [--resource-lane matched] \
+  [--client-location host|guest]
 ```
 
 Each `sched_waking` is classified by the waker's CPU and the target CPU's

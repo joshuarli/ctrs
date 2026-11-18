@@ -200,7 +200,48 @@ Its IPI call sites also differ, which indicates a different wake path. This
 justifies a bounded kernel-series experiment: the same `ctrs.config` and
 patches on 7.3.5 stable.
 
-## Next profiling boundary
+## Bounded hypotheses tested after the trace (all rejected)
+
+Interleaved ctrs-vs-ctrs pilots used the guarded driver: a kernel identity
+check before every trial and refusal to adopt a running daemon. Each block
+ran 20,000 exact C8 operations with matched seeds at 9 vCPUs, and every
+trial was exact.
+
+| Candidate | Blocks | IPI1/op ratio | Host CPU/success ratio | Decision |
+| --- | ---: | --- | --- | --- |
+| 7.3.5 stable, same config and patches (`e0f493d1…`, `PREEMPT_LAZY` forced) | 3 | 0.98, 1.02, 0.97 | 0.99, 1.02, 0.98 | neutral, reject |
+| `nohlt` idle polling (diagnostic only, 886% idle host CPU) | 2 | 0.97, 0.94 | 5.84, 5.64 | refutes the wake-latency feedback hypothesis |
+
+7.3.5 required config mapping: `PREEMPT_VOLUNTARY` is not selectable with
+`ARCH_HAS_PREEMPT_LAZY`; `MEMORY_BALLOON`/`BALLOON_COMPACTION` became
+`BALLOON`/`BALLOON_MIGRATION`; UDP-Lite is removed. Patch 0002's include
+hunk was rebased (context only). Stock arm64 7.3 still lacks
+`TIF_POLLING_NRFLAG`. The `idle=poll` spelling is x86-only and was ignored
+on arm64 (runs `mcab-*-20261118T092900`, invalid); the generic `nohlt`
+works. Runs: `mcab-*-20261118T092412` (7.3.5) and `mcab-*-20261118T093204`
+(nohlt).
+
+With the load client inside the guest on both engines
+(`wake-20261118T093336`, no port-forward path), ctrs still makes 18.3
+uvicorn→uvicorn wakes per request against OrbStack's 11.0. Only 9% of
+ctrs wakes land on the waker's CPU, against 43% on OrbStack. OrbStack's
+in-guest rps was low (1,064), which confounds that side. The port-forward
+path is not the cause.
+
+## Status and parked hypotheses (2026-11-18)
+
+W2 tuning is parked at the owner's direction in favor of filesystem and
+networking coverage. What is established on this host: the matched-lane
+CPU/success gap is guest API system CPU. It comes from API thread-handoff
+wakeups that land on idle vCPUs. It does not depend on guest kernel version
+(6.18 vs 7.3), SCHED_MC, idle state or the port-forward path. Open,
+unverified explanations: OrbStack guest patches or exposed cache/cluster
+topology (L2 shared 0–3) that change wake placement, and VMM-level vCPU
+scheduling. The installed-default lane already wins every W2 cell. Do not
+retry SCHED_MC, LSE, HZ/PREEMPT, 7.3.5 or idle polling without new
+evidence.
+
+## Next profiling boundary (parked)
 
 Measure which wakeups land on idle vCPUs, and from which API futex paths:
 per-wake target-CPU idle state and waker/wakee placement. Use

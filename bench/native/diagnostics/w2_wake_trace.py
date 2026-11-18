@@ -122,6 +122,7 @@ def main() -> int:
     parser.add_argument("--delay", type=float, default=6.0, help="seconds after workload start")
     parser.add_argument("--window", type=float, default=2.0)
     parser.add_argument("--resource-lane", choices=runner.RESOURCE_LANES, default="matched")
+    parser.add_argument("--client-location", choices=("host", "guest"), default="host")
     args = parser.parse_args()
     engines = args.engines.split(",")
     if set(engines) - {"ctrs", "orbstack"} or len(set(engines)) != len(engines):
@@ -162,7 +163,8 @@ def main() -> int:
         for index, name in enumerate(engines):
             rec = runner.run_one(ctx, name, "W2", "warm", pair_id=1, order_index=index,
                                  keep_warm=True, slot=name, concurrency=8, duration=20.0,
-                                 write_ratio=0.3, seed=args.seed, operations=args.operations)
+                                 write_ratio=0.3, seed=args.seed, operations=args.operations,
+                                 client_location=args.client_location)
             trace = traces.get(name)
             out = {"engine": name, "trial_correct": rec["correctness"]["ok"],
                    "validation_errors": rec.get("validation_errors"),
