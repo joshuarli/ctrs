@@ -68,6 +68,13 @@ walk('/app');packages('/app/node_modules');console.log(JSON.stringify({files:cou
     return counts
 
 
+def ready_image(engine, image, label, spec):
+    result = engine.sh(['run', '--rm', '--label', label, '--network', 'none',
+                        '--entrypoint', 'node', image, '--version'], timeout=120)
+    if result.stdout.strip() != spec['tools']['node']:
+        raise ValueError('W12 runtime readiness version mismatch')
+
+
 def trial_w12(ctx, engine, state, layout='full-bind'):
     import os
     import subprocess
@@ -134,7 +141,10 @@ fs.writeFileSync(p,next)}'''
             raise ValueError('W12 source archive missing or differs from pin')
         engine.ensure_up()
         check_image()
+        ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
+        if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
+            raise ValueError('W12 engine resource ownership is unverified')
         expected = spec['receipts']
         mounts = []
         with phase('setup'):
@@ -317,7 +327,10 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         inspected = json.loads(engine.sh(['image', 'inspect', image]).stdout)[0]
         if inspected['Id'] != image or inspected['Architecture'] != 'arm64' or inspected['RootFS']['Layers'] != spec['prepared_image']['diff_ids']:
             raise ValueError('W12 image identity mismatch')
+        ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
+        if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
+            raise ValueError('W12 watcher resource ownership is unverified')
         source.mkdir()
         subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(source)], check=True)
         base_sources = {path: (source / path).read_text() for path in paths}

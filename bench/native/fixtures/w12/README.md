@@ -25,6 +25,8 @@ from numeric chunk IDs. It separately hashes the main and polyfills runtime
 contents after replacing those numeric IDs. Other content hashes remain in
 the manifest receipt. Counts cover regular files and bytes under `/app` after
 installation, and installed packages under `node_modules`.
+An owned, network-isolated Node readiness check starts the guest before
+resource sampling. Setup is recorded separately and is not scored.
 
 W12-watch uses Kutt's TypeScript compiler in watch mode with
 `TSC_WATCHFILE=UseFsEvents` and `TSC_WATCHDIRECTORY=UseFsEvents`. It records
