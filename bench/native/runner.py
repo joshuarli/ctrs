@@ -19,6 +19,7 @@ import ownership
 import watch_loop
 import collect
 import resource_cells
+import resource_cycles
 import recovery_client
 import recovery_trace
 import ci_jobs
@@ -244,6 +245,7 @@ W8_IMAGES = [
 CHECK_COMPONENTS = {
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
     "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
+    "w5": ("test_w5", "test_resource_cycles", "test_reporting", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
@@ -2264,31 +2266,46 @@ def trial_w3(ctx, engine: Engine, state: str) -> dict:
         engine.sh(["volume", "rm", "-f", vol], check=False, timeout=60)
 
 
+def w5_phase_receipts(identity, phases, samples, iterations):
+    receipts = {}
+    for mode in ("bind", "volume"):
+        for phase in ("setup", "verify-inputs", *(f"edit-{i}" for i in range(iterations)), "cleanup"):
+            name = f"{mode}-{phase}"
+            if name in phases:
+                receipts[name] = resource_cycles.phase_summary(identity, phases[name], samples)
+            else:
+                receipts[name] = {"status": "unknown", "errors": ["phase boundaries unavailable"]}
+    return receipts
+
+
 def trial_w5(ctx, engine: Engine, state: str,
-             iters: int = 5, fixture_version: str = "w5-v2-marked") -> dict:
+             iters: int = 5, fixture_version: str = watch_loop.RECEIPT_VERSION) -> dict:
     """Persistent real TS app watch/rebuild/test; bind and volume kept separate."""
     trial_dir = ctx.trial_dir(engine.name, "W5", state)
     rec = ctx.new_record(engine, "W5", state, trial_dir)
     sampler = trace = None
     try:
         spec = watch_loop.contract()
-        if fixture_version != spec['fixture_version']:
+        if fixture_version != watch_loop.RECEIPT_VERSION:
             raise ValueError("W5 fixture version mismatch")
         archive = WORK / "inputs" / f"marked-{spec['source']['version']}.tar.gz"
-        if not archive.is_file() or sha256_file(archive) != spec['source']['sha256']:
-            raise ValueError("W5 pinned source unavailable; run prepare first")
+        source = watch_loop.pinned_source(archive)
         engine.ensure_up()
-        rec["inputs"] = watch_loop.check_image(engine)
+        rec["inputs"] = watch_loop.check_image(engine, source)
+        rec["paired_inputs"] = {key: rec["inputs"][key] for key in
+                                ("layers", "tools", "source_sha256", "dependency_lock_sha256")}
         sampler, trace = start_sampler(engine, trial_dir)
         for mode in ("bind", "volume"):
-            result = watch_loop.run_mode(engine, trial_dir / mode, mode, ctx.run_id,
+            result = watch_loop.run_mode(engine, trial_dir / mode, mode, rec["trial_id"],
                                          archive, iters,
                                          lambda phase: resource_phase(engine, rec, f"{mode}-{phase}"),
-                                         docker_cli=DOCKER)
+                                         docker_cli=DOCKER, image_id=rec["inputs"]["image_id"],
+                                         source_receipt=source)
             rec["metrics"][f"{mode}_edit_to_result_median_s"] = result["median_s"]
             rec["metrics"][f"{mode}_setup_s"] = result["setup_s"]
             rec["metrics"][f"{mode}_edits_s"] = [e["edit_to_result_s"] for e in result["edits"]]
             rec["correctness"]["checks"][f"{mode}_persistent_exact_results"] = True
+            rec["correctness"]["checks"][f"{mode}_pinned_mount"] = True
         rec["metrics"]["fixture_version"] = fixture_version
         rec["correctness"]["ok"] = True
     except Exception as exc:
@@ -2300,6 +2317,16 @@ def trial_w5(ctx, engine: Engine, state: str,
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
+            try:
+                samples = [json.loads(line) for line in trace.read_text().splitlines()]
+                receipts = w5_phase_receipts(engine.measurement_identity, rec["resources"].get("phases", {}),
+                                              samples, iters)
+                rec["resources"]["phase_receipts"] = receipts
+                missing = [name for name, receipt in receipts.items() if receipt["status"] != "ok"]
+                if missing:
+                    raise ValueError("unverified W5 resource phases: " + ", ".join(missing))
+            except (OSError, ValueError, KeyError) as exc:
+                rec.update(measurement_valid=False, measurement_invalidation=str(exc))
     return rec
 
 
@@ -3118,6 +3145,13 @@ def save_w8_portfolio(updates):
 
 
 def cmd_prepare(args) -> int:
+    scratch = WORK / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch, prefix="w5-common-") as temporary:
+        return prepare_engines(args, Path(temporary) / "marked.tar")
+
+
+def prepare_engines(args, w5_image_archive: Path) -> int:
     """Untimed setup: pull service images and build the fixture API image
     on each selected engine."""
     engines = args.engines.split(",")
@@ -3157,7 +3191,7 @@ def cmd_prepare(args) -> int:
             w5_source = watch_loop.contract()["source"]
             w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
                 "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")
-            watch_loop.prepare_image(engine, w5_archive, WORK / "tmp")
+            watch_loop.prepare_shared_image(engine, w5_archive, w5_image_archive)
 
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side

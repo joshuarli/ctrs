@@ -2,17 +2,19 @@
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import queue
 import statistics
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
 
 FIXTURE = Path(__file__).parent / 'fixtures/w5-v2'
 IMAGE = 'np-w5-marked:v2'
+RECEIPT_VERSION = 'w5-v3-marked-receipts'
 
 
 def contract():
@@ -38,20 +40,80 @@ def prepare_image(engine, archive, scratch):
                    '--build-arg', f"NODE_IMAGE={spec['tools']['image']}", '-t', IMAGE, str(context)], timeout=600)
 
 
-def check_image(engine):
+def prepare_shared_image(engine, source_archive, image_archive):
+    if image_archive.is_file():
+        engine.sh(['image', 'load', '--input', str(image_archive)], timeout=180)
+    else:
+        prepare_image(engine, source_archive, image_archive.parent)
+        engine.sh(['image', 'save', '--output', str(image_archive), IMAGE], timeout=180)
+        if not image_archive.is_file():
+            raise ValueError('W5 image export missing')
+
+
+def pinned_source(archive):
+    source = contract()['source']
+    if not archive.is_file() or digest(archive) != source['sha256']:
+        raise ValueError('W5 pinned source unavailable')
+    files = {}
+    lock = None
+    root = f"{source['name']}-{source['version']}"
+    with tarfile.open(archive, 'r:gz') as source_archive:
+        for member in source_archive:
+            path = PurePosixPath(member.name)
+            if not path.parts or path.parts[0] != root or '..' in path.parts:
+                raise ValueError('unexpected path in pinned W5 archive')
+            if member.isdir():
+                continue
+            name = path.relative_to(root).as_posix()
+            if not member.isfile() or name in files or name == '.':
+                raise ValueError('nonregular or duplicate file in pinned W5 archive')
+            with source_archive.extractfile(member) as file:
+                data = file.read()
+            files[name] = hashlib.sha256(data).hexdigest()
+            if name == 'package-lock.json':
+                lock = json.loads(data)
+    if files.get('package-lock.json') != source['lock_sha256']:
+        raise ValueError('W5 dependency lock SHA256 mismatch')
+    return {'files': files, 'esbuild': lock['packages']['node_modules/esbuild']['version'],
+            'source_sha256': source['sha256'], 'dependency_lock_sha256': source['lock_sha256']}
+
+
+def check_image(engine, source):
     spec = contract()
     image = json.loads(engine.sh(['image', 'inspect', IMAGE]).stdout)[0]
     if image['Architecture'] != 'arm64':
         raise ValueError('W5 requires native ARM64 image')
     inputs = ('watch.mjs', 'edit.mjs', 'verify.mjs', 'workload.json')
     script = "const fs=require('node:fs'),c=require('node:crypto'),p=require('node:child_process');let files={};for(const f of JSON.parse(process.argv[1]))files[f]=c.createHash('sha256').update(fs.readFileSync(f)).digest('hex');console.log(JSON.stringify({node:process.version,npm:p.execFileSync('npm',['--version'],{encoding:'utf8'}).trim(),esbuild:require('esbuild/package.json').version,files}));"
-    tools = json.loads(engine.sh(['run', '--rm', '--entrypoint', 'node', IMAGE, '-e', script, json.dumps(inputs)]).stdout)
-    if tools['node'] != spec['tools']['node'] or tools['npm'] != spec['tools']['npm']:
+    tools = json.loads(engine.sh(['run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'node',
+                                  image['Id'], '-e', script, json.dumps(inputs)]).stdout)
+    if (tools['node'] != spec['tools']['node'] or tools['npm'] != spec['tools']['npm']
+            or tools['esbuild'] != source['esbuild']):
         raise ValueError('W5 runtime tool version mismatch')
     if tools['files'] != {name: digest(FIXTURE / name) for name in inputs}:
         raise ValueError('W5 image does not match current fixture inputs; prepare it again')
     return {'image_id': image['Id'], 'layers': image['RootFS']['Layers'], 'tools': tools,
-            'source_sha256': spec['source']['sha256'], 'dependency_lock_sha256': spec['source']['lock_sha256']}
+            'source_sha256': source['source_sha256'], 'dependency_lock_sha256': source['dependency_lock_sha256']}
+
+
+def verify_mounted_inputs(engine, name, mode, mount_source, image_id, source, directory):
+    inspected = json.loads(engine.sh(['inspect', name]).stdout)[0]
+    mounts = [mount for mount in inspected['Mounts'] if mount['Destination'] == '/src']
+    identity_key = 'Name' if mode == 'volume' else 'Source'
+    if (inspected['Image'] != image_id or len(mounts) != 1 or mounts[0]['Type'] != mode
+            or mounts[0].get(identity_key) != mount_source or mounts[0].get('RW') is not True):
+        raise ValueError('W5 watcher image or mount identity mismatch')
+    script = (FIXTURE / 'mounted-inputs.mjs').read_text()
+    observed = json.loads(engine.sh(['exec', name, 'node', '--input-type=module', '-e',
+                                    script, '/src', '/opt/app']).stdout)
+    receipt = {'image_id': image_id, 'mount': mounts[0], 'source_sha256': source['source_sha256'],
+               'observed': observed}
+    (directory / 'mounted-inputs.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    expected_app = {name: sha for name, sha in source['files'].items()
+                    if name.startswith('bin/') or name in ('package.json', 'package-lock.json')}
+    if observed != {'mounted_files': source['files'], 'app_files': expected_app}:
+        raise ValueError('W5 mounted source or installed CLI/lock differs from pinned archive')
+    return inspected['State']
 
 
 def edit_source(root, state, spec):
@@ -74,7 +136,7 @@ def validate_event(event, state, spec):
         raise ValueError(f'W5 unexpected rebuild/test result: {event}')
 
 
-def run_mode(engine, directory, mode, run_id, archive, iterations, phase, *, docker_cli):
+def run_mode(engine, directory, mode, run_id, archive, iterations, phase, *, docker_cli, image_id, source_receipt):
     if mode not in ('bind', 'volume') or iterations < 1:
         raise ValueError('invalid W5 mode or edit count')
     spec = contract()
@@ -96,14 +158,17 @@ def run_mode(engine, directory, mode, run_id, archive, iterations, phase, *, doc
             if mode == 'bind':
                 source = directory / 'source'
                 subprocess.run([sys.executable, str(FIXTURE / 'prepare.py'), str(archive), str(source)], check=True)
-                mount = f'{source.resolve()}:/src'
+                mount_source = str(source.resolve())
             else:
                 engine.sh(['volume', 'create', '--label', label, volume])
-                engine.sh(['run', '--rm', '--label', label, '-v', f'{volume}:/src', '--entrypoint', 'sh', IMAGE,
-                           '-c', 'cp -a /opt/seed/. /src/'])
-                mount = f'{volume}:/src'
-            proc = subprocess.Popen([docker_cli, 'run', '--name', name, '--label', label,
-                                     '--network', 'none', '-v', mount, IMAGE], env=engine.env(),
+                info = json.loads(engine.sh(['volume', 'inspect', volume]).stdout)[0]
+                if (info.get('Labels') or {}).get('dev.ctrs.campaign.run') != run_id:
+                    raise ValueError('W5 volume population ownership mismatch')
+                engine.sh(['run', '--rm', '--pull=never', '--network', 'none', '--label', label, '-v',
+                           f'{volume}:/src', '--entrypoint', 'sh', image_id, '-c', 'cp -a /opt/seed/. /src/'])
+                mount_source = volume
+            proc = subprocess.Popen([docker_cli, 'run', '--pull=never', '--name', name, '--label', label,
+                                     '--network', 'none', '-v', f'{mount_source}:/src', image_id], env=engine.env(),
                                     stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1)
             def reader():
                 try:
@@ -128,7 +193,8 @@ def run_mode(engine, directory, mode, run_id, archive, iterations, phase, *, doc
                 validate_event(json.loads(line), state, spec)
                 return received
             initial_event = receive('original')
-            initial = json.loads(engine.sh(['inspect', name]).stdout)[0]['State']
+        with phase('verify-inputs'):
+            initial = verify_mounted_inputs(engine, name, mode, mount_source, image_id, source_receipt, directory)
             if initial['Pid'] <= 0 or not initial['Running']:
                 raise ValueError('W5 watcher is not running')
         for index in range(iterations):

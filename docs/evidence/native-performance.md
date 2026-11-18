@@ -2403,6 +2403,23 @@ failure. The integrated harness suite had 88 passing tests before the additional
 cleanup regression. A container cleanup failure cannot skip owned volume cleanup.
 W10 tracing remains a separate uncommitted product slice; no cache TTL change.
 
+### W5 v3 mounted inputs and resource receipts
+
+The runner verifies the immutable image ID, Node, npm and locked esbuild.
+It hashes each file inside the watcher's bind or volume mount and compares
+the set to the pinned Marked archive. It checks the installed CLI, package
+manifest and dependency lock against that source. A mismatch fails the
+trial and preserves the observed receipt. The report requires matching
+DiffIDs, tools and input hashes across engines.
+
+Native correctness run `w5-receipts-f37eb8347346` used the common image
+archive SHA256 `04c27dcc420fd25cc9f1510f64d874d04afd0219f821c40863896be98f838876`
+and the signed ctrs binary from the W8 cancellation proof. Both engines
+verified the same 386 source files in each mount and completed all five
+exact edits per mount. All 32 resource phase receipts passed ownership and
+counter coverage. The run is ineligible for scoring. Reproduce with the
+[W5 fixture instructions](../../bench/native/fixtures/w5-v2/README.md).
+
 ## Independent W10 recovery trace: readiness and cache expiry
 
 A bounded diagnostic entrypoint records Python entry, application dependency

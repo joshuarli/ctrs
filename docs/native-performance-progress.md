@@ -86,8 +86,11 @@ registry body read after the last pull client disconnected. The transport
 fix wakes that read and passes the production-deadline regression with
 the published 0.9.0 source plus the shutdown backport. Both native ctrs
 cancellation and retry conditions now pass on the signed candidate.
-If the host stays shared, complete W5 pinned-input and phase-resource
-receipts for both bind and named-volume conditions.
+[W5 mounted-input and phase-resource receipts](evidence/native-performance.md#w5-v3-mounted-inputs-and-resource-receipts)
+pass native correctness on both engines. If the host stays shared, close
+the W1 post-restart receipt gap. Verify the write response and the exact
+persisted DB/cache read after the owned database restarts, using the
+common pinned application inputs.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main

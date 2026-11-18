@@ -77,13 +77,13 @@ id = "W5"
 family = "monorepo-edit-test-loop"
 title = "Pinned Marked TypeScript CLI: persistent esbuild watch -> exact CLI HTML after source edits"
 fixture = "fixtures/w5-v2"
-fixture_version = "w5-v2-marked"
+fixture_version = "w5-v3-marked-receipts"
 status = "implemented"
 metrics = ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s", "bind_setup_s", "volume_setup_s"]
 states = ["warm"]
 params = { iters = 5 }
-correctness = ["source and dependency lock hashes", "pinned native ARM64 tool image", "persistent watcher PID/start identity", "exact rebuilt CLI output each edit", "owned cleanup"]
-note = "v2 uses real TS sources and dependencies; host bind edits use the coordinator file write, guest volume edits include Docker exec transport. Startup/population separate. Old Python fixture remains diagnostic data and its timings are incompatible. Workload/image must still be frozen before qualification."
+correctness = ["exact files on both mounted source trees and installed CLI/lock", "pinned native ARM64 tool image and esbuild from the lockfile", "persistent watcher PID/start identity", "exact rebuilt CLI output each edit", "owned cleanup"]
+note = "Both conditions use real TS sources and dependencies. Host bind uses the coordinator file write; volume includes Docker exec. Input verification is measured separately from startup and edits. Every phase requires complete owned resource boundaries before scoring."
 
 [[case]]
 id = "W6"
