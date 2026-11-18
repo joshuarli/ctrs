@@ -1,0 +1,1 @@
+{"fixture_version":"w13-v1","seed":"w13-v1-seed-2026","default_size_bytes":1073741824,"proof_size_bytes":268435456,"streams":[1,4],"repeats":3,"protocol":"newline JSON header: id, bytes, sha256; raw bytes; EOF"}

@@ -24,6 +24,7 @@ import recovery_client
 import recovery_trace
 import ci_jobs
 import w2_peer
+from transfer import trial_w13
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
@@ -3280,7 +3281,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
-              "W10": trial_w10, "W11": trial_w11, "HOLDOUT": trial_holdout}
+              "W10": trial_w10, "W11": trial_w11, "W13": trial_w13, "HOLDOUT": trial_holdout}
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
     trial = trials[case_id]

@@ -1,0 +1,7 @@
+# W13 verified artifact transfer
+
+The sender creates deterministic bytes before timing. Each 1 MiB block is SHAKE-256 of UTF-8 `w13-v1-seed-2026:<block index>`, truncated for the last block. A transfer's total bytes are divided evenly among its streams; each stream uses the same generated file. The default is 1 GiB total. The sender reads a host local disk file or a container tmpfs file; the receiver hashes without storing payloads.
+
+Each TCP connection begins with a newline-terminated JSON request containing the stream id. The sender responds with a newline-terminated JSON header containing `id`, `bytes`, and `sha256`, followed by exactly that many raw bytes and EOF. The receiver verifies the expected header, exact byte count, and SHA-256. Upload receivers acknowledge their verification. Client completion includes that acknowledgement. Times use a monotonic clock; stalls are receive-progress gaps of at least one second. Host and single-container loopback controls use the same program, size, direction and stream count. A result above half the slower control is marked tool-limited. Controlled egress is unsupported because there is no owned external endpoint.
+
+The proof driver uses 256 MiB and one attempt per condition, for functional validation only. It loads an OrbStack-saved image into the isolated ctrs root; the loaded platform image ID is recorded separately from the OrbStack image index ID. It never changes a Docker context.
