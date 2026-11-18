@@ -46,7 +46,7 @@ OrbStack's). Never pool lanes.
 | W12-watch | `tsc --watch` (fs.watch backend): save, atomic replace, create+import, rename, delete, five-file bursts, 140 results per trial | yes | yes (`w12-watch-v2`) | v1 proof both mounts; v2 oracle not yet run | no | critical. **ctrs bind: 140/140 missed** (no Mac→guest notifications). Volume: 23 burst results missed on both engines (engine-independent). Latency is exec-poll limited and not scored; esbuild polling stays the W5 condition |
 | W13 | Artifact transfer up/down: published port, container↔container, container→Mac; 1 and 4 streams; byte-exact receivers | yes | yes (`w13-v2`) | yes | D: seven cells; M: published-port upload; rx64 (patch 0005): three host→guest cells | critical. **Guest→host loss:** container→Mac upload 7.0×, published-port download 5.1× (VZ vsock ceiling, bounded). Host→guest after patch 0005: published-port upload 1.02 (parity), Mac→container 1.03, 4-stream upload 1.25 loss. Container↔container **win** 0.82 ([evidence](evidence/native-w12-w13-2026-11-18.md)). Controlled egress unsupported (no owned endpoint) |
 | W13-overlap | One transfer condition alongside W2: interactive latency | yes | no | no | no | depends on W13 |
-| W14 | Connection lifecycle: fresh, persistent/streaming, cancel, idle→resume, reconnect | yes | yes (`w14-v1`) | no | no | unmeasured; preserve protective session limits |
+| W14 | Connection lifecycle: fresh, persistent/streaming, cancel, idle→resume, reconnect | yes | yes (`w14-v2`) | yes, all six modes, both engines | D: fresh (v2), streaming, reconnect (v1) | **CPU loss**: fresh 1.30, streaming 1.75 (lateness p99 1.16 loss), restart 5.1. Reconnect p99 non-inferior, cleanup win. Fresh p50 5.7× is confounded by OrbStack SYN drops (p99 about 1 s); completion about 1.05×. Persistent, cancel, idle-resume: functional only ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
 | W3-v4 | Persistent storage: meaningful dataset, sustained read/write/checkpoint, declared working set and durability | yes | no (W3 v3 exists) | no | no | missing; durability/allocation limits stay explicit |
 
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
@@ -91,9 +91,10 @@ Mbps only. It is not reusable as a verified-transfer metric.
 2. W12 full-bind workflow 1.62× (install, test discovery on the Mac share).
 3. W12 all-volume workflow 1.29× in the D lane only; M lane parity. The cause is the 2-vCPU product default, an owner decision.
 4. W13 4-stream published-port upload 1.25× after patch 0005.
+4a. W14 lifecycle CPU: fresh 1.30×, streaming 1.75× (lateness p99 1.16×).
 5. W2 M-lane CPU per success: inconclusive, +4.5% median. Parked.
 6. Unmeasured on this host: W1, W3–W11, W3-v4, W12 bind-source + volume
-   deps, W12-watch v2, W13-overlap, W14. W6/W7 default-build losses are
+   deps, W12-watch v2, W13-overlap, W14 persistent/cancel/idle-resume cohorts. W6/W7 default-build losses are
    historical only.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
