@@ -89,7 +89,27 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-18 afternoon, after `19d4eb2`):** the frozen first
+**Current (2026-11-18 evening, after patch 0005):** the first W12 and W13
+comparisons are done and ranked in
+[native-acceptance-matrix.md](native-acceptance-matrix.md) with evidence in
+[native-w12-w13-2026-11-18.md](evidence/native-w12-w13-2026-11-18.md).
+Guest kernel patch 0005 (64 KiB vsock receive buffers) brought host→guest
+single-stream transfer to parity. Live kernel after this commit: the measured
+`1b2fdbc9…` Image, installed into `guest/out` between runs. Next, in order:
+
+1. Report the M-lane W12 all-volume cell (`.work/native-perf/matrix/c1.log`,
+   run on the rx64 guest) to separate the 2-vCPU default from engine cost.
+2. W14 functional runs on both engines (each `--lifecycle-mode`), then a
+   paired cohort for fresh and reconnect.
+3. W12-watch v2 functional run and paired cohort (bind and volume).
+4. Largest open deficit: guest→host transfer at 0.51–0.65 GB/s, a bounded
+   VZ vsock device ceiling (1 vs 4 streams are equal; guest half idle).
+   Investigate a non-vsock bulk path, which is a device and architecture
+   question. Surface it before any wire-protocol change.
+5. W12 full-bind install and test discovery on the Mac share; W13-overlap
+   with W2; W3-v4.
+
+**Earlier (2026-11-18 afternoon, after `19d4eb2`):** the frozen first
 comparison matrix is running serially on the Mac. Live assets are main's
 `d9465bc2…` binary and `f3ab7344…` initramfs (half-close fix). Every cell is
 10 AB/BA pairs, warm, `--resource-lane installed-default`, run from the repo

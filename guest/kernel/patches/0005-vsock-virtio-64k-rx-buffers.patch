@@ -1,0 +1,17 @@
+# Header: with the stock 4 KiB vsock receive buffers, every host-to-guest
+# vsock packet carries at most 4 KiB, so bulk streams (published ports,
+# host.docker.internal downloads, cp/exec stdin) pay per-packet device and
+# interrupt cost sixteen times as often as the 64 KiB packets the transport
+# allows. On Virtualization.framework that capped host-to-guest relays near
+# 0.7 GB/s with the guest kernel saturated; 64 KiB buffers reach ~2 GB/s.
+--- a/include/linux/virtio_vsock.h
++++ b/include/linux/virtio_vsock.h
+@@ -135,7 +135,7 @@
+  * rounding up to the next page order and also means that we
+  * don't leave higher-order pages sitting around in the RX queue.
+  */
+-#define VIRTIO_VSOCK_DEFAULT_RX_BUF_SIZE	SKB_WITH_OVERHEAD(1024 * 4)
++#define VIRTIO_VSOCK_DEFAULT_RX_BUF_SIZE	SKB_WITH_OVERHEAD(1024 * 64)
+ #define VIRTIO_VSOCK_MAX_BUF_SIZE		0xFFFFFFFFUL
+ #define VIRTIO_VSOCK_MAX_PKT_BUF_SIZE		(1024 * 64)
+ 
