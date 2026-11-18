@@ -37,9 +37,8 @@ class Readiness(unittest.TestCase):
             path = root / name; path.write_text(name)
             artifacts[name] = durable_job.receipt(path)
         proof = artifacts['proof']
-        versions = {key: key + '-v-test' for key in gate.CASES}
-        versions['W11'] = gate.mixed_resources.VERSION
-        contract = {key: {**cell, 'fixture_version': versions[cell['workload']]}
+        versions = gate.fixture_versions()
+        contract = {key: {'fixture_version': versions[cell['workload']], **cell}
                     for key, cell in gate.W1_W10_CELLS.items()}
         contract.update(copy.deepcopy(gate.W11_CELLS))
         contract['extra'] = {**contract[EDIT_CELL], 'metric': 'extra_metric'}
@@ -138,6 +137,27 @@ class Readiness(unittest.TestCase):
         with patch.object(durable_job, 'check_receipt') as verify, self.assertRaisesRegex(gate.ReadinessError, 'not frozen'):
             self.check()
         verify.assert_not_called()
+
+    def test_stale_fixture_version_is_rejected_even_when_all_its_cells_agree(self):
+        self.doc['fixtures']['W5']['version'] = 'w5-v2-marked'
+        for cell in self.doc['cell_contract'].values():
+            if cell['workload'] == 'W5':
+                cell['fixture_version'] = 'w5-v2-marked'
+        with self.assertRaisesRegex(gate.ReadinessError, 'fixture version differs from cases.toml: W5'):
+            self.check()
+
+    def test_offered_rate_cells_require_the_rate_producer_version(self):
+        from fixtures.w2.v3 import FIXTURE_VERSION
+        from w8_cancel import FIXTURE_VERSION as cancellation_version
+
+        name = next(name for name in self.doc['cell_contract'] if 'published-port-fixed-offered-rate' in name)
+        self.assertEqual(self.doc['cell_contract'][name]['fixture_version'], FIXTURE_VERSION)
+        for cell in self.doc['cell_contract'].values():
+            if cell['workload'] == 'W8' and cell['load'] == 'cancelled-delivery':
+                self.assertEqual(cell['fixture_version'], cancellation_version)
+        self.doc['cell_contract'][name]['fixture_version'] = self.doc['fixtures']['W2']['version']
+        with self.assertRaisesRegex(gate.ReadinessError, 'cell fixture version differs'):
+            self.check()
 
     def test_missing_failed_or_incomparable_prerequisites_cannot_admit(self):
         mutations = (

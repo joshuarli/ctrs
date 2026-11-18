@@ -1,15 +1,17 @@
 //! Stopping a pull from another thread: the window's Cancel, or every
-//! `docker pull` waiting on it having hung up. The pull checks between
-//! chunks and layers, ending with [`crate::registry::Error::Cancelled`]
-//! before it records anything; a stalled body read wakes at its read
-//! deadline (see transport.rs), so a cancelled pull does not hang forever.
+//! `docker pull` waiting on it having hung up. Cancellation shuts down
+//! registered response connections and stops the pull before image
+//! publication.
 //! Blobs it finished stay in the store for the next pull; a half-downloaded
 //! one is deleted with its writer.
 
 use std::cell::RefCell;
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use h12tiny_client_sync::{ResponseBody, ResponseBodyShutdown};
 
 /// A pull's cancel switch. Clones share it.
 #[derive(Debug, Clone, Default)]
@@ -18,6 +20,7 @@ pub struct Cancel(Arc<Inner>);
 #[derive(Debug, Default)]
 struct Inner {
     cancelled: AtomicBool,
+    bodies: Mutex<Vec<Arc<ResponseBodyShutdown>>>,
 }
 
 thread_local! {
@@ -30,14 +33,33 @@ impl Cancel {
         Cancel::default()
     }
 
-    /// Stops the pull: it ends at its next check. Cancelling twice is
-    /// harmless.
+    /// Stops the pull and interrupts active response bodies.
     pub fn cancel(&self) {
-        self.0.cancelled.store(true, Ordering::SeqCst);
+        if self.0.cancelled.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let bodies = std::mem::take(&mut *self.0.bodies.lock().unwrap_or_else(|e| e.into_inner()));
+        for body in bodies {
+            let _ = body.shutdown();
+        }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn register_body(body: &ResponseBody) -> io::Result<Option<RegisteredBody>> {
+        let Some(cancel) = CURRENT.with(|current| current.borrow().clone()) else {
+            return Ok(None);
+        };
+        let shutdown = Arc::new(body.shutdown_handle()?);
+        let mut bodies = cancel.0.bodies.lock().unwrap_or_else(|e| e.into_inner());
+        if cancel.is_cancelled() {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        bodies.push(Arc::clone(&shutdown));
+        drop(bodies);
+        Ok(Some(RegisteredBody { cancel, shutdown }))
     }
 
     /// Makes registry connections used on this thread answer to this switch
@@ -59,6 +81,18 @@ impl Cancel {
         }
     }
 
+}
+
+pub(crate) struct RegisteredBody {
+    cancel: Cancel,
+    shutdown: Arc<ResponseBodyShutdown>,
+}
+
+impl Drop for RegisteredBody {
+    fn drop(&mut self) {
+        self.cancel.0.bodies.lock().unwrap_or_else(|e| e.into_inner())
+            .retain(|body| !Arc::ptr_eq(body, &self.shutdown));
+    }
 }
 
 /// See [`Cancel::enter`]; puts back what the thread had before.

@@ -57,6 +57,18 @@ def metric_result(report, metric="wall_seconds", cohort=0):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_w5_receipts_require_equal_observed_inputs_for_pairing(self):
+        records = pair(case='W5', metric='bind_edit_to_result_median_s')
+        for record in records:
+            record['workload_params']['fixture_version'] = reporting.W5_RECEIPT_VERSION
+            record['paired_inputs'] = {'layers': ['same'], 'tools': {'esbuild': 'same'},
+                                       'source_sha256': 'same', 'dependency_lock_sha256': 'same'}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+        records[1]['paired_inputs']['layers'] = ['changed']
+        result = reporting.analyze(records)['cohorts'][0]
+        self.assertEqual(result['valid_pairs'], 0)
+        self.assertEqual(result['rejections'][0]['reason'], 'paired inputs differ or are missing')
+
     def test_w9_throughput_and_completion_latency_use_opposite_ratio_directions(self):
         duration = "job_completion_p95_ms_at_4"
         rate = "successful_jobs_per_minute_at_4"

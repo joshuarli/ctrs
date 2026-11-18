@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -63,6 +64,81 @@ for (const result of [
 
 
 class WatchContractTests(unittest.TestCase):
+    def test_shared_preparation_builds_one_image_and_imports_it_on_the_other_engine(self):
+        from unittest.mock import Mock, patch
+        import watch_loop
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'source.tar.gz'
+            image = Path(directory) / 'image.tar'
+            builder = Mock()
+            importer = Mock()
+            builder.sh.side_effect = lambda *args, **kwargs: image.write_bytes(b'exported')
+            with patch.object(watch_loop, 'prepare_image') as prepare:
+                watch_loop.prepare_shared_image(builder, source, image)
+                watch_loop.prepare_shared_image(importer, source, image)
+            prepare.assert_called_once_with(builder, source, image.parent)
+            builder.sh.assert_called_once_with(['image', 'save', '--output', str(image), watch_loop.IMAGE],
+                                               timeout=180)
+            importer.sh.assert_called_once_with(['image', 'load', '--input', str(image)], timeout=180)
+
+    def test_mounted_probe_reads_current_bytes_and_rejects_symlinks(self):
+        script = (FIXTURE / 'mounted-inputs.mjs').read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mounted, app = root / 'source', root / 'app'
+            mounted.mkdir()
+            (app / 'bin').mkdir(parents=True)
+            (mounted / 'Renderer.ts').write_bytes(b'mounted source')
+            (app / 'bin' / 'marked.js').write_bytes(b'cli')
+            (app / 'package.json').write_bytes(b'package')
+            (app / 'package-lock.json').write_bytes(b'lock')
+
+            def probe():
+                return subprocess.run(['node', '--input-type=module', '-e', script, str(mounted), str(app)],
+                                      capture_output=True, text=True)
+
+            result = probe()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertEqual(receipt['mounted_files'], {'Renderer.ts': hashlib.sha256(b'mounted source').hexdigest()})
+            self.assertEqual(receipt['app_files']['package-lock.json'], hashlib.sha256(b'lock').hexdigest())
+            (mounted / 'link').symlink_to(app / 'package-lock.json')
+            result = probe()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('W5 nonregular input', result.stderr)
+
+    def test_mounted_verification_rejects_wrong_image_mount_and_bytes(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import watch_loop
+        source = {'source_sha256': 'archive', 'files': {'a.ts': 'source', 'package-lock.json': 'lock'}}
+        with tempfile.TemporaryDirectory() as directory:
+            for mode, field in (('bind', 'Source'), ('volume', 'Name')):
+                for fault in (None, 'image', 'mount', 'extra', 'lock'):
+                    with self.subTest(mode=mode, fault=fault):
+                        state = {'Pid': 2, 'Running': True}
+                        mount = {'Destination': '/src', 'Type': mode, field: 'owned', 'RW': True}
+                        inspect = {'Image': 'immutable', 'Mounts': [mount], 'State': state}
+                        observed = {'mounted_files': dict(source['files']), 'app_files': {'package-lock.json': 'lock'}}
+                        match fault:
+                            case 'image':
+                                inspect['Image'] = 'different'
+                            case 'mount':
+                                mount[field] = 'different'
+                            case 'extra':
+                                observed['mounted_files']['extra.ts'] = 'extra'
+                            case 'lock':
+                                observed['app_files']['package-lock.json'] = 'wrong'
+                        engine = Mock()
+                        engine.sh.side_effect = [SimpleNamespace(stdout=json.dumps(value))
+                                                for value in ([inspect], observed)]
+                        args = (engine, 'watcher', mode, 'owned', 'immutable', source, Path(directory))
+                        if fault is None:
+                            self.assertEqual(watch_loop.verify_mounted_inputs(*args), state)
+                        else:
+                            with self.assertRaises(ValueError):
+                                watch_loop.verify_mounted_inputs(*args)
+
     def test_host_edit_matches_volume_editor_and_rejects_symlink(self):
         import watch_loop
         with tempfile.TemporaryDirectory() as directory:
@@ -111,7 +187,8 @@ class WatchContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(RuntimeError, 'setup interrupted'):
                 watch_loop.run_mode(engine, Path(directory), 'volume', 'owned', Path('unused'), 1,
-                                    lambda _: nullcontext(), docker_cli='unused')
+                                    lambda _: nullcontext(), docker_cli='unused', image_id='immutable',
+                                    source_receipt={})
             cleanup = json.loads((Path(directory) / 'cleanup.json').read_text())
             self.assertIn('ownership mismatch', cleanup['errors'][0])
         self.assertTrue(any(args[:2] == ['volume', 'rm'] for args in engine.calls))

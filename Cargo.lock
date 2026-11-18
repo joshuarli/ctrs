@@ -448,8 +448,7 @@ dependencies = [
 [[package]]
 name = "h12tiny-client-normalize"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4742323990543454dba088ced5a5c58bf7c6e060667162714f84fce2433df93"
+source = "git+https://github.com/laputa-systems/smolith?rev=448a24c7e799681d1a6a33b7668e47bbceb06587#448a24c7e799681d1a6a33b7668e47bbceb06587"
 dependencies = [
  "http",
 ]
@@ -457,8 +456,7 @@ dependencies = [
 [[package]]
 name = "h12tiny-client-sync"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5932c43b71ff79907bdbced501a27a63445408cc238a95ef3328b6e92735c35"
+source = "git+https://github.com/laputa-systems/smolith?rev=448a24c7e799681d1a6a33b7668e47bbceb06587#448a24c7e799681d1a6a33b7668e47bbceb06587"
 dependencies = [
  "h12tiny-client-normalize",
  "h12tiny-tls-system",
@@ -500,8 +498,7 @@ dependencies = [
 [[package]]
 name = "h12tiny-tls-system"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41149a08e2633e5e8f24e35d0e6b85deb863dc637e1360ca62dca2ed185016f2"
+source = "git+https://github.com/laputa-systems/smolith?rev=448a24c7e799681d1a6a33b7668e47bbceb06587#448a24c7e799681d1a6a33b7668e47bbceb06587"
 dependencies = [
  "base64",
  "openssl-probe",

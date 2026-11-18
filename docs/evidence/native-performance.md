@@ -2403,6 +2403,47 @@ failure. The integrated harness suite had 88 passing tests before the additional
 cleanup regression. A container cleanup failure cannot skip owned volume cleanup.
 W10 tracing remains a separate uncommitted product slice; no cache TTL change.
 
+### W5 v3 mounted inputs and resource receipts
+
+The runner verifies the immutable image ID, Node, npm and locked esbuild.
+It hashes each file inside the watcher's bind or volume mount and compares
+the set to the pinned Marked archive. It checks the installed CLI, package
+manifest and dependency lock against that source. A mismatch fails the
+trial and preserves the observed receipt. The report requires matching
+DiffIDs, tools and input hashes across engines.
+
+Native correctness run `w5-receipts-f37eb8347346` used the common image
+archive SHA256 `04c27dcc420fd25cc9f1510f64d874d04afd0219f821c40863896be98f838876`
+and the signed ctrs binary from the W8 cancellation proof. Both engines
+verified the same 386 source files in each mount and completed all five
+exact edits per mount. All 32 resource phase receipts passed ownership and
+counter coverage. The run is ineligible for scoring. Reproduce with the
+[W5 fixture instructions](../../bench/native/fixtures/w5-v2/README.md).
+
+## W1 pinned startup and database restart
+
+W1 uses three preinstalled W8 v2 portfolio images and the pinned W1 seed.
+The runner checks each image ID, ARM64 architecture and ordered DiffIDs
+before Compose starts with builds and pulls disabled. Startup measures
+from Compose invocation to the exact seed-row and Redis roundtrip receipt.
+The whole-workflow interval also includes the restart checks.
+
+The trial requires the exact write acknowledgment before restarting the
+owned database. It verifies the same database container and named volume
+with a changed process start time. The pre-restart value must return with
+the exact key and a matching Redis value. A second acknowledged write and
+exact DB/cache read show the recovered stack accepts new work.
+
+Warm native diagnostic `w1-restart-a5e18ad5c1b1` passed on both engines
+using the signed W8 cancellation candidate. Both records include the
+restart and response receipts and are ineligible for scoring. The W1
+component check passed 31 tests with no skips.
+
+Install the common images using the [portfolio instructions](../../bench/native/fixtures/w8-v2/README.md).
+Run `python3.14 bench/native/runner.py run --engine ctrs --case W1 --state warm`
+once per engine for a standalone check. Comparable engine-cold conditions
+remain open.
+
 ## Independent W10 recovery trace: readiness and cache expiry
 
 A bounded diagnostic entrypoint records Python entry, application dependency
@@ -2820,11 +2861,15 @@ Run `PYTHONPATH=bench/native python3.14 -m unittest test_ci_jobs test_safety
 test_reporting test_mixed_cycle`. The offline checks use a controlled clock,
 verify the metric derivation, and preserve the failed job's receipt without
 a p95. The job inputs, pinned artifacts and concurrency levels are unchanged.
-The new completion measurements need a native paired run.
+Native diagnostic `w9-correctness-616a92400e2d` used the same pinned
+ARM64 Marked portfolio image on both engines. Each verified 16 complete
+jobs at each of 1, 4, 8 and 16 concurrency, with exact output and owned
+cleanup. All eight conditions retained their completion receipts.
+These standalone runs are ineligible for scoring.
 
 ## W3 commit latency and persisted rows
 
-`w3-v2-commit-latency` sends the 300 fixed transactions over one psql
+`w3-v3-pinned-commit-latency` sends the 300 fixed transactions over one psql
 connection. Each request contains the existing insert and counter update
 inside an explicit transaction. The runner requires the expected command
 statuses and one psql timing per commit. It retains raw output and publishes
@@ -2834,13 +2879,17 @@ checkpoint and restart retain distinct elapsed intervals. [PostgreSQL 17 psql re
 The transaction session enables synchronous commit. After restart, the fixture
 verifies all ordered keys and payloads, the exact counter, and the PostgreSQL
 `fsync` setting. A corrupted payload with the same count and key sum fails.
-The W3 proof still needs a pinned native service image and comparable
-engine-level durability evidence.
+W3 uses the common portfolio's PostgreSQL image with verified ARM64
+architecture and ordered DiffIDs. It uses a fresh labeled volume and
+disables image pulls during the trial. Comparable engine-level durability
+evidence remains open.
 
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_safety test_reporting`.
-All 54 tests passed. The new regression covers the generated transaction
-script, timing aggregation, failed commit receipts and corrupt persisted
-payloads. The altered psql path and resulting timings await native validation.
+Native diagnostic `w3-correctness-be68737716da` passed on ctrs and
+OrbStack. Each retained 300 commit timings and all exact persisted rows
+with the correct counter and `fsync=on` after restart. The combined
+W3/W9 focused suite passed 69 tests, including a corrupted persisted
+payload, an incomplete commit, and a foreign volume.
 
 ## Existing-disk expansion criteria and bounded feasibility plan
 

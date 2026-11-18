@@ -111,6 +111,9 @@ class PersistentProbeTests(unittest.TestCase):
                         healthy.clear()
                     elif args == ['start', 'owned-db']:
                         healthy.set()
+                    elif args[:4] == ['exec', 'owned-db', 'sh', '-ec']:
+                        self.assertEqual('sync ' in args[-1], healthy.is_set() and not crash.called)
+                        return completed('a' * 64 + ' /data/pg_hba.conf')
                     elif args[:2] == ['exec', 'owned-db']:
                         return completed(json.dumps(rows))
                     else:
@@ -120,7 +123,7 @@ class PersistentProbeTests(unittest.TestCase):
                 engine.sh.side_effect = effects
                 identities = [({'daemon': {'pid': 1}}, (1, 2)), ({'daemon': {'pid': 2}}, (1, 2))]
                 with patch.object(runner, 'free_port', return_value=server.server_port), \
-                        patch.object(runner, 'compose_down'), \
+                        patch.object(runner, 'prepare_pinned_stack', return_value=({}, {'images': {}})) as provision, \
                         patch.object(runner, 'wait_health', return_value=(0, {})), \
                         patch.object(runner, 'start_sampler', return_value=(None, None)), \
                         patch.object(runner, 'resource_phase', return_value=nullcontext()), \
@@ -131,8 +134,13 @@ class PersistentProbeTests(unittest.TestCase):
                     rec = runner.trial_w10(FixtureContext(tmp), engine, 'warm', duration=1.4, concurrency=2,
                                            write_ratio=.5, kill_at=.4, down_for=.2, interrupt_service=interrupt_service)
                 self.assertTrue(rec['correctness']['ok'], rec)
+                self.assertEqual(provision.call_args.kwargs['layout'],
+                                 runner.WORK / 'inputs/w8-portfolio-v2/layout' if interrupt_service == 'engine' else None)
+                for call in engine.compose.call_args_list:
+                    self.assertEqual(call.kwargs['override'].name, 'pinned-compose.json')
                 if interrupt_service == 'engine':
                     self.assertFalse(rec['measurement_valid'])
+                    self.assertTrue(rec['correctness']['checks']['database_startup_auth_preserved'])
                     crash.assert_called_once()
                     verify_restart.assert_called_once_with(
                         identities[0][0], identities[1][0], (1, 2), (1, 2))

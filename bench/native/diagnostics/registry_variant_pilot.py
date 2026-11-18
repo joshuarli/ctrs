@@ -13,6 +13,7 @@ import traceback
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_jobs
 import diagnostic_signals
+import mixed_resources
 import registry_portfolio
 import ownership
 import resource
@@ -174,11 +175,32 @@ def prepare_warm_engine(engine, run, *, api_image):
         ci_jobs.cleanup(engine, container, run)
 
 
-def measure_engine(engine, directory, run, contract, portfolio, receipt, layout, server, under_load=False):
+def allocation_receipt(snapshots):
+    stages = ('before_pull', 'before_app_cleanup', 'after_app_cleanup')
+    receipt = {'status': 'unknown', 'snapshots': snapshots,
+               'deployment_delta_bytes': None, 'after_app_cleanup_delta_bytes': None}
+    if any(snapshots.get(stage, {}).get('status') != 'ok' for stage in stages):
+        receipt['error'] = 'missing or invalid owned allocation snapshot'
+        return receipt
+    before, deployed, cleaned = (snapshots[stage] for stage in stages)
+    identities = [[(entry['path'], entry['device'], entry['inode']) for entry in snapshot['files']]
+                  for snapshot in (before, deployed, cleaned)]
+    if not identities[0] or identities[0] != identities[1] or identities[0] != identities[2]:
+        receipt['error'] = 'owned backing file identity changed between snapshots'
+        return receipt
+    receipt.update(status='ok',
+                   deployment_delta_bytes=deployed['allocated_bytes'] - before['allocated_bytes'],
+                   after_app_cleanup_delta_bytes=cleaned['allocated_bytes'] - before['allocated_bytes'])
+    return receipt
+
+
+def measure_engine(engine, directory, run, contract, portfolio, receipt, layout, server,
+                   under_load=False, *, orbstack_storage_files=()):
     result = {'correctness': False, 'qualification_eligible': False, 'errors': [], 'pulls': [],
               'resources': {'phases': {}}, 'phase_status': {},
               'pre_content_state': 'unknown below image API; no cache purge'}
     sampler = trace = None
+    snapshots = {}
     names = ['pre_pull_setup'] + [f'{kind}_{repository.rsplit("/", 1)[1]}'
         for repository in portfolio.manifests for kind in ('pre_pull_inspection', 'pull_install', 'markers')] + [
         'identity_verification', 'stack_health', 'load_1000', 'persistence_recovery',
@@ -194,6 +216,27 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
             'address': server.server_address, 'fd': server.fileno()}
         sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
         phase = lambda phase_name: measured_phase(engine, result, phase_name)
+        if orbstack_storage_files:
+            paths = ((engine.dir / 'data/vm/data.img',) if engine.name == 'ctrs'
+                     else tuple(path.absolute() for path in orbstack_storage_files))
+            manifest = dict(engine.measurement_identity)
+            manifest['required_processes'] = [process for process in manifest['required_processes']
+                                              if process['role'] != 'fixture-coordinator']
+
+            def snapshot(stage):
+                try:
+                    snapshots[stage] = mixed_resources.allocation(manifest, paths)
+                except Exception as exc:
+                    snapshots[stage] = {'status': 'unknown', 'errors': [str(exc)]}
+
+            @contextmanager
+            def deployment_phase(phase_name):
+                with phase(phase_name):
+                    yield
+                if phase_name == 'marked_verification':
+                    snapshot('before_app_cleanup')
+        else:
+            deployment_phase = phase
         with phase('whole_workflow'):
             refs = {}
             with phase('pre_pull_setup'):
@@ -205,6 +248,12 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 retained_before = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-before.json', retained_before)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_before)
+                if orbstack_storage_files:
+                    inventory = engine.sh(['ps', '--no-trunc', '--format', '{{json .}}']).stdout
+                    (directory / 'containers-before.jsonl').write_text(inventory)
+                    if inventory.strip():
+                        raise ValueError('running containers present before the W8 allocation interval')
+                    snapshot('before_pull')
             context = w8_under_pull.baseline(engine, directory, run, contract, phase) if under_load else nullcontext(None)
             with context as load:
                 for repository, digest in portfolio.manifests.items():
@@ -250,11 +299,17 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                             ci_jobs.cleanup(engine, container, run)
                     refs[short] = ref
                     save(directory / 'result.json', result)
-                result['deployment'] = deploy(engine, refs, layout, directory, run, contract, phase=phase)
+                result['deployment'] = deploy(engine, refs, layout, directory, run, contract, phase=deployment_phase)
             result['pull_to_health_s'] = result['phase_status']['stack_health']['ended_monotonic'] - result['first_pull_monotonic']
             if load is not None:
                 result['under_pull_intervals'] = load['intervals']
             with phase('retained_identity'):
+                if orbstack_storage_files:
+                    inventory = engine.sh(['ps', '--no-trunc', '--format', '{{json .}}']).stdout
+                    (directory / 'containers-after.jsonl').write_text(inventory)
+                    if inventory.strip():
+                        raise ValueError('running containers present after W8 application cleanup')
+                    snapshot('after_app_cleanup')
                 retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-after.json', retained_after)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_after)
@@ -264,6 +319,10 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
         if not isinstance(exc, Exception):
             raise
     finally:
+        if orbstack_storage_files:
+            result['allocation'] = allocation_receipt(snapshots)
+            if result['allocation']['status'] != 'ok':
+                result['errors'].append(result['allocation']['error'])
         finish_engine(result, engine, sampler, trace, directory, stop=False)
 
     return result

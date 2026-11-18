@@ -62,3 +62,29 @@ asserts only that the wait does not return early; it has no tight upper-time
 assertion. Queue error and empty-result paths verify that owned queues close.
 The native application proof remains separate, and this diagnostic fixture does
 not establish a qualified speedup.
+
+## Container-to-container load
+
+`runner.py run` and `baseline` accept `--client-location guest` for W2.
+The runner creates an owned peer on the application network from the
+API's loaded image ID. It verifies that the peer uses the same image and
+that the copied client matches the selected source hash. Health, workload
+and count requests use the peer's direct connection to `api:8000`. The
+published-port client remains the default.
+
+```sh
+python3.14 bench/native/runner.py run --engine ctrs --case W2 \
+  --client-location guest --operations 10000 --concurrency 4 --request-rate 500
+```
+
+The same option works for fixed-work and saturation. Guest fixed-rate load
+uses the client's portable timer path, while the macOS host uses kqueue.
+Workload CPU accounts for the guest client inside the engine's VM. The API
+cgroup counters still bound the application work, and the runner copies
+receipts afterward. The final check still compares every acknowledged
+write against PostgreSQL.
+
+`runner.py check w2` passed 113 tests with zero skips. The offline placement
+test covers all three modes, rejects a wrong client hash and a corrupt
+persisted payload, and verifies owned peer cleanup. Native validation and
+comparative measurements remain open.

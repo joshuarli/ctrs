@@ -3,9 +3,13 @@ import hashlib
 import os
 import stat
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import re
+import select
+import socket
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -149,13 +153,33 @@ def prepare_layout(layout, repositories):
     return Portfolio(routes, selected)
 
 
+class TransferPause:
+    """Hold one blob response and observe the peer disconnect without sending the tail."""
+
+    def __init__(self, repository, digest, timeout=10):
+        self.key = (repository, 'blobs', digest)
+        self.timeout = timeout
+        self.started = threading.Event()
+        self.finished = threading.Event()
+        self.disconnected_at = None
+
+    def await_disconnect(self, connection):
+        ready, _, _ = select.select([connection], [], [], self.timeout)
+        if ready:
+            try:
+                if not connection.recv(1, socket.MSG_PEEK):
+                    self.disconnected_at = time.monotonic()
+            except ConnectionResetError:
+                self.disconnected_at = time.monotonic()
+
+
 class Portfolio:
     def __init__(self, routes, manifests):
         self.routes = routes
         self.manifests = manifests
         self.transfers = []
 
-    def handler(self):
+    def handler(self, pause=None):
         portfolio = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -170,6 +194,8 @@ class Portfolio:
 
             def respond(self, body):
                 started = time.monotonic()
+                if pause is not None:
+                    self.connection.settimeout(pause.timeout)
                 path = urlsplit(self.path).path
                 if path in ("/v2", "/v2/"):
                     self.send_response(200)
@@ -196,9 +222,23 @@ class Portfolio:
                 self.end_headers()
                 sent = 0
                 complete = False
+                held = False
                 try:
                     if body:
                         with blob.open() as stream:
+                            if pause is not None and key == pause.key:
+                                if pause.started.is_set():
+                                    return
+                                prefix = stream.read(min(65536, blob.size - 1))
+                                if not prefix:
+                                    raise ValueError('blob is too small to interrupt at a partial body')
+                                sent = self.wfile.write(prefix)
+                                if sent != len(prefix):
+                                    raise ConnectionError('short registry write')
+                                held = True
+                                pause.started.set()
+                                pause.await_disconnect(self.connection)
+                                return
                             while chunk := stream.read(65536):
                                 count = self.wfile.write(chunk)
                                 if count != len(chunk):
@@ -217,6 +257,8 @@ class Portfolio:
                                                 "digest": digest, "bytes": sent,
                                                 "complete": complete,
                                                 "byte_method": "completed body writes; failed-write partial bytes unknown"})
+                    if held:
+                        pause.finished.set()
 
         return Handler
 
@@ -241,6 +283,20 @@ def prepare_pinned_portfolio(layout, contract):
     return portfolio
 
 
-def serve(portfolio, port):
+def serve(portfolio, port, *, pause=None):
     """Construct a loopback server; its owner controls serving and shutdown."""
-    return HTTPServer(("127.0.0.1", port), portfolio.handler())
+    return HTTPServer(("127.0.0.1", port), portfolio.handler(pause))
+
+
+@contextmanager
+def running_registry(portfolio, *, pause=None):
+    with serve(portfolio, 0, pause=pause) as server:
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .05})
+        thread.start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            if thread.is_alive():
+                raise RuntimeError("fixture registry did not stop")

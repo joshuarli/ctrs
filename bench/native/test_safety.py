@@ -38,7 +38,7 @@ class FixtureContext:
         return path
 
     def new_record(self, *_):
-        return {"metrics": {}, "correctness": {"ok": True, "checks": {}},
+        return {"trial_id": self.run_id, "metrics": {}, "correctness": {"ok": True, "checks": {}},
                 "resources": {}, "validation_errors": [], "notes": []}
 
 
@@ -157,8 +157,21 @@ class WorkloadSafetyTests(unittest.TestCase):
                 "meta": [["txs", runner.W3_TXS]], "fsync": "on"}
         with tempfile.TemporaryDirectory() as tmp:
             engine = fake_engine()
+            pin = json.loads((runner.FIXTURES / "w8-v2/portfolio.json").read_text())["images"]["np-v2/postgres"]
+            volume_owner = "test-run-000001"
 
             def execute(args, **kwargs):
+                if args[:2] == ["image", "inspect"]:
+                    self.assertEqual(args[-1], pin["manifest"])
+                    return completed(json.dumps([{"Id": pin["manifest"], "Architecture": "arm64",
+                                                  "RootFS": {"Layers": pin["diff_ids"]}}]))
+                if args[:2] == ["volume", "inspect"]:
+                    return completed(json.dumps([{"Name": args[-1], "Labels": {"dev.ctrs.campaign.run": volume_owner}}]))
+                if args[0] == "inspect":
+                    return completed(json.dumps([{"Config": {"Labels": {"dev.ctrs.campaign.run": "test-run-000001"}}}]))
+                if args[0] == "run":
+                    self.assertIn("--pull=never", args)
+                    self.assertEqual(args[-1], pin["manifest"])
                 if "-tAc" in args:
                     return completed("1\n")
                 if "-tA" in args:
@@ -187,6 +200,13 @@ class WorkloadSafetyTests(unittest.TestCase):
                 bad_rows = runner.trial_w3(FixtureContext(tmp), engine, "warm")
                 timings = timings.replace("COMMIT", "ROLLBACK", 1)
                 bad_tx = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                volume_owner = "another-run"
+                engine.sh.reset_mock()
+                unowned = runner.trial_w3(FixtureContext(tmp), engine, "warm")
+                self.assertFalse(unowned["correctness"]["ok"])
+                self.assertIn("W3 database volume ownership mismatch", unowned["validation_errors"][0])
+                self.assertFalse(any(call.args[0][0] in ("run", "rm") or call.args[0][:2] == ["volume", "rm"]
+                                     for call in engine.sh.call_args_list))
 
             self.assertTrue(rec["correctness"]["ok"], rec)
             self.assertEqual(rec["metrics"]["transaction_p95_ms"], 285.125)
@@ -297,7 +317,7 @@ class WorkloadSafetyTests(unittest.TestCase):
         for vertices in ([], [dict(vertex, error="test failed")], [dict(vertex, completed=None)],
                          [dict(vertex, cached=True)], [vertex, dict(vertex, digest="sha256:" + "b" * 64)]):
             with self.subTest(vertices=vertices), self.assertRaises(ValueError):
-                runner._w6_compile_vertex(json.dumps({"vertexes": vertices}), instruction, cached=False)
+                runner._buildkit_vertex(json.dumps({"vertexes": vertices}), instruction, cached=False)
 
     def test_missing_w6_asset_fails_before_starting_engine(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -361,7 +381,9 @@ class WorkloadSafetyTests(unittest.TestCase):
             (fixture / "httpie-3.2.4.tar.gz").write_bytes(httpie)
             engine = fake_engine()
             loaded = {}
+            notes = []
             corrupt_warm = False
+            miscached = False
             lost_ownership = False
 
             def respond(args, **kw):
@@ -370,7 +392,20 @@ class WorkloadSafetyTests(unittest.TestCase):
                     owner = args[args.index("--label") + 1].split("=", 1)[1]
                     context = Path(args[args.index("-f") + 1]).parent
                     loaded[tag] = owner, (context / "stamp/note.txt").read_text()
-                    return completed()
+                    notes.append(loaded[tag][1])
+                    app = "hyperfine" if "hyperfine" in tag else "httpie"
+                    compile_cached = not tag.endswith("-uncached")
+                    if miscached and app == "hyperfine" and tag.endswith("-incr"):
+                        compile_cached = False
+                    progress = {"vertexes": [
+                        {"name": instruction, "digest": "sha256:" + digit * 64, "cached": cached,
+                         "started": "2026-11-17T12:00:00Z", "completed": "2026-11-17T12:00:02Z"}
+                        for instruction, digit, cached in (
+                            (apps[app]["compile_step"], "a", compile_cached),
+                            (runner.W7_NOTE_STEP, "b", tag.endswith("-warm")))]}
+                    result = completed()
+                    result.stderr = json.dumps(progress)
+                    return result
                 if args[0] == "run":
                     tag = args[3]
                     self.assertIn("--pull=never", args)
@@ -403,8 +438,16 @@ class WorkloadSafetyTests(unittest.TestCase):
                     patch.object(runner, "start_sampler",
                                  return_value=(None, None)):
                 rec = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                stamp = hashlib.sha256(FixtureContext(tmp).workload_id.encode()).hexdigest()
+                self.assertEqual(notes, [f"incremental-{i}:{stamp}\n" for i in (0, 0, 1)] * 2)
                 commands = [call.args[0] for call in engine.sh.call_args_list]
                 self.assertEqual(loaded, {})
+                miscached = True
+                bad_cache = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                self.assertFalse(bad_cache["correctness"]["ok"])
+                self.assertIn("did not prove cached=True", bad_cache["validation_errors"][0])
+                self.assertNotIn("hyperfine_incr_first_use_s", bad_cache["metrics"])
+                miscached = False
                 corrupt_warm = lost_ownership = True
                 bad = runner.trial_w7(FixtureContext(tmp), engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)

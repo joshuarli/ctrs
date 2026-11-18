@@ -262,6 +262,23 @@ class CleanupOwnershipTests(unittest.TestCase):
 
 
 class QueueLatencyTests(unittest.TestCase):
+    def test_guest_clock_normalizes_signed_offsets_and_preserves_boot_identity(self):
+        boot = '4ea3a5d3-6803-4976-83ad-5874d46724df'
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory)
+            (proc / 'sys/kernel/random').mkdir(parents=True)
+            (proc / 'sys/kernel/random/boot_id').write_text(boot + '\n')
+            (proc / 'self').mkdir()
+            offsets = proc / 'self/timens_offsets'
+            for seconds, nanos, observed in ((3, 250000000, 13250000000), (-3, 750000000, 7750000000)):
+                offsets.write_text(f'monotonic {seconds} {nanos}\nboottime 7 0\n')
+                identity, now = latency.guest_clock(proc, now=lambda: observed)
+                self.assertEqual((identity, now()), (boot, 10000000000))
+            for malformed in ('boottime 0 0', 'monotonic 0 1000000000', 'monotonic 0 0\nmonotonic 1 0'):
+                offsets.write_text(malformed)
+                with self.assertRaises(ValueError):
+                    latency.guest_clock(proc)
+
     def test_timed_pipeline_pairs_receipts_with_exact_artifacts(self):
         clock = 'guest:time-namespace'
         with FakeRedis() as redis, tempfile.TemporaryDirectory() as directory:

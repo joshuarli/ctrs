@@ -19,6 +19,7 @@ import ownership
 import perf_counts
 import cpu_profile
 import runner
+import w2_peer
 import sched_trace
 from resource_pilot import host_snapshot
 from w2_scheduler_app import parse_api_cpus
@@ -81,8 +82,7 @@ def load(engine, location, client, base, directory, label, count, write_ratio, *
     if location == 'host':
         cp = subprocess.run([sys.executable, str(runner.LOAD_PY), *args], capture_output=True, text=True, timeout=90)
     else:
-        wrapper = "import subprocess,sys; f=open(sys.argv[1],'w'); e=open(sys.argv[2],'w'); sys.exit(subprocess.run([sys.executable,'/work/load.py',*sys.argv[3:]],stdout=f,stderr=e).returncode)"
-        cp = engine.sh(['exec', client, 'python', '-c', wrapper, '/work/' + label + '.stdout', '/work/' + label + '.stderr', *args], timeout=90, check=False)
+        cp = w2_peer.run(engine, client, label, args, 90)
     if location == 'host':
         (directory / (label + '.stdout')).write_text(cp.stdout)
         (directory / (label + '.stderr')).write_text(cp.stderr)
@@ -95,16 +95,7 @@ def load(engine, location, client, base, directory, label, count, write_ratio, *
 def read_load(engine, location, client, directory, label, count):
     out = directory / (label + '.json')
     if location == 'guest':
-        for suffix in ('', '.writes.jsonl', '.errors.jsonl'):
-            cp = engine.sh(['exec', client, 'python', '-c',
-                "import pathlib,sys;sys.stdout.write(pathlib.Path(sys.argv[1]).read_bytes().decode('utf-8'))",
-                '/work/' + label + '.json' + suffix])
-            Path(str(out) + suffix).write_bytes(cp.stdout.encode('utf-8'))
-        for stream in ('stdout', 'stderr'):
-            cp = engine.sh(['exec', client, 'python', '-c',
-                "import pathlib,sys;sys.stdout.write(pathlib.Path(sys.argv[1]).read_bytes().decode('utf-8'))",
-                '/work/' + label + '.' + stream])
-            (directory / (label + '.' + stream)).write_bytes(cp.stdout.encode('utf-8'))
+        w2_peer.copy_results(engine, client, directory, label)
     summary = json.loads(out.read_text())
     if summary['errors'] or summary['requests_ok'] != count:
         raise RuntimeError('fixed application work failed: ' + label)
@@ -178,21 +169,9 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             (directory / 'guest-console.log').write_bytes((engine.dir / 'data/vm-console.log').read_bytes())
         engine.sh(['exec', '--privileged', api, 'mount', '-t', 'tracefs', 'tracefs', '/sys/kernel/tracing'])
         if client_location == 'guest':
-            engine.sh(['create', '--pull', 'never', '--name', client, '--label', 'dev.ctrs.campaign.run=' + run,
-                '--network', project + '_appnet', '--tmpfs', '/work:size=64m', '--entrypoint', 'python',
-                refs['api'], '-c', 'import time; time.sleep(86400)'])
-            engine.sh(['start', client])
-            info = json.loads(engine.sh(['inspect', client]).stdout)[0]
-            if info['Config']['Image'] != refs['api'] or info['Id'] == api:
-                raise ValueError('guest client identity differs from pinned peer')
+            info = w2_peer.prepare(engine, client, run, project, api, refs['api'],
+                                   root.parent / 'source' / runner.LOAD_PY.name, PIN['w2_load_sha256'])
             save(directory / 'guest-client.json', info)
-            engine.sh(['exec', client, 'python', '-c',
-                "import pathlib,sys;pathlib.Path('/work/load.py').write_bytes(sys.argv[1].encode('utf-8'))",
-                (root.parent / 'source' / runner.LOAD_PY.name).read_bytes().decode('utf-8')])
-            digest = engine.sh(['exec', client, 'python', '-c',
-                "import hashlib;print(hashlib.sha256(open('/work/load.py','rb').read()).hexdigest())"]).stdout.strip()
-            if digest != PIN['w2_load_sha256']:
-                raise ValueError('guest client source differs from pin')
         result['effective_client_location'] = client_location
         load(engine, client_location, client, base, directory, 'warmup', 1000, 0,
              concurrency=concurrency, seed=seed)
@@ -391,7 +370,7 @@ def main():
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
-    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
+    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(w2_peer.__file__), Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v2/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
     guest_suffix = GUEST_CLIENT_SUFFIX if args.client_location == 'guest' else ''
     save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix,

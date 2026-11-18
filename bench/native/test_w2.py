@@ -291,6 +291,96 @@ class PersistedStateTests(unittest.TestCase):
             self.assertFalse(runner.exact_w2_items(corrupt, writes))
 
 
+class GuestPlacementTests(unittest.TestCase):
+    def test_guest_uses_verified_peer_for_each_workload_mode(self):
+        import hashlib
+        import runner
+        from test_safety import FixtureContext, completed, fake_engine
+
+        image = "sha256:" + "a" * 64
+        for operations, rate, mode in ((None, None, "saturation"), (2, None, "fixed-work"),
+                                       (2, 100, "fixed-rate"), (2, None, "corrupt"),
+                                       (2, None, "source-mismatch")):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                engine = fake_engine()
+                engine.compose.side_effect = lambda _, args, **kw: completed(f"{args[-1]}-id") if "ps" in args else completed()
+                args_seen = {}
+                events = []
+                files = {
+                    "load.json.writes.jsonl": json.dumps({"name": "write-1", "payload": "value"}) + "\n",
+                    "load.json.errors.jsonl": "", "load.stdout": "", "load.stderr": "",
+                }
+                summary = dict(fixture_version=rate_load.FIXTURE_VERSION if rate else "w2-v2-fixed-work",
+                               mode=mode, requests_ok=2, duration_s=1, rps=2, requests=2,
+                               errors=0, writes_ok=1, reads_ok=1, latency_ms={"p50": 1, "p95": 2, "p99": 3})
+                if rate:
+                    summary.update(latency_scope="scheduled", service_latency_ms={}, request_rate=rate,
+                                   planned_span_s=.01, schedule_lag_budget_ms=10, planned_requests=2,
+                                   offered_requests=2, delivered_requests=2, late_requests=0,
+                                   offered_rate_valid=True, slots=[])
+                files["load.json"] = json.dumps(summary)
+
+                def command(args, **kwargs):
+                    if args[0] == "create":
+                        self.assertEqual(args[args.index("--network") + 1],
+                                         runner.project_name("test-run-000001", engine.name, "W2") + "_appnet")
+                        self.assertIn(image, args)
+                    elif args[0] == "inspect":
+                        return completed(json.dumps([{"Id": args[1], "Image": image,
+                                                       "Config": {"Image": image, "Labels": {"dev.ctrs.campaign.run": "test-run-000001"}}}]))
+                    elif args[:2] == ["exec", "api-id"]:
+                        events.append("api-cpu")
+                        return completed("usage_usec 42\n")
+                    elif args[:2] == ["exec", "db-id"]:
+                        rows = [[f"item-{i}", hashlib.md5(str(i).encode()).hexdigest()] for i in range(1, 501)]
+                        rows.append(["write-1", "corrupt" if mode == "corrupt" else "value"])
+                        return completed("\n".join(json.dumps(row) for row in rows))
+                    elif args[0] == "exec":
+                        script = args[4]
+                        if "write_bytes" in script:
+                            files["source"] = args[-1]
+                        elif "hashlib" in script:
+                            return completed("wrong" if mode == "source-mismatch" else hashlib.sha256(files["source"].encode()).hexdigest())
+                        elif "ProxyHandler" in script:
+                            self.assertTrue(args[5].startswith("http://api:8000/"))
+                            return completed(json.dumps([200, {"ok": True, "items": 501}]))
+                        elif "subprocess.run" in script:
+                            args_seen.update(dict(zip(args[7::2], args[8::2], strict=True)))
+                            events.append("guest-load")
+                        elif "read_bytes" in script:
+                            events.append("copy")
+                            return completed(files[Path(args[-1]).name])
+                    elif args[:2] == ["rm", "-f"]:
+                        events.append("remove-peer")
+                    return completed()
+
+                @contextlib.contextmanager
+                def phase(engine, record, name):
+                    yield
+                    record["resources"].setdefault("phases", {})[name] = {"cpu_seconds": 1}
+
+                engine.sh.side_effect = command
+                with patch.object(runner, "start_sampler", return_value=(None, None)), \
+                        patch.object(runner, "resource_phase", phase), patch.object(runner, "compose_down") as down, \
+                        patch.object(runner.subprocess, "run", side_effect=AssertionError("host load")):
+                    rec = runner.trial_w2(FixtureContext(directory), engine, "warm", 2, 20, .5, 7,
+                                           operations, request_rate=rate, client_location="guest")
+                self.assertEqual(down.call_count, 2)
+                self.assertIn("remove-peer", events)
+                self.assertEqual(rec["correctness"]["ok"], mode not in ("corrupt", "source-mismatch"), rec)
+                if mode == "source-mismatch":
+                    self.assertNotIn("guest-load", events)
+                    self.assertIn("source differs", rec["validation_errors"][0])
+                else:
+                    self.assertEqual(args_seen["--url"], "http://api:8000")
+                    self.assertEqual(args_seen.get("--operations"), str(operations) if operations else None)
+                    self.assertEqual(args_seen.get("--request-rate"), str(rate) if rate else None)
+                    self.assertEqual(events[:4], ["api-cpu", "guest-load", "api-cpu", "copy"])
+                    source = runner.RATE_LOAD_PY if rate else runner.LOAD_PY
+                    self.assertEqual(files["source"], source.read_text())
+                    self.assertEqual(rec["correctness"]["checks"]["exact_persisted_items"], mode != "corrupt")
+
+
 class WorkerFailureTests(unittest.TestCase):
     def test_fatal_worker_error_cannot_emit_successful_partial_summary(self):
         with patch.object(load, 'worker', side_effect=RuntimeError('worker failed')), \
