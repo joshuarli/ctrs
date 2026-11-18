@@ -22,6 +22,7 @@ import resource_cells
 import recovery_client
 import recovery_trace
 import ci_jobs
+import w2_peer
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
 from contextlib import contextmanager, nullcontext
@@ -912,12 +913,13 @@ def compose_down(engine: Engine, project: str,
         engine.sh(["rm", "-f", "--", cid], check=False, timeout=30)
 
 
-def wait_health(base: str, deadline_s: float):
+def wait_health(base: str, deadline_s: float, *, request=None):
     """Poll /health; return (monotonic_time, body) or (None, last)."""
     end = time.monotonic() + deadline_s
     last = None
+    get = http_json if request is None else request
     while time.monotonic() < end:
-        status, body = http_json(f"{base}/health", timeout=3)
+        status, body = get(f"{base}/health", timeout=3)
         last = (status, body)
         if status == 200 and isinstance(body, dict) and body.get("ok"):
             return time.monotonic(), body
@@ -1020,23 +1022,27 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
              duration: float, write_ratio: float, seed: int,
              operations: int | None = None, *, request_rate: float | None = None,
              allocation_paths: tuple[Path, ...] = (),
-             sampling=SamplingMode.PERIODIC) -> dict:
+             sampling=SamplingMode.PERIODIC, client_location: str = "host") -> dict:
     """W2: seeded stack up (untimed), then sustained mixed load timed."""
+    if client_location not in ("host", "guest"):
+        raise ValueError("W2 client location must be host or guest")
     span = planned_span(operations, request_rate) if request_rate is not None else None
     client_source = RATE_LOAD_PY if request_rate is not None else LOAD_PY
     case_id = "W2"
     proj = project_name(ctx.run_id, engine.name, case_id)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    api = f"{base}"
     cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     trial_dir.mkdir(parents=True, exist_ok=True)
     load_out = trial_dir / "load.json"
     rec = ctx.new_record(engine, case_id, state, trial_dir)
-    if request_rate is not None:
-        rec.setdefault("inputs", {})["load_client"] = {
-            "path": str(client_source.relative_to(REPO)), "sha256": sha256_file(client_source)}
+    client_sha = sha256_file(client_source)
+    rec.setdefault("inputs", {})["load_client"] = {
+        "path": str(client_source.relative_to(REPO)), "sha256": client_sha}
+    rec["metrics"]["client_location"] = client_location
+    peer = None
+    get = http_json
     sampler = trace = None
     measurement_started = False
     t0 = time.monotonic()
@@ -1056,7 +1062,26 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
                 rec["validation_errors"].append(
                     f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}")
                 return rec
-            t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
+            if client_location == "guest":
+                api_id = engine.compose(proj, ["ps", "-q", "api"], timeout=30).stdout.strip()
+                api_info, = json.loads(engine.sh(["inspect", api_id], timeout=30).stdout)
+                image_id = api_info["Image"]
+                if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+                    raise ValueError("cannot identify the immutable W2 API image")
+                peer = f"{proj}-client"
+                info = w2_peer.prepare(engine, peer, ctx.run_id, proj, api_id, image_id, client_source, client_sha)
+                if info["Image"] != image_id:
+                    raise ValueError("W2 peer uses a different loaded image")
+                (trial_dir / "guest-client.json").write_text(json.dumps(info, indent=2) + "\n")
+                base = w2_peer.URL
+
+                def get(url, timeout):
+                    return w2_peer.get(engine, peer, url, timeout)
+
+                t_ready, _ = wait_health(base, HEALTH_DEADLINE_S, request=get)
+                rec["resources"]["engine_cpu_scope"] = "includes guest load client"
+            else:
+                t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
             if t_ready is None:
                 rec["correctness"]["ok"] = False
                 rec["validation_errors"].append("stack never became healthy")
@@ -1071,19 +1096,26 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         app_before = application_cpu()
         if allocation_paths:
             rec["resources"]["disk_allocation"]["before_work"] = resource_cells.allocation_snapshot(allocation_paths)
+        output_path = str(load_out) if peer is None else f"{w2_peer.OUTPUT_DIR}/load.json"
+        args = ["--url", base, "--concurrency", str(concurrency), "--duration", str(duration),
+                "--write-ratio", str(write_ratio), "--seed", str(seed), "--out", output_path]
+        if operations is not None:
+            args += ["--operations", str(operations)]
+        if request_rate is not None:
+            args += ["--request-rate", str(request_rate)]
+        timeout = max(duration, span or 0) + 120
         with resource_phase(engine, rec, "workload"):
-            load = subprocess.run(
-                [sys.executable, str(client_source), "--url", api,
-                 "--concurrency", str(concurrency), "--duration", str(duration),
-                 "--write-ratio", str(write_ratio), "--seed", str(seed),
-                 "--out", str(load_out)] +
-                (["--operations", str(operations)] if operations is not None else []) +
-                (["--request-rate", str(request_rate)] if request_rate is not None else []),
-                capture_output=True, text=True, timeout=max(duration, span or 0) + 120)
+            if peer is None:
+                load = subprocess.run([sys.executable, str(client_source), *args],
+                                      capture_output=True, text=True, timeout=timeout)
+            else:
+                load = w2_peer.run(engine, peer, "load", args, timeout)
         app_after = application_cpu()
         rec["resources"]["application_cpu"] = {"before": app_before, "after": app_after,
             "delta": {key: app_after[key] - value for key, value in app_before.items()
                       if key in app_after}, "method": "API cgroup v2 cpu.stat; includes counter-reader exec"}
+        if peer is not None:
+            w2_peer.copy_results(engine, peer, trial_dir, "load")
         if load_out.exists():
             summary = json.loads(load_out.read_text())
             rec["metrics"].update({
@@ -1122,7 +1154,7 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         rec["metrics"]["workload_cpu_seconds"] = phase_cpu
         rec["metrics"]["cpu_seconds_per_success"] = (
             phase_cpu / summary["requests_ok"] if phase_cpu is not None and summary["requests_ok"] else None)
-        status, stats = http_json(f"{base}/stats", timeout=10)
+        status, stats = get(f"{base}/stats", timeout=10)
         expected_items = 500 + summary["writes_ok"]
         got_items = stats.get("items") if isinstance(stats, dict) else None
         count_ok = status == 200 and got_items == expected_items
@@ -1158,10 +1190,15 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         try:
             if allocation_paths:
                 rec["resources"].setdefault("disk_allocation", {})["after_work"] = resource_cells.allocation_snapshot(allocation_paths)
-            if measurement_started:
-                with resource_phase(engine, rec, "cleanup"):
-                    compose_down(engine, proj)
-            else:
+            with resource_phase(engine, rec, "cleanup") if measurement_started else nullcontext():
+                if peer is not None:
+                    try:
+                        ci_jobs.cleanup(engine, peer, ctx.run_id)
+                    except BaseException as exc:
+                        rec["correctness"]["ok"] = False
+                        rec["validation_errors"].append(f"peer cleanup {type(exc).__name__}: {exc}")
+                        if not isinstance(exc, Exception) and interrupted is None:
+                            interrupted = exc
                 compose_down(engine, proj)
             if allocation_paths:
                 rec["resources"]["disk_allocation"]["after_cleanup"] = resource_cells.allocation_snapshot(allocation_paths)
@@ -3177,6 +3214,8 @@ def cmd_run(args) -> int:
     if args.case == "W2":
         kw["operations"] = getattr(args, "operations", None)
         kw["request_rate"] = getattr(args, "request_rate", None)
+        if getattr(args, "client_location", None) is not None:
+            kw["client_location"] = args.client_location
     if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
         kw["interrupt_service"] = args.interrupt_service
     if args.case in ("W6", "W7"):
@@ -3223,6 +3262,8 @@ def cmd_baseline(args) -> int:
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
                     kw["request_rate"] = getattr(args, "request_rate", None)
+                    if getattr(args, "client_location", None) is not None:
+                        kw["client_location"] = args.client_location
                 if args.case == "W10" and getattr(args, "interrupt_service", None) is not None:
                     kw["interrupt_service"] = args.interrupt_service
                 if args.case in ("W6", "W7"):
@@ -3419,6 +3460,8 @@ def main() -> int:
                    help="W6/W7: dc pins matching BuildKit images in "
                         "isolated per-engine builders")
     for command in ("run", "baseline"):
+        sub.choices[command].add_argument("--client-location", choices=("host", "guest"),
+                                         help="W2 client placement (default: published port from host)")
         sub.choices[command].add_argument("--build-cache", choices=("uncached", "warm"),
                                          help="W6 build-cache condition (default: uncached); warm primes the same context")
         sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
@@ -3467,6 +3510,8 @@ def main() -> int:
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
     args = ap.parse_args()
+    if getattr(args, "client_location", None) is not None and args.case != "W2":
+        ap.error("--client-location requires W2")
     if getattr(args, "build_cache", None) is not None and args.case != "W6":
         ap.error("--build-cache requires W6")
     if getattr(args, "interrupt_service", None) is not None and args.case != "W10":

@@ -34,14 +34,14 @@ correctness = ["health", "roundtrip_db_and_cache", "persist_after_db_restart"]
 [[case]]
 id = "W2"
 family = "api-service-under-load"
-title = "sustained mixed read/write JSON load vs seeded Postgres+Redis stack via published port"
-fixture = "fixtures/w1 + fixtures/w2/load.py"
+title = "sustained mixed read/write JSON load against a seeded stack from the host or an owned peer"
+fixture = "fixtures/w1 + fixtures/w2/load.py or fixtures/w2/v3.py"
 status = "implemented"
 fixture_version = "w2-v2-fixed-work"
 metrics = ["cpu_seconds_per_success", "wall_seconds", "rps", "p50_ms", "p95_ms", "p99_ms", "errors",
            "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]
-params = { modes = ["fixed-work", "saturation"], operations = 50000, concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
+params = { modes = ["fixed-work", "fixed-rate", "saturation"], client_location = ["host", "guest"], operations = 50000, concurrency = [1, 4, 8, 16], duration_s = 20, write_ratio = 0.3, seed_rows = 500 }
 correctness = ["http_errors_zero", "item_count_equals_seed_plus_writes", "exact_persisted_names_and_payloads", "fixed_work_complete"]
 
 [[case]]

@@ -78,11 +78,13 @@ capture in one matched block using 50,000 exact C8 operations per cell.
 Require every API thread, valid native samples and zero loss. Collect a
 fresh paired overhead batch before using the profile for product selection.
 
-If the Mac stays shared, add the container-to-container client path to
-the normal W2 runner. Reuse the diagnostic peer-container setup and
-preserve the published-port default. Keep fixed-work, saturation, and
-fixed-offered-rate inputs and result identities distinct. Verify the
-copied client and exact persisted outputs in both placements.
+If the Mac stays shared, prepare the W8 cancelled-delivery condition.
+Use an owned pull against the pinned registry and interrupt it during
+a verified blob transfer. Check the staged image, owned cleanup, and
+retained portfolio before attempting a fresh exact pull. Keep retained
+and derived inputs in separate cells.
+The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
+now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
 `90491bf`. Its [bounded W11 checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
 pass on `3d3f3fb`. The asset lock remains in pilot status.
