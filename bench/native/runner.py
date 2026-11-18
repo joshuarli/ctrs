@@ -243,6 +243,7 @@ W8_IMAGES = [
 ]
 
 CHECK_COMPONENTS = {
+    "w1": ("test_w1", "test_safety"),
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
     "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
     "w5": ("test_w5", "test_resource_cycles", "test_reporting", "test_safety"),
@@ -929,88 +930,144 @@ def wait_health(base: str, deadline_s: float, *, request=None):
     return None, last
 
 
-def trial_w1(ctx, engine: Engine, state: str) -> dict:
-    """W1: compose up -> verified healthy + DB/cache roundtrip; then a
-    persistence check across a database restart."""
+W1_FIXTURE_VERSION = "w1-v2-pinned-restart"
+
+
+def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_VERSION) -> dict:
+    """Verify startup and DB/cache recovery with a preinstalled pinned stack."""
+    from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
+
     case_id = "W1"
-    proj = project_name(ctx.run_id, engine.name, case_id)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     cenv = {"NP_API_PORT": str(port), "NP_API_TAG": API_TAG}
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
-    trial_dir.mkdir(parents=True, exist_ok=True)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
+    trial_token = hashlib.sha256(rec["trial_id"].encode()).hexdigest()[:16]
+    proj = project_name(trial_token, engine.name, case_id)
+    override = trial_dir / "pinned-compose.json"
+    checks = rec["correctness"]["checks"]
+    rec["metrics"]["fixture_version"] = fixture_version
+    recovery = rec["recovery"] = {}
+    started = False
     sampler = trace = None
-    t0 = time.monotonic()
-    try:
-        engine.ensure_up()
-        compose_down(engine, proj)
-        sampler, trace = start_sampler(engine, trial_dir)
-        up = engine.compose(proj, ["up", "-d"], env_extra=cenv, timeout=300)
-        rec["validation_errors"].append(
-            f"compose up rc={up.returncode}: {(up.stderr or up.stdout)[-300:]}"
-            if up.returncode != 0 else "")
-        rec["validation_errors"] = [e for e in rec["validation_errors"] if e]
-        if up.returncode != 0:
-            rec["correctness"]["ok"] = False
-            return rec
+    t0 = None
 
+    def compose(args):
+        return engine.sh(["compose", "-f", str(COMPOSE_FILE), "-f", str(override),
+                          "-p", proj, *args], env_extra=cenv, timeout=300)
+
+    def inspect_service(service):
+        selected = compose(["ps", "-q", service]).stdout.split()
+        if len(selected) != 1:
+            raise ValueError(f"expected one owned W1 {service} container")
+        inspected, = json.loads(engine.sh(["inspect", "--", selected[0]], timeout=30).stdout)
+        labels = inspected["Config"]["Labels"]
+        if (not inspected["Id"].startswith(selected[0])
+                or labels.get("com.docker.compose.project") != proj
+                or labels.get("com.docker.compose.service") != service
+                or inspected["Image"] != refs[service]
+                or inspected["State"]["Running"] is not True):
+            raise ValueError(f"wrong identity for W1 {service} container")
+        return inspected
+
+    def database_identity():
+        inspected = inspect_service("db")
+        mounts = [mount for mount in inspected["Mounts"]
+                  if mount["Destination"] == "/var/lib/postgresql/data"]
+        if (len(mounts) != 1 or mounts[0]["Type"] != "volume"
+                or mounts[0].get("Name") != proj + "_dbdata" or mounts[0].get("RW") is not True
+                or not inspected["State"]["StartedAt"]):
+            raise ValueError("W1 database volume or process identity differs")
+        return {"id": inspected["Id"], "volume": mounts[0]["Name"],
+                "started_at": inspected["State"]["StartedAt"]}
+
+    def write_record(stage, key, value):
+        status, body = http_json_write(f"{base}/records", {"key": key, "value": value})
+        recovery[stage] = {"status": status, "body": body}
+        if status != 200 or body != {"stored": key}:
+            raise ValueError(f"W1 {stage} did not acknowledge the exact key")
+        checks[stage] = True
+
+    def read_record(stage, key, value):
+        status, body = http_json(f"{base}/records/{key}", timeout=10)
+        recovery[stage] = {"status": status, "body": body}
+        if (status != 200 or body != {"key": key, "value": value, "cache_match": True}
+                or body["cache_match"] is not True):
+            raise ValueError(f"W1 {stage} did not return the exact database and cache record")
+        checks[stage] = True
+
+    try:
+        if fixture_version != W1_FIXTURE_VERSION:
+            raise ValueError("W1 fixture version mismatch")
+        pin_path = FIXTURES / "w8-v2/portfolio.json"
+        source = json.loads(pin_path.read_text())
+        seed_sha = sha256_file(W1_DIR / "seed.sql")
+        if seed_sha != source["seed_sql_sha256"]:
+            raise ValueError("W1 seed differs from the pinned portfolio")
+        engine.ensure_up()
+        pins = {service: source["images"]["np-v2/" + image] for service, image in
+                (("api", "api"), ("db", "postgres"), ("cache", "redis"))}
+        refs = {service: baseline_image_reference(engine.name, pin)[1] for service, pin in pins.items()}
+        installed = json.loads(engine.sh(["image", "inspect", *refs.values()]).stdout)
+        rec["inputs"] = {"images": require_baseline_images(engine.name, pins, installed),
+                         "seed_sha256": seed_sha, "portfolio_sha256": sha256_file(pin_path)}
+        override.write_text(json.dumps({"services": {service: {"image": ref}
+                                                    for service, ref in refs.items()}}) + "\n")
+        sampler, trace = start_sampler(engine, trial_dir)
+        started = True
+        t0 = time.monotonic()
+        compose(["up", "-d", "--no-build", "--pull", "never"])
         t_health, health_body = wait_health(base, HEALTH_DEADLINE_S)
         if t_health is None:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append(
-                f"health deadline; last={health_body}")
-            return rec
+            raise RuntimeError(f"W1 health deadline; last={health_body}")
+        checks["health"] = True
         rec["metrics"]["time_to_health_s"] = round(t_health - t0, 3)
-
         status, rt = http_json(f"{base}/roundtrip", timeout=10)
-        ok_rt = (status == 200 and isinstance(rt, dict) and rt.get("ok")
-                 and isinstance(rt.get("db_row"), dict)
-                 and rt["db_row"].get("name") == "item-1")
-        rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
-        rec["metrics"]["time_to_roundtrip_s"] = rec["metrics"]["wall_seconds"]
-        rec["correctness"]["checks"]["roundtrip"] = ok_rt
-        if not ok_rt:
-            rec["correctness"]["ok"] = False
-            rec["validation_errors"].append(f"roundtrip bad: {rt}")
-            return rec
-
-        # Persistence: write a record, restart the db container, read back.
-        key = f"keep-{ctx.run_id}-{engine.name}"
-        _, wr = http_json_write(f"{base}/records",
-                                {"key": key, "value": "persist-ok"})
-        db_id = engine.compose(proj, ["ps", "-q", "db"], timeout=30
-                               ).stdout.strip()
-        persist_ok = False
-        detail = {}
-        if db_id:
-            engine.sh(["restart", db_id], timeout=120)
-            t_ready, _ = wait_health(base, HEALTH_DEADLINE_S)
-            if t_ready is not None:
-                st, got = http_json(f"{base}/records/{key}", timeout=10)
-                persist_ok = (st == 200 and isinstance(got, dict)
-                              and got.get("value") == "persist-ok"
-                              and got.get("cache_match") is True)
-                detail = {"status": st, "body": got}
-        else:
-            detail = {"error": "db container id not found"}
-        rec["correctness"]["checks"]["persist_after_db_restart"] = persist_ok
-        rec["correctness"]["checks"]["persist_detail"] = detail
-        rec["correctness"]["ok"] = bool(
-            rec["correctness"]["ok"] and persist_ok)
-        return rec
+        recovery["initial_roundtrip"] = {"status": status, "body": rt}
+        expected_row = {"id": 1, "name": "item-1", "payload": hashlib.md5(b"1").hexdigest()}
+        if (status != 200 or not isinstance(rt, dict) or rt.get("ok") is not True
+                or rt.get("db_row") != expected_row or rt.get("seed_rows") != 500
+                or not re.fullmatch(r"rt-[0-9]+", str(rt.get("cache_token")))):
+            raise ValueError("W1 initial DB/cache roundtrip differs from pin")
+        rec["metrics"]["time_to_roundtrip_s"] = round(time.monotonic() - t0, 3)
+        checks["roundtrip"] = True
+        for service in ("api", "cache"):
+            inspect_service(service)
+        before = recovery["database_before"] = database_identity()
+        key = "keep-" + trial_token
+        write_record("write_before_restart", key, "persist-ok")
+        engine.sh(["restart", before["id"]], timeout=120)
+        t_ready, health_body = wait_health(base, HEALTH_DEADLINE_S)
+        if t_ready is None:
+            raise RuntimeError(f"W1 restart health deadline; last={health_body}")
+        after = recovery["database_after"] = database_identity()
+        if (before["id"] != after["id"] or before["volume"] != after["volume"]
+                or before["started_at"] == after["started_at"]):
+            raise ValueError("W1 did not observe the owned database restart on the same volume")
+        read_record("persist_after_db_restart", key, "persist-ok")
+        write_record("write_after_restart", key + "-after", "restart-ok")
+        read_record("read_after_restart", key + "-after", "restart-ok")
+        rec["correctness"]["ok"] = True
     except Exception as exc:
         rec["correctness"]["ok"] = False
-        rec["validation_errors"].append(f"exception: {exc}")
-        return rec
+        rec["validation_errors"].append(str(exc))
     finally:
-        rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
-        compose_down(engine, proj)
+        if t0 is not None:
+            rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
+        if started:
+            try:
+                compose(["down", "-v", "--remove-orphans"])
+                checks["cleanup"] = True
+            except Exception as exc:
+                rec["correctness"]["ok"] = False
+                rec["validation_errors"].append(f"W1 cleanup: {exc}")
         if sampler is not None:
             stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
+    return rec
 
 
 def exact_w2_items(actual, writes):
@@ -3548,7 +3605,7 @@ def main() -> int:
 
     p = sub.add_parser("check", help="bounded offline native tests for one component")
     p.add_argument("component", choices=tuple(CHECK_COMPONENTS),
-                   help="required component: w2, w8, or resources")
+                   help="component to check")
     p.add_argument("--timeout", type=int, default=CHECK_TIMEOUT_SECONDS,
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 

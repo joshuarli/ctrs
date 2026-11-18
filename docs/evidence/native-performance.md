@@ -2420,6 +2420,30 @@ exact edits per mount. All 32 resource phase receipts passed ownership and
 counter coverage. The run is ineligible for scoring. Reproduce with the
 [W5 fixture instructions](../../bench/native/fixtures/w5-v2/README.md).
 
+## W1 pinned startup and database restart
+
+W1 uses three preinstalled W8 v2 portfolio images and the pinned W1 seed.
+The runner checks each image ID, ARM64 architecture and ordered DiffIDs
+before Compose starts with builds and pulls disabled. Startup measures
+from Compose invocation to the exact seed-row and Redis roundtrip receipt.
+The whole-workflow interval also includes the restart checks.
+
+The trial requires the exact write acknowledgment before restarting the
+owned database. It verifies the same database container and named volume
+with a changed process start time. The pre-restart value must return with
+the exact key and a matching Redis value. A second acknowledged write and
+exact DB/cache read show the recovered stack accepts new work.
+
+Warm native diagnostic `w1-restart-a5e18ad5c1b1` passed on both engines
+using the signed W8 cancellation candidate. Both records include the
+restart and response receipts and are ineligible for scoring. The W1
+component check passed 31 tests with no skips.
+
+Install the common images using the [portfolio instructions](../../bench/native/fixtures/w8-v2/README.md).
+Run `python3.14 bench/native/runner.py run --engine ctrs --case W1 --state warm`
+once per engine for a standalone check. Comparable engine-cold conditions
+remain open.
+
 ## Independent W10 recovery trace: readiness and cache expiry
 
 A bounded diagnostic entrypoint records Python entry, application dependency

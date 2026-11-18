@@ -87,10 +87,12 @@ fix wakes that read and passes the production-deadline regression with
 the published 0.9.0 source plus the shutdown backport. Both native ctrs
 cancellation and retry conditions now pass on the signed candidate.
 [W5 mounted-input and phase-resource receipts](evidence/native-performance.md#w5-v3-mounted-inputs-and-resource-receipts)
-pass native correctness on both engines. If the host stays shared, close
-the W1 post-restart receipt gap. Verify the write response and the exact
-persisted DB/cache read after the owned database restarts, using the
-common pinned application inputs.
+pass native correctness on both engines. The [W1 warm restart proof](evidence/native-performance.md#w1-pinned-startup-and-database-restart)
+passed on both engines with pinned images, exact writes and reads, and
+the same owned database container and volume across the restart. Engine-cold
+parity still requires an isolated OrbStack environment.
+If the host stays shared, validate the W10 database, queue and owned ctrs
+engine interruption producers against representative native fixtures.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main
