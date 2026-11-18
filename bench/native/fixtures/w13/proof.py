@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,9 +11,15 @@ sys.path.insert(0, str(NATIVE))
 import runner
 from transfer import trial_w13
 
-runner.CTRS_BIN = Path('/Users/josh/d/ctrs/target/release/ctrs')
+runner.CTRS_BIN = Path('/Users/josh/d/ctrs/.work/wt/host-bound/.work/tmp/target/release/ctrs')
 runner.DOCKER = runner.find_docker()
-os.environ['CTRS_GUEST_DIR'] = '/Users/josh/d/ctrs/guest/out'
+os.environ['CTRS_GUEST_DIR'] = '/Users/josh/d/ctrs/.work/wt/host-bound/guest/out'
+for path, expected in ((runner.CTRS_BIN, 'd9465bc2b73b15e1318c1e7b27aecff7227edb1515670448cc0dd8ee1db55380'),
+                       (Path(os.environ['CTRS_GUEST_DIR']) / 'initramfs.cpio', 'f3ab7344848d5bc5be6a7850c67c66c3b11e6a5e2081e0683792199b55b6ed38')):
+    digest = hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
+    print('sha256:', path, digest, flush=True)
+    if digest != expected:
+        raise ValueError('proof artifact hash mismatch')
 run_id = 'w13-proof-' + str(int(time.time()))
 ctx = runner.RunContext(run_id)
 orb = runner.Engine('orbstack', run_id)
@@ -46,10 +53,16 @@ try:
                     rec = trial_w13(ctx, engine, 'warm', path=path, direction=direction,
                                     streams=streams, size_bytes=256 * 1024**2, repeats=1)
                     ctx.write(rec)
+                    metrics = rec['metrics']
+                    attempt = metrics['attempts'][0] if metrics['attempts'] else None
+                    controls = metrics.get('capacity_controls', {})
                     item = {'engine': engine.name, 'path': path, 'direction': direction,
                             'streams': streams, 'ok': rec['correctness']['ok'],
-                            'image_id': engine.w13_image_id, 'errors': rec['validation_errors'],
-                            'metrics': rec['metrics']}
+                            'errors': rec['validation_errors'],
+                            'sha256_per_stream': rec.get('inputs', {}).get('sha256_per_stream'),
+                            'verified_bytes': attempt['verified_bytes'] if attempt else None,
+                            'receiver_hashes': [x.get('sha256') for x in attempt['receivers']] if attempt else [],
+                            'capacity_controls': {key: {'ok': value['ok'], 'bytes_per_second': value['goodput_bytes_per_second']} for key, value in controls.items()}}
                     summary.append(item)
                     print(json.dumps(item), flush=True)
                     if not item['ok']:

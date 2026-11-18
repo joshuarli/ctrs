@@ -15,6 +15,34 @@ def tool_limited(goodput, host_capacity, container_capacity):
     return goodput > 0.5 * min(host_capacity, container_capacity)
 
 
+
+def transfer_result(data, received, direction, streams, part, digest):
+    checks = received if direction == 'upload' else data['streams']
+    errors = [x.get('error') or x.get('ack_error') for x in data['streams'] + received
+              if x.get('error') or x.get('ack_error')]
+    identities = len(checks) == streams and sorted(x['id'] for x in checks) == [str(i) for i in range(streams)]
+    if not identities:
+        errors.append('stream identities mismatch')
+    ok = identities and not errors and all(x.get('bytes') == part and x.get('sha256') == digest for x in checks)
+    if not ok and not errors:
+        errors.append('byte count or hash mismatch')
+    data['receivers'] = checks
+    data['partial_bytes'] = sum(x.get('bytes') or 0 for x in checks if x.get('bytes') is not None)
+    data['partial_bytes_complete'] = len(checks) == streams and all(x.get('bytes') is not None for x in checks)
+    data['verified_bytes'] = sum(x['bytes'] for x in checks if x.get('error') is None
+                                 and x.get('bytes') == part and x.get('sha256') == digest)
+    data['ok'] = ok
+    data['errors'] = errors
+    data['goodput_bytes_per_second'] = data['verified_bytes'] / data['seconds'] if ok else None
+    return data
+
+
+def record_attempt(rec, attempt):
+    rec['metrics']['attempts'].append(attempt)
+    if not attempt['ok']:
+        rec['correctness']['ok'] = False
+        rec['validation_errors'].extend(attempt.get('errors', ['transfer integrity failure']))
+
 def trial_w13(ctx, engine, state, path='published-port', direction='upload', streams=1,
               size_bytes=DEFAULT_SIZE, repeats=3):
     import runner
@@ -92,14 +120,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 if proc.returncode:
                     raise RuntimeError(f'server exit {proc.returncode}: {err}')
                 received = json.loads(Path(result).read_text() if server_where == 'host' else engine.sh(['exec', server_where, 'cat', result]).stdout)
-                checks = received if run_direction == 'upload' else data['streams']
-                if len(checks) != streams or sorted(x['id'] for x in checks) != [str(i) for i in range(streams)]:
-                    raise ValueError('stream identities mismatch')
-                data['receivers'] = checks
-                data['verified_bytes'] = sum(x['bytes'] for x in checks if not x['error'])
-                data['ok'] = all(x['error'] is None and x['bytes'] == part and x['sha256'] == digest for x in checks)
-                data['goodput_bytes_per_second'] = data['verified_bytes'] / data['seconds'] if data['ok'] else None
-                return data
+                return transfer_result(data, received, run_direction, streams, part, digest)
             finally:
                 if proc.poll() is None:
                     proc.terminate()
@@ -123,15 +144,20 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
             server_where, client_where, host, bind = 'host', client, 'host.docker.internal', '0.0.0.0'
         rec['metrics']['server_bind_address'] = bind
         for i in range(repeats):
-            with runner.resource_phase(engine, rec, f'transfer_{i + 1}'):
-                attempt = transfer(server_where, client_where, host, bind, direction)
+            started = time.monotonic()
+            try:
+                with runner.resource_phase(engine, rec, f'transfer_{i + 1}'):
+                    attempt = transfer(server_where, client_where, host, bind, direction)
+            except Exception as exc:
+                attempt = {'ok': False, 'seconds': time.monotonic() - started,
+                           'verified_bytes': 0, 'partial_bytes': None,
+                           'partial_bytes_complete': False, 'receivers': [],
+                           'errors': [f'{type(exc).__name__}: {exc}'],
+                           'goodput_bytes_per_second': None}
             cpu = rec['resources']['phases'][f'transfer_{i + 1}']['cpu_seconds']
             attempt['engine_cpu_seconds_per_verified_gib'] = cpu / (attempt['verified_bytes'] / 1024**3) if cpu is not None and attempt['ok'] else None
             attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second']) if attempt['ok'] else None
-            rec['metrics']['attempts'].append(attempt)
-            if not attempt['ok']:
-                rec['correctness']['ok'] = False
-                rec['validation_errors'].append('transfer integrity failure')
+            record_attempt(rec, attempt)
         return rec
     except Exception as exc:
         rec['correctness']['ok'] = False

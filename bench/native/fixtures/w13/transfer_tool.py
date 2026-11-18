@@ -69,7 +69,9 @@ def receive(sock, ident, size, digest):
         if total != size or actual.hexdigest() != digest:
             raise ValueError('byte count or hash mismatch')
     except Exception as exc:
-        error = str(exc)
+        error = f'{type(exc).__name__}: {exc}'
+        if 'last' in locals():
+            gaps.append(time.monotonic() - last)
     elapsed = time.monotonic() - start
     return {'id': ident, 'bytes': total, 'sha256': actual.hexdigest(), 'seconds': elapsed,
             'first_byte_seconds': first, 'stall_count': sum(g >= 1 for g in gaps),
@@ -88,27 +90,48 @@ def serve(bind, port, direction, count, path, size, digest, output):
                 ident = request['id']
                 if direction == 'upload':
                     result = receive(conn, ident, size, digest)
-                    conn.sendall((json.dumps(result) + '\n').encode())
+                    try:
+                        conn.sendall((json.dumps(result) + '\n').encode())
+                    except OSError as exc:
+                        result['ack_error'] = f'{type(exc).__name__}: {exc}'
                     return result
-                send(conn, path, ident, size, digest)
-                return {'id': ident}
+                try:
+                    send(conn, path, ident, size, digest)
+                    return {'id': ident}
+                except OSError as exc:
+                    return {'id': ident, 'error': f'{type(exc).__name__}: {exc}'}
         with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
-            futures = [pool.submit(handle, listener.accept()[0]) for _ in range(count)]
-            results = [f.result() for f in futures]
+            futures = []
+            for _ in range(count):
+                try:
+                    futures.append(pool.submit(handle, listener.accept()[0]))
+                except socket.timeout:
+                    break
+            for future in futures:
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append({'id': 'unknown', 'bytes': None,
+                                    'error': f'{type(exc).__name__}: {exc}'})
     with open(output, 'w') as f:
         json.dump(results, f)
 
 
 def client(host, port, direction, count, path, size, digest):
     def stream(i):
-        with socket.create_connection((host, port), timeout=120) as sock:
-            sock.settimeout(120)
-            ident = str(i)
-            sock.sendall((json.dumps({'id': ident}) + '\n').encode())
-            if direction == 'upload':
-                send(sock, path, ident, size, digest)
-                return line(sock)
-            return receive(sock, ident, size, digest)
+        ident = str(i)
+        started = time.monotonic()
+        try:
+            with socket.create_connection((host, port), timeout=120) as sock:
+                sock.settimeout(120)
+                sock.sendall((json.dumps({'id': ident}) + '\n').encode())
+                if direction == 'upload':
+                    send(sock, path, ident, size, digest)
+                    return line(sock)
+                return receive(sock, ident, size, digest)
+        except Exception as exc:
+            return {'id': ident, 'bytes': None, 'seconds': time.monotonic() - started,
+                    'error': f'{type(exc).__name__}: {exc}'}
     start = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
         results = list(pool.map(stream, range(count)))
