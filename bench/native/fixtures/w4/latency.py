@@ -4,6 +4,7 @@ from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 import time
+from uuid import UUID
 
 if __package__:
     from . import app
@@ -11,10 +12,17 @@ else:
     import app
 
 
-def guest_clock():
-    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    namespace = Path('/proc/self/ns/time').stat().st_ino
-    return f'{boot}:{namespace}'
+def guest_clock(proc=Path('/proc'), *, now=time.monotonic_ns):
+    boot = str(UUID((proc / 'sys/kernel/random/boot_id').read_text().strip()))
+    offsets = [line.split() for line in (proc / 'self/timens_offsets').read_text().splitlines()]
+    monotonic = [fields[1:] for fields in offsets if fields and fields[0] == 'monotonic']
+    if len(monotonic) != 1 or len(monotonic[0]) != 2:
+        raise ValueError('expected exactly one monotonic namespace offset')
+    seconds, nanoseconds = map(int, monotonic[0])
+    if not 0 <= nanoseconds < 1_000_000_000:
+        raise ValueError('invalid monotonic namespace offset nanoseconds')
+    offset = seconds * 1_000_000_000 + nanoseconds
+    return boot, lambda: now() - offset
 
 
 def handler(host, port, clock_id, *, now=time.monotonic_ns):
@@ -135,12 +143,12 @@ def main():
     if args.command == 'submit':
         app.submit(args.url)
         return
-    clock_id = guest_clock()
+    clock_id, now = guest_clock()
     if args.command == 'serve':
         ThreadingHTTPServer(('0.0.0.0', 8080), handler(
-            args.redis_host, args.redis_port, clock_id)).serve_forever()
+            args.redis_host, args.redis_port, clock_id, now=now)).serve_forever()
     elif args.command == 'worker':
-        worker(args.redis_host, args.redis_port, args.output_dir, clock_id)
+        worker(args.redis_host, args.redis_port, args.output_dir, clock_id, now=now)
     elif args.command == 'pending':
         print(json.dumps(pending(args.redis_host, args.redis_port, clock_id)))
     else:

@@ -63,14 +63,14 @@ id = "W4"
 family = "worker-queue"
 title = "HTTP ingest -> Redis -> 1/4/16 workers -> exact gzip NDJSON and aggregate summaries on named volumes"
 fixture = "fixtures/w4"
-fixture_version = "w4-v3-queue-latency"
+fixture_version = "w4-v4-boot-clock"
 status = "implemented"
 metrics = ["workers_1_s", "workers_4_s", "workers_16_s", "jobs", "events", "artifacts",
            "queue_p95_ms_at_1", "queue_p95_ms_at_4", "queue_p95_ms_at_16",
            "queue_p99_ms_at_1", "queue_p99_ms_at_4", "queue_p99_ms_at_16"]
 states = ["warm"]
 params = { jobs = 200, events_per_job = 64, workers = [1, 4, 16] }
-correctness = ["Redis-backed readiness", "all worker exits zero", "all 400 artifacts exact", "200 matched queue timing receipts in one guest clock namespace", "no pending jobs, duplicate, missing, corrupt or extra outputs", "owned cleanup"]
+correctness = ["Redis-backed readiness", "all worker exits zero", "all 400 artifacts exact", "200 matched queue timing receipts in the same guest boot clock", "no pending jobs, duplicate, missing, corrupt or extra outputs", "owned cleanup"]
 note = "The primary interval includes HTTP submission and worker drain. The queue latency clock starts at enqueue preparation and stops after both artifacts close. Setup, verification and cleanup are separate. The W11 worker still uses the pinned v2 image."
 
 [[case]]

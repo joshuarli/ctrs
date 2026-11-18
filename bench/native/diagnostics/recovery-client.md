@@ -60,13 +60,31 @@ the configured workload includes both.
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
 test_recovery_trace test_safety test_reporting`. All 64 tests passed,
 including a local HTTP server with simulated database interruption and
-negative persisted-state and response checks. Native API and database
-trials and owned-engine interruption remain open.
+negative persisted-state and response checks.
+
+Native database diagnostic `w10-db-native-0beb30700799` passed on ctrs
+and OrbStack. It used the signed W8 cancellation candidate, the W1 seed and
+three preinstalled common W8 v2 portfolio images. The diagnostic
+overrode the Compose service image references with the verified engine
+image IDs and disabled builds and pulls. It ran four clients for 20
+seconds with seed 7, a 30% write mix and a three-second database outage
+after six seconds of load. All acknowledged rows were exact and both
+engines reported zero unexpected errors. The counts below describe
+the retained correctness receipts.
+
+| Engine | Acknowledged writes | Interrupted writes that persisted | Expected outage errors |
+| --- | ---: | ---: | ---: |
+| ctrs | 11,953 | 20 | 60 |
+| OrbStack | 7,210 | 28 | 65 |
+
+The independent diagnostic used a pinned Compose override. The normal
+W10 entry point still uses fixture tags. Native v3 API and owned-engine
+interruption remain open.
 
 ## Queue-service recovery
 
 `runner.py run` and `baseline` also accept `--interrupt-service queue`.
-Run `prepare` to build the W4 v3 image. Queue mode uses `--concurrency`
+Run `prepare` to build the W4 v4 image. Queue mode uses `--concurrency`
 workers. Here `--duration` is the restart verification deadline in seconds
 and the planned Redis downtime is three seconds. The API/database workload
 mix options apply to those two conditions.
@@ -87,9 +105,28 @@ separately because it includes the outage.
 
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_w4_lifecycle
 test_w4 test_mixed_cycle test_recovery_client test_recovery_trace
-test_reporting`. All 53 focused tests passed. They include the local RESP
-snapshot, a simulated Redis restart, a corrupted backlog, and owned-volume
-cleanup. Native AOF restart validation remains open.
+test_reporting`. The focused suite passed 59 tests. They include the
+local RESP snapshot, a simulated Redis restart, a corrupted backlog,
+owned-volume cleanup, and signed monotonic offset normalization.
+
+Native diagnostic `w10-queue-native-97a04ef1fe7e` retained an exact
+OrbStack backlog across Redis restart, then failed when all four workers
+rejected the ingest container's time-namespace ID. Three independent
+probes on the same OrbStack boot showed distinct time-namespace IDs
+and zero monotonic offsets. ctrs passed with a shared time namespace.
+
+The v4 image converts `CLOCK_MONOTONIC` readings to the initial namespace
+clock by subtracting each container's kernel-reported offset. It requires
+a common boot ID and rejects unavailable or malformed monotonic offsets.
+Keep v3 and v4 timing cohorts separate. [Linux time namespaces](https://www.man7.org/linux/man-pages/man7/time_namespaces.7.html)
+
+Native diagnostic `w10-queue-clock-924f5c21bb55` passed on both engines.
+The worker image came from one ARM64 build of `Dockerfile.latency`, exported
+once and loaded into ctrs. Both sides verified image DiffIDs and used the
+pinned W8 v2 Redis image. The export SHA256 was
+`04ad40c6bda62546bcf9e48dc1c86b650febf3a2a274952d20bc8e2340585249`.
+Each four-worker trial verified 200 recovered backlog jobs, 200 new jobs,
+and all 800 artifacts. These runs are correctness evidence.
 
 ## Owned-engine recovery
 

@@ -91,8 +91,11 @@ pass native correctness on both engines. The [W1 warm restart proof](evidence/na
 passed on both engines with pinned images, exact writes and reads, and
 the same owned database container and volume across the restart. Engine-cold
 parity still requires an isolated OrbStack environment.
-If the host stays shared, validate the W10 database, queue and owned ctrs
-engine interruption producers against representative native fixtures.
+The [W10 database and queue recovery proofs](../bench/native/diagnostics/recovery-client.md)
+passed on both engines with pinned diagnostic inputs. The W4 v4 fixture
+normalizes time-namespace offsets to a verified common guest boot clock.
+If the host stays shared, seed a new private ctrs recovery root with the
+common portfolio, then verify W10 owned-engine interruption and recovery.
 The normal [W2 guest placement](../bench/native/diagnostics/w2-fixed-rate.md#container-to-container-load)
 now covers fixed-work, saturation, and fixed offered rate offline.
 The parked qualification branch has been refreshed through main

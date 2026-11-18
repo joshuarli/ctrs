@@ -162,8 +162,8 @@ def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
 DC_BUILDER_IMAGE = ("moby/buildkit@sha256:"
                     "aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb")
 W4_IMAGE = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
-W4_LATENCY_VERSION = "w4-v3-queue-latency"
-W4_LATENCY_IMAGE = "np-w4-events:v3"
+W4_LATENCY_VERSION = "w4-v4-boot-clock"
+W4_LATENCY_IMAGE = "np-w4-events:v4"
 W4_FIXED_WORK = {"jobs": w4_fixture.JOBS, "events": w4_fixture.JOBS * w4_fixture.EVENTS,
                  "artifacts": w4_fixture.JOBS * len(w4_fixture.filenames(0))}
 # Holdout: a real third-party app never used for tuning — Gitea +
@@ -2100,6 +2100,7 @@ def trial_w4(ctx, engine: Engine, state: str,
         if queue_interruption is not None:
             rec["metrics"].update({key: value * len(conditions) for key, value in W4_FIXED_WORK.items()})
             rec["metrics"].update(recovery, fixture_version="w10-v3-exact-recovery", interrupt_service="queue",
+                                  queue_fixture_version=fixture_version,
                                   recovered_p99_ms=rec["metrics"]["queue_p99_ms_at_recovered"])
         rec["correctness"]["ok"] = all(checks.values())
     except Exception as exc:
