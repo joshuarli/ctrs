@@ -1,7 +1,27 @@
+import subprocess
 import time
 import uuid
 from pathlib import Path
 from fixtures.w14 import lifecycle_tool as tool
+
+PORT_WAIT_LIMIT_SECONDS = 45
+
+
+def ephemeral_ports_free():
+    def sysctl(name):
+        return int(subprocess.run(['sysctl', '-n', name], capture_output=True, text=True, check=True).stdout)
+    size = sysctl('net.inet.ip.portrange.last') - sysctl('net.inet.ip.portrange.first') + 1
+    return size - sysctl('net.inet.tcp.pcbcount')
+
+
+def wait_for_client_ports(needed, free=ephemeral_ports_free, sleep=time.sleep, clock=time.monotonic):
+    start = clock()
+    while free() < needed:
+        if clock() - start >= PORT_WAIT_LIMIT_SECONDS:
+            break
+        sleep(1)
+    return clock() - start
+
 
 SOURCE = (Path(__file__).parent / 'fixtures/w14/lifecycle_tool.py').read_text()
 
@@ -15,7 +35,7 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
         raise ValueError('invalid lifecycle parameters')
     directory = ctx.trial_dir(engine.name, 'W14', state)
     rec = ctx.new_record(engine, 'W14', state, directory)
-    rec['metrics'].update(fixture_version='w14-v1', mode=mode, clients=[], successes=0,
+    rec['metrics'].update(fixture_version='w14-v2', mode=mode, clients=[], successes=0,
                           errors={}, server_open_connections=None, leaked_sessions=None)
     name = 'w14-' + uuid.uuid4().hex[:12]
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -45,6 +65,8 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(0.05)
+        if mode == 'fresh':
+            rec['metrics']['client_port_wait_seconds'] = wait_for_client_ports(2 * clients * operations)
         sampler, trace = runner.start_sampler(engine, directory)
         result = tool.run('127.0.0.1', port, mode, clients, operations, chunks, interval,
                           idle_seconds, timeout, restart=lambda: engine.sh(['restart', name], timeout=120),

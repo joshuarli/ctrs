@@ -45,6 +45,8 @@ def classify(exc):
         return 'timeout'
     if isinstance(exc, ConnectionRefusedError) or getattr(exc, 'errno', None) == errno.ECONNREFUSED:
         return 'refused'
+    if getattr(exc, 'errno', None) == errno.EADDRNOTAVAIL:
+        return 'client_ports'
     if isinstance(exc, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)) or getattr(exc, 'errno', None) in (errno.ECONNRESET, errno.EPIPE, errno.ENOTCONN):
         return 'reset'
     return 'wrong_data' if isinstance(exc, (ValueError, json.JSONDecodeError)) else 'other'
@@ -257,7 +259,7 @@ def run(host, port, mode, clients=32, operations=100, chunks=50, interval=0.02,
     expected = clients * operations if mode in ('fresh', 'persistent') else clients
     successes = sum(r['successes'] for r in results) if mode != 'reconnect' else len(reconnects)
     return {'clients': results, 'successes': successes, 'expected_successes': expected,
-            'errors': {key: errors.count(key) for key in ('refused', 'reset', 'timeout', 'wrong_data', 'other', 'restart_failed', 'reconnect_deadline')},
+            'errors': {key: errors.count(key) for key in ('refused', 'reset', 'timeout', 'wrong_data', 'client_ports', 'other', 'restart_failed', 'reconnect_deadline')},
             'restart_window_errors': {key: window.count(key) for key in sorted(set(window))},
             'latency_p50_ms': percentile(latencies, 50), 'latency_p95_ms': percentile(latencies, 95),
             'latency_p99_ms': percentile(latencies, 99), 'chunk_lateness_p99_ms': percentile(late, 99),

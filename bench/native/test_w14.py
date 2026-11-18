@@ -1,7 +1,9 @@
+import errno
 import socket
 import threading
 import unittest
 from fixtures.w14 import lifecycle_tool as tool
+import lifecycle
 
 
 class LifecycleTests(unittest.TestCase):
@@ -36,6 +38,17 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(tool.classify(ConnectionResetError()), 'reset')
         self.assertEqual(tool.classify(TimeoutError()), 'timeout')
         self.assertEqual(tool.classify(ValueError()), 'wrong_data')
+        self.assertEqual(tool.classify(OSError(errno.EADDRNOTAVAIL, 'Can\'t assign requested address')), 'client_ports')
+
+    def test_fresh_waits_for_ephemeral_ports(self):
+        now = [0.0]
+        free = iter([100, 500, 7000])
+        waited = lifecycle.wait_for_client_ports(6400, free=lambda: next(free),
+                                                 sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+        self.assertEqual(waited, 2)
+        waited = lifecycle.wait_for_client_ports(6400, free=lambda: 0,
+                                                 sleep=lambda s: now.__setitem__(0, now[0] + s), clock=lambda: now[0])
+        self.assertEqual(waited, lifecycle.PORT_WAIT_LIMIT_SECONDS)
 
     def test_modes_on_loopback(self):
         for mode in ('fresh', 'persistent', 'streaming', 'cancel', 'idle-resume'):
