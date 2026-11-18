@@ -138,6 +138,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         rec['metrics']['capacity_controls'] = {'host': host_control, 'container': guest_control}
         if not host_control['ok'] or not guest_control['ok']:
             raise ValueError('capacity control failed')
+        rec['correctness']['checks']['capacity_controls_exact'] = True
         if path == 'published-port':
             server_where, client_where, host, bind = server, 'host', '127.0.0.1', '0.0.0.0'
         elif path == 'container-to-container':
@@ -161,6 +162,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
             attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second']) if attempt['ok'] else None
             record_attempt(rec, attempt)
         attempts = rec['metrics']['attempts']
+        rec['correctness']['checks']['transfers_byte_exact'] = all(x['ok'] for x in attempts)
         if all(x['ok'] for x in attempts):
             rec['metrics'].update(
                 goodput_bytes_per_second=statistics.median(x['goodput_bytes_per_second'] for x in attempts),
@@ -191,4 +193,6 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 if removed.returncode:
                     rec['correctness']['ok'] = False
                     rec['validation_errors'].append('cleanup failed: ' + name)
+        rec['correctness']['checks']['owned_cleanup'] = not any(
+            error.startswith(('ownership verification failed', 'cleanup failed')) for error in rec['validation_errors'])
         (directory / 'artifact.bin').unlink(missing_ok=True)

@@ -50,6 +50,8 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
                           idle_seconds, timeout, restart=lambda: engine.sh(['restart', name], timeout=120),
                           phase=lambda: runner.resource_phase(engine, rec, 'lifecycle'))
         rec['metrics'].update(result)
+        rec['correctness']['checks'].update(results_exact=result['successes'] == result['expected_successes'] and not any(result['errors'].values()),
+                                            no_leaked_sessions=result['leaked_sessions'] == 0)
         if not result['ok']:
             rec['correctness']['ok'] = False
             rec['validation_errors'].append('lifecycle results or cleanup failed')
@@ -68,4 +70,6 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
             elif engine.sh(['rm', '-f', name], check=False).returncode:
                 rec['correctness']['ok'] = False
                 rec['validation_errors'].append('cleanup failed: ' + name)
+            else:
+                rec['correctness']['checks']['owned_cleanup'] = True
     return rec
