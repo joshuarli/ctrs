@@ -11,6 +11,50 @@ resource accounting still need qualification. Historical “frozen” wins
 are superseded by the correction in `docs/evidence/native-performance.md`.
 Healthy soak/watch counters are not hillclimb progress.
 
+## Entrypoint: `pyramid.py`
+
+```sh
+python3 bench/native/pyramid.py list                         # registry: name, tier, area, cost, purpose
+python3 bench/native/pyramid.py check --tier change          # preflight only for the selection
+python3 bench/native/pyramid.py run --tier edit              # harness tests + manifest (~35 s)
+python3 bench/native/pyramid.py run --name w14-fresh         # one paired trial of one workload
+python3 bench/native/pyramid.py run --tier change --area transfer --dry-run
+python3 bench/native/pyramid.py run --name w13-pp-down:cohort    # a 10-pair scored cohort
+```
+
+| Tier | What runs | Cost |
+| --- | --- | --- |
+| edit | the harness's own tests (`test_*.py`, with `TMPDIR` under `.work`) and manifest validation | 34 s observed |
+| change | one ctrs/OrbStack pair of a real workload, installed-default lane | 16 s – 6 min per workload |
+| scenario | the 10-pair cohort of the same workload (5 for W12-watch, plus W12 matched and W8), started only on a quiet host | 3 – 41 min per workload |
+| full | `holdout`, `w11-soak` | manual only |
+
+Selectors: `--tier` is a ceiling; `--name` and `--area` select by workload
+name or area (distinct sets; a name given as an area is an error);
+`--skip` removes a name. Unknown names or areas, an empty selection, or
+a named workload above the given ceiling are errors. Full workloads are
+never selected by a ceiling, only by `--name`, and `w11-soak` refuses to
+run outside its durable-job procedure. Costs marked `est.` have no
+recorded trials yet.
+
+Preflight checks only what the selection needs: macOS arm64, docker CLI,
+the ctrs binary and guest assets (a warning, not a failure, when they
+are older than their sources), OrbStack answering, no `.work/tmp/hold`,
+no ctrs daemon already running, 20 GB free, the pinned portfolio, the
+W12 inputs in `.work/tmp`, the W8 layout, and `BENCH_W9_IMAGE_REF` for
+W9. A failure names the workloads that need it and nothing runs. Host
+load is information; the reporter rejects pairs measured above the CPU
+count. Scenario workloads wait (up to `--quiet-timeout`, default 2 h) for
+1-minute load < 4, 5-minute load < 6, no hold and no daemon.
+
+Each run writes `.work/native-perf/pyramid/<UTC>/`: a log per workload,
+`summary.json` and `summary.md` with exit status, duration, the
+reporter's rejections (with reasons), valid pairs, and per-metric ratio,
+CI and assessment for every trial run. The exit status is nonzero when
+any workload failed or was excluded. There are no regression budgets:
+the verdicts compare ctrs with OrbStack, and fewer than ten valid pairs
+is never a verdict.
+
 ## Offline checks (no Docker or macOS required)
 
 ```sh

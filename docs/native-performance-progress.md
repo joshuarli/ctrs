@@ -369,6 +369,33 @@ current-host baseline. Fixture commands now reference w8-v5
    qualification admission; existing short W11 proofs must not be repeated as
    substitutes. Then execute the owner-requested full paired comparison,
    independent batch, fresh held-out app and finite12h W11 for each engine.
+7. Benchmark-suite audit (2026-11-19), ranked by risk of a missed or false
+   regression, then by wasted iteration. The entrypoint
+   (`bench/native/pyramid.py`, README "Entrypoint") replaced the scratch
+   queue scripts; the rest is open:
+   1. No anchor between ctrs builds. Every verdict is ctrs against OrbStack
+      inside one cohort, so a ctrs regression that stays ahead of OrbStack,
+      or OrbStack drift, shows only if a reader compares cohorts by hand.
+      Cheapest fix: a reporter mode that compares the ctrs side of two
+      cohorts with the same identity.
+   2. Load admission samples the 1-minute load only at trial start and end;
+      a burst inside a trial passes. `collect.py` already samples loadavg
+      every 0.2 s; admit on the maximum sampled during the trial.
+   3. Metrics that do not measure what they name: W14 fresh p50 measures
+      how many clients each engine admits at once (completion time is not
+      a reported metric); W13 cells above half the loopback control are
+      tool-limited on both engines; W14 reports every mode's metrics, most
+      as "unmeasured". W13-overlap rejected every pair until `8b5709d`.
+   4. A cohort with one load-rejected pair is invalid and reruns whole;
+      on 2026-11-19 four of nine cohorts were lost that way. Top up pairs
+      until ten are admitted, with a cap.
+   5. Guest attribution for W13/W14 (sched_switch and syscall traces of the
+      agent) ran from scratch scripts; resources record the VM process
+      without a guest split. Promote them into `diagnostics/` with a doc.
+   6. W12 inputs (`kutt.tar.gz`, `w12-image.tar`) live in disposable
+      `.work/tmp`; preflight now fails when they are missing, but their
+      rebuild needs a documented command. W1, W4–W10 and W8 have no trial
+      records on this host, so their costs are estimates.
 
 All work stays native ARM64/macOS. Installed-default behavior, disclosed
 resource-matched default-driver results and identical-builder controls stay

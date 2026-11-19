@@ -90,8 +90,11 @@ buildx ─────┘    Docker Engine API          owns the VM             
 
 ## Verification
 
-For native performance iteration, use the explicit offline component checks
-before broad suites:
+The benchmark suite has one entrypoint, `python3 bench/native/pyramid.py`
+(`list`, `check`, `run --tier edit|change|scenario` or `--name`, `--dry-run`);
+full workloads run only when named. See `bench/native/README.md`
+("Entrypoint"). For native performance iteration, use the explicit offline
+component checks before broad suites:
 
 ```sh
 python3.14 bench/native/runner.py check w2
