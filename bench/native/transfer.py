@@ -117,11 +117,18 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 if proc.poll() is not None:
                     raise RuntimeError('server exited: ' + proc.communicate()[1])
                 with phase():
+                    observer = getattr(ctx, 'overlap_transfer_observer', None) if phase is not nullcontext else None
+                    if observer:
+                        observer('start', time.monotonic(), None)
                     data = json.loads(invoke(client_where, ['client', host, port, run_direction, streams, client_file, part, digest], timeout=600))
+                    if observer:
+                        observer('end', time.monotonic(), data)
                     out, err = proc.communicate(timeout=120)
                 if proc.returncode:
                     raise RuntimeError(f'server exit {proc.returncode}: {err}')
                 received = json.loads(Path(result).read_text() if server_where == 'host' else engine.sh(['exec', server_where, 'cat', result]).stdout)
+                if observer:
+                    observer('receipts', time.monotonic(), received)
                 return transfer_result(data, received, run_direction, streams, part, digest)
             finally:
                 if proc.poll() is None:
