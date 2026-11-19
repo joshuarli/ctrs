@@ -122,6 +122,8 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(all("dev.ctrs.campaign.run=run1" in a for a in creates))
         self.assertTrue(any(a[:2] == ["volume", "rm"] for a in engine.calls))
         self.assertTrue(any(a[:2] == ["rm", "-f"] for a in engine.calls))
+        runs = [a for a in engine.calls if "pgbench" in a and "-i" not in a]
+        self.assertEqual(["-n" in a for a in runs], [False, True])
 
     def test_durability_failure_still_cleans_owned_resources(self):
         rec, engine, path = self.run_trial(True)

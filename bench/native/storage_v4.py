@@ -133,7 +133,7 @@ def trial_w3_v4(ctx, engine, state):
         for phase in ("rw", "ro"):
             args = ["exec", "-u", "postgres", name, "pgbench", "-U", "postgres", "-c", str(clients), "-j", str(threads), "-t", str(transactions), "--random-seed", str(seed), "-l", "--log-prefix", f"/tmp/w3v4-logs/{phase}"]
             if phase == "ro":
-                args.append("-S")
+                args += ["-S", "-n"]
             try:
                 output = run([*args, "postgres"], phase, 3600)
             finally:
