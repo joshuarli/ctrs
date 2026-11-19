@@ -162,6 +162,7 @@ pub(crate) fn route(req: &Request, engine: &Arc<Engine>, w: &mut UnixStream, r: 
         ("POST", "/ctrs/proxy") => return reply(w, set_proxy(req), 200),
         ("PUT", "/ctrs/proxy/system") => return reply(w, set_host_proxy(req), 200),
         ("GET", "/ctrs/resources") => return reply(w, Ok(resources(engine)), 200),
+        ("GET", "/ctrs/relays") => return reply(w, Ok(super::ports::relay_counts()), 200),
         ("POST", "/ctrs/resources") => return reply(w, set_resources(req).map(|()| resources(engine)), 200),
         ("POST", p) if p.strip_prefix("/ctrs/containers/").and_then(|r| r.strip_suffix("/ports")).is_some_and(|id| !id.is_empty()) => {
             let id = p.strip_prefix("/ctrs/containers/").and_then(|r| r.strip_suffix("/ports")).unwrap_or_default();

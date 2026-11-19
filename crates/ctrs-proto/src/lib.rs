@@ -42,7 +42,9 @@ pub const INPUT_WINDOW: usize = 4 << 20;
 /// 6 added `HostFsEvents`, which an older agent would answer "unexpected" to.
 /// 7 added the `Rescan` event kind, which a 6 agent fails to decode.
 /// 8 added `HostRelay`, which an older agent would answer "unexpected" to.
-pub const PROTOCOL: u16 = 8;
+/// 9 put a kind byte after the token on the `HostRelay` listener, for the
+/// published-port legs the agent opens there; an 8 agent's header is short.
+pub const PROTOCOL: u16 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg<'a> {

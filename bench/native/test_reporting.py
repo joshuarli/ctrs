@@ -124,6 +124,14 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result["tool_limited_trials"], {"ctrs": 0, "orbstack": 10})
         self.assertEqual(result["assessment"], "tool-limited")
 
+    def test_w13_reports_which_path_ctrs_connections_took(self):
+        records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
+        for record in records[:4]:
+            if record["engine"] == "ctrs":
+                record["metrics"]["transport"] = {"nat_leg": 3, "vsock": 0}
+        result = metric_result(reporting.analyze(records), "goodput_bytes_per_second")
+        self.assertEqual(result["ctrs_transport"], {"unrecorded_trials": 1, "nat_leg": 6, "vsock": 0})
+
     def test_w13_pairs_need_matching_verified_inputs_and_old_ones_are_flagged(self):
         records = pair(case="W14", metric="latency_p99_ms")
         report = reporting.analyze(records)

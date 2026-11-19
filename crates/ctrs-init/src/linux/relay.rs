@@ -61,6 +61,9 @@ pub struct Relay {
     framed: bool,
     /// The backend connect failed; a refusal marker still owes the host.
     refusing: bool,
+    /// A connection the agent opened to the Mac's NAT relay ahead of time,
+    /// for a published-port client the Mac has yet to accept.
+    leg: bool,
 }
 
 pub fn listen_udp() -> io::Result<OwnedFd> {
@@ -89,7 +92,7 @@ pub fn accept(listener: &OwnedFd) -> Option<Relay> {
     }
     // SAFETY: `fd` is a fresh descriptor that nothing else owns.
     let host = unsafe { OwnedFd::from_raw_fd(fd) };
-    Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
+    Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false })
 }
 
 fn read_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
@@ -165,6 +168,15 @@ impl Relay {
             };
             out.push(libc::pollfd { fd: t.as_raw_fd(), events: ev, revents: 0 });
         }
+    }
+
+    /// A NAT leg the Mac has not yet handed a client.
+    pub fn idle_leg(&self) -> bool {
+        self.leg && self.target.is_none() && !self.refusing && !self.dead
+    }
+
+    pub fn lost_leg(&self) -> bool {
+        self.leg && self.dead && self.target.is_none() && !self.refusing
     }
 
     pub fn owns(&self, fd: RawFd) -> bool {
@@ -422,9 +434,13 @@ pub struct NatRelay {
 /// connection falls back to vsock.
 const NAT_CONNECT_MS: libc::c_int = 100;
 
-/// A connected, blocking-for-header TCP socket to the Mac's NAT relay with
-/// the token and target already written, or None to fall back to vsock.
-fn dial_nat(nat: &NatRelay, port: u16) -> Option<OwnedFd> {
+/// What a connection to the Mac's NAT relay is for, the byte after the token.
+const NAT_HOST_BOUND: u8 = 0;
+const NAT_PUBLISHED_LEG: u8 = 1;
+
+/// A connected TCP socket to the Mac's NAT relay with the token and
+/// `header` already written, or None to fall back to vsock.
+fn dial_nat(nat: &NatRelay, kind: u8, target: [u8; 6]) -> Option<OwnedFd> {
     let sock = connect(nat.addr, nat.port).ok()?;
     let mut pfd = libc::pollfd { fd: sock.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
     // SAFETY: one valid pollfd.
@@ -437,15 +453,24 @@ fn dial_nat(nat: &NatRelay, port: u16) -> Option<OwnedFd> {
     if unsafe { libc::getsockopt(sock.as_raw_fd(), libc::SOL_SOCKET, libc::SO_ERROR, (&mut err as *mut libc::c_int).cast(), &mut len) } != 0 || err != 0 {
         return None;
     }
-    let mut header = [0u8; 22];
+    let mut header = [0u8; 23];
     header[..16].copy_from_slice(&nat.token);
-    header[16..20].copy_from_slice(&[127, 0, 0, 1]);
-    header[20..].copy_from_slice(&port.to_be_bytes());
-    // SAFETY: a 22-byte write to a just-connected stream; the socket buffer is empty.
+    header[16] = kind;
+    header[17..].copy_from_slice(&target);
+    // SAFETY: a 23-byte write to a just-connected stream; the socket buffer is empty.
     if unsafe { libc::write(sock.as_raw_fd(), header.as_ptr().cast(), header.len()) } != header.len() as isize {
         return None;
     }
     Some(sock)
+}
+
+/// A published-port leg: the Mac hands it the next client connection by
+/// sending the container's `ip[4] port[2]`, as on `FRAMED_PORT`, and the
+/// container's bytes go back framed. TCP over the NAT network carries them
+/// several times faster than vsock does from the guest to the Mac.
+pub fn dial_leg(nat: &NatRelay) -> Option<Relay> {
+    let host = dial_nat(nat, NAT_PUBLISHED_LEG, [0; 6])?;
+    Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: true, refusing: false, leg: true })
 }
 
 pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&NatRelay>) -> Option<Relay> {
@@ -469,8 +494,10 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&Na
         }
         u16::from_be(dst.sin_port)
     };
-    if let Some(host) = nat.and_then(|nat| dial_nat(nat, port)) {
-        return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false });
+    let mut target = [127, 0, 0, 1, 0, 0];
+    target[4..].copy_from_slice(&port.to_be_bytes());
+    if let Some(host) = nat.and_then(|nat| dial_nat(nat, NAT_HOST_BOUND, target)) {
+        return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false });
     }
     let Ok(host) = dial_host(HOST_FRAMED_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
     // The Mac connects to its own loopback: services bound to 127.0.0.1 work.
@@ -494,6 +521,7 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&Na
         udp: false,
         framed: true,
         refusing: false,
+        leg: false,
     })
 }
 
@@ -504,7 +532,7 @@ fn dial_host(port: u32) -> io::Result<OwnedFd> {
 impl Relay {
     /// A relay that only exists to close `fd` on the next sweep.
     fn dead_one(fd: OwnedFd) -> Relay {
-        Relay { host: fd, target: None, connected: false, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: true, udp: false, framed: false, refusing: false }
+        Relay { host: fd, target: None, connected: false, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: true, udp: false, framed: false, refusing: false, leg: false }
     }
 }
 
@@ -551,7 +579,7 @@ pub fn accept_ssh_agent(listener: &OwnedFd) -> Option<Relay> {
     if sys::set_nonblocking(host.as_raw_fd()).is_err() {
         return Some(Relay::dead_one(client));
     }
-    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
+    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false })
 }
 
 /// The engine's own API, for containers that mount the docker socket
@@ -595,7 +623,7 @@ pub fn accept_engine(listener: &OwnedFd) -> Option<Relay> {
     if sys::set_nonblocking(host.as_raw_fd()).is_err() {
         return Some(Relay::dead_one(client));
     }
-    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false })
+    Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false })
 }
 
 #[cfg(test)]

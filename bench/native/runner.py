@@ -817,6 +817,35 @@ def project_name(run_id: str, engine: str, case: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "-" for c in raw)[:48]
 
 
+def relay_counts(engine) -> dict | None:
+    """ctrs's per-path relay connection counts (`GET /ctrs/relays`), or
+    None for another engine or a ctrs without the endpoint."""
+    if engine.name != "ctrs":
+        return None
+    import http.client
+    class UnixConnection(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(5)
+            self.sock.connect(engine.socket.removeprefix("unix://"))
+    conn = UnixConnection("localhost")
+    try:
+        conn.request("GET", "/ctrs/relays")
+        reply = conn.getresponse()
+        return json.loads(reply.read()) if reply.status == 200 else None
+    except (OSError, ValueError):
+        return None
+    finally:
+        conn.close()
+
+
+def relay_delta(before: dict | None, after: dict | None, group: str) -> dict | None:
+    """Connections each path of `group` carried between two counts."""
+    if before is None or after is None:
+        return None
+    return {path: after[group][path] - before[group].get(path, 0) for path in after[group]}
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

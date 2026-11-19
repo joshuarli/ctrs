@@ -112,6 +112,10 @@ fn bulk_connect(id: &str) -> Option<BulkConn> {
 const TTY_HUP_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 /// How soon the loop retries host change lines a full pipe refused.
 const FSNOTIFY_RETRY_MS: i32 = 20;
+/// Published-port legs kept open to the Mac's NAT relay, ready for clients.
+const NAT_LEGS: usize = 4;
+/// After a leg could not be opened, published ports use vsock this long.
+const NAT_LEGS_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// One reply slot in `outbox`, in the order the host sent the requests.
 /// `AwaitJob` is a `LayerBegin` whose `LayerStored`/`Error` the install
@@ -339,6 +343,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let mut fds: Vec<libc::pollfd> = Vec::with_capacity(16);
     let fsnotify = super::fsnotify::start();
     let mut nat_relay: Option<super::relay::NatRelay> = None;
+    let mut nat_legs_retry: Option<std::time::Instant> = None;
     let mut frame = Vec::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     let mut chunk = vec![0u8; MAX_OUTPUT_CHUNK];
@@ -623,7 +628,26 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
             }
         }
 
+        // A leg the Mac closed before using it: its relay is gone or refused
+        // us, and dialing again at once would spin.
+        if relays.iter().any(|r| r.lost_leg()) {
+            nat_legs_retry = Some(std::time::Instant::now() + NAT_LEGS_RETRY);
+        }
         relays.retain(|r| !r.dead);
+        if let Some(nat) = nat_relay.as_ref()
+            && nat_legs_retry.is_none_or(|t| std::time::Instant::now() >= t)
+        {
+            let idle = relays.iter().filter(|r| r.idle_leg()).count();
+            for _ in idle..NAT_LEGS {
+                match super::relay::dial_leg(nat) {
+                    Some(r) => relays.push(r),
+                    None => {
+                        nat_legs_retry = Some(std::time::Instant::now() + NAT_LEGS_RETRY);
+                        break;
+                    }
+                }
+            }
+        }
 
         if fds[1].revents != 0 {
             drain_signals(&sigfd);
@@ -701,7 +725,10 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
             out.clear();
             match ctrs_proto::decode(&frame) {
                 Ok(Msg::HostFsEvents { events }) => fsnotify.send(events),
-                Ok(Msg::HostRelay { addr, port, token }) => nat_relay = Some(super::relay::NatRelay { addr, port, token }),
+                Ok(Msg::HostRelay { addr, port, token }) => {
+                    nat_relay = Some(super::relay::NatRelay { addr, port, token });
+                    nat_legs_retry = None;
+                }
                 Ok(Msg::Ping(v)) => Msg::Pong(v).encode(&mut out),
                 Ok(Msg::Shutdown) => {
                     if host_process {

@@ -729,12 +729,18 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
     client.set_write_timeout(Some(TCP_IDLE))?;
     // A Linux host reaches the container's address itself.
     if cfg!(target_os = "linux") {
+        count(&RELAYS.published_direct);
         return relay_direct(client, ip, port);
+    }
+    if let Some(leg) = take_leg() {
+        count(&RELAYS.published_nat_leg);
+        return relay_leg(client, leg, ip, port);
     }
     if let Some(addr) = nat.filter(|_| nat_usable() && nat_budget()) {
         match TcpStream::connect_timeout(&addr, NAT_CONNECT) {
             Ok(guest) => {
                 NAT_TIMEOUTS.store(0, Ordering::Relaxed);
+                count(&RELAYS.published_vmnet);
                 return relay_tcp(client, guest);
             }
             // Refused is the container (not listening yet), and vsock gets
@@ -758,6 +764,7 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
         }
     }
     let (guest, framed) = open_framed_relay(vm, ip, port)?;
+    count(&RELAYS.published_vsock);
     socket_timeouts(guest.fd.as_raw_fd())?;
     vsock_buffers(guest.fd.as_raw_fd());
     let mut to_guest = std::fs::File::from(guest.fd.try_clone()?);
@@ -781,6 +788,60 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
     crate::diag::debug!("port relay ended", ms = relay_start.elapsed().as_millis(), framed = framed, down = format!("{down_res:?}"), up = format!("{up_res:?}"));
     // `guest` drops here: the vsock connection is released on the VM's queue.
     drop(guest);
+    Ok(())
+}
+
+/// An idle published-port leg the agent opened over the NAT network, if
+/// one is open and the network's connection budget allows a new one.
+fn take_leg() -> Option<TcpStream> {
+    let mut legs = NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner());
+    while let Some(leg) = legs.pop() {
+        if !leg_open(&leg) {
+            continue;
+        }
+        if !nat_budget() {
+            legs.push(leg);
+            return None;
+        }
+        return Some(leg);
+    }
+    None
+}
+
+/// An idle leg has nothing to read until it is used; a readable one was
+/// closed by the guest.
+fn leg_open(leg: &TcpStream) -> bool {
+    let mut b = [0u8; 1];
+    // SAFETY: a nonblocking peek into a one-byte local buffer.
+    let n = unsafe { libc::recv(leg.as_raw_fd(), b.as_mut_ptr().cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
+    n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::WouldBlock
+}
+
+/// A client connection over a leg: the container's address, then the
+/// client's bytes up and the container's back in frames, as on the framed
+/// vsock relay.
+fn relay_leg(client: TcpStream, leg: TcpStream, ip: [u8; 4], port: u16) -> io::Result<()> {
+    leg.set_read_timeout(Some(TCP_IDLE))?;
+    leg.set_write_timeout(Some(TCP_IDLE))?;
+    let mut header = [0u8; 6];
+    header[..4].copy_from_slice(&ip);
+    header[4..].copy_from_slice(&port.to_be_bytes());
+    (&leg).write_all(&header)?;
+    let start = Instant::now();
+    let (mut client_read, mut leg_write) = (client.try_clone()?, leg.try_clone()?);
+    let up = std::thread::Builder::new().name("ctrs-conn-up".into()).spawn(move || {
+        let r = copy(&mut client_read, &mut leg_write);
+        let _ = leg_write.shutdown(Shutdown::Write);
+        r
+    })?;
+    let (mut leg_read, mut client_write) = (leg, client);
+    let down = copy_frames(&mut leg_read, &mut client_write);
+    if matches!(down, Ok(true)) {
+        note_refused(ip, port);
+    }
+    let _ = client_write.shutdown(Shutdown::Write);
+    let up = up.join();
+    crate::diag::debug!("nat leg relay ended", ms = start.elapsed().as_millis(), down = format!("{down:?}"), up = format!("{up:?}"));
     Ok(())
 }
 
@@ -1114,6 +1175,7 @@ fn host_bound(stream: ctrs_vmm::VsockStream, framed: bool) -> io::Result<()> {
     // Refused or unreachable: dropping closes the container's connection,
     // which is what it would see from a real host too.
     let target = TcpStream::connect((ip, port))?;
+    count(&RELAYS.host_bound_vsock);
     target.set_nodelay(true)?;
     let mut to_guest = std::fs::File::from(stream.fd.try_clone()?);
     let mut target_read = target.try_clone()?;
@@ -1171,20 +1233,64 @@ pub fn start_nat_host_bound(vm: std::sync::Weak<super::vmlink::VmLink>) {
             _ => return,
         }
         crate::diag::info!("NAT host relay listening", addr = format!("{}:{port}", std::net::Ipv4Addr::from(gateway)));
+        NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner()).clear();
         while vm.strong_count() > 0 {
             let Ok((conn, _)) = listener.accept() else { continue };
             let _ = std::thread::Builder::new().name("ctrs-nat-host-bound-conn".into()).spawn(move || {
                 let _ = nat_host_bound(conn, &token);
             });
         }
+        NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner()).clear();
     });
 }
 
 const NAT_UPLINK_WAIT: Duration = Duration::from_secs(30);
 
+/// What a connection to the NAT relay is for, the byte after the token.
+const NAT_HOST_BOUND: u8 = 0;
+const NAT_PUBLISHED_LEG: u8 = 1;
+/// Idle published-port legs kept beyond the agent's few; extra ones close.
+const NAT_LEGS_MAX: usize = 16;
+static NAT_LEGS: Mutex<Vec<TcpStream>> = Mutex::new(Vec::new());
+
+/// Connections relayed this run, by the path they took.
+struct RelayCounts {
+    published_nat_leg: AtomicUsize,
+    published_vmnet: AtomicUsize,
+    published_vsock: AtomicUsize,
+    published_direct: AtomicUsize,
+    host_bound_nat: AtomicUsize,
+    host_bound_vsock: AtomicUsize,
+}
+
+static RELAYS: RelayCounts = RelayCounts {
+    published_nat_leg: AtomicUsize::new(0),
+    published_vmnet: AtomicUsize::new(0),
+    published_vsock: AtomicUsize::new(0),
+    published_direct: AtomicUsize::new(0),
+    host_bound_nat: AtomicUsize::new(0),
+    host_bound_vsock: AtomicUsize::new(0),
+};
+
+fn count(c: &AtomicUsize) {
+    c.fetch_add(1, Ordering::Relaxed);
+}
+
+/// `GET /ctrs/relays`: how many connections each path has carried, so a
+/// benchmark can tell which one a transfer used.
+pub fn relay_counts() -> serde_json::Value {
+    let r = &RELAYS;
+    let n = |c: &AtomicUsize| c.load(Ordering::Relaxed);
+    serde_json::json!({
+        "published": {"nat_leg": n(&r.published_nat_leg), "vmnet": n(&r.published_vmnet), "vsock": n(&r.published_vsock), "direct": n(&r.published_direct)},
+        "host_bound": {"nat": n(&r.host_bound_nat), "vsock": n(&r.host_bound_vsock)},
+        "idle_nat_legs": NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner()).len(),
+    })
+}
+
 fn nat_host_bound(mut from_guest: TcpStream, token: &[u8; 16]) -> io::Result<()> {
     from_guest.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut header = [0u8; 22];
+    let mut header = [0u8; 23];
     from_guest.read_exact(&mut header)?;
     from_guest.set_read_timeout(None)?;
     // Constant time, so a wrong guess learns nothing about the token.
@@ -1192,13 +1298,25 @@ fn nat_host_bound(mut from_guest: TcpStream, token: &[u8; 16]) -> io::Result<()>
         crate::diag::warn!("refused a NAT host-bound connection without the boot token");
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "bad token"));
     }
-    let ip = std::net::Ipv4Addr::new(header[16], header[17], header[18], header[19]);
-    let port = u16::from_be_bytes([header[20], header[21]]);
+    if header[16] == NAT_PUBLISHED_LEG {
+        from_guest.set_nodelay(true)?;
+        let mut legs = NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner());
+        if legs.len() < NAT_LEGS_MAX {
+            legs.push(from_guest);
+        }
+        return Ok(());
+    }
+    if header[16] != NAT_HOST_BOUND {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "unknown NAT connection kind"));
+    }
+    let ip = std::net::Ipv4Addr::new(header[17], header[18], header[19], header[20]);
+    let port = u16::from_be_bytes([header[21], header[22]]);
     if ip != std::net::Ipv4Addr::LOCALHOST {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "not loopback"));
     }
     from_guest.set_nodelay(true)?;
     let target = TcpStream::connect((ip, port))?;
+    count(&RELAYS.host_bound_nat);
     target.set_nodelay(true)?;
     let mut to_guest = from_guest.try_clone()?;
     let mut target_read = target.try_clone()?;
@@ -1400,17 +1518,65 @@ mod tests {
             back
         };
         let mut good = token.to_vec();
+        good.push(super::NAT_HOST_BOUND);
         good.extend_from_slice(&[127, 0, 0, 1]);
         good.extend_from_slice(&echo_port.to_be_bytes());
         let mut bad = good.clone();
         bad[0] ^= 1;
         let mut lan = good.clone();
-        lan[16..20].copy_from_slice(&[10, 0, 0, 1]);
+        lan[17..21].copy_from_slice(&[10, 0, 0, 1]);
         assert!(send(&bad, b"x").is_empty());
         assert!(send(&lan, b"x").is_empty());
         assert_eq!(send(&good, b"hello"), b"hello");
         assert_eq!(server.join().unwrap(), vec![false, false, true]);
     }
+    #[test]
+    fn published_legs_wait_in_the_pool_and_carry_one_client_each() {
+        use std::io::{Read, Write};
+        let token = [7u8; 16];
+        let relay = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = relay.local_addr().unwrap();
+        let mut guest = std::net::TcpStream::connect(addr).unwrap();
+        let mut head = token.to_vec();
+        head.push(super::NAT_PUBLISHED_LEG);
+        head.extend_from_slice(&[0; 6]);
+        guest.write_all(&head).unwrap();
+        let (c, _) = relay.accept().unwrap();
+        super::nat_host_bound(c, &token).unwrap();
+        let leg = super::take_leg().expect("a leg in the pool");
+        assert!(super::take_leg().is_none());
+
+        let mac = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(mac.local_addr().unwrap()).unwrap();
+        let (accepted, _) = mac.accept().unwrap();
+        let relayed = std::thread::spawn(move || super::relay_leg(accepted, leg, [172, 17, 0, 2], 8080));
+        client.write_all(b"GET").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut target = [0u8; 6];
+        guest.read_exact(&mut target).unwrap();
+        assert_eq!(target, [172, 17, 0, 2, 0x1f, 0x90]);
+        let mut up = Vec::new();
+        guest.read_to_end(&mut up).unwrap();
+        assert_eq!(up, b"GET");
+        for part in [&b"200 OK"[..], b""] {
+            guest.write_all(&(part.len() as u32).to_be_bytes()).unwrap();
+            guest.write_all(part).unwrap();
+        }
+        let mut down = Vec::new();
+        client.read_to_end(&mut down).unwrap();
+        assert_eq!(down, b"200 OK");
+        relayed.join().unwrap().unwrap();
+
+        // A leg the guest closed while it waited is never handed out.
+        let mut guest = std::net::TcpStream::connect(addr).unwrap();
+        guest.write_all(&head).unwrap();
+        let (c, _) = relay.accept().unwrap();
+        super::nat_host_bound(c, &token).unwrap();
+        drop(guest);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(super::take_leg().is_none());
+    }
+
     use super::{MAX_PEER_SESSIONS, MAX_REMOTE_SESSIONS, MAX_TCP_SESSIONS, NAT_PORTS, REMOTE_SESSIONS, TCP_SESSIONS, kernel_forwards, kernel_host_ip, listening, nat_port, relays_too, tcp_permit};
     use std::net::IpAddr;
     use std::sync::atomic::Ordering;

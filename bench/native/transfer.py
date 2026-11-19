@@ -151,7 +151,9 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         else:
             server_where, client_where, host, bind = 'host', client, 'host.docker.internal', '127.0.0.1'
         rec['metrics']['server_bind_address'] = bind
+        relay_group = {'published-port': 'published', 'container-to-mac': 'host_bound'}.get(path)
         for i in range(repeats):
+            relays_before = runner.relay_counts(engine) if relay_group else None
             started = time.monotonic()
             try:
                 attempt = transfer(server_where, client_where, host, bind, direction,
@@ -162,6 +164,8 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                            'partial_bytes_complete': False, 'receivers': [],
                            'errors': [f'{type(exc).__name__}: {exc}'],
                            'goodput_bytes_per_second': None}
+            if relay_group:
+                attempt['transport'] = runner.relay_delta(relays_before, runner.relay_counts(engine), relay_group)
             cpu = rec['resources'].get('phases', {}).get(f'transfer_{i + 1}', {}).get('cpu_seconds')
             attempt['engine_cpu_seconds_per_verified_gib'] = cpu / (attempt['verified_bytes'] / 1024**3) if cpu is not None and attempt['ok'] else None
             attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second'], path) if attempt['ok'] else None
@@ -173,6 +177,9 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                 goodput_bytes_per_second=statistics.median(x['goodput_bytes_per_second'] for x in attempts),
                 completion_seconds=statistics.median(x['seconds'] for x in attempts),
                 tool_limited=any(x['tool_limited'] for x in attempts))
+            transports = [x.get('transport') for x in attempts]
+            if transports and all(t is not None for t in transports):
+                rec['metrics']['transport'] = {k: sum(t.get(k, 0) for t in transports) for k in transports[0]}
             cpu = [x['engine_cpu_seconds_per_verified_gib'] for x in attempts]
             if all(value is not None for value in cpu):
                 rec['metrics']['cpu_seconds_per_verified_gib'] = statistics.median(cpu)

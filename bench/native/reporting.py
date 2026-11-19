@@ -304,12 +304,19 @@ def _analyze_cohort(identity: dict, records: list[dict],
             assessment = "invalid"
         elif missing:
             assessment = "unmeasured" if not ratios else "incomplete"
-        limited = None
+        limited = transport = None
         if identity["case"] == "W13" and metric in TRANSFER_TIMING:
             limited = {side: sum(bool(pair[i + 1]["metrics"].get("tool_limited")) for pair in valid)
                        for i, side in enumerate(sides)}
             if (assessment in FAVORABLE and limited[sides[1]]) or (assessment == "loss" and limited[sides[0]]):
                 assessment = "tool-limited"
+            if "ctrs" in sides:
+                side = sides.index("ctrs") + 1
+                recorded = [pair[side]["metrics"]["transport"] for pair in valid if "transport" in pair[side]["metrics"]]
+                transport = {"unrecorded_trials": len(valid) - len(recorded)}
+                for paths in recorded:
+                    for name, n in paths.items():
+                        transport[name] = transport.get(name, 0) + n
         complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success")
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
@@ -318,6 +325,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             "ci95": [low, high] if len(ratios) >= 2 and complete_resource else None,
             "evidence_status": "pilot", "promotion_eligible": False,
             **({"tool_limited_trials": limited} if limited is not None else {}),
+            **({"ctrs_transport": transport} if transport is not None else {}),
         })
     return result
 
@@ -462,6 +470,9 @@ def render_markdown(report: dict) -> str:
                 if "tool_limited_trials" in metric:
                     counts = ", ".join(f"{side} {n}" for side, n in metric["tool_limited_trials"].items())
                     lines.append(f"- {metric['metric']}: tool-limited trials {counts}.")
+                if "ctrs_transport" in metric:
+                    paths = ", ".join(f"{name} {n}" for name, n in metric["ctrs_transport"].items())
+                    lines.append(f"- {metric['metric']}: ctrs connections by path: {paths}.")
     return "\n".join(lines) + "\n"
 
 
