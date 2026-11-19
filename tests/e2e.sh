@@ -499,6 +499,20 @@ t bind-root-churn "churn4 churn4" $D exec e2e-mix sh -c "$WAIT_CHURN"
 mkdir "$MIX/burst"; (cd "$MIX/burst" && seq 1 20000 | xargs touch) ; echo last > "$MIX/src/inplace"
 WAIT_BURST='for i in $(seq 100); do [ "$(ls /w/burst | wc -l)" = 20000 ] && [ "$(cat /w/src/inplace)" = last ] && break; sleep 0.1; done; echo "$(ls /w/burst | wc -l) $(cat /w/src/inplace)"'
 t bind-burst "20000 last" $D exec e2e-mix sh -c "$WAIT_BURST"
+# A rescan (the host lost events) revalidates the share's cached
+# entries without detaching a volume mounted inside a bind mount, and
+# renaming the bind root away and back (FSEvents root-changed) still lets
+# a change made meanwhile show.
+RS=$(mktemp -d); mkdir "$RS/proj"; echo one > "$RS/proj/f"
+$D volume create e2e-rescan >/dev/null
+$D run -d --name e2e-rescan --privileged -v "$RS/proj:/w" -v e2e-rescan:/w/deps alpine sh -c 'echo vol > /w/deps/marker; sleep 120' >/dev/null
+sleep 1
+$D exec e2e-rescan cat /w/f >/dev/null
+echo two > "$RS/proj/f"
+t bind-rescan-keeps-mounts "vol two" $D exec e2e-rescan sh -c 'echo "s /w" > /proc/ctrs/fsnotify && echo "$(cat /w/deps/marker) $(cat /w/f)"'
+mv "$RS/proj" "$RS/moved"; echo three > "$RS/moved/f"; mv "$RS/moved" "$RS/proj"
+t bind-root-renamed "three" $D exec e2e-rescan sh -c 'for i in $(seq 40); do [ "$(cat /w/f)" = three ] && break; sleep 0.1; done; cat /w/f'
+$D rm -f e2e-rescan >/dev/null; $D volume rm e2e-rescan >/dev/null; rm -rf "$RS"
 $D rm -f e2e-mix >/dev/null; rm -rf "$MIX"
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
