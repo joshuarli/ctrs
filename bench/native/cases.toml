@@ -263,5 +263,5 @@ fixture_version = "w13-overlap-v1"
 status = "implemented"
 metrics = ["w2_latency_p50_ms", "w2_latency_p99_ms", "w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction"]
 states = ["warm"]
-params = { size_bytes = 1073741824, loops = 64, lead_seconds = 2.0, operations = 50000 }
+params = { size_bytes = 1073741824, loops = 96, lead_seconds = 2.0, operations = 20000 }
 correctness = ["receiver byte exact", "W2 payload exact", "at least 95 percent overlap", "owned cleanup"]

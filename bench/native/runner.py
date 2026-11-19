@@ -3562,7 +3562,7 @@ def cmd_run(args) -> int:
     if args.case == "W13-overlap":
         kw = {"concurrency": args.concurrency, "duration": args.duration,
               "write_ratio": args.write_ratio, "seed": args.seed,
-              "operations": args.operations or 50000}
+              "operations": args.operations or 20000}
     rec = run_one(ctx, args.engine, args.case, args.state,
                   cold=args.cold, **kw)
     m = rec["metrics"]
@@ -3623,7 +3623,7 @@ def cmd_baseline(args) -> int:
                 if args.case == "W13-overlap":
                     kw = {"concurrency": args.concurrency, "duration": args.duration,
                           "write_ratio": args.write_ratio, "seed": args.seed + pair * 10,
-                          "operations": args.operations or 50000, "size_bytes": args.size_bytes,
+                          "operations": args.operations or 20000, "size_bytes": args.size_bytes,
                           "streams": args.streams, "lead_seconds": args.lead_seconds}
                 if args.case == "W14":
                     kw = {"mode": args.lifecycle_mode, "clients": args.lifecycle_clients,

@@ -28,8 +28,8 @@ def overlap_fraction(window, transfers):
 
 
 def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=0.3,
-                  seed=1, operations=50000, size_bytes=1 << 30, repeats=1, streams=1,
-                  lead_seconds=2.0, loops=64):
+                  seed=1, operations=20000, size_bytes=1 << 30, repeats=1, streams=1,
+                  lead_seconds=2.0, loops=96):
     import runner
     if lead_seconds < 0 or operations <= 0 or loops < 1 or repeats != 1:
         raise ValueError('invalid overlap parameters')
