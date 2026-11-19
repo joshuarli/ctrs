@@ -41,8 +41,7 @@ co-resident user load and a dirty worktree at launch; a quiet-window
 confirmation batch from a clean tree is required before promotion use. The
 earlier "missing provenance" note was a reporter defect (it ignored
 `provenance.build_outputs`), fixed 2026-11-18; the trials carry all binary
-and guest-asset hashes. The installed-default ctrs lane (2 vCPUs) remains an open, separate
-cell. No campaign-owned measured job is active.
+and guest-asset hashes. The installed-default ctrs lane was 2 vCPUs until `148136f`; it is now half the Mac's cores. No campaign-owned measured job is active.
 
 Later 2026-11-18 ([W2 IPI evidence](evidence/native-w2-ipi-2026-11-18.md)):
 the quiet-window matched confirmation `base-20261118T081857-9b61` keeps all
@@ -89,27 +88,34 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-19, owner delegated all decisions):** live kernel k13
-(patches 0001–0011, `8c66e93`), e2e 499/499. W12-watch bind reached
-120/120 on k11 (2 pairs). A trace of file creation on a bind mount showed
-five serial host requests per file. Patches 0008–0011 removed FLUSH, the
-synchronous RELEASE, the parent GETATTR and the capability GETXATTR.
-Create+write+close went from about 300 to 227 µs; OrbStack is 73–104 µs.
-On k9, W12 full-bind was 1.57× D and 1.38× M. Next, in order:
+**Current (2026-11-19, owner delegated all decisions):** live kernel k14
+(patches 0001–0012, `c143c82`), e2e 499/499; live host binary
+`4e0a7ecc…` from `148136f`, which defaults the VM to half the Mac's
+cores (5 here) after paired D-lane cohorts closed the all-volume gap
+(1.29 → 1.02) with W2 still a strict win (see the evidence file's
+"Installed-default vCPUs"). On k14, W12 full-bind is 1.25× M and
+1.26× D at 5 vCPUs; install 1.96× and test discovery 2.15× remain.
+W12-watch bind is at parity. Next, in order:
 
-1. Report `.work/native-perf/matrix/k13.log`: M and D W12 full-bind and
-   a 10-pair W12-watch bind on k13. Compare with k9
-   (`base-20261118T221806-099e` M 1.38, `base-20261118T230106-7f42` D
-   1.57).
-2. If full-bind still loses, what remains per create is LOOKUP (ENOENT)
-   plus CREATE. Read-only open+close is 51 µs against 17 µs, and
-   listdir is 2.5× slower. Trace W12 install and test discovery with
-   `events/fuse/fuse_request_send` (stacktrace trigger, privileged
-   container) to rank the opcodes before writing more patches.
-3. vCPU default: test about half the host cores against W2 D-lane CPU
-   per success and W12 all-volume before changing the 2-vCPU default.
-4. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
+1. Kernel k15: two virtiofs caching patches, built in
+   `ctrs-kbuild-exp-k15`. (a) A directory this guest made with MKDIR is
+   "complete": a lookup of a name not in the dcache answers ENOENT
+   without a request, until a child dentry is freed, a non-echo
+   `/proc/ctrs/fsnotify` event names the directory, or a bound expires.
+   This removes the 51% of install LOOKUPs that are first lookups of new
+   names, plus mkdir's exclusive lookup. (b) Directory dentries and
+   directory attributes get a minimum validity of several seconds, since
+   Mac-side changes arrive through the notifications; this removes the
+   41% that revalidate path components after the server's 1 s expiry.
+   Prove with e2e (add a Mac-creates-inside-guest-made-dir check), the
+   `.work/tmp/w12trace` opcode counts, then W12 full-bind M and D.
+2. Test discovery (2.15×): four requests per directory; consider
+   skipping the EOF READDIR when a READDIRPLUS reply leaves room for
+   any further entry, after checking the server fills replies greedily.
+3. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
    per-thread sampler; the `ps -M` parsing was unreliable.
+4. W2 D-lane CPU per success is unmeasured: fix the useful-work
+   mismatch in the harness or record why it differs.
 5. W14 CPU (fresh 1.30×, streaming 1.75×). Then W13-overlap and W3-v4.
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
