@@ -1,0 +1,17 @@
+# Header: virtiofs releases files synchronously, so every close waits for
+# a RELEASE round trip to the host. The reason is fs shutdown with
+# submounts: the num_waiting mechanism cannot wait for releases on them.
+# A connection with no submounts (Virtualization.framework's server sets
+# none) releases in the background, as other FUSE transports do.
+--- a/fs/fuse/file.c
++++ b/fs/fuse/file.c
+@@ -380,7 +380,8 @@
+ 	 * before commencing with fs shutdown doesn't work if submounts are
+ 	 * used.
+ 	 */
+-	fuse_file_put(ff, ff->fm->fc->auto_submounts);
++	fuse_file_put(ff, ff->fm->fc->auto_submounts &&
++			  !list_is_singular(&ff->fm->fc->mounts));
+ }
+ 
+ void fuse_release_common(struct file *file, bool isdir)

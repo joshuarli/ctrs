@@ -1,0 +1,19 @@
+# Header: every close of a FUSE file sends FLUSH, a host round trip that
+# made open+close on Virtualization.framework's virtiofs ~75 us against
+# ~21 us on other engines. Without a writeback cache, writes reach the
+# server as they happen, and the local writeback above still runs for
+# mmap'd pages. With no POSIX locks on the inode (and the server lacking
+# lock support) FLUSH has nothing left to do, so skip it on virtiofs.
+--- a/fs/fuse/file.c
++++ b/fs/fuse/file.c
+@@ -484,6 +484,10 @@
+ 
+ 	err = 0;
+ 	if (fm->fc->no_flush)
++		goto inval_attr_out;
++
++	if (fm->fc->no_lock && !locks_inode_context(inode) &&
++	    !strcmp(inode->i_sb->s_type->name, "virtiofs"))
+ 		goto inval_attr_out;
+ 
+ 	memset(&inarg, 0, sizeof(inarg));

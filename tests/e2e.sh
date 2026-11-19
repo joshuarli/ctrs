@@ -433,6 +433,7 @@ t bind-file "from the mac" $D run --rm -v "$BIND/hello.txt:/etc/greeting" alpine
 # Mac-side edits under a bind mount reach container inotify watchers
 # (docs/design-bind-notify.md): save, atomic replace, create, rename, delete.
 # A watch on a replaced or deleted file gets IN_DELETE_SELF, as on Linux.
+# An in-place save is also a rename of the name onto itself, as on OrbStack.
 WATCH=$(mktemp -d); echo one > "$WATCH/saved"; echo one > "$WATCH/replaced"; echo one > "$WATCH/renamed"; echo one > "$WATCH/deleted"
 $D run -d --name e2e-inotify -v "$WATCH:/w" alpine inotifyd - /w:cndmy /w/replaced:D /w/deleted:D >/dev/null
 sleep 1
@@ -441,6 +442,7 @@ echo new > "$WATCH/created"; mv "$WATCH/renamed" "$WATCH/moved"; unlink "$WATCH/
 sleep 2
 INOTIFY=$($D logs e2e-inotify 2>&1)
 t bind-inotify-save "saved" grep -E "^c.*/w.saved" <<<"$INOTIFY"
+t bind-inotify-save-rename "saved" grep -E "^y.*/w.saved" <<<"$INOTIFY"
 t bind-inotify-replace "replaced" grep -E "^n.*/w.replaced" <<<"$INOTIFY"
 t bind-inotify-create "created" grep -E "^n.*/w.created" <<<"$INOTIFY"
 t bind-inotify-rename "moved" grep -E "^n.*/w.moved" <<<"$INOTIFY"

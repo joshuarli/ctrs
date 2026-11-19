@@ -15,7 +15,7 @@
  proc-y	+= devices.o
 --- a/fs/proc/ctrs_fsnotify.c
 +++ b/fs/proc/ctrs_fsnotify.c
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,184 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * /proc/ctrs/fsnotify: the ctrs guest agent reports changes made on the
@@ -75,6 +75,16 @@
 +	fsnotify_inoderemove(inode);
 +}
 +
++static void notify_renamed_in_place(struct inode *dir, struct dentry *dentry)
++{
++	u32 cookie = fsnotify_get_cookie();
++
++	fsnotify_name(FS_MOVED_FROM, d_inode(dentry), FSNOTIFY_EVENT_INODE, dir,
++		      &dentry->d_name, cookie);
++	fsnotify_name(FS_MOVED_TO, d_inode(dentry), FSNOTIFY_EVENT_INODE, dir,
++		      &dentry->d_name, cookie);
++}
++
 +static int notify_present(struct path *parent, const char *full, bool created,
 +			  struct inode *known)
 +{
@@ -89,8 +99,11 @@
 +		invalidate_mapping_pages(inode->i_mapping, 0, -1);
 +	if (known && inode != known)
 +		notify_unlinked(known);
-+	if (inode == known || (!created && !known))
++	if (inode == known || (!created && !known)) {
++		if (S_ISREG(inode->i_mode))
++			notify_renamed_in_place(d_inode(parent->dentry), p.dentry);
 +		fsnotify_change(p.dentry, ATTR_SIZE);
++	}
 +	else if (d_is_dir(p.dentry))
 +		fsnotify_mkdir(d_inode(parent->dentry), p.dentry);
 +	else

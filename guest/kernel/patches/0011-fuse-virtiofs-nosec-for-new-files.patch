@@ -1,0 +1,18 @@
+# Header: the first write to every FUSE file asks the server for its
+# security.capability xattr (file_remove_privs), because FUSE never marks
+# inodes S_NOSEC: another client may set the xattr. A file this guest has
+# just created on virtiofs without setuid or setgid has no capability
+# xattr, so mark it S_NOSEC. FUSE clears the flag on every attribute
+# refresh and the VFS on any security.* setxattr.
+--- a/fs/fuse/dir.c
++++ b/fs/fuse/dir.c
+@@ -733,6 +733,9 @@
+ 		goto out_err;
+ 	}
+ 	kfree(forget);
++	if (!strcmp(dir->i_sb->s_type->name, "virtiofs") &&
++	    !(inode->i_mode & (S_ISUID | S_ISGID)))
++		inode->i_flags |= S_NOSEC;
+ 	d_instantiate(entry, inode);
+ 	entry->d_time = epoch;
+ 	fuse_change_entry_timeout(entry, &outentry);

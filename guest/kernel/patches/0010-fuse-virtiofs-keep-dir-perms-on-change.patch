@@ -1,0 +1,22 @@
+# Header: a create, unlink or rename in a FUSE directory marks all of the
+# directory's attributes stale, so the next path walk through it sends
+# GETATTR for the permission check: one more Virtualization.framework
+# round trip (~20 us) per file created, as in npm install. Changing
+# entries cannot change the directory's type, mode, owner or inode
+# number, so on virtiofs keep those and mark only the rest stale.
+--- a/fs/fuse/dir.c
++++ b/fs/fuse/dir.c
+@@ -131,7 +131,12 @@
+ 
+ static void fuse_dir_changed(struct inode *dir)
+ {
+-	fuse_invalidate_attr(dir);
++	if (!strcmp(dir->i_sb->s_type->name, "virtiofs"))
++		fuse_invalidate_attr_mask(dir, STATX_BASIC_STATS &
++					  ~(STATX_TYPE | STATX_MODE | STATX_UID |
++					    STATX_GID | STATX_INO));
++	else
++		fuse_invalidate_attr(dir);
+ 	inode_maybe_inc_iversion(dir, false);
+ }
+ 
