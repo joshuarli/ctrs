@@ -417,6 +417,17 @@ EOF_PID=$!
 sleep 0.5
 t host-internal-upload-eof "received 67108864" $D run --rm alpine sh -c 'head -c 67108864 /dev/zero | nc host.docker.internal 18998'
 kill $EOF_PID 2>/dev/null
+# A Mac service sees the container's connection come from its own loopback,
+# whichever path (NAT relay or vsock) carries it.
+python3 -c '
+import socket
+l = socket.socket(); l.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); l.bind(("127.0.0.1", 18997)); l.listen(1)
+c, peer = l.accept(); c.sendall(f"peer {peer[0]}\n".encode()); c.close()
+' >/dev/null 2>&1 &
+PEER_PID=$!
+sleep 0.5
+t host-internal-peer "peer 127.0.0.1" $D run --rm alpine sh -c 'nc host.docker.internal 18997 </dev/null'
+kill $PEER_PID 2>/dev/null
 
 section "volumes and bind mounts"
 BIND=$(mktemp -d); echo "from the mac" > "$BIND/hello.txt"

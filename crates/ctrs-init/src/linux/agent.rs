@@ -338,6 +338,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let mut procs: HashMap<libc::pid_t, Proc> = HashMap::new();
     let mut fds: Vec<libc::pollfd> = Vec::with_capacity(16);
     let fsnotify = super::fsnotify::start();
+    let mut nat_relay: Option<super::relay::NatRelay> = None;
     let mut frame = Vec::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     let mut chunk = vec![0u8; MAX_OUTPUT_CHUNK];
@@ -545,7 +546,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 continue;
             }
             if let Some(l) = host_bound.as_ref().filter(|l| l.as_raw_fd() == pfd.fd) {
-                while let Some(r) = super::relay::accept_host_bound(l, super::net::HOST_ADDR) {
+                while let Some(r) = super::relay::accept_host_bound(l, super::net::HOST_ADDR, nat_relay.as_ref()) {
                     relays.push(r);
                 }
                 continue;
@@ -700,6 +701,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
             out.clear();
             match ctrs_proto::decode(&frame) {
                 Ok(Msg::HostFsEvents { events }) => fsnotify.send(events),
+                Ok(Msg::HostRelay { addr, port, token }) => nat_relay = Some(super::relay::NatRelay { addr, port, token }),
                 Ok(Msg::Ping(v)) => Msg::Pong(v).encode(&mut out),
                 Ok(Msg::Shutdown) => {
                     if host_process {

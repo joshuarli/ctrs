@@ -284,6 +284,11 @@ impl VmLink {
 
     /// Whether every event reached the guest: one too long for a frame,
     /// or a failed send, loses the rest.
+    /// Tells the guest where the NAT-network host relay listens.
+    pub fn host_relay(&self, addr: [u8; 4], port: u16, token: [u8; 16]) -> io::Result<()> {
+        self.send(|o| Msg::HostRelay { addr, port, token }.encode(o))
+    }
+
     #[cfg(target_os = "macos")]
     pub fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) -> bool {
         let mut pending = events;

@@ -41,7 +41,8 @@ pub const INPUT_WINDOW: usize = 4 << 20;
 /// the virtiofs layer source an older agent would answer "unexpected" to.
 /// 6 added `HostFsEvents`, which an older agent would answer "unexpected" to.
 /// 7 added the `Rescan` event kind, which a 6 agent fails to decode.
-pub const PROTOCOL: u16 = 7;
+/// 8 added `HostRelay`, which an older agent would answer "unexpected" to.
+pub const PROTOCOL: u16 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg<'a> {
@@ -167,6 +168,10 @@ pub enum Msg<'a> {
     /// IPv6 network, the IPv6 NAT table. No reply; an older agent ignores it.
     RemoveBridge { bridge: &'a str },
     HostFsEvents { events: FsEvents<'a> },
+    /// Host → guest, no reply: the daemon accepts `host.docker.internal`
+    /// connections on the VM's NAT network at `addr:port`. Each connection
+    /// opens with `token`, then the target's IPv4 address and big-endian port.
+    HostRelay { addr: [u8; 4], port: u16, token: [u8; 16] },
     /// Success, for requests with nothing else to say.
     Ack,
 }
@@ -701,6 +706,7 @@ mod kind {
     pub const USAGE: u16 = 75;
     pub const LAYER_FETCH: u16 = 76;
     pub const HOST_FS_EVENTS: u16 = 77;
+    pub const HOST_RELAY: u16 = 78;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -868,6 +874,7 @@ impl Msg<'_> {
     pub fn encode(&self, out: &mut Vec<u8>) {
         match *self {
             Msg::HostFsEvents { events } => frame(out, kind::HOST_FS_EVENTS, |o| { put_u32(o, events.count); o.extend_from_slice(events.raw); }),
+            Msg::HostRelay { addr, port, token } => frame(out, kind::HOST_RELAY, |o| { o.extend_from_slice(&addr); o.extend_from_slice(&port.to_le_bytes()); o.extend_from_slice(&token); }),
             Msg::Hello(h) => frame(out, kind::HELLO, |o| {
                 o.extend_from_slice(&h.protocol.to_le_bytes());
                 for v in [h.init_start_ns, h.ready_ns, h.mem_total_kib, h.mem_available_kib] {
@@ -1147,6 +1154,11 @@ pub fn decode(frame: &[u8]) -> Result<Msg<'_>, DecodeError> {
             for _ in 0..count { event_kind(r.u8()?)?; r.str()?; }
             Msg::HostFsEvents { events: FsEvents { count, raw: &r.buf[start..r.pos] } }
         },
+        kind::HOST_RELAY => Msg::HostRelay {
+            addr: r.take(4)?.try_into().map_err(|_| DecodeError::Truncated)?,
+            port: r.u16()?,
+            token: r.take(16)?.try_into().map_err(|_| DecodeError::Truncated)?,
+        },
         kind::HELLO => Msg::Hello(Hello {
             protocol: r.u16()?,
             init_start_ns: r.u64()?,
@@ -1315,6 +1327,7 @@ mod tests {
         let Msg::HostFsEvents { events: decoded } = decode(&buf).unwrap() else { panic!() };
         assert_eq!(decoded.iter().collect::<Vec<_>>(), events);
         round(Msg::HostFsEvents { events: decoded });
+        round(Msg::HostRelay { addr: [192, 168, 64, 1], port: 50123, token: [7; 16] });
         let long = "x".repeat(MAX_FRAME - HEADER - 4 - 5);
         let batch = [FsEvent { kind: FsEventKind::Modified, path: &long }, FsEvent { kind: FsEventKind::Removed, path: "/b" }];
         let mut limited = Vec::new();

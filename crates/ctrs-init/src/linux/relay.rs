@@ -408,7 +408,47 @@ pub const HOST_FRAMED_VSOCK_PORT: u32 = 1032;
 /// dials the Mac and returns a relay between the two. Only connections that
 /// were redirected from `host_addr` are relayed: one made to the listener
 /// directly (from the LAN, on a Linux host) would reach the host's loopback.
-pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4]) -> Option<Relay> {
+/// Where the Mac accepts host-bound connections on the VM's NAT network
+/// (`Msg::HostRelay`). The path carries guest-to-Mac bytes faster than
+/// vsock; a connection that cannot reach it uses vsock instead.
+#[derive(Clone, Copy)]
+pub struct NatRelay {
+    pub addr: [u8; 4],
+    pub port: u16,
+    pub token: [u8; 16],
+}
+
+/// How long a NAT relay connect may hold up the agent loop before the
+/// connection falls back to vsock.
+const NAT_CONNECT_MS: libc::c_int = 100;
+
+/// A connected, blocking-for-header TCP socket to the Mac's NAT relay with
+/// the token and target already written, or None to fall back to vsock.
+fn dial_nat(nat: &NatRelay, port: u16) -> Option<OwnedFd> {
+    let sock = connect(nat.addr, nat.port).ok()?;
+    let mut pfd = libc::pollfd { fd: sock.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
+    // SAFETY: one valid pollfd.
+    if unsafe { libc::poll(&mut pfd, 1, NAT_CONNECT_MS) } != 1 {
+        return None;
+    }
+    let mut err: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: SO_ERROR fills an int of the stated size.
+    if unsafe { libc::getsockopt(sock.as_raw_fd(), libc::SOL_SOCKET, libc::SO_ERROR, (&mut err as *mut libc::c_int).cast(), &mut len) } != 0 || err != 0 {
+        return None;
+    }
+    let mut header = [0u8; 22];
+    header[..16].copy_from_slice(&nat.token);
+    header[16..20].copy_from_slice(&[127, 0, 0, 1]);
+    header[20..].copy_from_slice(&port.to_be_bytes());
+    // SAFETY: a 22-byte write to a just-connected stream; the socket buffer is empty.
+    if unsafe { libc::write(sock.as_raw_fd(), header.as_ptr().cast(), header.len()) } != header.len() as isize {
+        return None;
+    }
+    Some(sock)
+}
+
+pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&NatRelay>) -> Option<Relay> {
     // SAFETY: accept4 on a listening socket we own; the fd is owned immediately.
     let fd = unsafe { libc::accept4(listener.as_raw_fd(), std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) };
     if fd < 0 {
@@ -429,6 +469,9 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4]) -> Option<Relay
         }
         u16::from_be(dst.sin_port)
     };
+    if let Some(host) = nat.and_then(|nat| dial_nat(nat, port)) {
+        return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false });
+    }
     let Ok(host) = dial_host(HOST_FRAMED_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
     // The Mac connects to its own loopback: services bound to 127.0.0.1 work.
     let mut header = [127, 0, 0, 1, 0, 0];

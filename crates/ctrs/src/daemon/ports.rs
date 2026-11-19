@@ -90,6 +90,7 @@ static NAT_BUDGET: Mutex<Option<(f64, Instant)>> = Mutex::new(None);
 /// costs a quarter less CPU per byte than 256 KiB from the VM to the Mac).
 const COPY_BUF: usize = 64 * 1024;
 const COPY_BUF_MAX: usize = 1024 * 1024;
+const VSOCK_BUF: libc::c_int = 4 << 20;
 
 /// A guest port in `NAT_PORTS`, free again when dropped.
 struct NatPort(u16);
@@ -758,6 +759,7 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
     }
     let (guest, framed) = open_framed_relay(vm, ip, port)?;
     socket_timeouts(guest.fd.as_raw_fd())?;
+    vsock_buffers(guest.fd.as_raw_fd());
     let mut to_guest = std::fs::File::from(guest.fd.try_clone()?);
     let mut from_guest = std::fs::File::from(guest.fd.try_clone()?);
     let mut client_read = client.try_clone()?;
@@ -1046,6 +1048,17 @@ fn copy_frames(from: &mut impl Read, to: &mut impl Write) -> io::Result<bool> {
     }
 }
 
+/// Room for Virtualization.framework to hand over a guest's bytes while the
+/// relay is still writing the last batch on: it returns vsock credit to the
+/// guest only as this end takes the bytes.
+fn vsock_buffers(fd: std::os::fd::RawFd) {
+    for opt in [libc::SO_RCVBUF, libc::SO_SNDBUF] {
+        let size: libc::c_int = VSOCK_BUF;
+        // SAFETY: setsockopt with an int of the stated size on a socket we own.
+        unsafe { libc::setsockopt(fd, libc::SOL_SOCKET, opt, (&size as *const libc::c_int).cast(), std::mem::size_of::<libc::c_int>() as libc::socklen_t) };
+    }
+}
+
 fn socket_timeouts(fd: std::os::fd::RawFd) -> io::Result<()> {
     let timeout = libc::timeval {
         tv_sec: TCP_IDLE.as_secs() as _,
@@ -1086,6 +1099,7 @@ pub fn serve_host_bound_framed(stream: ctrs_vmm::VsockStream) {
 }
 
 fn host_bound(stream: ctrs_vmm::VsockStream, framed: bool) -> io::Result<()> {
+    vsock_buffers(stream.fd.as_raw_fd());
     let mut from_guest = std::fs::File::from(stream.fd.try_clone()?);
     let mut header = [0u8; 6];
     from_guest.read_exact(&mut header)?;
@@ -1113,6 +1127,89 @@ fn host_bound(stream: ctrs_vmm::VsockStream, framed: bool) -> io::Result<()> {
     let _ = target_write.shutdown(Shutdown::Write);
     let _ = down.join();
     drop(stream);
+    Ok(())
+}
+
+/// Accepts `host.docker.internal` connections the guest makes over the VM's
+/// NAT network, on the Mac's address there. Each opens with the per-boot
+/// token; only the Mac's loopback is relayed, so services see 127.0.0.1 as
+/// they do over vsock. The listener lives as long as the VM: it is polled
+/// once a second and closes when `vm` is gone.
+pub fn start_nat_host_bound(vm: std::sync::Weak<super::vmlink::VmLink>) {
+    let _ = std::thread::Builder::new().name("ctrs-nat-host-bound".into()).spawn(move || {
+        let deadline = Instant::now() + NAT_UPLINK_WAIT;
+        let gateway = loop {
+            let Some(link) = vm.upgrade() else { return };
+            match link.uplink() {
+                Ok((_, gateway)) if gateway != [0; 4] => break gateway,
+                _ if Instant::now() > deadline => {
+                    crate::diag::info!("no NAT uplink; host-bound connections use vsock");
+                    return;
+                }
+                _ => {}
+            }
+            drop(link);
+            std::thread::sleep(Duration::from_millis(250));
+        };
+        let listener = match std::net::TcpListener::bind((std::net::Ipv4Addr::from(gateway), 0)) {
+            Ok(l) => l,
+            Err(e) => {
+                crate::diag::info!("NAT host relay unavailable; host-bound connections use vsock", error = e);
+                return;
+            }
+        };
+        let mut token = [0u8; 16];
+        if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut token)).is_err() {
+            return;
+        }
+        let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
+        let timeout = libc::timeval { tv_sec: 1, tv_usec: 0 };
+        // SAFETY: setsockopt with a timeval of the stated size on a socket we own.
+        unsafe { libc::setsockopt(listener.as_raw_fd(), libc::SOL_SOCKET, libc::SO_RCVTIMEO, (&timeout as *const libc::timeval).cast(), std::mem::size_of::<libc::timeval>() as libc::socklen_t) };
+        match vm.upgrade().map(|link| link.host_relay(gateway, port, token)) {
+            Some(Ok(())) => {}
+            _ => return,
+        }
+        crate::diag::info!("NAT host relay listening", addr = format!("{}:{port}", std::net::Ipv4Addr::from(gateway)));
+        while vm.strong_count() > 0 {
+            let Ok((conn, _)) = listener.accept() else { continue };
+            let _ = std::thread::Builder::new().name("ctrs-nat-host-bound-conn".into()).spawn(move || {
+                let _ = nat_host_bound(conn, &token);
+            });
+        }
+    });
+}
+
+const NAT_UPLINK_WAIT: Duration = Duration::from_secs(30);
+
+fn nat_host_bound(mut from_guest: TcpStream, token: &[u8; 16]) -> io::Result<()> {
+    from_guest.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut header = [0u8; 22];
+    from_guest.read_exact(&mut header)?;
+    from_guest.set_read_timeout(None)?;
+    // Constant time, so a wrong guess learns nothing about the token.
+    if header[..16].iter().zip(token).fold(0u8, |acc, (a, b)| acc | (a ^ b)) != 0 {
+        crate::diag::warn!("refused a NAT host-bound connection without the boot token");
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "bad token"));
+    }
+    let ip = std::net::Ipv4Addr::new(header[16], header[17], header[18], header[19]);
+    let port = u16::from_be_bytes([header[20], header[21]]);
+    if ip != std::net::Ipv4Addr::LOCALHOST {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "not loopback"));
+    }
+    from_guest.set_nodelay(true)?;
+    let target = TcpStream::connect((ip, port))?;
+    target.set_nodelay(true)?;
+    let mut to_guest = from_guest.try_clone()?;
+    let mut target_read = target.try_clone()?;
+    let mut target_write = target;
+    let down = std::thread::Builder::new().name("ctrs-nat-host-bound-down".into()).spawn(move || {
+        let _ = copy(&mut target_read, &mut to_guest);
+        let _ = to_guest.shutdown(Shutdown::Write);
+    })?;
+    let _ = copy(&mut from_guest, &mut target_write);
+    let _ = target_write.shutdown(Shutdown::Write);
+    let _ = down.join();
     Ok(())
 }
 
@@ -1271,6 +1368,49 @@ pub fn listening<S: AsRef<str>>(lines: &[S], host_network: bool) -> (Vec<u16>, V
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nat_host_bound_needs_the_token_and_relays_only_loopback() {
+        use std::io::{Read, Write};
+        let token = [9u8; 16];
+        let echo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut c, _) = echo.accept().unwrap();
+            let mut b = Vec::new();
+            c.read_to_end(&mut b).unwrap();
+            c.write_all(&b).unwrap();
+        });
+        let relay = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = relay.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut results = Vec::new();
+            for _ in 0..3 {
+                let (c, _) = relay.accept().unwrap();
+                results.push(super::nat_host_bound(c, &token).is_ok());
+            }
+            results
+        });
+        let send = |head: &[u8], body: &[u8]| {
+            let mut c = std::net::TcpStream::connect(addr).unwrap();
+            c.write_all(head).unwrap();
+            c.write_all(body).unwrap();
+            c.shutdown(std::net::Shutdown::Write).unwrap();
+            let mut back = Vec::new();
+            let _ = c.read_to_end(&mut back);
+            back
+        };
+        let mut good = token.to_vec();
+        good.extend_from_slice(&[127, 0, 0, 1]);
+        good.extend_from_slice(&echo_port.to_be_bytes());
+        let mut bad = good.clone();
+        bad[0] ^= 1;
+        let mut lan = good.clone();
+        lan[16..20].copy_from_slice(&[10, 0, 0, 1]);
+        assert!(send(&bad, b"x").is_empty());
+        assert!(send(&lan, b"x").is_empty());
+        assert_eq!(send(&good, b"hello"), b"hello");
+        assert_eq!(server.join().unwrap(), vec![false, false, true]);
+    }
     use super::{MAX_PEER_SESSIONS, MAX_REMOTE_SESSIONS, MAX_TCP_SESSIONS, NAT_PORTS, REMOTE_SESSIONS, TCP_SESSIONS, kernel_forwards, kernel_host_ip, listening, nat_port, relays_too, tcp_permit};
     use std::net::IpAddr;
     use std::sync::atomic::Ordering;
