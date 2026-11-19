@@ -241,3 +241,15 @@ states = ["warm"]
 params = { mode = "fresh", clients = 32, operations = 100, idle_seconds = 30 }
 correctness = ["exact responses", "all operations complete", "zero leaked sessions", "owned cleanup"]
 note = "Modes and parameters form separate cohorts. Idle durations above 300 seconds measure relay timeout behavior."
+
+[[case]]
+id = "W13-overlap"
+family = "artifact-transfer"
+title = "Published-port upload alongside fixed-work interactive API load"
+fixture = "fixtures/w13 + fixtures/w1 + fixtures/w2/load.py"
+fixture_version = "w13-overlap-v1"
+status = "implemented"
+metrics = ["w2_latency_p50_ms", "w2_latency_p99_ms", "w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction"]
+states = ["warm"]
+params = { size_bytes = 1073741824, repeats = 3, lead_seconds = 2.0, operations = 50000 }
+correctness = ["receiver byte exact", "W2 payload exact", "at least 95 percent overlap", "owned cleanup"]

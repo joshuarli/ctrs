@@ -91,6 +91,19 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(metric_result(report, duration)["ratio_median"], .5)
         self.assertEqual(metric_result(report, rate)["ratio_median"], .5)
 
+    def test_overlap_metric_directions_and_paired_inputs(self):
+        records = pair(case="W13-overlap", metric="w2_latency_p99_ms", ratio=.5)
+        for record in records:
+            record["paired_inputs"] = {"seed": "same"}
+        for metric in ("w2_rps", "transfer_goodput_bytes_per_second"):
+            records[0]["metrics"][metric] = 2
+            records[1]["metrics"][metric] = 1
+        report = reporting.analyze(records)
+        for metric in ("w2_latency_p99_ms", "w2_rps", "transfer_goodput_bytes_per_second"):
+            self.assertEqual(metric_result(report, metric)["ratio_median"], .5)
+        records[1]["paired_inputs"] = {"seed": "different"}
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 0)
+
     def test_legacy_w8_without_parameters_is_historical_and_does_not_crash(self):
         records = pair(case='W8', metric='pull_wall_seconds')
         for record in records:

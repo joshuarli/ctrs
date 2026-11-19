@@ -31,6 +31,7 @@ import recovery_trace
 import ci_jobs
 import w2_peer
 from transfer import trial_w13
+import overlap
 from lifecycle import trial_w14
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
@@ -1304,7 +1305,8 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
         if request_rate is not None:
             args += ["--request-rate", str(request_rate)]
         timeout = max(duration, span or 0) + 120
-        with resource_phase(engine, rec, "workload"):
+        overlap_workload = getattr(ctx, "overlap_workload", None)
+        with resource_phase(engine, rec, "workload"), (overlap_workload() if overlap_workload else nullcontext()):
             if peer is None:
                 load = subprocess.run([sys.executable, str(client_source), *args],
                                       capture_output=True, text=True, timeout=timeout)
@@ -1320,6 +1322,9 @@ def trial_w2(ctx, engine: Engine, state: str, concurrency: int,
             w2_peer.copy_results(engine, peer, trial_dir, "load")
         if load_out.exists():
             summary = json.loads(load_out.read_text())
+            overlap_dir = getattr(ctx, "overlap_dir", None)
+            if overlap_dir is not None:
+                (overlap_dir / "w2-load.json").write_text(load_out.read_text())
             rec["metrics"].update({
                 "fixture_version": summary["fixture_version"],
                 "mode": summary["mode"],
@@ -3289,7 +3294,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
               "W10": trial_w10, "W11": trial_w11, "W12": workspace.trial_w12,
-              "W12-watch": workspace.trial_w12_watch, "W13": trial_w13, "W14": trial_w14,
+              "W12-watch": workspace.trial_w12_watch, "W13": trial_w13, "W13-overlap": overlap.trial_overlap, "W14": trial_w14,
               "HOLDOUT": trial_holdout}
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
@@ -3553,6 +3558,10 @@ def cmd_run(args) -> int:
         kw["build_cache"] = args.build_cache
     if args.case == "W8" and getattr(args, "under_load", False):
         kw["under_load"] = True
+    if args.case == "W13-overlap":
+        kw = {"concurrency": args.concurrency, "duration": args.duration,
+              "write_ratio": args.write_ratio, "seed": args.seed,
+              "operations": args.operations or 50000}
     rec = run_one(ctx, args.engine, args.case, args.state,
                   cold=args.cold, **kw)
     m = rec["metrics"]
@@ -3610,6 +3619,11 @@ def cmd_baseline(args) -> int:
                     kw = {"path": args.transfer_path, "direction": args.direction,
                           "streams": args.streams, "size_bytes": args.size_bytes,
                           "repeats": args.repeats}
+                if args.case == "W13-overlap":
+                    kw = {"concurrency": args.concurrency, "duration": args.duration,
+                          "write_ratio": args.write_ratio, "seed": args.seed + pair * 10,
+                          "operations": args.operations or 50000, "size_bytes": args.size_bytes,
+                          "repeats": args.repeats, "streams": args.streams, "lead_seconds": args.lead_seconds}
                 if args.case == "W14":
                     kw = {"mode": args.lifecycle_mode, "clients": args.lifecycle_clients,
                           "idle_seconds": args.idle_seconds}
@@ -3759,7 +3773,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -3780,7 +3794,7 @@ def main() -> int:
                         "control for builder topology)")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
@@ -3821,6 +3835,7 @@ def main() -> int:
     p.add_argument("--streams", type=int, choices=(1, 4), default=1, help="W13 parallel streams")
     p.add_argument("--size-bytes", type=int, default=1 << 30, help="W13 bytes per transfer")
     p.add_argument("--repeats", type=int, default=3, help="W13 transfers per trial")
+    p.add_argument("--lead-seconds", type=float, default=2.0, help="W13-overlap transfer lead")
 
     p.add_argument("--lifecycle-mode", choices=("fresh", "persistent", "streaming", "cancel", "idle-resume", "reconnect"), default="fresh")
     p.add_argument("--lifecycle-clients", type=int, default=32)
@@ -3888,8 +3903,8 @@ def main() -> int:
             args.cmd != "run" or args.engine != "ctrs" or args.cold or args.state != "warm"):
         ap.error("engine interruption requires run --case W10 --engine ctrs with a warmed private stack")
     if getattr(args, "operations", None) is not None:
-        if args.case != "W2" or args.operations <= 0:
-            ap.error("--operations requires W2 and a positive value")
+        if args.case not in ("W2", "W13-overlap") or args.operations <= 0:
+            ap.error("--operations requires W2 or W13-overlap and a positive value")
     if getattr(args, "request_rate", None) is not None:
         if args.case != "W2":
             ap.error("--request-rate requires W2")

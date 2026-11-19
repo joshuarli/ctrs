@@ -81,6 +81,8 @@ python3 bench/native/runner.py preflight          # fail-closed G0 checks
 python3 bench/native/runner.py prepare            # pull images + build fixture API on both engines (untimed)
 python3 bench/native/runner.py baseline --case W1 --a ctrs --b orbstack --pairs 3
 python3 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack --pairs 3 --duration 20
+python3 bench/native/runner.py baseline --case W13 --a ctrs --b orbstack --pairs 3
+python3 bench/native/runner.py baseline --case W13-overlap --a ctrs --b orbstack --pairs 3 --resource-lane matched
 python3 bench/native/runner.py noop --engine ctrs --pairs 3   # same-engine A/B slot noise control
 python3 bench/native/runner.py report --noise --match '<run-id>'  # noise report, never engine scores
 python3 bench/native/runner.py holdout                       # independent real-app gate (once per engine)
