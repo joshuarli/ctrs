@@ -150,18 +150,21 @@ impl Drop for Stream {
 unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths: *mut c_void, flags: *const u32, _: *const u64) {
     // SAFETY: FSEvents supplies arrays valid for this callback and the stream owns the context.
     let (callback, paths, flags) = unsafe { (&*(info as *const Callback), std::slice::from_raw_parts(paths as *const *const c_char, count), std::slice::from_raw_parts(flags, count)) };
-    let mut unique = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
     {
         let roots = callback.roots.lock().unwrap();
         for (path, flags) in paths.iter().zip(flags) {
             // SAFETY: each path is a NUL-terminated FSEvents path.
             let Ok(path) = unsafe { CStr::from_ptr(*path) }.to_str() else { continue };
             if !roots.accepts(Path::new(path)) { continue; }
-            for kind in classify(*flags, Path::new(path).exists()) { unique.insert((kind, path.to_owned())); }
+            for kind in classify(*flags, Path::new(path).exists()) {
+                if seen.insert((kind, path.to_owned())) { ordered.push((kind, path.to_owned())); }
+            }
         }
     }
     if let Some(engine) = callback.engine.upgrade() {
-        let events: Vec<_> = unique.iter().map(|(kind, path)| FsEvent { kind: *kind, path }).collect();
+        let events: Vec<_> = ordered.iter().map(|(kind, path)| FsEvent { kind: *kind, path }).collect();
         engine.send_fs_events(&events);
     }
 }
