@@ -89,25 +89,28 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-18 evening, after patch 0005):** the first W12 and W13
-comparisons are done and ranked in
-[native-acceptance-matrix.md](native-acceptance-matrix.md) with evidence in
+**Current (2026-11-18 evening):** W12, W12-watch v2, W13 and W14 have
+comparisons on this host, ranked in
+[native-acceptance-matrix.md](native-acceptance-matrix.md), with evidence in
 [native-w12-w13-2026-11-18.md](evidence/native-w12-w13-2026-11-18.md).
-Guest kernel patch 0005 (64 KiB vsock receive buffers) brought host→guest
-single-stream transfer to parity. Live kernel after this commit: the measured
-`1b2fdbc9…` Image, installed into `guest/out` between runs. Next, in order:
+Patch 0005 (64 KiB vsock receive buffers, kernel `1b2fdbc9…`, now in
+`guest/out`) brought host→guest single-stream transfer to parity. W12
+all-volume is at M-lane parity. Next, in order:
 
-1. Report the M-lane W12 all-volume cell (`.work/native-perf/matrix/c1.log`,
-   run on the rx64 guest) to separate the 2-vCPU default from engine cost.
-2. W14 functional runs on both engines (each `--lifecycle-mode`), then a
-   paired cohort for fresh and reconnect.
-3. W12-watch v2 functional run and paired cohort (bind and volume).
-4. Largest open deficit: guest→host transfer at 0.51–0.65 GB/s, a bounded
-   VZ vsock device ceiling (1 vs 4 streams are equal; guest half idle).
-   Investigate a non-vsock bulk path, which is a device and architecture
-   question. Surface it before any wire-protocol change.
-5. W12 full-bind install and test discovery on the Mac share; W13-overlap
-   with W2; W3-v4.
+1. Report the M-lane W12 full-bind cohort (`.work/native-perf/matrix/w12m-fullbind.log`).
+   It separates the 2-vCPU default from Mac-share cost in install and test
+   discovery.
+2. Guest→host transfer (0.51–0.65 GB/s, the largest open throughput
+   deficit). Sample per-thread CPU of the Virtualization XPC process and
+   the ctrs relay during a guest→host transfer (`ps -M`) to find which side
+   serializes. The guest is half idle, and 1 and 4 streams are equal.
+   vmnet comparison needs a Local Network grant (owner). Any new device or
+   wire path must be surfaced before implementation.
+3. W14 CPU per lifecycle (fresh 1.30×, streaming 1.75×): profile the
+   connection setup path (host accept → vsock connect → guest connect).
+4. Bind notifications: blocked on owner approval of
+   [design-bind-notify.md](design-bind-notify.md).
+5. W13-overlap with W2; W3-v4; W14 persistent/cancel/idle-resume cohorts.
 
 **Earlier (2026-11-18 afternoon, after `19d4eb2`):** the frozen first
 comparison matrix is running serially on the Mac. Live assets are main's
