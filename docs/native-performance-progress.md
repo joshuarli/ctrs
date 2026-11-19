@@ -91,7 +91,7 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 **Current (2026-11-19, second steering: coherence, then guest→host):**
 live kernel k17 = patches 0001–0011 plus a new 0012 (echo proof and
 rescan; the old two-second echo window, 0013 and 0014 are removed),
-protocol 8, host binary from `3351ba9`, e2e 508/508. Done this round:
+protocol 9, host binary from `439b14e`, e2e 508/508. Done this round:
 
 - Filesystem coherence: an echo is skipped only when proven to be the
   guest's own change; FSEvents drop/must-scan/root-change flags, failed
@@ -101,28 +101,33 @@ protocol 8, host binary from `3351ba9`, e2e 508/508. Done this round:
 - Keep/revert: 0013/0014 reverted (no paired W12 benefit).
 - Admission: W12-watch misses/stale fail the trial; W13 claims are capped
   when the favored side was tool-limited; W13/W14 pair on pinned image
-  identity (older cohorts flagged unverified). The latest W2 records were
-  saturation runs (no `--operations`).
-- Guest→host: attributed to the VZ vsock credit loop (~0.55 GB/s); the
-  NAT host relay (`3351ba9`, decision in `docs/decisions.md`) moved 8 GiB
-  in 4.5–4.7 s against 15.4–17.4 s on a loaded host. Idle guards at 5 vs
-  2 vCPUs: idle VM CPU about 0.0015 cores, next use about 40 ms.
+  identity (older cohorts flagged unverified); W13 ctrs trials record
+  connections per transport (`GET /ctrs/relays`). The latest W2 records
+  were saturation runs (no `--operations`).
+- Guest→host: the NAT host relay (`3351ba9`) and published-port legs
+  (`ad22161`) cut container→Mac upload to 2.23× (was 7.0×) and
+  published-port download to 1.64× (was 5.1×), paired, 10 pairs, every
+  connection over NAT. Leg-only regressed published-port upload to 1.14×;
+  `439b14e` moves client bytes back to vsock (unmeasured). One NAT flow
+  caps near 1.9 GB/s here. Evidence: "Guest→host transfer attribution".
 
-Next, in order (queue `.work/native-perf/matrix/run-k17b.sh`, which waits
-for no foreign OrbStack containers and a 1-minute load under 4; a
-foreign `kache-builder` loaded the host from 09:37):
+Next, in order (queue `.work/native-perf/matrix/run-k17e.sh`, log
+`k17e.log`; it waits for `.work/tmp/hold` absent, no OrbStack containers
+and a 1-minute load under 4 — unrelated builds held the load at 10–22
+from 11:30):
 
-1. Report W13 container-to-Mac upload and download (10 pairs each) to
-   confirm or reject the NAT relay; then W13-overlap (10 pairs) as its
-   regression companion (W2 tails, errors, resources with a transfer).
-2. Report W12 full-bind M and D and the first bind-source-plus-volume-deps
-   cohort on k17; W12-watch bind (5 pairs) must stay at 120/120 per trial.
-3. Report the W2 50,000-operation fixed-work D cohort at 5 vCPUs (CPU per
-   success), and W3-v4 functional + 10 pairs.
-4. Published-port download still rides vsock (the daemon cannot open
-   connections to the VM); a guest-initiated reverse connection over NAT
-   is the next transfer candidate. Then W14 CPU (streaming 2.2×, cancel
-   cleanup 1.14×).
+1. Report W13 container-to-Mac download (does host-bound Mac→container
+   need the same vsock split?), then published-port upload and download
+   on `439b14e`, then W13-overlap (10 pairs).
+2. Report the W2 50,000-operation fixed-work D cohort, W12 full-bind M
+   and D, the first bind-source-plus-volume-deps cohort, W12-watch bind
+   (5 pairs, 120/120 per trial), W3-v4 functional + 10 pairs.
+3. If container→Mac download regressed: split host-bound connections the
+   same way (container bytes over NAT, Mac bytes over vsock). The
+   remaining guest→host gap is the single NAT flow (~1.9 GB/s) plus the
+   agent's 64 KiB poll-loop copy; a guest splice or multi-flow striping
+   needs its own attribution first. Then W14 CPU (streaming 2.2×,
+   cancel cleanup 1.14×).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
