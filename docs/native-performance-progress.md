@@ -91,7 +91,7 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 **Current (2026-11-19, second steering: coherence, then guest→host):**
 live kernel k17 = patches 0001–0011 plus a new 0012 (echo proof and
 rescan; the old two-second echo window, 0013 and 0014 are removed),
-protocol 9, host binary from `439b14e`, e2e 508/508. Done this round:
+protocol 9, host binary and agent from `bf2ea2b`, e2e 508/508. Done this round:
 
 - Filesystem coherence: an echo is skipped only when proven to be the
   guest's own change; FSEvents drop/must-scan/root-change flags, failed
@@ -111,14 +111,19 @@ protocol 9, host binary from `439b14e`, e2e 508/508. Done this round:
   `439b14e` moves client bytes back to vsock (unmeasured). One NAT flow
   caps near 1.9 GB/s here. Evidence: "Guest→host transfer attribution".
 
-Next, in order (queue `.work/native-perf/matrix/run-k17e.sh`, log
-`k17e.log`; it waits for `.work/tmp/hold` absent, no OrbStack containers
+- W14 CPU: the agent busy-looped while a container connect was pending
+  (1.35 s agent CPU in one streaming run; 0.05 s after `bf2ea2b`).
+  Host-bound split (Mac bytes over vsock) built and rejected: no gain.
+
+Next, in order (queue `.work/native-perf/matrix/run-k17f.sh`, log
+`k17f.log`; it waits for `.work/tmp/hold` absent, no OrbStack containers
 and a 1-minute load under 4 — unrelated builds held the load at 10–22
 from 11:30):
 
 1. Report W13 container-to-Mac download (does host-bound Mac→container
    need the same vsock split?), then published-port upload and download
-   on `439b14e`, then W13-overlap (10 pairs).
+   on `439b14e`, then W13-overlap (10 pairs), then all six W14 modes
+   (10 pairs each) on the spin fix.
 2. Report the W2 50,000-operation fixed-work D cohort, W12 full-bind M
    and D, the first bind-source-plus-volume-deps cohort, W12-watch bind
    (5 pairs, 120/120 per trial), W3-v4 functional + 10 pairs.
