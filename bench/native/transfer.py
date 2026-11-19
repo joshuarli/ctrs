@@ -12,8 +12,11 @@ SOURCE = TOOL.read_text()
 DEFAULT_SIZE = 1024 ** 3
 
 
-def tool_limited(goodput, host_capacity, container_capacity):
-    return goodput > 0.5 * min(host_capacity, container_capacity)
+def tool_limited(goodput, host_capacity, container_capacity, path='published-port'):
+    """Whether the transfer tool, not the engine, may bound the result: the
+    tool's loopback capacity at every end the path uses, halved for headroom."""
+    capacity = container_capacity if path == 'container-to-container' else min(host_capacity, container_capacity)
+    return goodput > 0.5 * capacity
 
 
 
@@ -57,19 +60,13 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
     resources = []
     sampler = trace = None
-    image = getattr(engine, 'w13_image_id', None)
-    rec['metrics'].update(fixture_version='w13-v2', path=path, direction=direction,
+    rec['metrics'].update(fixture_version='w13-v3', path=path, direction=direction,
                           streams=streams, size_bytes=size_bytes, repeats=repeats,
                           controlled_egress='unsupported: no owned external endpoint', attempts=[])
     try:
         engine.ensure_up()
-        if not image:
-            images = engine.sh(['images', '--format', '{{.Repository}} {{.ID}}']).stdout.splitlines()
-            matches = [line.split()[1] for line in images if line.split() and line.split()[0].endswith('np-v5/api')]
-            if not matches:
-                raise ValueError('pinned API image not found')
-            image = matches[0]
-        rec.setdefault('inputs', {})['image_id'] = image
+        image, identity = runner.pinned_api_image(engine)
+        rec.setdefault('inputs', {}).update(image_id=image, **identity)
         network = token + '-net'
         engine.sh(['network', 'create', '--label', label, network])
         resources.append(('network', network))
@@ -105,6 +102,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         digest = hashes['host']
         rec['inputs'].update(seed='w13-v1-seed-2026', sha256_per_stream=digest,
                              sender_storage='host local disk or container tmpfs', image_id=image)
+        rec['paired_inputs'] = {**identity, 'sha256_per_stream': digest, 'tool_sha256': runner.sha256_file(TOOL)}
         sampler, trace = runner.start_sampler(engine, directory)
         def transfer(server_where, client_where, host, bind, run_direction, phase=nullcontext):
             server_file = str(host_file) if server_where == 'host' else guest_file
@@ -166,7 +164,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
                            'goodput_bytes_per_second': None}
             cpu = rec['resources'].get('phases', {}).get(f'transfer_{i + 1}', {}).get('cpu_seconds')
             attempt['engine_cpu_seconds_per_verified_gib'] = cpu / (attempt['verified_bytes'] / 1024**3) if cpu is not None and attempt['ok'] else None
-            attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second']) if attempt['ok'] else None
+            attempt['tool_limited'] = tool_limited(attempt['goodput_bytes_per_second'], host_control['goodput_bytes_per_second'], guest_control['goodput_bytes_per_second'], path) if attempt['ok'] else None
             record_attempt(rec, attempt)
         attempts = rec['metrics']['attempts']
         rec['correctness']['checks']['transfers_byte_exact'] = all(x['ok'] for x in attempts)

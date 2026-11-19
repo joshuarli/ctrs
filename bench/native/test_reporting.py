@@ -113,6 +113,27 @@ class ReportingTests(unittest.TestCase):
         records[1]["paired_inputs"] = {"seed": "different"}
         self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 0)
 
+    def test_w13_tool_limited_side_caps_the_claim(self):
+        records = [r for i in range(1, 11) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
+        for record in records:
+            record["metrics"]["tool_limited"] = record["engine"] == "orbstack"
+        self.assertEqual(metric_result(reporting.analyze([dict(r, metrics={**r["metrics"], "tool_limited": False}) for r in records]),
+                                       "goodput_bytes_per_second")["assessment"], "strict-win")
+        report = reporting.analyze(records)
+        result = metric_result(report, "goodput_bytes_per_second")
+        self.assertEqual(result["tool_limited_trials"], {"ctrs": 0, "orbstack": 10})
+        self.assertEqual(result["assessment"], "tool-limited")
+
+    def test_w13_pairs_need_matching_verified_inputs_and_old_ones_are_flagged(self):
+        records = pair(case="W14", metric="latency_p99_ms")
+        report = reporting.analyze(records)
+        self.assertIn("paired_inputs (historical: image chosen by repository name, not verified)",
+                      report["cohorts"][0]["metadata_gaps"])
+        for record in records:
+            record["paired_inputs"] = {"api_config": "sha256:a"}
+        records[1]["paired_inputs"] = {"api_config": "sha256:b"}
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 0)
+
     def test_legacy_w8_without_parameters_is_historical_and_does_not_crash(self):
         records = pair(case='W8', metric='pull_wall_seconds')
         for record in records:

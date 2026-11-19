@@ -29,7 +29,6 @@ class Context:
 
 class Engine:
     name = 'fake'
-    w13_image_id = 'image'
 
     def __init__(self):
         self.commands = []
@@ -172,9 +171,13 @@ class OverlapTests(unittest.TestCase):
                  patch.object(transfer.subprocess, 'Popen', Process), \
                  patch.object(transfer.time, 'sleep'), patch.object(runner, 'free_port', return_value=1234), \
                  patch.object(runner, 'start_sampler', return_value=(None, None)), \
-                 patch.object(runner, 'resource_phase', return_value=__import__('contextlib').nullcontext()):
+                 patch.object(runner, 'resource_phase', return_value=__import__('contextlib').nullcontext()), \
+                 patch.object(runner, 'pinned_api_image', return_value=('image', {'api_config': 'sha256:c'})):
                 rec = transfer.trial_w13(ctx, engine, 'warm', size_bytes=10, repeats=1)
             self.assertTrue(rec['correctness']['ok'], rec['validation_errors'])
+            self.assertEqual(rec['paired_inputs']['api_config'], 'sha256:c')
+            self.assertEqual(rec['paired_inputs']['sha256_per_stream'], 'hash')
+            self.assertEqual(rec['metrics']['fixture_version'], 'w13-v3')
             creations = [c for c in engine.commands if c[:2] == ['network', 'create'] or c[:2] == ['run', '-d']]
             self.assertEqual(len(creations), 3)
             self.assertTrue(all('dev.ctrs.campaign.run=test-run' in c for c in creations))

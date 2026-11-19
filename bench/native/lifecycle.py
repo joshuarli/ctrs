@@ -35,7 +35,7 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
         raise ValueError('invalid lifecycle parameters')
     directory = ctx.trial_dir(engine.name, 'W14', state)
     rec = ctx.new_record(engine, 'W14', state, directory)
-    rec['metrics'].update(fixture_version='w14-v2', mode=mode, clients=[], successes=0,
+    rec['metrics'].update(fixture_version='w14-v3', mode=mode, clients=[], successes=0,
                           errors={}, server_open_connections=None, leaked_sessions=None)
     name = 'w14-' + uuid.uuid4().hex[:12]
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -43,14 +43,9 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
     sampler = trace = None
     try:
         engine.ensure_up()
-        image = getattr(engine, 'w14_image_id', None)
-        if not image:
-            images = engine.sh(['images', '--format', '{{.Repository}} {{.ID}}']).stdout.splitlines()
-            matches = [line.split()[1] for line in images if len(line.split()) >= 2 and line.split()[0].endswith('np-v5/api')]
-            if not matches:
-                raise ValueError('pinned API image not found')
-            image = matches[0]
-        rec.setdefault('inputs', {})['image_id'] = image
+        image, identity = runner.pinned_api_image(engine)
+        rec.setdefault('inputs', {}).update(image_id=image, **identity)
+        rec['paired_inputs'] = {**identity, 'fixture_sha256': runner.sha256_file(Path(__file__))}
         port = runner.free_port()
         engine.sh(['run', '-d', '--pull=never', '--name', name, '--label', label,
                    '-p', f'127.0.0.1:{port}:{port}', '--entrypoint', 'python3', image,

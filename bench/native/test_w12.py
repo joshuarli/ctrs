@@ -39,6 +39,16 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(workspace.observed_stale('expected', 'expected', 'old', False))
         self.assertFalse(workspace.observed_stale('expected', 'expected', 'old', True))
 
+    def test_watch_admission_needs_every_result_correct(self):
+        good = {'results': 120, 'correct': 120, 'missed': 0, 'stale': 0, 'edits': [0] * 120}
+        checks, error = workspace.watch_admission(good, 60)
+        self.assertEqual(checks, {'watch_run_completed': True, 'every_result_correct': True})
+        self.assertIsNone(error)
+        for bad in ({'correct': 97, 'missed': 23}, {'correct': 119, 'stale': 1}, {'results': 0, 'correct': 0, 'edits': []}):
+            checks, error = workspace.watch_admission({**good, **bad}, 60)
+            self.assertFalse(checks['every_result_correct'])
+            self.assertIn('W12-watch', error)
+
     def test_phase_metrics_cover_scored_workflow(self):
         phases = {name: {'operation_wall_seconds': float(i + 1)}
                   for i, name in enumerate(('setup',) + workspace.BUILD_PHASES + ('cleanup',))}

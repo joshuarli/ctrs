@@ -43,12 +43,14 @@ CASE_METRICS = {
             "test_discovery_seconds", "warm_rebuild_seconds", "multi_file_change_seconds",
             "branch_switch_seconds"],
     # Watch latency is observed through host exec polling; missed/stale counts are reported, not scored.
-    "W12-watch": [],
+    "W12-watch": ["edit_to_result_p50_s", "edit_to_result_p95_s"],
     "W13-overlap": ["w2_latency_p50_ms", "w2_latency_p99_ms", "w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction"],
     "W13": ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"],
     "W14": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"],
 }
 HIGHER_BETTER = {"w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction", "rps", "tx_tps", "rw_tps", "ro_tps", "load_rps", "goodput_bytes_per_second", "successes"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
+TRANSFER_TIMING = ("goodput_bytes_per_second", "completion_seconds")
+FAVORABLE = ("strict-win", "non-inferior")
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")
@@ -185,12 +187,15 @@ def _analyze_cohort(identity: dict, records: list[dict],
                  and params.get('fixture_version') == W8_PAIRED_FIXTURE)
     paired_w5 = (identity['case'] == 'W5' and isinstance(params, dict)
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
-    paired_w2 = (identity['case'] == 'W13-overlap' or
+    verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
+    paired_w2 = verified_transfer or (identity['case'] == 'W13-overlap' or
                  (identity['case'] == 'W2' and isinstance(params, dict)
                   and params.get('pinned_stack') is True))
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
               "metrics": [], "metadata_gaps": []}
+    if identity['case'] in ('W13', 'W14') and not verified_transfer:
+        result["metadata_gaps"].append("paired_inputs (historical: image chosen by repository name, not verified)")
     for side in sides:
         rows = [r for r in records if side_of(r) == side]
         result["engines"][side] = {
@@ -299,6 +304,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
             assessment = "invalid"
         elif missing:
             assessment = "unmeasured" if not ratios else "incomplete"
+        limited = None
+        if identity["case"] == "W13" and metric in TRANSFER_TIMING:
+            limited = {side: sum(bool(pair[i + 1]["metrics"].get("tool_limited")) for pair in valid)
+                       for i, side in enumerate(sides)}
+            if (assessment in FAVORABLE and limited[sides[1]]) or (assessment == "loss" and limited[sides[0]]):
+                assessment = "tool-limited"
         complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success")
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
@@ -306,6 +317,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             "ratio_median": statistics.median(ratios) if ratios and complete_resource else None,
             "ci95": [low, high] if len(ratios) >= 2 and complete_resource else None,
             "evidence_status": "pilot", "promotion_eligible": False,
+            **({"tool_limited_trials": limited} if limited is not None else {}),
         })
     return result
 
@@ -447,6 +459,9 @@ def render_markdown(report: dict) -> str:
             lines.append("")
             for metric in cohort["metrics"]:
                 lines += [f"- {metric['metric']}, pair {item['pair_id']}: {item['reason']}." for item in metric["missing_reasons"]]
+                if "tool_limited_trials" in metric:
+                    counts = ", ".join(f"{side} {n}" for side, n in metric["tool_limited_trials"].items())
+                    lines.append(f"- {metric['metric']}: tool-limited trials {counts}.")
     return "\n".join(lines) + "\n"
 
 

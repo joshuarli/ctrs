@@ -37,6 +37,17 @@ def classify_result(expected, observed, timed_out):
     return 'stale'
 
 
+def watch_admission(metrics, edits):
+    """A watch trial is scored only when the run finished (diagnostic) and
+    every result reached the expected output (application)."""
+    every = (metrics['results'] > 0 and metrics['correct'] == metrics['results']
+             and metrics['missed'] == 0 and metrics['stale'] == 0)
+    checks = {'watch_run_completed': len(metrics['edits']) >= edits, 'every_result_correct': every}
+    error = None if every else (f"W12-watch: {metrics['correct']} of {metrics['results']} results correct, "
+                                f"{metrics['missed']} missed, {metrics['stale']} stale")
+    return checks, error
+
+
 def observed_stale(actual, expected, previous, diagnostic_ok):
     changed_wrong = actual is not None and actual != previous and actual != expected
     changed_without_valid_diagnostics = actual == expected and actual != previous and not diagnostic_ok
@@ -483,8 +494,11 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                               observation='host docker exec poll every 0.1 s; latency includes exec round trips',
                               edit_to_result_p50_s=latencies[len(latencies) // 2] if latencies else None,
                               edit_to_result_p95_s=latencies[int(.95 * (len(latencies) - 1))] if latencies else None)
-        rec['correctness']['checks']['watch_run_completed'] = len(rec['metrics']['edits']) >= edits
-        rec['correctness']['ok'] = rec['correctness']['checks']['watch_run_completed']
+        checks, error = watch_admission(rec['metrics'], edits)
+        rec['correctness']['checks'].update(checks)
+        rec['correctness']['ok'] = all(checks.values())
+        if error:
+            rec['validation_errors'].append(error)
     except Exception as exc:
         rec['correctness']['ok'] = False
         rec['validation_errors'].append(str(exc))

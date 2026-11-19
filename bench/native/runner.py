@@ -308,6 +308,20 @@ def load_cases() -> dict:
         return tomllib.load(f)
 
 
+def pinned_api_image(engine) -> tuple[str, dict]:
+    """The portfolio's np-v5/api image on `engine`, verified against its
+    pinned config, manifest and layer digests, and the identity two engines'
+    trials must share to pair."""
+    from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
+    pin_path = FIXTURES / "w8-v5/portfolio.json"
+    pin = json.loads(pin_path.read_text())["images"]["np-v5/api"]
+    image = baseline_image_reference(engine.name, pin)[1]
+    inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
+    require_baseline_images(engine.name, {"api": pin}, inspected)
+    return image, {"portfolio_sha256": sha256_file(pin_path), "api_config": pin["config"],
+                   "api_diff_ids": list(pin["diff_ids"])}
+
+
 def sha256_file(path: Path) -> str | None:
     if not path.is_file():
         return None
