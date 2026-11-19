@@ -452,7 +452,7 @@ t bind-inotify-delete-self "/w/deleted" grep -E "^D\s+/w/deleted$" <<<"$INOTIFY"
 t bind-inotify-content "two" $D exec e2e-inotify cat /w/saved
 # The host's report of a container's own write is not raised again when
 # the guest already holds the host's attributes for it
-# (guest/kernel/patches/0015): here a stat right after the write.
+# (guest/kernel/patches/0012): here a stat right after the write.
 $D exec e2e-inotify sh -c 'echo own > /w/own; stat /w/own >/dev/null'
 sleep 2
 t bind-inotify-no-echo "no echo" bash -c "$D logs e2e-inotify 2>&1 | grep -qE '^[my].*/w.own' && echo echoed || echo no echo"
@@ -463,17 +463,15 @@ $D run -d --name e2e-negative -v "$WATCH:/w" alpine sh -c 'while true; do [ -e /
 sleep 1
 echo x > "$WATCH/late"; sleep 0.2
 t bind-negative-create "seen" $D exec e2e-negative sh -c 'test -e /w/late && echo seen'
-# Names missing from a directory the container just made are answered
-# without asking the Mac (guest/kernel/patches/0013), and directories stay
-# cached for ten seconds (0014); Mac-side changes inside them, including
-# in a new subdirectory, and a Mac-side directory removal still show.
+# Mac-side changes inside a directory the container just made, including
+# in a new subdirectory, and a Mac-side directory removal show at once.
 mkdir "$WATCH/gone"
 $D exec e2e-negative sh -c 'mkdir /w/made && ls /w/gone && for n in a b c; do [ -e /w/made/$n ]; [ -e /w/made/sub/$n ]; done' >/dev/null
 echo mac > "$WATCH/made/a"; mkdir "$WATCH/made/sub" && echo mac > "$WATCH/made/sub/b"; rmdir "$WATCH/gone"
 WAIT_SEEN='for i in $(seq 30); do test -e /w/made/a && test -e /w/made/sub/b && ! test -e /w/gone && echo seen && break; sleep 0.1; done'
 t bind-made-here-mac-create "seen" $D exec e2e-negative sh -c "$WAIT_SEEN"
 $D rm -f e2e-negative >/dev/null
-# Mixed writers (guest/kernel/patches/0015): a Mac edit right after the
+# Mixed writers (guest/kernel/patches/0012): a Mac edit right after the
 # container's own write is raised and read, in place or as an atomic
 # replace. A builder that re-reads the file on every event must end on the
 # Mac's bytes, and so must a plain read.

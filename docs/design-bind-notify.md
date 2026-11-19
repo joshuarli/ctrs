@@ -1,7 +1,9 @@
 # Design: Mac-side change notifications for bind mounts
 
-Status: **implemented 2026-11-18.** It adds host→guest `Msg::HostFsEvents`
-(wire protocol 6) and guest kernel patch 0006 (`/proc/ctrs/fsnotify`). The
+Status: **implemented 2026-11-18; coherence contract revised 2026-11-19.**
+It adds host→guest `Msg::HostFsEvents` (wire protocol 6, rescan kind in 7)
+and guest kernel patches 0006 (`/proc/ctrs/fsnotify`) and 0012 (echo proof
+and rescan). The
 owner delegated the approval. The host watcher is
 `crates/ctrs/src/daemon/fsevents.rs`. A forked writer in
 `crates/ctrs-init/src/linux/fsnotify.rs` writes the events, so the agent
@@ -60,21 +62,61 @@ ctrs has nothing that forwards them.
    Re-setting attributes or touching files from the guest would modify user
    data and would loop back through FSEvents.
 
-## Open questions
+## Coherence contract (2026-11-19)
 
-- **Echoes.** A guest-side write also produces a host FSEvent, so the guest
-  gets a second IN_MODIFY for its own write. Watchers debounce duplicates.
-  Suppressing them would need write attribution that FSEvents does not
-  provide. The first version measures the duplicate rate instead.
-- **Staleness.** Is the guest's virtiofs attribute and entry cache also stale
-  after Mac edits, or only un-notified? Step 3's invalidation covers both. A
-  polling-watcher W12-watch condition would measure staleness independently.
-- **Ordering and latency.** FSEvents coalesces events. W12-watch's
-  missed/stale counts and edit-to-result latency are the acceptance
-  measures. Its latency observer is currently exec-poll limited and should
-  move into the container before it is used for tail claims.
-- **Scale.** FSEvents handles large trees. The watched-root set must be
-  bounded, and the daemon must stop streams when containers exit.
+Notifications are best effort on the Mac side, so the guest never treats
+their absence as proof that nothing changed, and it never skips one it
+cannot prove redundant.
+
+- **Echoes.** The host reports the guest's own virtiofs writes too.
+  Patch 0012 skips an event only when it provably reports the guest's own
+  change: a removed name that is already negative in the guest, or a name
+  whose inode the guest changed since a notification last named it and
+  whose LOOKUP returns the same node with the cached size, mtime and
+  ctime. Everything else is raised. A same-node change is raised in place
+  (attributes refreshed from the LOOKUP reply, page cache dropped, dentry
+  kept). The earlier rule (skip any name changed here within two seconds)
+  hid a Mac edit that followed the guest's own; `bind-mixed-writer`
+  reproduces that on the old kernel and passes on the new one.
+- **Loss.** FSEvents can coalesce or drop events. The host turns its
+  `MustScanSubDirs`, `UserDropped`, `KernelDropped`, `RootChanged`, `Mount`
+  and `Unmount` flags, and any batch that could not be sent whole, into a
+  rescan (kind `s`, protocol 7) of the affected bind directories, followed
+  by a walk of up to 20,000 entries that re-reports everything whose ctime
+  is at or after the last delivered batch (minus 2 s). A truncated walk is
+  logged. When bind roots change, the replacement stream replays from the
+  last event id, so the gap between streams is covered.
+- **Guest queue.** The agent queues lines the pipe to its writer refuses
+  (1 MiB pipe, 8,192 queued lines) and retries every 20 ms. Beyond that,
+  the queue collapses into one rescan of the share and the agent logs the
+  count.
+- **Rescan.** A rescan bumps the FUSE connection epoch. On virtiofs a
+  dentry from an older epoch is revalidated with a LOOKUP rather than
+  dropped, so a volume mounted inside a bind mount stays attached when its
+  directory is unchanged (`bind-rescan-keeps-mounts`).
+- **Not covered.** A rescan restores cache coherence, and the walk
+  re-reports changed entries, but a watcher can still miss a deletion that
+  happened inside a lost interval: it sees the name gone on its next look,
+  without a delete event. Writeback caching stays off: Mac-side writers
+  bypass the guest's page cache, and these notifications do not order
+  guest dirty pages against them.
+
+Regressions in `tests/e2e.sh`: `bind-mixed-writer` (in-place overwrite and
+atomic replace by the Mac 0.3 s after the container's own write; final
+bytes and a re-reading builder), `bind-made-here-mac-create` (nested Mac
+changes inside a container-made directory), `bind-burst` (20,000 Mac
+creates past the guest queue), `bind-root-churn` (stream replacement while
+the Mac edits), `bind-rescan-keeps-mounts` and `bind-root-renamed`.
+
+## Remaining questions
+
+- **Ordering and latency.** W12-watch's missed/stale counts and
+  edit-to-result latency are the acceptance measures; a watch trial with
+  any missed or stale result is now scored as failed. Its latency observer
+  is exec-poll limited and should move into the container before it is
+  used for tail claims.
+- **Scale.** The watched-root set is bounded by running containers' bind
+  sources, and streams stop when containers exit.
 
 ## Acceptance
 

@@ -1,66 +1,43 @@
-# Header: replaces patch 0012's time window, which skipped a host event
-# for any name this guest had changed within two seconds and so could
-# hide a Mac-side edit that followed the guest's own. An event is now
-# skipped only when it provably reports the guest's own change: a removed
-# name that is already negative here, or a name whose inode this guest
-# changed and whose LOOKUP returns the same node with the cached size,
+# Header: the host forwards every FSEvents change under a bind source to
+# /proc/ctrs/fsnotify (patch 0006), including the changes this guest made
+# itself through virtiofs. An event is skipped only when it provably
+# reports the guest's own change: a removed name that is already negative
+# here, or a name whose inode this guest changed since a notification last
+# named it and whose LOOKUP returns the same node with the cached size,
 # mtime and ctime. Any other same-node event refreshes the attributes from
-# that reply and is raised in place, keeping the dentry. A new kind, s
-# (rescan), reports that the host lost events: the connection epoch is
-# bumped, and on virtiofs a stale-epoch dentry is revalidated with a
-# LOOKUP rather than dropped, so mounts on unchanged directories stay
-# attached; directories made here stop answering missing names without a
-# request.
+# that reply and is raised in place, keeping the dentry. A Mac edit right
+# after the guest's own write is therefore always raised. Kind s (rescan)
+# reports that the host lost events: the connection epoch is bumped, and
+# on virtiofs a stale-epoch dentry is revalidated with a LOOKUP rather
+# than dropped, so mounts on unchanged directories stay attached.
 diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
 --- a/fs/fuse/dir.c
 +++ b/fs/fuse/dir.c
-@@ -140,28 +140,22 @@
+@@ -17,6 +17,7 @@
+ #include <linux/slab.h>
+ #include <linux/xattr.h>
+ #include <linux/iversion.h>
++#include <linux/magic.h>
+ #include <linux/posix_acl.h>
+ #include <linux/security.h>
+ #include <linux/types.h>
+@@ -129,8 +130,15 @@
  	fuse_invalidate_attr_mask(inode, STATX_BASIC_STATS);
  }
  
--void fuse_mark_local_change(struct inode *inode)
 +void fuse_mark_changed_here(struct inode *inode)
- {
--	WRITE_ONCE(get_fuse_inode(inode)->local_change, jiffies);
++{
 +	if (!test_bit(FUSE_I_CHANGED_HERE, &get_fuse_inode(inode)->state))
 +		set_bit(FUSE_I_CHANGED_HERE, &get_fuse_inode(inode)->state);
- }
- 
--bool fuse_changed_locally(struct inode *inode, unsigned long window)
--{
--	unsigned long t;
--
--	if (inode->i_sb->s_magic != FUSE_SUPER_MAGIC)
--		return false;
--	t = READ_ONCE(get_fuse_inode(inode)->local_change);
--	return t && time_before(jiffies, t + window);
--}
--
- #define FUSE_BUILT_HERE_WINDOW (10 * HZ)
- 
- static bool fuse_built_here(struct inode *dir)
- {
--	unsigned long t = READ_ONCE(get_fuse_inode(dir)->built_here);
-+	struct fuse_inode *fi = get_fuse_inode(dir);
-+	unsigned long t = READ_ONCE(fi->built_here);
- 
--	return t && time_before(jiffies, t + FUSE_BUILT_HERE_WINDOW);
-+	return t && time_before(jiffies, t + FUSE_BUILT_HERE_WINDOW) &&
-+	       READ_ONCE(fi->built_epoch) ==
-+	       atomic_read(&get_fuse_conn(dir)->epoch);
- }
- 
- static void fuse_forget_built_here(struct inode *dir)
-@@ -189,7 +183,7 @@
- 
++}
++
  static void fuse_dir_changed(struct inode *dir)
  {
--	fuse_mark_local_change(dir);
 +	fuse_mark_changed_here(dir);
  	if (!strcmp(dir->i_sb->s_type->name, "virtiofs"))
  		fuse_invalidate_attr_mask(dir, STATX_BASIC_STATS &
  					  ~(STATX_TYPE | STATX_MODE | STATX_UID |
-@@ -267,16 +261,20 @@
+@@ -207,16 +215,20 @@
  	struct fuse_mount *fm;
  	struct fuse_conn *fc;
  	struct fuse_inode *fi;
@@ -84,7 +61,7 @@ diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
  		 (flags & (LOOKUP_EXCL | LOOKUP_REVAL | LOOKUP_RENAME_TARGET))) {
  		struct fuse_entry_out outarg;
  		FUSE_ARGS(args);
-@@ -330,6 +328,7 @@
+@@ -270,6 +282,7 @@
  				       ATTR_TIMEOUT(&outarg),
  				       attr_version);
  		fuse_change_entry_timeout(entry, &outarg);
@@ -92,10 +69,12 @@ diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
  	} else if (inode) {
  		fi = get_fuse_inode(inode);
  		if (flags & LOOKUP_RCU) {
-@@ -350,6 +349,87 @@
+@@ -286,8 +299,89 @@
+ invalid:
+ 	ret = 0;
  	goto out;
- }
- 
++}
++
 +/*
 + * Whether a host notification for @entry reports only this guest's own
 + * change: 1 if the guest changed the inode and the host's entry maps the
@@ -159,12 +138,12 @@ diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
 +			       ATTR_TIMEOUT(&outarg), attr_version);
 +	fuse_change_entry_timeout(entry, &outarg);
 +	return 0;
-+}
-+
+ }
+ 
 +/*
 + * The host could not vouch for its change notifications (they were
-+ * coalesced or dropped): drop the trust every cached dentry and every
-+ * directory made here rests on, so each is looked up again on next use.
++ * coalesced or dropped): every cached dentry is revalidated with the host
++ * on its next use.
 + */
 +void fuse_host_rescan(struct inode *inode)
 +{
@@ -180,47 +159,31 @@ diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
  static int fuse_dentry_init(struct dentry *dentry)
  {
  	int ret = 0;
-@@ -811,7 +891,7 @@
+@@ -733,6 +827,7 @@
  		goto out_err;
  	}
  	kfree(forget);
--	fuse_mark_local_change(inode);
 +	fuse_mark_changed_here(inode);
  	if (!strcmp(dir->i_sb->s_type->name, "virtiofs") &&
  	    !(inode->i_mode & (S_ISUID | S_ISGID)))
  		inode->i_flags |= S_NOSEC;
-@@ -949,10 +1029,12 @@
+@@ -870,6 +965,7 @@
  		return ERR_PTR(-ENOMEM);
  	}
  	kfree(forget);
--	fuse_mark_local_change(inode);
 +	fuse_mark_changed_here(inode);
- 	if (args->opcode == FUSE_MKDIR &&
--	    !strcmp(dir->i_sb->s_type->name, "virtiofs"))
-+	    !strcmp(dir->i_sb->s_type->name, "virtiofs")) {
-+		WRITE_ONCE(get_fuse_inode(inode)->built_epoch, epoch);
- 		WRITE_ONCE(get_fuse_inode(inode)->built_here, jiffies ?: 1);
-+	}
  
  	d_drop(entry);
  	d = d_splice_alias(inode, entry);
-@@ -1196,7 +1278,7 @@
+@@ -1113,6 +1209,7 @@
  	if (!err) {
  		/* ctime changes */
  		fuse_update_ctime(d_inode(oldent));
--		fuse_mark_local_change(d_inode(oldent));
 +		fuse_mark_changed_here(d_inode(oldent));
  
  		if (flags & RENAME_EXCHANGE)
  			fuse_update_ctime(d_inode(newent));
-@@ -2073,13 +2155,12 @@
- 	bool is_truncate = false;
- 	bool is_wb = fc->writeback_cache && S_ISREG(inode->i_mode);
- 	loff_t oldsize;
--
--	fuse_mark_local_change(inode);
- 	int err;
- 	bool trust_local_cmtime = is_wb;
+@@ -1993,6 +2090,7 @@
  	bool fault_blocked = false;
  	u64 attr_version;
  
@@ -231,12 +194,10 @@ diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
 diff -ru a/fs/fuse/file.c b/fs/fuse/file.c
 --- a/fs/fuse/file.c
 +++ b/fs/fuse/file.c
-@@ -1131,8 +1131,7 @@
+@@ -1131,6 +1131,7 @@
  	struct fuse_inode *fi = get_fuse_inode(inode);
  	bool ret = false;
  
--	fuse_mark_local_change(inode);
--
 +	fuse_mark_changed_here(inode);
  	spin_lock(&fi->lock);
  	fi->attr_version = atomic64_inc_return(&fc->attr_version);
@@ -244,23 +205,7 @@ diff -ru a/fs/fuse/file.c b/fs/fuse/file.c
 diff -ru a/fs/fuse/fuse_i.h b/fs/fuse/fuse_i.h
 --- a/fs/fuse/fuse_i.h
 +++ b/fs/fuse/fuse_i.h
-@@ -119,12 +119,12 @@
- 	/** Number of lookups on this inode */
- 	u64 nlookup;
- 
--	/** Jiffies of this guest's last change to the inode */
--	unsigned long local_change;
--
- 	/** Jiffies when this guest made the directory with MKDIR, or 0 */
- 	unsigned long built_here;
- 
-+	/** Connection epoch when built_here was set */
-+	int built_epoch;
-+
- 	/** The request used for sending the FORGET message */
- 	struct fuse_forget_link *forget;
- 
-@@ -239,6 +239,8 @@
+@@ -233,6 +233,8 @@
  	FUSE_I_BTIME,
  	/* Wants or already has page cache IO */
  	FUSE_I_CACHE_IO_MODE,
@@ -269,87 +214,50 @@ diff -ru a/fs/fuse/fuse_i.h b/fs/fuse/fuse_i.h
  };
  
  struct fuse_conn;
-@@ -1404,9 +1406,10 @@
+@@ -1397,6 +1399,10 @@
+ int fuse_dev_release(struct inode *inode, struct file *file);
  
  bool fuse_write_update_attr(struct inode *inode, loff_t pos, ssize_t written);
- 
--void fuse_mark_local_change(struct inode *inode);
--bool fuse_changed_locally(struct inode *inode, unsigned long window);
++
 +void fuse_mark_changed_here(struct inode *inode);
- void fuse_host_changed_dir(struct inode *dir);
 +int fuse_host_entry_state(struct dentry *entry);
 +void fuse_host_rescan(struct inode *inode);
- u64 fuse_dir_valid_until(struct inode *inode, u64 time);
- void fuse_host_changed_entry(struct dentry *entry);
  
+ int fuse_flush_times(struct inode *inode, struct fuse_file *ff);
+ int fuse_write_inode(struct inode *inode, struct writeback_control *wbc);
 diff -ru a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 --- a/fs/proc/ctrs_fsnotify.c
 +++ b/fs/proc/ctrs_fsnotify.c
-@@ -12,6 +12,14 @@
+@@ -12,6 +12,15 @@
   * events a local unlink raises, so per-file watchers re-watch the name.
   * Files are never written. Mountpoints and directories are not
   * invalidated, since that would detach mounts under them.
 + *
 + * The host also reports the changes this guest made itself. An event is
-+ * skipped only when the guest's view already matches the host's: a removed
-+ * name that is negative here, or a cached name whose host lookup returns
-+ * the same node with the cached size, mtime and ctime. A same-node change
-+ * is raised in place without dropping the dentry. Kind s (rescan) reports
-+ * that the host lost events under a directory: every cached dentry of the
-+ * share is revalidated against the host before its next use.
++ * skipped only when it provably reports the guest's own change: a removed
++ * name that is negative here, or a name whose inode this guest changed and
++ * whose host lookup returns the same node with the cached size, mtime and
++ * ctime. Any other same-node change is raised in place without dropping
++ * the dentry. Kind s (rescan) reports that the host lost events under a
++ * directory: every cached dentry of the share is revalidated against the
++ * host before its next use.
   */
  #include <linux/capability.h>
  #include <linux/dcache.h>
-@@ -29,39 +37,11 @@
+@@ -29,6 +38,9 @@
  #include <linux/string.h>
  #include <linux/uaccess.h>
  
--#define CTRS_ECHO_WINDOW (2 * HZ)
--
--bool fuse_changed_locally(struct inode *inode, unsigned long window);
- void fuse_host_changed_dir(struct inode *dir);
- void fuse_host_changed_entry(struct dentry *entry);
 +int fuse_host_entry_state(struct dentry *entry);
 +void fuse_host_rescan(struct inode *inode);
- 
--/*
-- * The host reports every change under a bind source, including the ones
-- * this guest made through virtiofs. Those echoes would drop live dcache
-- * entries and cost a lookup each, so an event is skipped when the name's
-- * cached inode was changed here within the window, when a removed name is
-- * already negative here, or when an uncached removed name's directory was
-- * changed here within the window.
-- */
--static bool local_echo(struct dentry *dir, const char *name, char kind)
--{
--	struct dentry *child = try_lookup_noperm(&QSTR(name), dir);
--	bool echo;
--
--	if (IS_ERR(child))
--		return false;
--	if (!child)
--		return kind == 'r' &&
--		       fuse_changed_locally(d_inode(dir), CTRS_ECHO_WINDOW);
--	if (d_really_is_negative(child))
--		echo = kind == 'r';
--	else
--		echo = kind != 'r' &&
--		       fuse_changed_locally(d_inode(child), CTRS_ECHO_WINDOW);
--	dput(child);
--	return echo;
--}
--
++
  static bool may_forget(struct dentry *dentry)
  {
  	return !d_mountpoint(dentry) && !d_is_dir(dentry);
-@@ -167,8 +147,56 @@
- 			fuse_host_changed_dir(d_inode(p.dentry));
- 			path_put(&p);
- 			return;
-+		}
-+	}
-+}
-+
+@@ -114,12 +126,62 @@
+ 	return 0;
+ }
+ 
 +static int notify_rescan(char *full)
 +{
 +	struct path p;
@@ -372,7 +280,7 @@ diff -ru a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +	return 0;
 +}
 +
-+/* -1: not known here; 0: same node, changed and raised; 1: unchanged. */
++/* -1: not known here; 0: same node, changed and raised; 1: own change. */
 +static int notify_known(struct dentry *dir, const char *name, char kind)
 +{
 +	struct dentry *child = try_lookup_noperm(&QSTR(name), dir);
@@ -392,14 +300,15 @@ diff -ru a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +				notify_renamed_in_place(d_inode(dir), child);
 +			}
 +			fsnotify_change(child, ATTR_SIZE);
- 		}
- 	}
++		}
++	}
 +	dput(child);
 +	return state;
- }
- 
++}
++
  static int ctrs_notify(char kind, char *full)
-@@ -177,6 +205,8 @@
+ {
+ 	char *slash = strrchr(full, '/');
  	struct path parent;
  	int err;
  
@@ -408,12 +317,14 @@ diff -ru a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	if (slash == full || !slash[1])
  		return -EINVAL;
  	*slash = '\0';
-@@ -188,7 +218,7 @@
+@@ -127,6 +189,10 @@
  	*slash = '/';
  	if (err)
  		return err;
--	if (local_echo(parent.dentry, slash + 1, kind)) {
 +	if (notify_known(parent.dentry, slash + 1, kind) >= 0) {
- 		path_put(&parent);
- 		return 0;
- 	}
++		path_put(&parent);
++		return 0;
++	}
+ 	switch (kind) {
+ 	case 'm':
+ 	case 'c': {
