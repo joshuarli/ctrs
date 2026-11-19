@@ -89,30 +89,33 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-18 evening):** W12, W12-watch v2, W13 and W14 have
-comparisons on this host, ranked in
-[native-acceptance-matrix.md](native-acceptance-matrix.md), with evidence in
-[native-w12-w13-2026-11-18.md](evidence/native-w12-w13-2026-11-18.md).
-Patch 0005 (64 KiB vsock receive buffers, kernel `1b2fdbc9…`, now in
-`guest/out`) brought host→guest single-stream transfer to parity. W12
-all-volume is at M-lane parity. Next, in order:
+**Current (2026-11-18 night, owner delegated all decisions):** bind-mount
+change notifications are implemented: protocol 6, host FSEvents watcher,
+and guest patch 0006 with same-inode modify reporting (`a5e5ab1`, plus the
+follow-up fix). W12-watch bind went from 0/120 to 101/120 correct. Patch
+0007 caches missing virtiofs names for one second: a missing-name `stat`
+went from 34.6 to 1.0 µs, against 7.3 µs on OrbStack. Live assets:
+kernel k8 (0001–0007), initramfs `9a2b6c9d…`, and the binary built after
+the ordering fix. Next, in order:
 
-1. W12 full-bind is an engine loss in the M lane (1.44×; install 2.56×,
-   test discovery 2.80×, `base-20261118T161928-8d7f`). Profile the
-   virtiofs metadata path: per-operation latency of stat, open, readdir
-   and getattr on `/mnt/mac`, and the guest mount options (cache mode,
-   attribute timeouts) against OrbStack's share.
-2. Guest→host transfer (0.51–0.65 GB/s, the largest open throughput
-   deficit). Sample per-thread CPU of the Virtualization XPC process and
-   the ctrs relay during a guest→host transfer (`ps -M`) to find which side
-   serializes. The guest is half idle, and 1 and 4 streams are equal.
-   vmnet comparison needs a Local Network grant (owner). Any new device or
-   wire path must be surfaced before implementation.
-3. W14 CPU per lifecycle (fresh 1.30×, streaming 1.75×): profile the
-   connection setup path (host accept → vsock connect → guest connect).
-4. Bind notifications: blocked on owner approval of
-   [design-bind-notify.md](design-bind-notify.md).
-5. W13-overlap with W2; W3-v4; W14 persistent/cancel/idle-resume cohorts.
+1. Report the queue in `.work/native-perf/matrix/k8.log`: D and M W12
+   full-bind on k8, and a 3-pair W12-watch bind. It measures 0007 against
+   the k6 full-bind cohort `base-20261118T183442-84f0` (1.65×).
+2. If full-bind still loses: `open`+`close` is 75 µs on ctrs against
+   21 µs on OrbStack, and `listdir` of 200 entries is 478 µs against
+   210 µs. Candidate patch 0008 skips FUSE FLUSH on read-only closes
+   when the server has no lock support (`fc->no_lock`) and the inode
+   has no lock context. Probe first whether Apple's server takes locks.
+3. vCPU default: test about half the host cores against W2 D-lane CPU
+   per success and W12 all-volume before changing the 2-vCPU default.
+4. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
+   per-thread sampler; the `ps -M` parsing was unreliable.
+5. W14 CPU (fresh 1.30×, streaming 1.75×). Then W13-overlap and W3-v4.
+
+Tooling: `kache` hung debug test builds for over 20 minutes on 3 small
+crates. Workaround: `RUSTC_WRAPPER="" CARGO_TARGET_DIR=.work/tmp/target-nowrap`.
+The ownership resolver (`laputa-systems/stuff/repomod/which.py`) is not
+present on this host, so no ticket was filed.
 
 **Earlier (2026-11-18 afternoon, after `19d4eb2`):** the frozen first
 comparison matrix is running serially on the Mac. Live assets are main's
