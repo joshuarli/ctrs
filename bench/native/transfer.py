@@ -45,7 +45,7 @@ def record_attempt(rec, attempt):
         rec['validation_errors'].extend(attempt.get('errors', ['transfer integrity failure']))
 
 def trial_w13(ctx, engine, state, path='published-port', direction='upload', streams=1,
-              size_bytes=DEFAULT_SIZE, repeats=3):
+              size_bytes=DEFAULT_SIZE, repeats=3, artifact_bytes=None):
     import runner
     if path not in ('published-port', 'container-to-container', 'container-to-mac'):
         raise ValueError('unknown transfer path')
@@ -99,7 +99,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         hashes = {}
         for location in ('host', server, client):
             filename = str(host_file) if location == 'host' else guest_file
-            hashes[location] = invoke(location, ['prepare', filename, part])
+            hashes[location] = invoke(location, ['prepare', filename, min(part, artifact_bytes or part)])
         if len(set(hashes.values())) != 1:
             raise ValueError('prepared artifact hashes differ')
         digest = hashes['host']

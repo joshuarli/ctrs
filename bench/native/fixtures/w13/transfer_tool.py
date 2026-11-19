@@ -33,12 +33,26 @@ def line(sock):
 def send(sock, path, ident, size, digest):
     sock.sendall((json.dumps({'id': ident, 'bytes': size, 'sha256': digest}) + '\n').encode())
     with open(path, 'rb') as f:
-        while True:
-            data = f.read(CHUNK)
+        remaining = size
+        while remaining:
+            data = f.read(min(CHUNK, remaining))
             if not data:
-                break
+                f.seek(0)
+                continue
             sock.sendall(data)
+            remaining -= len(data)
     sock.shutdown(socket.SHUT_WR)
+
+
+def read_cyclic(f, count):
+    data = f.read(count)
+    while len(data) < count:
+        f.seek(0)
+        more = f.read(count - len(data))
+        if not more:
+            break
+        data += more
+    return data
 
 
 def receive(sock, ident, size, digest, expected_path):
@@ -68,7 +82,7 @@ def receive(sock, ident, size, digest, expected_path):
                 if total > size:
                     raise ValueError('excess bytes')
                 block = buffer if count == CHUNK else buffer[:count]
-                if block != expected.read(count):
+                if block != read_cyclic(expected, count):
                     exact = False
         if total != size or not exact:
             raise ValueError('byte count or content mismatch')

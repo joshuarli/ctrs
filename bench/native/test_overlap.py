@@ -61,6 +61,55 @@ def receipt():
             'first_byte_seconds': 0.1, 'error': None}
 
 
+class CyclicTransferTests(unittest.TestCase):
+    def test_send_cycles_a_smaller_artifact_and_receiver_checks_every_byte(self):
+        import socket
+        import threading
+        from fixtures.w13 import transfer_tool as tool
+        with tempfile.TemporaryDirectory() as root:
+            artifact = Path(root) / 'a.bin'
+            digest = tool.prepare(str(artifact), 3 * tool.CHUNK + 5)
+            total = 3 * (3 * tool.CHUNK + 5) + 7
+            for corrupt in (False, True):
+                left, right = socket.socketpair()
+                sent = Path(root) / 'sent.bin'
+                data = artifact.read_bytes()
+                cycled = (data * 4)[:total]
+                if corrupt:
+                    cycled = cycled[:-1] + bytes([cycled[-1] ^ 1])
+                sent.write_bytes(cycled)
+                def sender():
+                    with left:
+                        left.sendall((json.dumps({'id': '0'}) + '\n').encode())
+                        tool.send(left, str(sent if corrupt else artifact), '0', total, digest)
+                thread = threading.Thread(target=sender)
+                thread.start()
+                with right:
+                    self.assertEqual(tool.line(right), {'id': '0'})
+                    result = tool.receive(right, '0', total, digest, str(artifact))
+                thread.join()
+                self.assertEqual(result['bytes'], total)
+                self.assertEqual(result['error'] is None, not corrupt)
+
+    def test_overlap_sends_one_cycled_transfer(self):
+        calls = []
+        def fake(ctx, engine, state, **kw):
+            calls.append(kw)
+            raise RuntimeError('stop')
+        def w2(ctx, *a, **k):
+            try:
+                with ctx.overlap_workload():
+                    pass
+            except RuntimeError:
+                pass
+            return {'metrics': {}, 'correctness': {'ok': False}}
+        with tempfile.TemporaryDirectory() as root, patch.object(runner, 'trial_w13', fake), \
+                patch.object(runner, 'trial_w2', w2):
+            rec = overlap.trial_overlap(Context(root), Engine(), 'warm', size_bytes=1 << 20, loops=8)
+        self.assertFalse(rec['correctness']['ok'])
+        self.assertEqual(calls, [{'size_bytes': 8 << 20, 'repeats': 1, 'streams': 1, 'artifact_bytes': 1 << 20}])
+
+
 class OverlapTests(unittest.TestCase):
     def test_conservative_union_and_empty_window(self):
         transfers = [{'host_start': 0, 'host_end': 10, 'receipts': [receipt()]},

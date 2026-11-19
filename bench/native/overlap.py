@@ -28,10 +28,10 @@ def overlap_fraction(window, transfers):
 
 
 def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=0.3,
-                  seed=1, operations=50000, size_bytes=1 << 30, repeats=3, streams=1,
-                  lead_seconds=2.0):
+                  seed=1, operations=50000, size_bytes=1 << 30, repeats=1, streams=1,
+                  lead_seconds=2.0, loops=64):
     import runner
-    if lead_seconds < 0 or operations <= 0:
+    if lead_seconds < 0 or operations <= 0 or loops < 1 or repeats != 1:
         raise ValueError('invalid overlap parameters')
     directory = ctx.trial_dir(engine.name, 'W13-overlap', state)
     rec = ctx.new_record(engine, 'W13-overlap', state, directory)
@@ -54,7 +54,8 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
 
     def transfer():
         try:
-            results['transfer'] = runner.trial_w13(ctx, engine, state, size_bytes=size_bytes, repeats=repeats, streams=streams)
+            results['transfer'] = runner.trial_w13(ctx, engine, state, size_bytes=size_bytes * loops, repeats=1, streams=streams,
+                                                   artifact_bytes=size_bytes // streams)
         except Exception as exc:
             results['error'] = f'{type(exc).__name__}: {exc}'
         finally:
@@ -89,7 +90,7 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
     fraction = overlap_fraction(window, transfers) if len(window) == 2 else 0.0
     wm = w2.get('metrics', {})
     tm = w13.get('metrics', {})
-    rec['metrics'].update(fixture_version='w13-overlap-v1',
+    rec['metrics'].update(fixture_version='w13-overlap-v1', artifact_bytes=size_bytes, loops=loops,
                           w2_latency_p50_ms=wm.get('p50_ms'), w2_latency_p99_ms=wm.get('p99_ms'),
                           w2_rps=wm.get('rps'), transfer_goodput_bytes_per_second=tm.get('goodput_bytes_per_second'),
                           overlap_fraction=fraction)

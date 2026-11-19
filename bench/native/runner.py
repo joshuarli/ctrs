@@ -3624,7 +3624,7 @@ def cmd_baseline(args) -> int:
                     kw = {"concurrency": args.concurrency, "duration": args.duration,
                           "write_ratio": args.write_ratio, "seed": args.seed + pair * 10,
                           "operations": args.operations or 50000, "size_bytes": args.size_bytes,
-                          "repeats": args.repeats, "streams": args.streams, "lead_seconds": args.lead_seconds}
+                          "streams": args.streams, "lead_seconds": args.lead_seconds}
                 if args.case == "W14":
                     kw = {"mode": args.lifecycle_mode, "clients": args.lifecycle_clients,
                           "idle_seconds": args.idle_seconds}
