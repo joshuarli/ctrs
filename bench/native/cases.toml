@@ -59,6 +59,18 @@ correctness = ["db_ready", "migrate", "300 complete commit timing receipts", "ch
 note = "A single psql connection sends one request per explicit INSERT+UPDATE transaction with synchronous_commit on. p95 uses the completed transaction timings. Volume and container are per-trial and removed after."
 
 [[case]]
+id = "W3-v4"
+family = "persistent-transactional"
+title = "postgres pgbench fixed-work persistent storage"
+fixture = "storage_v4.py (PostgreSQL pinned in the common W8 v5 portfolio)"
+status = "implemented"
+fixture_version = "w3-v4-pgbench"
+metrics = ["init_s", "rw_tps", "rw_p50_ms", "rw_p95_ms", "rw_p99_ms", "ro_tps", "ro_p99_ms", "checkpoint_s", "restart_s", "pgdata_allocated_bytes", "db_size_bytes"]
+states = ["warm"]
+params = { scale = 50, shared_buffers = "128MB", clients = 8, threads = 2, transactions_per_client = 2000, random_seed = 42 }
+correctness = ["durability settings on before and after restart", "complete latency receipts", "exact account count, balance and history after restart", "owned cleanup"]
+
+[[case]]
 id = "W4"
 family = "worker-queue"
 title = "HTTP ingest -> Redis -> 1/4/16 workers -> exact gzip NDJSON and aggregate summaries on named volumes"

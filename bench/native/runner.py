@@ -29,6 +29,7 @@ import resource_cycles
 import recovery_client
 import recovery_trace
 import ci_jobs
+import storage_v4
 import w2_peer
 from transfer import trial_w13
 from lifecycle import trial_w14
@@ -3285,7 +3286,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
             slot: str | None = None, **kw) -> dict:
-    trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3,
+    trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3, "W3-v4": storage_v4.trial_w3_v4,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
               "W10": trial_w10, "W11": trial_w11, "W12": workspace.trial_w12,
@@ -3759,7 +3760,7 @@ def main() -> int:
     p.add_argument("--engines", default="ctrs,orbstack")
 
     p = sub.add_parser("run")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
     p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -3780,7 +3781,7 @@ def main() -> int:
                         "control for builder topology)")
 
     p = sub.add_parser("baseline")
-    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
+    p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W14"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
@@ -3846,7 +3847,7 @@ def main() -> int:
     p = sub.add_parser("noop")
     p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
-    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
+    p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--pairs", type=int, default=2)
     p.add_argument("--state", default="warm")
     p.add_argument("--concurrency", type=int, default=8)

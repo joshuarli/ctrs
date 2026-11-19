@@ -91,6 +91,15 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(metric_result(report, duration)["ratio_median"], .5)
         self.assertEqual(metric_result(report, rate)["ratio_median"], .5)
 
+    def test_w3_v4_rate_and_latency_directions(self):
+        records = pair(case="W3-v4", metric="rw_p99_ms", ratio=.5)
+        for metric in ("rw_tps", "ro_tps"):
+            records[0]["metrics"][metric] = 120
+            records[1]["metrics"][metric] = 60
+        report = reporting.analyze(records)
+        for metric in ("rw_p99_ms", "rw_tps", "ro_tps"):
+            self.assertEqual(metric_result(report, metric)["ratio_median"], .5)
+
     def test_legacy_w8_without_parameters_is_historical_and_does_not_crash(self):
         records = pair(case='W8', metric='pull_wall_seconds')
         for record in records:

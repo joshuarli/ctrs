@@ -24,6 +24,7 @@ CASE_METRICS = {
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
     "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes"],
+    "W3-v4": ["init_s", "rw_tps", "rw_p50_ms", "rw_p95_ms", "rw_p99_ms", "ro_tps", "ro_p99_ms", "checkpoint_s", "restart_s", "pgdata_allocated_bytes", "db_size_bytes"],
     "W4": [metric for count in (1, 4, 16) for metric in
            (f"workers_{count}_s", f"queue_p95_ms_at_{count}", f"queue_p99_ms_at_{count}")],
     "W5": ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s"],
@@ -46,7 +47,7 @@ CASE_METRICS = {
     "W13": ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"],
     "W14": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"],
 }
-HIGHER_BETTER = {"rps", "tx_tps", "load_rps", "goodput_bytes_per_second", "successes"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
+HIGHER_BETTER = {"rps", "tx_tps", "rw_tps", "ro_tps", "load_rps", "goodput_bytes_per_second", "successes"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")
