@@ -450,9 +450,10 @@ t bind-inotify-delete "deleted" grep -E "^d.*/w.deleted" <<<"$INOTIFY"
 t bind-inotify-replace-self "/w/replaced" grep -E "^D\s+/w/replaced$" <<<"$INOTIFY"
 t bind-inotify-delete-self "/w/deleted" grep -E "^D\s+/w/deleted$" <<<"$INOTIFY"
 t bind-inotify-content "two" $D exec e2e-inotify cat /w/saved
-# The host's report of a container's own write is not raised again
-# (guest/kernel/patches/0012): a local save gets no echoed rename pair.
-$D exec e2e-inotify sh -c 'echo own > /w/own'
+# The host's report of a container's own write is not raised again when
+# the guest already holds the host's attributes for it
+# (guest/kernel/patches/0015): here a stat right after the write.
+$D exec e2e-inotify sh -c 'echo own > /w/own; stat /w/own >/dev/null'
 sleep 2
 t bind-inotify-no-echo "no echo" bash -c "$D logs e2e-inotify 2>&1 | grep -qE '^[my].*/w.own' && echo echoed || echo no echo"
 $D rm -f e2e-inotify >/dev/null
@@ -472,6 +473,33 @@ echo mac > "$WATCH/made/a"; mkdir "$WATCH/made/sub" && echo mac > "$WATCH/made/s
 WAIT_SEEN='for i in $(seq 30); do test -e /w/made/a && test -e /w/made/sub/b && ! test -e /w/gone && echo seen && break; sleep 0.1; done'
 t bind-made-here-mac-create "seen" $D exec e2e-negative sh -c "$WAIT_SEEN"
 $D rm -f e2e-negative >/dev/null
+# Mixed writers (guest/kernel/patches/0015): a Mac edit right after the
+# container's own write is raised and read, in place or as an atomic
+# replace. A builder that re-reads the file on every event must end on the
+# Mac's bytes, and so must a plain read.
+MIX=$(mktemp -d); mkdir "$MIX/src"; echo base > "$MIX/src/inplace"; echo base > "$MIX/src/replaced"
+$D run -d --name e2e-mix -v "$MIX:/w" alpine sh -c 'inotifyd - /w/src:cwnmy | while read -r e d n; do echo "$n $(cat /w/src/$n 2>/dev/null)"; done > /tmp/built' >/dev/null
+sleep 1
+$D exec e2e-mix sh -c 'echo guest > /w/src/inplace; echo guest > /w/src/replaced'
+sleep 0.3
+echo mac > "$MIX/src/inplace"; echo mac > "$MIX/src/.tmp" && mv "$MIX/src/.tmp" "$MIX/src/replaced"
+WAIT_MIX='for i in $(seq 40); do [ "$(grep "^inplace " /tmp/built | tail -1)" = "inplace mac" ] && [ "$(grep "^replaced " /tmp/built | tail -1)" = "replaced mac" ] && break; sleep 0.1; done; echo "$(cat /w/src/inplace) $(cat /w/src/replaced) $(grep "^inplace " /tmp/built | tail -1 | cut -d" " -f2) $(grep "^replaced " /tmp/built | tail -1 | cut -d" " -f2)"'
+t bind-mixed-writer "mac mac mac mac" $D exec e2e-mix sh -c "$WAIT_MIX"
+# Watched-root churn: other containers' bind mounts come and go, which
+# replaces the host's FSEvents stream; edits made meanwhile still arrive.
+for i in 1 2 3 4; do
+  OTHER=$(mktemp -d); $D run -d --name "e2e-churn$i" -v "$OTHER:/o" alpine sleep 30 >/dev/null
+  echo "churn$i" > "$MIX/src/inplace"
+  $D rm -f "e2e-churn$i" >/dev/null; rmdir "$OTHER"
+done
+WAIT_CHURN='for i in $(seq 40); do [ "$(grep "^inplace " /tmp/built | tail -1)" = "inplace churn4" ] && break; sleep 0.1; done; echo "$(cat /w/src/inplace) $(grep "^inplace " /tmp/built | tail -1 | cut -d" " -f2)"'
+t bind-root-churn "churn4 churn4" $D exec e2e-mix sh -c "$WAIT_CHURN"
+# A burst larger than the guest's queue (8,192 lines) is delivered or
+# collapsed into a rescan; either way the final state shows.
+mkdir "$MIX/burst"; (cd "$MIX/burst" && seq 1 20000 | xargs touch) ; echo last > "$MIX/src/inplace"
+WAIT_BURST='for i in $(seq 100); do [ "$(ls /w/burst | wc -l)" = 20000 ] && [ "$(cat /w/src/inplace)" = last ] && break; sleep 0.1; done; echo "$(ls /w/burst | wc -l) $(cat /w/src/inplace)"'
+t bind-burst "20000 last" $D exec e2e-mix sh -c "$WAIT_BURST"
+$D rm -f e2e-mix >/dev/null; rm -rf "$MIX"
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
 t vol-inspect "/var/lib/ctrs/volumes/tvol/_data" $D volume inspect -f '{{.Mountpoint}}' tvol
@@ -578,6 +606,7 @@ t cp-in-rename "one" bash -c "$D cp $CPD/a.txt cpc:/tmp/renamed.txt && $D exec c
 t cp-in-root-owner "0 0" bash -c "$D exec cpc stat -c '%u %g' /tmp/a.txt"
 t cp-out-file "fromctr" bash -c "$D exec cpc sh -c 'echo fromctr > /etc/motd2' && $D cp cpc:/etc/motd2 $CPD/ && cat $CPD/motd2"
 t cp-out-dir "deep" bash -c "$D exec cpc sh -c 'mkdir -p /opt/x/y; echo deep > /opt/x/y/z' && $D cp cpc:/opt/x $CPD/xx && cat $CPD/xx/y/z"
+t cp-out-dir-contents "z" bash -c "mkdir $CPD/contents && $D cp cpc:/opt/x/y/. $CPD/contents && ls $CPD/contents"
 t cp-out-stdout "alpine-release" bash -c "$D cp cpc:/etc/alpine-release - | tar -t"
 t cp-out-symlink "-> " bash -c "$D exec cpc ln -sf /etc/alpine-release /tmp/rel && $D cp cpc:/tmp/rel - | tar -tv"
 t cp-big "match" bash -c "head -c 30000000 /dev/urandom > $CPD/big && $D cp $CPD/big cpc:/tmp/big && a=\$(shasum -a 256 $CPD/big | cut -c1-64); b=\$($D exec cpc sha256sum /tmp/big | cut -c1-64); [ \$a = \$b ] && echo match"

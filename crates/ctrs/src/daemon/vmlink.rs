@@ -282,14 +282,18 @@ impl VmLink {
         conn.write_all(out)
     }
 
+    /// Whether every event reached the guest: one too long for a frame,
+    /// or a failed send, loses the rest.
     #[cfg(target_os = "macos")]
-    pub fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) {
+    pub fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) -> bool {
         let mut pending = events;
+        let mut whole = true;
         while !pending.is_empty() {
             let mut count = 0;
-            if self.send(|out| count = ctrs_proto::encode_host_fs_events(out, pending)).is_err() { return; }
-            if count == 0 { pending = &pending[1..]; } else { pending = &pending[count..]; }
+            if self.send(|out| count = ctrs_proto::encode_host_fs_events(out, pending)).is_err() { return false; }
+            if count == 0 { whole = false; pending = &pending[1..]; } else { pending = &pending[count..]; }
         }
+        whole
     }
 
     /// What the guest's layers, containers and volumes take on disk: the

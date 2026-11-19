@@ -110,6 +110,8 @@ fn bulk_connect(id: &str) -> Option<BulkConn> {
 
 /// How long a hung-up terminal waits before it's polled again.
 const TTY_HUP_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+/// How soon the loop retries host change lines a full pipe refused.
+const FSNOTIFY_RETRY_MS: i32 = 20;
 
 /// One reply slot in `outbox`, in the order the host sent the requests.
 /// `AwaitJob` is a `LayerBegin` whose `LayerStored`/`Error` the install
@@ -396,6 +398,10 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
         let wait = dns.timeout_ms();
         if wait >= 0 {
             timeout = if timeout < 0 { wait } else { timeout.min(wait) };
+        }
+        fsnotify.flush();
+        if fsnotify.waiting() {
+            timeout = if timeout < 0 { FSNOTIFY_RETRY_MS } else { timeout.min(FSNOTIFY_RETRY_MS) };
         }
         // SAFETY: `fds` is a valid array of pollfd of the given length.
         let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };

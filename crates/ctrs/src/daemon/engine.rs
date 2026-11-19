@@ -707,9 +707,11 @@ impl Engine {
         self.link.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Whether the guest has every event. A sleeping VM has nothing
+    /// cached to keep coherent, so it counts as delivered.
     #[cfg(target_os = "macos")]
-    pub(super) fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) {
-        if let Some(vm) = self.awake() { vm.send_fs_events(events); }
+    pub(super) fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) -> bool {
+        self.awake().is_none_or(|vm| vm.send_fs_events(events))
     }
 
     pub fn touch(&self) {

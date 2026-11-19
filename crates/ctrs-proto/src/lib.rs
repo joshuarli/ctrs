@@ -40,7 +40,8 @@ pub const INPUT_WINDOW: usize = 4 << 20;
 /// would be taken as the reply to the next request. 5 added `LayerFetch`,
 /// the virtiofs layer source an older agent would answer "unexpected" to.
 /// 6 added `HostFsEvents`, which an older agent would answer "unexpected" to.
-pub const PROTOCOL: u16 = 6;
+/// 7 added the `Rescan` event kind, which a 6 agent fails to decode.
+pub const PROTOCOL: u16 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg<'a> {
@@ -599,7 +600,13 @@ impl<'a> StrList<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum FsEventKind { Modified = b'm', Created = b'c', Removed = b'r' }
+pub enum FsEventKind {
+    Modified = b'm',
+    Created = b'c',
+    Removed = b'r',
+    /// The host may have missed changes under this directory.
+    Rescan = b's',
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FsEvent<'a> { pub kind: FsEventKind, pub path: &'a str }
@@ -623,7 +630,8 @@ impl<'a> FsEvents<'a> {
 fn event_kind(value: u8) -> Result<FsEventKind, DecodeError> {
     match value {
         b'm' => Ok(FsEventKind::Modified), b'c' => Ok(FsEventKind::Created),
-        b'r' => Ok(FsEventKind::Removed), other => Err(DecodeError::UnknownEventKind(other)),
+        b'r' => Ok(FsEventKind::Removed), b's' => Ok(FsEventKind::Rescan),
+        other => Err(DecodeError::UnknownEventKind(other)),
     }
 }
 
@@ -1301,9 +1309,9 @@ mod tests {
 
     #[test]
     fn host_fs_events_round_trip_and_unknown_kind() {
-        let events = [FsEvent { kind: FsEventKind::Created, path: "/private/a" }, FsEvent { kind: FsEventKind::Modified, path: "/private/b" }];
+        let events = [FsEvent { kind: FsEventKind::Created, path: "/private/a" }, FsEvent { kind: FsEventKind::Modified, path: "/private/b" }, FsEvent { kind: FsEventKind::Rescan, path: "/private" }];
         let mut buf = Vec::new();
-        assert_eq!(encode_host_fs_events(&mut buf, &events), 2);
+        assert_eq!(encode_host_fs_events(&mut buf, &events), 3);
         let Msg::HostFsEvents { events: decoded } = decode(&buf).unwrap() else { panic!() };
         assert_eq!(decoded.iter().collect::<Vec<_>>(), events);
         round(Msg::HostFsEvents { events: decoded });
