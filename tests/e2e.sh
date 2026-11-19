@@ -432,8 +432,9 @@ t bind-v-creates "made" bash -c "$D run --rm -v $BIND/new/dir:/n alpine true && 
 t bind-file "from the mac" $D run --rm -v "$BIND/hello.txt:/etc/greeting" alpine cat /etc/greeting
 # Mac-side edits under a bind mount reach container inotify watchers
 # (docs/design-bind-notify.md): save, atomic replace, create, rename, delete.
+# A watch on a replaced or deleted file gets IN_DELETE_SELF, as on Linux.
 WATCH=$(mktemp -d); echo one > "$WATCH/saved"; echo one > "$WATCH/replaced"; echo one > "$WATCH/renamed"; echo one > "$WATCH/deleted"
-$D run -d --name e2e-inotify -v "$WATCH:/w" alpine inotifyd - /w:cndmy >/dev/null
+$D run -d --name e2e-inotify -v "$WATCH:/w" alpine inotifyd - /w:cndmy /w/replaced:D /w/deleted:D >/dev/null
 sleep 1
 echo two >> "$WATCH/saved"; echo two > "$WATCH/.tmp" && mv "$WATCH/.tmp" "$WATCH/replaced"
 echo new > "$WATCH/created"; mv "$WATCH/renamed" "$WATCH/moved"; unlink "$WATCH/deleted"
@@ -444,6 +445,8 @@ t bind-inotify-replace "replaced" grep -E "^n.*/w.replaced" <<<"$INOTIFY"
 t bind-inotify-create "created" grep -E "^n.*/w.created" <<<"$INOTIFY"
 t bind-inotify-rename "moved" grep -E "^n.*/w.moved" <<<"$INOTIFY"
 t bind-inotify-delete "deleted" grep -E "^d.*/w.deleted" <<<"$INOTIFY"
+t bind-inotify-replace-self "/w/replaced" grep -E "^D\s+/w/replaced$" <<<"$INOTIFY"
+t bind-inotify-delete-self "/w/deleted" grep -E "^D\s+/w/deleted$" <<<"$INOTIFY"
 t bind-inotify-content "two" $D exec e2e-inotify cat /w/saved
 $D rm -f e2e-inotify >/dev/null
 # The guest caches missing names for a second (guest/kernel/patches/0007);

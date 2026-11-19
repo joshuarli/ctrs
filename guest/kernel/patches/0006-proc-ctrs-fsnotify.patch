@@ -15,7 +15,7 @@
  proc-y	+= devices.o
 --- a/fs/proc/ctrs_fsnotify.c
 +++ b/fs/proc/ctrs_fsnotify.c
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,171 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * /proc/ctrs/fsnotify: the ctrs guest agent reports changes made on the
@@ -25,7 +25,10 @@
 + * namespace. Stale dcache entries are dropped so lookups see the host's
 + * state, then the matching fsnotify event is raised on the parent and
 + * child. FSEvents flags are sticky, so a "created" report for a name whose
-+ * inode is unchanged is raised as a modification. Files are never written. Mountpoints and directories are not
++ * inode is unchanged is raised as a modification. A file whose name now
++ * holds another inode, or is gone, gets the link-count and delete-self
++ * events a local unlink raises, so per-file watchers re-watch the name.
++ * Files are never written. Mountpoints and directories are not
 + * invalidated, since that would detach mounts under them.
 + */
 +#include <linux/capability.h>
@@ -64,6 +67,14 @@
 +	return known;
 +}
 +
++static void notify_unlinked(struct inode *inode)
++{
++	if (S_ISDIR(inode->i_mode))
++		return;
++	fsnotify_inode(inode, FS_ATTRIB);
++	fsnotify_inoderemove(inode);
++}
++
 +static int notify_present(struct path *parent, const char *full, bool created,
 +			  struct inode *known)
 +{
@@ -76,7 +87,9 @@
 +	inode = d_inode(p.dentry);
 +	if (S_ISREG(inode->i_mode))
 +		invalidate_mapping_pages(inode->i_mapping, 0, -1);
-+	if (!created || inode == known)
++	if (known && inode != known)
++		notify_unlinked(known);
++	if (inode == known || (!created && !known))
 +		fsnotify_change(p.dentry, ATTR_SIZE);
 +	else if (d_is_dir(p.dentry))
 +		fsnotify_mkdir(d_inode(parent->dentry), p.dentry);
@@ -94,6 +107,7 @@
 +	if (IS_ERR(child))
 +		return PTR_ERR(child);
 +	if (child && d_really_is_positive(child)) {
++		notify_unlinked(d_inode(child));
 +		fsnotify_delete(d_inode(parent->dentry), d_inode(child), child);
 +		if (may_forget(child))
 +			d_invalidate(child);

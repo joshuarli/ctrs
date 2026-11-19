@@ -1,0 +1,20 @@
+# Header: every close of a FUSE file sends FLUSH, a host round trip that
+# makes open+close on Virtualization.framework's virtiofs ~75 us against
+# ~21 us on other engines. A file opened read-only has no dirty data to
+# write back, and with no POSIX locks on the inode (and the server lacking
+# lock support) FLUSH has nothing to release. Skip it for such files on
+# virtiofs.
+--- a/fs/fuse/file.c
++++ b/fs/fuse/file.c
+@@ -474,6 +474,11 @@
+ 	if (ff->open_flags & FOPEN_NOFLUSH && !fm->fc->writeback_cache)
+ 		return 0;
+ 
++	if (fm->fc->no_lock && !(file->f_mode & FMODE_WRITE) &&
++	    !locks_inode_context(inode) &&
++	    !strcmp(inode->i_sb->s_type->name, "virtiofs"))
++		return 0;
++
+ 	err = write_inode_now(inode, 1);
+ 	if (err)
+ 		return err;
