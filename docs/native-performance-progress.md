@@ -104,9 +104,8 @@ at parity on k15. Next, in order:
    still invalidate cached pages (0006 already drops page cache on
    Mac-side events), O_APPEND, and mmap. Prove with e2e, the
    `.work/tmp/conc` probe (`run.sh ctrs`) and W12 full-bind M.
-2. Test discovery (2.2×): four requests per directory; consider
-   skipping the EOF READDIR when a READDIRPLUS reply leaves room for any
-   further entry, after checking the server fills replies greedily.
+2. Test discovery: the EOF READDIR skip was measured and rejected
+   (see the evidence file's "Directory reads on the Mac share").
 3. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
    per-thread sampler; the `ps -M` parsing was unreliable.
 4. W2 D-lane CPU per success is unmeasured: fix the useful-work
