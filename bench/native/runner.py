@@ -3290,6 +3290,7 @@ class RunContext:
             "workload_params": dict(self.workload_params),
             "workload_id": self.workload_id,
             "started_utc": utcnow(),
+            "host_load": {"cpus": os.cpu_count(), "start": list(os.getloadavg())},
             "metrics": {},
             "correctness": {"ok": True, "checks": {}},
             "resources": {},
@@ -3299,6 +3300,8 @@ class RunContext:
 
     def write(self, rec: dict) -> None:
         rec["finished_utc"] = utcnow()
+        if "host_load" in rec:
+            rec["host_load"]["end"] = list(os.getloadavg())
         with open(self.jsonl, "a") as f:
             f.write(json.dumps(rec) + "\n")
 

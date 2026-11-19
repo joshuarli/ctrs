@@ -256,6 +256,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
+        if not reason:
+            reason = next((contended for r in (*a, *b) if (contended := host_contended(r))), None)
         if not reason and any(r.get("measurement_valid") is False for r in (*a, *b)):
             reason = "measurement invalidated: " + "; ".join(
                 r.get("measurement_invalidation", "unspecified") for r in (*a, *b)
@@ -328,6 +330,19 @@ def _analyze_cohort(identity: dict, records: list[dict],
             **({"ctrs_transport": transport} if transport is not None else {}),
         })
     return result
+
+
+def host_contended(record: dict) -> str | None:
+    """Why a trial ran on a contended host: its 1-minute load average, at
+    start or end, above the host's CPU count. The engine under test adds a
+    few runnable threads; other work on the Mac adds the rest."""
+    load = record.get("host_load")
+    if not load or not load.get("cpus"):
+        return None
+    worst = max(x[0] for x in (load.get("start"), load.get("end")) if x)
+    if worst > load["cpus"]:
+        return f"host contended: {record.get('engine')} trial 1-minute load {worst:.1f} > {load['cpus']} CPUs"
+    return None
 
 
 def analyze(records: list[dict], input_issues: list[str] | None = None) -> dict:

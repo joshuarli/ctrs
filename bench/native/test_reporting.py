@@ -124,6 +124,16 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result["tool_limited_trials"], {"ctrs": 0, "orbstack": 10})
         self.assertEqual(result["assessment"], "tool-limited")
 
+    def test_pairs_measured_on_a_contended_host_are_rejected(self):
+        records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
+        for record in records:
+            record["host_load"] = {"cpus": 10, "start": [3.0, 3, 3], "end": [4.0, 4, 4]}
+        records[3]["host_load"]["end"] = [36.6, 23, 17]
+        cohort = reporting.analyze(records)["cohorts"][0]
+        self.assertEqual(cohort["valid_pairs"], 2)
+        self.assertEqual([r["pair_id"] for r in cohort["rejections"]], [2])
+        self.assertIn("host contended", cohort["rejections"][0]["reason"])
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:
