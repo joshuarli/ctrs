@@ -109,9 +109,8 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
         rec['validation_errors'].append('transfer_not_overlapping')
     rec['inputs'] = {'w2': w2.get('inputs', {}), 'w13': w13.get('inputs', {})}
     rec['paired_inputs'] = dict(w2.get('paired_inputs', {}))
-    if rec['paired_inputs'] and w13.get('inputs'):
-        rec['paired_inputs']['transfer_image_id'] = w13['inputs'].get('image_id')
-        rec['paired_inputs']['transfer_sha256'] = w13['inputs'].get('sha256_per_stream')
+    if rec['paired_inputs'] and w13.get('paired_inputs'):
+        rec['paired_inputs']['transfer'] = dict(w13['paired_inputs'])
     (directory / 'w2-record.json').write_text(json.dumps(w2, indent=2) + '\n')
     (directory / 'w13-record.json').write_text(json.dumps(w13, indent=2) + '\n')
     return rec

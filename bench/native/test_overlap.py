@@ -116,6 +116,27 @@ class OverlapTests(unittest.TestCase):
         self.assertAlmostEqual(overlap.overlap_fraction((2, 15), transfers), 11.8 / 13)
         self.assertEqual(overlap.overlap_fraction((1, 1), transfers), 0)
 
+    def test_transfer_pairs_on_verified_identity_not_the_engine_image_id(self):
+        def record(image_id):
+            def w13(ctx, engine, state, **kwargs):
+                ctx.overlap_transfer_observer('start', 0, None)
+                ctx.overlap_transfer_observer('end', 8, {'streams': [receipt()]})
+                return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': [],
+                        'inputs': {'image_id': image_id, 'sha256_per_stream': 'hash'},
+                        'paired_inputs': {'api_config': 'sha256:c', 'sha256_per_stream': 'hash'}}
+            def w2(ctx, engine, state, *args, **kwargs):
+                with ctx.overlap_workload():
+                    pass
+                return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': [],
+                        'paired_inputs': {'seed_sha256': 's'}}
+            with tempfile.TemporaryDirectory() as tmp, patch.object(runner, 'trial_w13', w13), \
+                    patch.object(runner, 'trial_w2', w2), \
+                    patch.object(overlap.time, 'monotonic', side_effect=[3, 7]), patch.object(overlap.time, 'sleep'):
+                return overlap.trial_overlap(Context(tmp), Engine(), 'warm', lead_seconds=0)['paired_inputs']
+        ctrs, orbstack = record('sha256:config'), record('sha256:manifest')
+        self.assertEqual(ctrs, orbstack)
+        self.assertEqual(ctrs['transfer']['api_config'], 'sha256:c')
+
     def run_case(self, end):
         with tempfile.TemporaryDirectory() as tmp:
             ctx, engine = Context(tmp), Engine()
