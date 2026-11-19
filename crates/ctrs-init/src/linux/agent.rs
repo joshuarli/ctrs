@@ -344,6 +344,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let fsnotify = super::fsnotify::start();
     let mut nat_relay: Option<super::relay::NatRelay> = None;
     let mut nat_legs_retry: Option<std::time::Instant> = None;
+    let mut next_leg_id: u16 = 0;
     let mut frame = Vec::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     let mut chunk = vec![0u8; MAX_OUTPUT_CHUNK];
@@ -556,8 +557,12 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 }
                 continue;
             }
-            if let Some(r) = relays.iter_mut().find(|r| r.owns(pfd.fd)) {
-                r.step();
+            if let Some(i) = relays.iter().position(|r| r.owns(pfd.fd)) {
+                relays[i].step();
+                if let Some((id, fd)) = relays[i].take_attach() {
+                    let mut src = Some(fd);
+                    let _ = relays.iter_mut().any(|r| r.attach_up(id, &mut src));
+                }
                 continue;
             }
             if dns.owns(pfd.fd) {
@@ -639,7 +644,11 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
         {
             let idle = relays.iter().filter(|r| r.idle_leg()).count();
             for _ in idle..NAT_LEGS {
-                match super::relay::dial_leg(nat) {
+                next_leg_id = next_leg_id.wrapping_add(1);
+                while relays.iter().any(|r| r.is_leg() && r.leg_id() == next_leg_id) {
+                    next_leg_id = next_leg_id.wrapping_add(1);
+                }
+                match super::relay::dial_leg(nat, next_leg_id) {
                     Some(r) => relays.push(r),
                     None => {
                         nat_legs_retry = Some(std::time::Instant::now() + NAT_LEGS_RETRY);

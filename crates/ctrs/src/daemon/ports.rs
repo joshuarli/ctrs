@@ -732,9 +732,21 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
         count(&RELAYS.published_direct);
         return relay_direct(client, ip, port);
     }
-    if let Some(leg) = take_leg() {
-        count(&RELAYS.published_nat_leg);
-        return relay_leg(client, leg, ip, port);
+    if let Some((id, leg)) = take_leg() {
+        // The client's bytes go over vsock, which carries the Mac's bytes
+        // to the guest faster than the NAT network does.
+        match open_relay(vm, [0; 4], id) {
+            Ok(up) => {
+                count(&RELAYS.published_nat_leg);
+                socket_timeouts(up.fd.as_raw_fd())?;
+                vsock_buffers(up.fd.as_raw_fd());
+                let r = relay_leg(client, leg, std::fs::File::from(up.fd.try_clone()?), ip, port);
+                // The vsock connection is released on the VM's queue.
+                drop(up);
+                return r;
+            }
+            Err(e) => crate::diag::debug!("no vsock stream for a NAT leg; the connection uses vsock alone", error = e),
+        }
     }
     if let Some(addr) = nat.filter(|_| nat_usable() && nat_budget()) {
         match TcpStream::connect_timeout(&addr, NAT_CONNECT) {
@@ -793,17 +805,17 @@ fn relay(client: TcpStream, vm: &VmLink, ip: [u8; 4], port: u16, nat: Option<Soc
 
 /// An idle published-port leg the agent opened over the NAT network, if
 /// one is open and the network's connection budget allows a new one.
-fn take_leg() -> Option<TcpStream> {
+fn take_leg() -> Option<(u16, TcpStream)> {
     let mut legs = NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner());
-    while let Some(leg) = legs.pop() {
+    while let Some((id, leg)) = legs.pop() {
         if !leg_open(&leg) {
             continue;
         }
         if !nat_budget() {
-            legs.push(leg);
+            legs.push((id, leg));
             return None;
         }
-        return Some(leg);
+        return Some((id, leg));
     }
     None
 }
@@ -817,10 +829,11 @@ fn leg_open(leg: &TcpStream) -> bool {
     n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::WouldBlock
 }
 
-/// A client connection over a leg: the container's address, then the
-/// client's bytes up and the container's back in frames, as on the framed
-/// vsock relay.
-fn relay_leg(client: TcpStream, leg: TcpStream, ip: [u8; 4], port: u16) -> io::Result<()> {
+/// A client connection over a leg: the container's address on the leg,
+/// the client's bytes up over `to_guest` (the vsock stream that names the
+/// leg, sent first so the guest has both before it connects), and the
+/// container's bytes back on the leg in frames, as on the framed vsock relay.
+fn relay_leg(client: TcpStream, leg: TcpStream, mut to_guest: std::fs::File, ip: [u8; 4], port: u16) -> io::Result<()> {
     leg.set_read_timeout(Some(TCP_IDLE))?;
     leg.set_write_timeout(Some(TCP_IDLE))?;
     let mut header = [0u8; 6];
@@ -828,10 +841,11 @@ fn relay_leg(client: TcpStream, leg: TcpStream, ip: [u8; 4], port: u16) -> io::R
     header[4..].copy_from_slice(&port.to_be_bytes());
     (&leg).write_all(&header)?;
     let start = Instant::now();
-    let (mut client_read, mut leg_write) = (client.try_clone()?, leg.try_clone()?);
+    let mut client_read = client.try_clone()?;
     let up = std::thread::Builder::new().name("ctrs-conn-up".into()).spawn(move || {
-        let r = copy(&mut client_read, &mut leg_write);
-        let _ = leg_write.shutdown(Shutdown::Write);
+        let r = copy(&mut client_read, &mut to_guest);
+        // SAFETY: half-closing a socket we own.
+        unsafe { libc::shutdown(to_guest.as_raw_fd(), libc::SHUT_WR) };
         r
     })?;
     let (mut leg_read, mut client_write) = (leg, client);
@@ -1251,7 +1265,7 @@ const NAT_HOST_BOUND: u8 = 0;
 const NAT_PUBLISHED_LEG: u8 = 1;
 /// Idle published-port legs kept beyond the agent's few; extra ones close.
 const NAT_LEGS_MAX: usize = 16;
-static NAT_LEGS: Mutex<Vec<TcpStream>> = Mutex::new(Vec::new());
+static NAT_LEGS: Mutex<Vec<(u16, TcpStream)>> = Mutex::new(Vec::new());
 
 /// Connections relayed this run, by the path they took.
 struct RelayCounts {
@@ -1302,7 +1316,7 @@ fn nat_host_bound(mut from_guest: TcpStream, token: &[u8; 16]) -> io::Result<()>
         from_guest.set_nodelay(true)?;
         let mut legs = NAT_LEGS.lock().unwrap_or_else(|e| e.into_inner());
         if legs.len() < NAT_LEGS_MAX {
-            legs.push(from_guest);
+            legs.push((u16::from_be_bytes([header[17], header[18]]), from_guest));
         }
         return Ok(());
     }
@@ -1539,24 +1553,28 @@ mod tests {
         let mut guest = std::net::TcpStream::connect(addr).unwrap();
         let mut head = token.to_vec();
         head.push(super::NAT_PUBLISHED_LEG);
-        head.extend_from_slice(&[0; 6]);
+        head.extend_from_slice(&[0, 42, 0, 0, 0, 0]);
         guest.write_all(&head).unwrap();
         let (c, _) = relay.accept().unwrap();
         super::nat_host_bound(c, &token).unwrap();
-        let leg = super::take_leg().expect("a leg in the pool");
+        let (id, leg) = super::take_leg().expect("a leg in the pool");
+        assert_eq!(id, 42);
         assert!(super::take_leg().is_none());
+        let vsock = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let up = std::net::TcpStream::connect(vsock.local_addr().unwrap()).unwrap();
+        let (mut guest_up, _) = vsock.accept().unwrap();
 
         let mac = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut client = std::net::TcpStream::connect(mac.local_addr().unwrap()).unwrap();
         let (accepted, _) = mac.accept().unwrap();
-        let relayed = std::thread::spawn(move || super::relay_leg(accepted, leg, [172, 17, 0, 2], 8080));
+        let relayed = std::thread::spawn(move || super::relay_leg(accepted, leg, std::fs::File::from(std::os::fd::OwnedFd::from(up)), [172, 17, 0, 2], 8080));
         client.write_all(b"GET").unwrap();
         client.shutdown(std::net::Shutdown::Write).unwrap();
         let mut target = [0u8; 6];
         guest.read_exact(&mut target).unwrap();
         assert_eq!(target, [172, 17, 0, 2, 0x1f, 0x90]);
         let mut up = Vec::new();
-        guest.read_to_end(&mut up).unwrap();
+        guest_up.read_to_end(&mut up).unwrap();
         assert_eq!(up, b"GET");
         for part in [&b"200 OK"[..], b""] {
             guest.write_all(&(part.len() as u32).to_be_bytes()).unwrap();
