@@ -88,33 +88,41 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-19, owner delegated all decisions):** live kernel k15
-(patches 0001–0014, `c1d2d0c`), e2e 501/501; live host binary
-`4e0a7ecc…` from `148136f` (VM defaults to half the Mac's cores). W12
-full-bind is 1.23× M and 1.28× D; install about 1.9× and test discovery
-2.2–2.4× remain. k15 removed 70% of install LOOKUPs without moving wall
-time: a concurrency probe shows the Mac's virtiofs server flattening
-near 8,300 small files/s (about 25,000 requests/s, one request queue,
-guest 86% idle) while OrbStack reaches 16,600–20,900. W12-watch bind is
-at parity on k15. Next, in order:
+**Current (2026-11-19, second steering: coherence, then guest→host):**
+live kernel k17 = patches 0001–0011 plus a new 0012 (echo proof and
+rescan; the old two-second echo window, 0013 and 0014 are removed),
+protocol 8, host binary from `3351ba9`, e2e 508/508. Done this round:
 
-1. Kernel k16: writeback caching on virtiofs, so a file's small writes
-   merge into one WRITE sent off the critical path (WRITE is 146,395
-   requests for 92,102 files in install). Check that Mac-side edits
-   still invalidate cached pages (0006 already drops page cache on
-   Mac-side events), O_APPEND, and mmap. Prove with e2e, the
-   `.work/tmp/conc` probe (`run.sh ctrs`) and W12 full-bind M.
-2. Test discovery: the EOF READDIR skip was measured and rejected
-   (see the evidence file's "Directory reads on the Mac share").
-3. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
-   per-thread sampler; the `ps -M` parsing was unreliable.
-4. W2 D-lane CPU per success is unmeasured: fix the useful-work
-   mismatch in the harness or record why it differs.
-5. W14 CPU (fresh 1.30×, streaming 1.75×). Then W13-overlap and W3-v4.
+- Filesystem coherence: an echo is skipped only when proven to be the
+  guest's own change; FSEvents drop/must-scan/root-change flags, failed
+  sends and agent-queue overflow become rescans with a bounded
+  reconciliation walk; stream replacement replays from the last event id.
+  Contract and regressions: `docs/design-bind-notify.md`.
+- Keep/revert: 0013/0014 reverted (no paired W12 benefit).
+- Admission: W12-watch misses/stale fail the trial; W13 claims are capped
+  when the favored side was tool-limited; W13/W14 pair on pinned image
+  identity (older cohorts flagged unverified). The latest W2 records were
+  saturation runs (no `--operations`).
+- Guest→host: attributed to the VZ vsock credit loop (~0.55 GB/s); the
+  NAT host relay (`3351ba9`, decision in `docs/decisions.md`) moved 8 GiB
+  in 4.5–4.7 s against 15.4–17.4 s on a loaded host. Idle guards at 5 vs
+  2 vCPUs: idle VM CPU about 0.0015 cores, next use about 40 ms.
 
-Queue guards use `pgrep -f "ctrs daemon"`; never put that string in a
-waiter's own command line (it aborted one k15 cohort). Put waiters in
-script files.
+Next, in order (queue `.work/native-perf/matrix/run-k17b.sh`, which waits
+for no foreign OrbStack containers and a 1-minute load under 4; a
+foreign `kache-builder` loaded the host from 09:37):
+
+1. Report W13 container-to-Mac upload and download (10 pairs each) to
+   confirm or reject the NAT relay; then W13-overlap (10 pairs) as its
+   regression companion (W2 tails, errors, resources with a transfer).
+2. Report W12 full-bind M and D and the first bind-source-plus-volume-deps
+   cohort on k17; W12-watch bind (5 pairs) must stay at 120/120 per trial.
+3. Report the W2 50,000-operation fixed-work D cohort at 5 vCPUs (CPU per
+   success), and W3-v4 functional + 10 pairs.
+4. Published-port download still rides vsock (the daemon cannot open
+   connections to the VM); a guest-initiated reverse connection over NAT
+   is the next transfer candidate. Then W14 CPU (streaming 2.2×, cancel
+   cleanup 1.14×).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
