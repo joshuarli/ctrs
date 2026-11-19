@@ -494,6 +494,8 @@ pub struct Engine {
     /// The VM, while it is awake. It sleeps (powers off, freeing all its
     /// memory) when idle, and boots again on the next request.
     link: Mutex<Option<Arc<VmLink>>>,
+    #[cfg(target_os = "macos")]
+    fs_events: OnceLock<super::fsevents::Watcher>,
     /// Unix seconds of the last API request; drives the idle sleep.
     last_activity: std::sync::atomic::AtomicU64,
     expected_vm_stop: std::sync::atomic::AtomicBool,
@@ -593,6 +595,8 @@ impl Engine {
         let engine = Arc::new(Engine {
             volumes,
             link: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            fs_events: OnceLock::new(),
             last_activity: std::sync::atomic::AtomicU64::new(now_secs()),
             expected_vm_stop: std::sync::atomic::AtomicBool::new(false),
             stopped: std::sync::atomic::AtomicBool::new(stopped_marker().is_some_and(|f| f.exists())),
@@ -616,6 +620,8 @@ impl Engine {
             events: Mutex::new(Events::default()),
         });
         let _ = engine.me.set(Arc::downgrade(&engine));
+        #[cfg(target_os = "macos")]
+        let _ = engine.fs_events.set(super::fsevents::Watcher::start(Arc::downgrade(&engine)));
         engine.load()?;
         engine.start_balloon();
         engine.start_cpu_meter();
@@ -695,6 +701,11 @@ impl Engine {
     /// The VM if it is awake; never boots it.
     fn awake(&self) -> Option<Arc<VmLink>> {
         self.link.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) {
+        if let Some(vm) = self.awake() { vm.send_fs_events(events); }
     }
 
     pub fn touch(&self) {
@@ -1071,6 +1082,8 @@ impl Engine {
                     }
                     return;
                 }
+                #[cfg(target_os = "macos")]
+                if let Some(watcher) = self.fs_events.get() { watcher.remove(id); }
                 let mut restart_in = None;
                 let mut persist = false;
                 let mut closed_ports = None;
@@ -1176,6 +1189,8 @@ impl Engine {
             Event::Pressure => self.grow_memory(),
             Event::Lost => {
                 let mut st = self.lock();
+                #[cfg(target_os = "macos")]
+                if let Some(watcher) = self.fs_events.get() { watcher.clear(); }
                 let mut closed = Vec::new();
                 for c in st.containers.values_mut() {
                     closed.extend(c.forwards.take());
@@ -1831,6 +1846,14 @@ impl Engine {
             self.fail_start(&id, &spec, &e);
             return Err(e);
         }
+        #[cfg(target_os = "macos")]
+        {
+            let roots = super::fsevents::Watcher::roots(&spec.mounts);
+            let st = self.lock();
+            if st.containers.get(&id).is_some_and(|c| c.status == Status::Running) {
+                if let Some(watcher) = self.fs_events.get() { watcher.add(&id, roots); }
+            }
+        }
         match vm.run(&id, &layers, &argv, &spec.env, &spec.cwd, &spec.user, &hostname, flags, net_args, &spec.mounts, &spec.limits.wire(), spec.caps, &host_opts) {
             Ok(pid) => {
                 if let Some(c) = self.lock().containers.get_mut(&id).filter(|c| c.status == Status::Running) {
@@ -1838,6 +1861,8 @@ impl Engine {
                 }
             }
             Err(e) => {
+                #[cfg(target_os = "macos")]
+                if let Some(watcher) = self.fs_events.get() { watcher.remove(&id); }
                 crate::diag::warn!("container did not start", id = &id[..12], image = spec.image, error = e);
                 self.fail_start(&id, &spec, &e);
                 return Err(Error::Io(e));

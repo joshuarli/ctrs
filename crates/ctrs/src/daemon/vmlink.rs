@@ -282,6 +282,16 @@ impl VmLink {
         conn.write_all(out)
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn send_fs_events(&self, events: &[ctrs_proto::FsEvent<'_>]) {
+        let mut pending = events;
+        while !pending.is_empty() {
+            let mut count = 0;
+            if self.send(|out| count = ctrs_proto::encode_host_fs_events(out, pending)).is_err() { return; }
+            if count == 0 { pending = &pending[1..]; } else { pending = &pending[count..]; }
+        }
+    }
+
     /// What the guest's layers, containers and volumes take on disk: the
     /// `KIND NAME BYTES` lines of `Msg::Usage`, or None if they don't come
     /// within `wait` or the VM stops.

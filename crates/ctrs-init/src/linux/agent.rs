@@ -335,6 +335,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     let mut relays: Vec<super::relay::Relay> = Vec::new();
     let mut procs: HashMap<libc::pid_t, Proc> = HashMap::new();
     let mut fds: Vec<libc::pollfd> = Vec::with_capacity(16);
+    let fsnotify = super::fsnotify::start();
     let mut frame = Vec::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     let mut chunk = vec![0u8; MAX_OUTPUT_CHUNK];
@@ -692,6 +693,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
             let received_ns = sys::boottime_ns();
             out.clear();
             match ctrs_proto::decode(&frame) {
+                Ok(Msg::HostFsEvents { events }) => fsnotify.send(events),
                 Ok(Msg::Ping(v)) => Msg::Pong(v).encode(&mut out),
                 Ok(Msg::Shutdown) => {
                     if host_process {

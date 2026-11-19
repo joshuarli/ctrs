@@ -6,6 +6,8 @@
 pub mod access;
 mod api;
 mod binds;
+#[cfg(target_os = "macos")]
+mod fsevents;
 mod builder;
 mod buildgrpc;
 pub mod dns;

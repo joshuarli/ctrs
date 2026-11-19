@@ -39,7 +39,8 @@ pub const INPUT_WINDOW: usize = 4 << 20;
 /// `UsageQuery`, which has no reply: an older agent's "unexpected" error
 /// would be taken as the reply to the next request. 5 added `LayerFetch`,
 /// the virtiofs layer source an older agent would answer "unexpected" to.
-pub const PROTOCOL: u16 = 5;
+/// 6 added `HostFsEvents`, which an older agent would answer "unexpected" to.
+pub const PROTOCOL: u16 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg<'a> {
@@ -164,6 +165,7 @@ pub enum Msg<'a> {
     /// the bridge's addresses and routes, its DNS server and, with the last
     /// IPv6 network, the IPv6 NAT table. No reply; an older agent ignores it.
     RemoveBridge { bridge: &'a str },
+    HostFsEvents { events: FsEvents<'a> },
     /// Success, for requests with nothing else to say.
     Ack,
 }
@@ -595,6 +597,50 @@ impl<'a> StrList<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum FsEventKind { Modified = b'm', Created = b'c', Removed = b'r' }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FsEvent<'a> { pub kind: FsEventKind, pub path: &'a str }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct FsEvents<'a> { count: u32, raw: &'a [u8] }
+
+impl core::fmt::Debug for FsEvents<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl<'a> FsEvents<'a> {
+    pub fn iter(&self) -> impl Iterator<Item = FsEvent<'a>> + 'a {
+        let mut r = Reader { buf: self.raw, pos: 0 };
+        (0..self.count).map(move |_| FsEvent { kind: event_kind(r.u8().unwrap()).unwrap(), path: r.str().unwrap() })
+    }
+}
+
+fn event_kind(value: u8) -> Result<FsEventKind, DecodeError> {
+    match value {
+        b'm' => Ok(FsEventKind::Modified), b'c' => Ok(FsEventKind::Created),
+        b'r' => Ok(FsEventKind::Removed), other => Err(DecodeError::UnknownEventKind(other)),
+    }
+}
+
+pub fn encode_host_fs_events(out: &mut Vec<u8>, events: &[FsEvent<'_>]) -> usize {
+    let mut size = HEADER + 4;
+    let count = events.iter().take_while(|event| {
+        let next = size + 5 + event.path.len();
+        if next > MAX_FRAME { false } else { size = next; true }
+    }).count();
+    if count == 0 { return 0; }
+    frame(out, kind::HOST_FS_EVENTS, |o| {
+        put_u32(o, count as u32);
+        for event in &events[..count] { o.push(event.kind as u8); put_str(o, event.path); }
+    });
+    count
+}
+
 mod kind {
     pub const HELLO: u16 = 1;
     pub const PING: u16 = 2;
@@ -646,6 +692,7 @@ mod kind {
     pub const USAGE_QUERY: u16 = 74;
     pub const USAGE: u16 = 75;
     pub const LAYER_FETCH: u16 = 76;
+    pub const HOST_FS_EVENTS: u16 = 77;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,6 +701,7 @@ pub enum DecodeError {
     UnknownKind(u16),
     Truncated,
     BadUtf8,
+    UnknownEventKind(u8),
 }
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -811,6 +859,7 @@ impl Msg<'_> {
     /// Appends one encoded frame to `out`.
     pub fn encode(&self, out: &mut Vec<u8>) {
         match *self {
+            Msg::HostFsEvents { events } => frame(out, kind::HOST_FS_EVENTS, |o| { put_u32(o, events.count); o.extend_from_slice(events.raw); }),
             Msg::Hello(h) => frame(out, kind::HELLO, |o| {
                 o.extend_from_slice(&h.protocol.to_le_bytes());
                 for v in [h.init_start_ns, h.ready_ns, h.mem_total_kib, h.mem_available_kib] {
@@ -1084,6 +1133,12 @@ pub fn decode(frame: &[u8]) -> Result<Msg<'_>, DecodeError> {
     let kind = u16::from_le_bytes([frame[4], frame[5]]);
     let mut r = Reader { buf: &frame[HEADER..], pos: 0 };
     Ok(match kind {
+        kind::HOST_FS_EVENTS => {
+            let count = r.u32()?;
+            let start = r.pos;
+            for _ in 0..count { event_kind(r.u8()?)?; r.str()?; }
+            Msg::HostFsEvents { events: FsEvents { count, raw: &r.buf[start..r.pos] } }
+        },
         kind::HELLO => Msg::Hello(Hello {
             protocol: r.u16()?,
             init_start_ns: r.u64()?,
@@ -1242,6 +1297,23 @@ mod tests {
         m.encode(&mut buf);
         assert_eq!(frame_len(buf[..4].try_into().unwrap()).unwrap(), buf.len());
         assert_eq!(decode(&buf).unwrap(), m);
+    }
+
+    #[test]
+    fn host_fs_events_round_trip_and_unknown_kind() {
+        let events = [FsEvent { kind: FsEventKind::Created, path: "/private/a" }, FsEvent { kind: FsEventKind::Modified, path: "/private/b" }];
+        let mut buf = Vec::new();
+        assert_eq!(encode_host_fs_events(&mut buf, &events), 2);
+        let Msg::HostFsEvents { events: decoded } = decode(&buf).unwrap() else { panic!() };
+        assert_eq!(decoded.iter().collect::<Vec<_>>(), events);
+        round(Msg::HostFsEvents { events: decoded });
+        let long = "x".repeat(MAX_FRAME - HEADER - 4 - 5);
+        let batch = [FsEvent { kind: FsEventKind::Modified, path: &long }, FsEvent { kind: FsEventKind::Removed, path: "/b" }];
+        let mut limited = Vec::new();
+        assert_eq!(encode_host_fs_events(&mut limited, &batch), 1);
+        assert_eq!(limited.len(), MAX_FRAME);
+        buf[10] = b'x';
+        assert_eq!(decode(&buf), Err(DecodeError::UnknownEventKind(b'x')));
     }
 
     #[test]
