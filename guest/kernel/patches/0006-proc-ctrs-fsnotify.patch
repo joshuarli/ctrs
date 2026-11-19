@@ -1,0 +1,166 @@
+# Header: Virtualization.framework's virtiofs server sends no change
+# notifications, so edits made on the Mac under a bind mount never raise
+# inotify events in containers. /proc/ctrs/fsnotify lets the guest agent,
+# which learns of those edits from the host's FSEvents stream, drop the
+# stale dcache entries and raise the matching fsnotify events.
+--- a/fs/proc/Makefile
++++ b/fs/proc/Makefile
+@@ -13,6 +13,7 @@
+ 		fd.o
+ proc-$(CONFIG_TTY)      += proc_tty.o
+ proc-y	+= cmdline.o
++proc-y	+= ctrs_fsnotify.o
+ proc-y	+= consoles.o
+ proc-y	+= cpuinfo.o
+ proc-y	+= devices.o
+--- a/fs/proc/ctrs_fsnotify.c
++++ b/fs/proc/ctrs_fsnotify.c
+@@ -0,0 +1,148 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * /proc/ctrs/fsnotify: the ctrs guest agent reports changes made on the
++ * host side of a virtiofs share, which the guest's VFS never sees. Each
++ * write is one "<kind> <absolute path>" line, kind m (modified), c
++ * (created) or r (removed). The path resolves in the writer's mount
++ * namespace. Stale dcache entries are dropped so lookups see the host's
++ * state, then the matching fsnotify event is raised on the parent and
++ * child. Files are never written. Mountpoints and directories are not
++ * invalidated, since that would detach mounts under them.
++ */
++#include <linux/capability.h>
++#include <linux/dcache.h>
++#include <linux/err.h>
++#include <linux/fs.h>
++#include <linux/fsnotify.h>
++#include <linux/init.h>
++#include <linux/limits.h>
++#include <linux/mm.h>
++#include <linux/namei.h>
++#include <linux/pagemap.h>
++#include <linux/path.h>
++#include <linux/proc_fs.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++
++static bool may_forget(struct dentry *dentry)
++{
++	return !d_mountpoint(dentry) && !d_is_dir(dentry);
++}
++
++static void forget_cached(struct dentry *dir, const char *name)
++{
++	struct dentry *child = try_lookup_noperm(&QSTR(name), dir);
++
++	if (IS_ERR_OR_NULL(child))
++		return;
++	if (may_forget(child))
++		d_invalidate(child);
++	dput(child);
++}
++
++static int notify_present(struct path *parent, const char *full, bool created)
++{
++	struct path p;
++	struct inode *inode;
++	int err = kern_path(full, 0, &p);
++
++	if (err)
++		return err;
++	inode = d_inode(p.dentry);
++	if (S_ISREG(inode->i_mode))
++		invalidate_mapping_pages(inode->i_mapping, 0, -1);
++	if (!created)
++		fsnotify_change(p.dentry, ATTR_SIZE);
++	else if (d_is_dir(p.dentry))
++		fsnotify_mkdir(d_inode(parent->dentry), p.dentry);
++	else
++		fsnotify_create(d_inode(parent->dentry), p.dentry);
++	path_put(&p);
++	return 0;
++}
++
++static int notify_removed(struct path *parent, const char *name)
++{
++	struct qstr q = QSTR(name);
++	struct dentry *child = try_lookup_noperm(&q, parent->dentry);
++
++	if (IS_ERR(child))
++		return PTR_ERR(child);
++	if (child && d_really_is_positive(child)) {
++		fsnotify_delete(d_inode(parent->dentry), d_inode(child), child);
++		if (may_forget(child))
++			d_invalidate(child);
++	} else {
++		fsnotify_name(FS_DELETE, NULL, FSNOTIFY_EVENT_NONE,
++			      d_inode(parent->dentry), &q, 0);
++	}
++	dput(child);
++	return 0;
++}
++
++static int ctrs_notify(char kind, char *full)
++{
++	char *slash = strrchr(full, '/');
++	struct path parent;
++	int err;
++
++	if (slash == full || !slash[1])
++		return -EINVAL;
++	*slash = '\0';
++	err = kern_path(full, LOOKUP_FOLLOW | LOOKUP_DIRECTORY, &parent);
++	*slash = '/';
++	if (err)
++		return err;
++	switch (kind) {
++	case 'm':
++	case 'c':
++		forget_cached(parent.dentry, slash + 1);
++		err = notify_present(&parent, full, kind == 'c');
++		break;
++	case 'r':
++		err = notify_removed(&parent, slash + 1);
++		break;
++	default:
++		err = -EINVAL;
++	}
++	path_put(&parent);
++	return err;
++}
++
++static ssize_t ctrs_fsnotify_write(struct file *file, const char __user *buf,
++				   size_t count, loff_t *ppos)
++{
++	char *line;
++	int err;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	if (count < 4 || count > PATH_MAX + 3)
++		return -EINVAL;
++	line = memdup_user_nul(buf, count);
++	if (IS_ERR(line))
++		return PTR_ERR(line);
++	if (line[count - 1] == '\n')
++		line[count - 1] = '\0';
++	if (line[1] != ' ' || line[2] != '/')
++		err = -EINVAL;
++	else
++		err = ctrs_notify(line[0], line + 2);
++	kfree(line);
++	return err ? err : count;
++}
++
++static const struct proc_ops ctrs_fsnotify_ops = {
++	.proc_write = ctrs_fsnotify_write,
++};
++
++static int __init ctrs_fsnotify_init(void)
++{
++	struct proc_dir_entry *dir = proc_mkdir("ctrs", NULL);
++
++	if (!dir || !proc_create("fsnotify", 0200, dir, &ctrs_fsnotify_ops))
++		return -ENOMEM;
++	return 0;
++}
++fs_initcall(ctrs_fsnotify_init);

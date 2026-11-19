@@ -1,8 +1,12 @@
 # Design: Mac-side change notifications for bind mounts
 
-Status: **proposal, not implemented.** It adds a host→guest message, which is
-a wire-protocol change, and a fifth guest kernel patch. Both need owner
-approval before implementation.
+Status: **implemented 2026-11-18.** It adds host→guest `Msg::HostFsEvents`
+(wire protocol 6) and guest kernel patch 0006 (`/proc/ctrs/fsnotify`). The
+owner delegated the approval. The host watcher is
+`crates/ctrs/src/daemon/fsevents.rs`. A forked writer in
+`crates/ctrs-init/src/linux/fsnotify.rs` writes the events, so the agent
+stays single-threaded. `tests/e2e.sh` `bind-inotify-*` covers save, atomic
+replace, create, rename and delete.
 
 ## Problem
 
