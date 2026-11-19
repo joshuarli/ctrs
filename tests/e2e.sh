@@ -446,6 +446,13 @@ t bind-inotify-rename "moved" grep -E "^n.*/w.moved" <<<"$INOTIFY"
 t bind-inotify-delete "deleted" grep -E "^d.*/w.deleted" <<<"$INOTIFY"
 t bind-inotify-content "two" $D exec e2e-inotify cat /w/saved
 $D rm -f e2e-inotify >/dev/null
+# The guest caches missing names for a second (guest/kernel/patches/0007);
+# a Mac-side create must still show at once to a container that keeps probing.
+$D run -d --name e2e-negative -v "$WATCH:/w" alpine sh -c 'while true; do [ -e /w/late ]; sleep 0.01; done' >/dev/null
+sleep 1
+echo x > "$WATCH/late"; sleep 0.2
+t bind-negative-create "seen" $D exec e2e-negative sh -c 'test -e /w/late && echo seen'
+$D rm -f e2e-negative >/dev/null
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
 t vol-inspect "/var/lib/ctrs/volumes/tvol/_data" $D volume inspect -f '{{.Mountpoint}}' tvol

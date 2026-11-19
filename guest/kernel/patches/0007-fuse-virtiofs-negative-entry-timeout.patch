@@ -1,0 +1,22 @@
+# Header: Virtualization.framework's virtiofs server answers a lookup of a
+# missing name with ENOENT and no entry timeout, so FUSE never caches the
+# negative dentry and every probe for a missing path (module resolution,
+# test discovery) is a host round trip, ~35 us against ~7 us on other
+# engines. On virtiofs, cache ENOENT lookups for one second. Mac-side
+# creations under bind mounts drop the negative dentry through
+# /proc/ctrs/fsnotify (patch 0006), and the guest's own creations go
+# through its VFS.
+--- a/fs/fuse/dir.c
++++ b/fs/fuse/dir.c
+@@ -441,6 +441,11 @@
+ 	if (err == -ENOENT) {
+ 		outarg_valid = false;
+ 		err = 0;
++		if (!strcmp(dir->i_sb->s_type->name, "virtiofs")) {
++			memset(&outarg, 0, sizeof(outarg));
++			outarg.entry_valid = 1;
++			outarg_valid = true;
++		}
+ 	}
+ 	if (err)
+ 		goto out_err;
