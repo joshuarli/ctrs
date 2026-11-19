@@ -161,7 +161,10 @@ impl Relay {
         let reading_up = !self.up.eof && self.up.buf.len() < BUF;
         // A leg's host side carries only its header up; the client's bytes
         // come from `up_src`.
-        let host_in = if self.leg { self.target.is_none() && !self.refusing } else { self.target.is_none() || reading_up };
+        // Nothing is read from the host while the container's connect is
+        // pending: a client's early bytes would wake poll at once, again and
+        // again, until a dropped SYN is sent again a second later.
+        let host_in = if self.leg { self.target.is_none() && !self.refusing } else { self.target.is_none() || (self.connected && reading_up) };
         let host_ev = (if host_in { libc::POLLIN } else { 0 })
             | (if self.down.buf.is_empty() { 0 } else { libc::POLLOUT })
             | if self.refusing { libc::POLLOUT } else { 0 };
@@ -701,5 +704,32 @@ mod tests {
         // No room for a frame: not read, and not taken for EOF.
         let full = buf.len() + 4;
         assert_eq!(super::read_frame_into(r.as_raw_fd(), &mut buf, full).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_pending_connect_leaves_poll_asleep_while_the_client_has_sent() {
+        let mut host = [0; 2];
+        // SAFETY: `host` has room for the two descriptors socketpair writes.
+        assert_eq!(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0, host.as_mut_ptr()) }, 0);
+        // SAFETY: socketpair succeeded, so both are fresh and ours.
+        let (near, far) = unsafe { (OwnedFd::from_raw_fd(host[0]), OwnedFd::from_raw_fd(host[1])) };
+        // SAFETY: writing a local buffer to a socket we own.
+        assert_eq!(unsafe { libc::write(far.as_raw_fd(), b"GET".as_ptr().cast(), 3) }, 3);
+        // A connect the container has not answered: a socket that never becomes writable here.
+        let mut target = [0; 2];
+        // SAFETY: as above.
+        assert_eq!(unsafe { libc::pipe2(target.as_mut_ptr(), libc::O_NONBLOCK) }, 0);
+        // SAFETY: pipe2 succeeded; the read end is never writable.
+        let (pending, _w) = unsafe { (OwnedFd::from_raw_fd(target[0]), OwnedFd::from_raw_fd(target[1])) };
+        let mut relay = super::Relay { target: Some(pending), connected: false, header: vec![0; 6], ..super::Relay::dead_one(near) };
+        relay.dead = false;
+        let mut fds = Vec::new();
+        relay.interest(&mut fds);
+        // SAFETY: `fds` is a valid pollfd array of the given length.
+        assert_eq!(unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 0) }, 0, "{:?}", fds.iter().map(|p| p.events).collect::<Vec<_>>());
+        relay.connected = true;
+        fds.clear();
+        relay.interest(&mut fds);
+        assert_ne!(fds[0].events & libc::POLLIN, 0);
     }
 }
