@@ -89,28 +89,33 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-18 night, owner delegated all decisions):** bind-mount
-change notifications are implemented: protocol 6, host FSEvents watcher,
-and guest patch 0006 with same-inode modify reporting (`a5e5ab1`, plus the
-follow-up fix). W12-watch bind went from 0/120 to 101/120 correct. Patch
-0007 caches missing virtiofs names for one second: a missing-name `stat`
-went from 34.6 to 1.0 µs, against 7.3 µs on OrbStack. Live assets:
-kernel k8 (0001–0007), initramfs `9a2b6c9d…`, and the binary built after
-the ordering fix. Next, in order:
+**Current (2026-11-19, owner delegated all decisions):** live kernel k13
+(patches 0001–0011, `8c66e93`), e2e 499/499. W12-watch bind reached
+120/120 on k11 (2 pairs). A trace of file creation on a bind mount showed
+five serial host requests per file. Patches 0008–0011 removed FLUSH, the
+synchronous RELEASE, the parent GETATTR and the capability GETXATTR.
+Create+write+close went from about 300 to 227 µs; OrbStack is 73–104 µs.
+On k9, W12 full-bind was 1.57× D and 1.38× M. Next, in order:
 
-1. Report the queue in `.work/native-perf/matrix/k8.log`: D and M W12
-   full-bind on k8, and a 3-pair W12-watch bind. It measures 0007 against
-   the k6 full-bind cohort `base-20261118T183442-84f0` (1.65×).
-2. If full-bind still loses: `open`+`close` is 75 µs on ctrs against
-   21 µs on OrbStack, and `listdir` of 200 entries is 478 µs against
-   210 µs. Candidate patch 0008 skips FUSE FLUSH on read-only closes
-   when the server has no lock support (`fc->no_lock`) and the inode
-   has no lock context. Probe first whether Apple's server takes locks.
+1. Report `.work/native-perf/matrix/k13.log`: M and D W12 full-bind and
+   a 10-pair W12-watch bind on k13. Compare with k9
+   (`base-20261118T221806-099e` M 1.38, `base-20261118T230106-7f42` D
+   1.57).
+2. If full-bind still loses, what remains per create is LOOKUP (ENOENT)
+   plus CREATE. Read-only open+close is 51 µs against 17 µs, and
+   listdir is 2.5× slower. Trace W12 install and test discovery with
+   `events/fuse/fuse_request_send` (stacktrace trigger, privileged
+   container) to rank the opcodes before writing more patches.
 3. vCPU default: test about half the host cores against W2 D-lane CPU
    per success and W12 all-volume before changing the 2-vCPU default.
 4. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
    per-thread sampler; the `ps -M` parsing was unreliable.
 5. W14 CPU (fresh 1.30×, streaming 1.75×). Then W13-overlap and W3-v4.
+
+Kernel experiments build in a labeled copy of `ctrs-kbuild`
+(`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
+tried with `CTRS_GUEST_DIR` pointing at a guest dir made with `cp -c`
+(`data.img` is 1 TB sparse; never checksum it).
 
 Tooling: `kache` hung debug test builds for over 20 minutes on 3 small
 crates. Workaround: `RUSTC_WRAPPER="" CARGO_TARGET_DIR=.work/tmp/target-nowrap`.
