@@ -450,6 +450,11 @@ t bind-inotify-delete "deleted" grep -E "^d.*/w.deleted" <<<"$INOTIFY"
 t bind-inotify-replace-self "/w/replaced" grep -E "^D\s+/w/replaced$" <<<"$INOTIFY"
 t bind-inotify-delete-self "/w/deleted" grep -E "^D\s+/w/deleted$" <<<"$INOTIFY"
 t bind-inotify-content "two" $D exec e2e-inotify cat /w/saved
+# The host's report of a container's own write is not raised again
+# (guest/kernel/patches/0012): a local save gets no echoed rename pair.
+$D exec e2e-inotify sh -c 'echo own > /w/own'
+sleep 2
+t bind-inotify-no-echo "no echo" bash -c "$D logs e2e-inotify 2>&1 | grep -qE '^[my].*/w.own' && echo echoed || echo no echo"
 $D rm -f e2e-inotify >/dev/null
 # The guest caches missing names for a second (guest/kernel/patches/0007);
 # a Mac-side create must still show at once to a container that keeps probing.

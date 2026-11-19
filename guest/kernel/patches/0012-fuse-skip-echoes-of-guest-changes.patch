@@ -1,0 +1,165 @@
+# Header: the host forwards every FSEvents change under a bind source to
+# /proc/ctrs/fsnotify (patch 0006), including the changes this guest made
+# itself through virtiofs. During npm install those echoes dropped live
+# dcache entries and cost a lookup and an attribute refresh per file.
+# FUSE now stamps inodes this guest changes (create, write, setattr,
+# rename, directory entry changes), and the proc file skips an event
+# whose name's cached inode was changed here within two seconds, whose
+# removed name is already negative here, or whose uncached removed name's
+# directory was changed here within two seconds.
+diff -ru a/fs/fuse/dir.c b/fs/fuse/dir.c
+--- a/fs/fuse/dir.c
++++ b/fs/fuse/dir.c
+@@ -17,6 +17,7 @@
+ #include <linux/slab.h>
+ #include <linux/xattr.h>
+ #include <linux/iversion.h>
++#include <linux/magic.h>
+ #include <linux/posix_acl.h>
+ #include <linux/security.h>
+ #include <linux/types.h>
+@@ -129,8 +130,24 @@
+ 	fuse_invalidate_attr_mask(inode, STATX_BASIC_STATS);
+ }
+ 
++void fuse_mark_local_change(struct inode *inode)
++{
++	WRITE_ONCE(get_fuse_inode(inode)->local_change, jiffies);
++}
++
++bool fuse_changed_locally(struct inode *inode, unsigned long window)
++{
++	unsigned long t;
++
++	if (inode->i_sb->s_magic != FUSE_SUPER_MAGIC)
++		return false;
++	t = READ_ONCE(get_fuse_inode(inode)->local_change);
++	return t && time_before(jiffies, t + window);
++}
++
+ static void fuse_dir_changed(struct inode *dir)
+ {
++	fuse_mark_local_change(dir);
+ 	if (!strcmp(dir->i_sb->s_type->name, "virtiofs"))
+ 		fuse_invalidate_attr_mask(dir, STATX_BASIC_STATS &
+ 					  ~(STATX_TYPE | STATX_MODE | STATX_UID |
+@@ -733,6 +750,7 @@
+ 		goto out_err;
+ 	}
+ 	kfree(forget);
++	fuse_mark_local_change(inode);
+ 	if (!strcmp(dir->i_sb->s_type->name, "virtiofs") &&
+ 	    !(inode->i_mode & (S_ISUID | S_ISGID)))
+ 		inode->i_flags |= S_NOSEC;
+@@ -870,6 +888,7 @@
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 	kfree(forget);
++	fuse_mark_local_change(inode);
+ 
+ 	d_drop(entry);
+ 	d = d_splice_alias(inode, entry);
+@@ -1113,6 +1132,7 @@
+ 	if (!err) {
+ 		/* ctime changes */
+ 		fuse_update_ctime(d_inode(oldent));
++		fuse_mark_local_change(d_inode(oldent));
+ 
+ 		if (flags & RENAME_EXCHANGE)
+ 			fuse_update_ctime(d_inode(newent));
+@@ -1988,6 +2008,8 @@
+ 	bool is_truncate = false;
+ 	bool is_wb = fc->writeback_cache && S_ISREG(inode->i_mode);
+ 	loff_t oldsize;
++
++	fuse_mark_local_change(inode);
+ 	int err;
+ 	bool trust_local_cmtime = is_wb;
+ 	bool fault_blocked = false;
+diff -ru a/fs/fuse/file.c b/fs/fuse/file.c
+--- a/fs/fuse/file.c
++++ b/fs/fuse/file.c
+@@ -1131,6 +1131,8 @@
+ 	struct fuse_inode *fi = get_fuse_inode(inode);
+ 	bool ret = false;
+ 
++	fuse_mark_local_change(inode);
++
+ 	spin_lock(&fi->lock);
+ 	fi->attr_version = atomic64_inc_return(&fc->attr_version);
+ 	if (written > 0 && pos > inode->i_size) {
+diff -ru a/fs/fuse/fuse_i.h b/fs/fuse/fuse_i.h
+--- a/fs/fuse/fuse_i.h
++++ b/fs/fuse/fuse_i.h
+@@ -119,6 +119,9 @@
+ 	/** Number of lookups on this inode */
+ 	u64 nlookup;
+ 
++	/** Jiffies of this guest's last change to the inode */
++	unsigned long local_change;
++
+ 	/** The request used for sending the FORGET message */
+ 	struct fuse_forget_link *forget;
+ 
+@@ -1397,6 +1400,9 @@
+ int fuse_dev_release(struct inode *inode, struct file *file);
+ 
+ bool fuse_write_update_attr(struct inode *inode, loff_t pos, ssize_t written);
++
++void fuse_mark_local_change(struct inode *inode);
++bool fuse_changed_locally(struct inode *inode, unsigned long window);
+ 
+ int fuse_flush_times(struct inode *inode, struct fuse_file *ff);
+ int fuse_write_inode(struct inode *inode, struct writeback_control *wbc);
+diff -ru a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
+--- a/fs/proc/ctrs_fsnotify.c	2026-11-19 02:26:15
++++ b/fs/proc/ctrs_fsnotify.c	2026-11-19 02:26:51
+@@ -29,6 +29,37 @@
+ #include <linux/string.h>
+ #include <linux/uaccess.h>
+ 
++#define CTRS_ECHO_WINDOW (2 * HZ)
++
++bool fuse_changed_locally(struct inode *inode, unsigned long window);
++
++/*
++ * The host reports every change under a bind source, including the ones
++ * this guest made through virtiofs. Those echoes would drop live dcache
++ * entries and cost a lookup each, so an event is skipped when the name's
++ * cached inode was changed here within the window, when a removed name is
++ * already negative here, or when an uncached removed name's directory was
++ * changed here within the window.
++ */
++static bool local_echo(struct dentry *dir, const char *name, char kind)
++{
++	struct dentry *child = try_lookup_noperm(&QSTR(name), dir);
++	bool echo;
++
++	if (IS_ERR(child))
++		return false;
++	if (!child)
++		return kind == 'r' &&
++		       fuse_changed_locally(d_inode(dir), CTRS_ECHO_WINDOW);
++	if (d_really_is_negative(child))
++		echo = kind == 'r';
++	else
++		echo = kind != 'r' &&
++		       fuse_changed_locally(d_inode(child), CTRS_ECHO_WINDOW);
++	dput(child);
++	return echo;
++}
++
+ static bool may_forget(struct dentry *dentry)
+ {
+ 	return !d_mountpoint(dentry) && !d_is_dir(dentry);
+@@ -127,6 +158,10 @@
+ 	*slash = '/';
+ 	if (err)
+ 		return err;
++	if (local_echo(parent.dentry, slash + 1, kind)) {
++		path_put(&parent);
++		return 0;
++	}
+ 	switch (kind) {
+ 	case 'm':
+ 	case 'c': {
