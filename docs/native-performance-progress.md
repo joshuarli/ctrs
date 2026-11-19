@@ -88,35 +88,34 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
 
 ## Exact next action
 
-**Current (2026-11-19, owner delegated all decisions):** live kernel k14
-(patches 0001–0012, `c143c82`), e2e 499/499; live host binary
-`4e0a7ecc…` from `148136f`, which defaults the VM to half the Mac's
-cores (5 here) after paired D-lane cohorts closed the all-volume gap
-(1.29 → 1.02) with W2 still a strict win (see the evidence file's
-"Installed-default vCPUs"). On k14, W12 full-bind is 1.25× M and
-1.26× D at 5 vCPUs; install 1.96× and test discovery 2.15× remain.
-W12-watch bind is at parity. Next, in order:
+**Current (2026-11-19, owner delegated all decisions):** live kernel k15
+(patches 0001–0014, `c1d2d0c`), e2e 501/501; live host binary
+`4e0a7ecc…` from `148136f` (VM defaults to half the Mac's cores). W12
+full-bind is 1.23× M and 1.28× D; install about 1.9× and test discovery
+2.2–2.4× remain. k15 removed 70% of install LOOKUPs without moving wall
+time: a concurrency probe shows the Mac's virtiofs server flattening
+near 8,300 small files/s (about 25,000 requests/s, one request queue,
+guest 86% idle) while OrbStack reaches 16,600–20,900. W12-watch bind is
+at parity on k15. Next, in order:
 
-1. Kernel k15: two virtiofs caching patches, built in
-   `ctrs-kbuild-exp-k15`. (a) A directory this guest made with MKDIR is
-   "complete": a lookup of a name not in the dcache answers ENOENT
-   without a request, until a child dentry is freed, a non-echo
-   `/proc/ctrs/fsnotify` event names the directory, or a bound expires.
-   This removes the 51% of install LOOKUPs that are first lookups of new
-   names, plus mkdir's exclusive lookup. (b) Directory dentries and
-   directory attributes get a minimum validity of several seconds, since
-   Mac-side changes arrive through the notifications; this removes the
-   41% that revalidate path components after the server's 1 s expiry.
-   Prove with e2e (add a Mac-creates-inside-guest-made-dir check), the
-   `.work/tmp/w12trace` opcode counts, then W12 full-bind M and D.
-2. Test discovery (2.15×): four requests per directory; consider
-   skipping the EOF READDIR when a READDIRPLUS reply leaves room for
-   any further entry, after checking the server fills replies greedily.
+1. Kernel k16: writeback caching on virtiofs, so a file's small writes
+   merge into one WRITE sent off the critical path (WRITE is 146,395
+   requests for 92,102 files in install). Check that Mac-side edits
+   still invalidate cached pages (0006 already drops page cache on
+   Mac-side events), O_APPEND, and mmap. Prove with e2e, the
+   `.work/tmp/conc` probe (`run.sh ctrs`) and W12 full-bind M.
+2. Test discovery (2.2×): four requests per directory; consider
+   skipping the EOF READDIR when a READDIRPLUS reply leaves room for any
+   further entry, after checking the server fills replies greedily.
 3. Guest→host transfer ceiling (0.51–0.65 GB/s). Needs a proper
    per-thread sampler; the `ps -M` parsing was unreliable.
 4. W2 D-lane CPU per success is unmeasured: fix the useful-work
    mismatch in the harness or record why it differs.
 5. W14 CPU (fresh 1.30×, streaming 1.75×). Then W13-overlap and W3-v4.
+
+Queue guards use `pgrep -f "ctrs daemon"`; never put that string in a
+waiter's own command line (it aborted one k15 cohort). Put waiters in
+script files.
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
