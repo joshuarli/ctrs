@@ -97,9 +97,11 @@ Patch 0005 (64 KiB vsock receive buffers, kernel `1b2fdbc9…`, now in
 `guest/out`) brought host→guest single-stream transfer to parity. W12
 all-volume is at M-lane parity. Next, in order:
 
-1. Report the M-lane W12 full-bind cohort (`.work/native-perf/matrix/w12m-fullbind.log`).
-   It separates the 2-vCPU default from Mac-share cost in install and test
-   discovery.
+1. W12 full-bind is an engine loss in the M lane (1.44×; install 2.56×,
+   test discovery 2.80×, `base-20261118T161928-8d7f`). Profile the
+   virtiofs metadata path: per-operation latency of stat, open, readdir
+   and getattr on `/mnt/mac`, and the guest mount options (cache mode,
+   attribute timeouts) against OrbStack's share.
 2. Guest→host transfer (0.51–0.65 GB/s, the largest open throughput
    deficit). Sample per-thread CPU of the Virtualization XPC process and
    the ctrs relay during a guest→host transfer (`ps -M`) to find which side
