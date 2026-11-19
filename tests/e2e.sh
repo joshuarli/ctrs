@@ -462,6 +462,15 @@ $D run -d --name e2e-negative -v "$WATCH:/w" alpine sh -c 'while true; do [ -e /
 sleep 1
 echo x > "$WATCH/late"; sleep 0.2
 t bind-negative-create "seen" $D exec e2e-negative sh -c 'test -e /w/late && echo seen'
+# Names missing from a directory the container just made are answered
+# without asking the Mac (guest/kernel/patches/0013), and directories stay
+# cached for ten seconds (0014); Mac-side changes inside them, including
+# in a new subdirectory, and a Mac-side directory removal still show.
+mkdir "$WATCH/gone"
+$D exec e2e-negative sh -c 'mkdir /w/made && ls /w/gone && for n in a b c; do [ -e /w/made/$n ]; [ -e /w/made/sub/$n ]; done' >/dev/null
+echo mac > "$WATCH/made/a"; mkdir "$WATCH/made/sub" && echo mac > "$WATCH/made/sub/b"; rmdir "$WATCH/gone"
+WAIT_SEEN='for i in $(seq 30); do test -e /w/made/a && test -e /w/made/sub/b && ! test -e /w/gone && echo seen && break; sleep 0.1; done'
+t bind-made-here-mac-create "seen" $D exec e2e-negative sh -c "$WAIT_SEEN"
 $D rm -f e2e-negative >/dev/null
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
