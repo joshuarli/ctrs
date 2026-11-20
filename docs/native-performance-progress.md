@@ -167,23 +167,42 @@ ctrs's build gRPC rewrite rejected; `d692709` drops it (e2e 508/508),
 restoring W6/W7. Change-tier pilots W1, W6, W7, W10 pass; costs are in
 the `pyramid.py` registry.
 
+Third steering (2026-11-20): default builds, the vCPU default as a
+measured decision, watcher recovery after loss, then full-bind.
+
+Done so far: the matrix is reconciled (`1e45fc1`); W4/W5 inputs build
+alone (`runner.py prepare --only W4,W5`) and W9 finds its pinned image
+(`bc996cf`); W4, W5, W9 one-pair pilots are correct on both engines;
+concurrent builds each hold measured pairs (`.work/tmp/holds/<name>`,
+`bf8512f`); a same-engine CPU candidate design (`--candidate-cpus N`,
+`reporting.py --candidate`, pyramid `<cell>:cpus9`; `83a3315`,
+`98eb949`) clones the default warm engine copy-on-write; ctrs CPU is
+marked incomplete in machine-readable output when the Mac's NAT carried
+the trial's connections (`adf2f67`). Watcher regression
+`tests/watch-recovery.sh` (branch `fix/watch-recovery`, `a00f3d6`) fails
+on main for both host loss and guest overflow; the fix is in progress
+on that branch.
+
 Next, in order:
 
-1. Report the 10-pair W6/W7 cohorts (`pyramid.py run --name
-   w6-build:cohort --name w7-buildx:cohort`, log
-   `.work/native-perf/matrix/p13.log`) into matrix rows W6/W7. Check
-   each rejected trial's outside-CPU: OrbStack build CPU may run outside
-   the Helper process and be charged as foreign.
-2. Owner decisions to surface, not take: the 5-vCPU default (costs
-   W13-overlap and W12 D against OrbStack's 9); VZ `Fsync` vs `Full`
-   (gates any W3-v4 claim); whether to run `runner.py prepare` for W4
-   and W5 inputs (preflight names them).
-3. W12 full-bind: the Mac virtiofs server ceiling; the measured way out
-   is the mixed layout. Any engine work there needs a new attribution.
-4. W13 wins need a native receiver (or the 4-stream cells). CPU-only
-   losses: W12-watch 1.07, published-port upload CPU/GiB 1.08; NAT
-   paths undercount ctrs CPU in the host kernel.
-5. W8 and W9 cohorts (W9 needs `BENCH_W9_IMAGE_REF`).
+1. Queue `.work/tmp/queue.sh` (log `.work/native-perf/matrix/q1.log`),
+   serial: `w13-overlap:cpus9` (primary decision test), `w2-api:cpus9`
+   + `w14-idle-resume:cpus9`, `w12-full-bind:cpus9` + `w6-build:cpus9`,
+   then `w6-build:cohort` + `w7-buildx:cohort`. Report each with
+   `reporting.py --candidate --match <run>`. Decide the default from the
+   overlap tail plus the W2 CPU/success, idle-resume CPU, footprint and
+   next-use budgets (`resource_cycles.BUDGETS`); if adopted, change
+   `default_cpus`, record policy and candidate identity in
+   `docs/decisions.md`, and re-run the D-lane cohorts at the new default.
+2. Land `fix/watch-recovery` after review: watch-recovery.sh passes
+   both cases with the loss asserted, e2e 0 failed.
+3. Full-bind boundary: a two-virtiofs-device probe
+   (`exp/fs-devices`, `CTRS_EXP_SHARE_DEVICES=2`, a noisy first run
+   showed 1.2–2.5× more files/s split across two devices) tests whether
+   the Virtualization.framework server serializes per device. Rerun in a
+   quiet window before drawing a conclusion.
+4. W6/W7: profile the largest confirmed losing build phase once the
+   cohorts report.
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
