@@ -63,6 +63,9 @@ nginx_up() { for _ in $(seq 50); do $D exec "$1" wget -qO- -T 1 http://127.0.0.1
 # the user's: cleanup removes only what the suite made.
 KEEP_C=" $($D ps -aq --no-trunc | tr '\n' ' ') "
 KEEP_N=" $($D network ls -q --no-trunc --filter type=custom 2>/dev/null | tr '\n' ' ') "
+scratch_dir() { mktemp -d "$TMPDIR/ctrs-e2e.XXXXXXXX"; }
+scratch_file() { mktemp "$TMPDIR/ctrs-e2e.XXXXXXXX"; }
+export -f scratch_dir scratch_file
 scratch_remove() {
   python3 - "$1" <<'PYREMOVE'
 import os, sys
@@ -164,7 +167,7 @@ code tty-exit-code 5 bash -c "(sleep 1; printf 'exit 5\n') | script -q /dev/null
 # runs. The hang is timed here: an alarm does not stop a docker client. Each run
 # must also exit 0 and print its input, or runs that all fail would pass this.
 if [ "${SLOW:-0}" = 1 ]; then
-  hung=0 wrong=0 out=$(mktemp)
+  hung=0 wrong=0 out=$(scratch_file)
   for _ in $(seq 300); do
     echo in | $D run -i --rm --name e2e-stdin-end alpine cat >"$out" 2>&1 &
     p=$!
@@ -448,7 +451,7 @@ t host-internal-peer "peer 127.0.0.1" $D run --rm alpine sh -c 'nc host.docker.i
 kill $PEER_PID 2>/dev/null
 
 section "volumes and bind mounts"
-BIND=$(mktemp -d); echo "from the mac" > "$BIND/hello.txt"
+BIND=$(scratch_dir); echo "from the mac" > "$BIND/hello.txt"
 t bind-read "from the mac" $D run --rm -v "$BIND:/data" alpine cat /data/hello.txt
 t bind-write "from the container" bash -c "$D run --rm -v $BIND:/data alpine sh -c 'echo from the container > /data/out.txt' && cat $BIND/out.txt"
 # A new file without owner read (Node's fs.cpSync creates with 0200) is made
@@ -463,7 +466,7 @@ t bind-file "from the mac" $D run --rm -v "$BIND/hello.txt:/etc/greeting" alpine
 # (docs/design-bind-notify.md): save, atomic replace, create, rename, delete.
 # A watch on a replaced or deleted file gets IN_DELETE_SELF, as on Linux.
 # An in-place save is also a rename of the name onto itself, as on OrbStack.
-WATCH=$(mktemp -d); echo one > "$WATCH/saved"; echo one > "$WATCH/replaced"; echo one > "$WATCH/renamed"; echo one > "$WATCH/deleted"
+WATCH=$(scratch_dir); echo one > "$WATCH/saved"; echo one > "$WATCH/replaced"; echo one > "$WATCH/renamed"; echo one > "$WATCH/deleted"
 $D run -d --name e2e-inotify -v "$WATCH:/w" alpine inotifyd - /w:cndmy /w/replaced:D /w/deleted:D >/dev/null
 sleep 1
 echo two >> "$WATCH/saved"; echo two > "$WATCH/.tmp" && mv "$WATCH/.tmp" "$WATCH/replaced"
@@ -499,12 +502,12 @@ $D exec e2e-negative sh -c 'mkdir /w/made && ls /w/gone && for n in a b c; do [ 
 echo mac > "$WATCH/made/a"; mkdir "$WATCH/made/sub" && echo mac > "$WATCH/made/sub/b"; rmdir "$WATCH/gone"
 WAIT_SEEN='for i in $(seq 30); do test -e /w/made/a && test -e /w/made/sub/b && ! test -e /w/gone && echo seen && break; sleep 0.1; done'
 t bind-made-here-mac-create "seen" $D exec e2e-negative sh -c "$WAIT_SEEN"
-$D rm -f e2e-negative >/dev/null
+$D rm -f e2e-negative >/dev/null; scratch_remove "$WATCH"
 # Mixed writers (guest/kernel/patches/0012): a Mac edit right after the
 # container's own write is raised and read, in place or as an atomic
 # replace. A builder that re-reads the file on every event must end on the
 # Mac's bytes, and so must a plain read.
-MIX=$(mktemp -d); mkdir "$MIX/src"; echo base > "$MIX/src/inplace"; echo base > "$MIX/src/replaced"
+MIX=$(scratch_dir); mkdir "$MIX/src"; echo base > "$MIX/src/inplace"; echo base > "$MIX/src/replaced"
 $D run -d --name e2e-mix -v "$MIX:/w" alpine sh -c 'inotifyd - /w/src:cwnmy | while read -r e d n; do echo "$n $(cat /w/src/$n 2>/dev/null)"; done > /tmp/built' >/dev/null
 sleep 1
 $D exec e2e-mix sh -c 'echo guest > /w/src/inplace; echo guest > /w/src/replaced'
@@ -515,7 +518,7 @@ t bind-mixed-writer "mac mac mac mac" $D exec e2e-mix sh -c "$WAIT_MIX"
 # Watched-root churn: other containers' bind mounts come and go, which
 # replaces the host's FSEvents stream; edits made meanwhile still arrive.
 for i in 1 2 3 4; do
-  OTHER=$(mktemp -d); $D run -d --name "e2e-churn$i" -v "$OTHER:/o" alpine sleep 30 >/dev/null
+  OTHER=$(scratch_dir); $D run -d --name "e2e-churn$i" -v "$OTHER:/o" alpine sleep 30 >/dev/null
   echo "churn$i" > "$MIX/src/inplace"
   $D rm -f "e2e-churn$i" >/dev/null; rmdir "$OTHER"
 done
@@ -530,7 +533,7 @@ t bind-burst "20000 last" $D exec e2e-mix sh -c "$WAIT_BURST"
 # entries without detaching a volume mounted inside a bind mount, and
 # renaming the bind root away and back (FSEvents root-changed) still lets
 # a change made meanwhile show.
-RS=$(mktemp -d); mkdir "$RS/proj"; echo one > "$RS/proj/f"
+RS=$(scratch_dir); mkdir "$RS/proj"; echo one > "$RS/proj/f"
 $D volume create e2e-rescan >/dev/null
 $D run -d --name e2e-rescan --privileged -v "$RS/proj:/w" -v e2e-rescan:/w/deps alpine sh -c 'echo vol > /w/deps/marker; sleep 120' >/dev/null
 sleep 1
@@ -554,7 +557,7 @@ t vol-copyup-not-over "1 mine" bash -c "$D run --rm -v tkeep:/usr/share/nginx/ht
 t redis-volume "PONG OK running" bash -c "$D run -d --name rv -v tredis:/data redis:7-alpine >/dev/null; for i in \$(seq 50); do $D exec rv redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 0.2; done; p=\$($D exec rv redis-cli ping); s=\$($D exec rv redis-cli save); sleep 1; echo \$p \$s \$($D inspect -f '{{.State.Status}}' rv)"
 # A volume over part of a bind (`./:/app` and `/app/node_modules`) is filled
 # from the image, as Docker does, never from the host's folder under it.
-t vol-copyup-under-bind "index.html" bash -c "h=\$(mktemp -d); mkdir \$h/html; echo mac > \$h/html/from-host.txt; $D run --rm -v \$h:/usr/share/nginx -v /usr/share/nginx/html nginx:alpine sh -c 'cd /usr/share/nginx/html; [ -e from-host.txt ] && echo from the host || ls'; scratch_remove \"\$h\""
+t vol-copyup-under-bind "index.html" bash -c "h=\$(scratch_dir); mkdir \$h/html; echo mac > \$h/html/from-host.txt; $D run --rm -v \$h:/usr/share/nginx -v /usr/share/nginx/html nginx:alpine sh -c 'cd /usr/share/nginx/html; [ -e from-host.txt ] && echo from the host || ls'; scratch_remove \"\$h\""
 $D rm -f rv >/dev/null 2>&1; $D volume rm towner tapk tkeep tredis >/dev/null 2>&1
 t vol-in-use "in use" bash -c "$D run -d --name vu -v tvol:/v alpine sleep 30 >/dev/null; $D volume rm tvol"
 $D rm -f vu >/dev/null
@@ -568,7 +571,7 @@ t anon-from-image "volume:/var/lib/postgresql/data" bash -c "$D run -d --name pg
 # initialise, which also answers, and then restarts.
 t postgres-works "42" bash -c "for i in \$(seq 60); do $D logs pgv 2>&1 | grep -q 'init process complete' && $D exec pgv psql -U postgres -tAc 'select 1' >/dev/null 2>&1 && break; sleep 0.5; done; $D exec pgv psql -U postgres -tAc 'select 42'"
 t rm-v-anon "gone" bash -c "n=\$($D volume ls -q | wc -l); $D rm -f -v pgv >/dev/null; m=\$($D volume ls -q | wc -l); [ \$m -lt \$n ] && echo gone"
-PGK_VOL=$(mktemp)
+PGK_VOL=$(scratch_file)
 t rm-anon-default-kept "kept" bash -c "$D run -d --name pgk -e POSTGRES_PASSWORD=x postgres:17-alpine >/dev/null; $D inspect -f '{{range .Mounts}}{{.Name}}{{end}}' pgk > $PGK_VOL; n=\$($D volume ls -q | wc -l); $D rm -f pgk >/dev/null; m=\$($D volume ls -q | wc -l); [ \$m -eq \$n ] && echo kept"
 $D volume rm "$(cat $PGK_VOL 2>/dev/null)" >/dev/null 2>&1; unlink "$PGK_VOL"
 # Prune only what this suite labels: never the user's own volumes.
@@ -613,7 +616,7 @@ $D rm -f fa fb fx >/dev/null
 section "compose"
 # A container outside the project must not confuse Compose.
 $D run -d --name bystander nginx:alpine >/dev/null
-CP=$(mktemp -d)
+CP=$(scratch_dir)
 cat > "$CP/compose.yaml" <<'YAML'
 services:
   web:
@@ -640,7 +643,7 @@ $D rm -f bystander >/dev/null
 scratch_remove "$CP"
 
 section "docker cp"
-CPD=$(mktemp -d); mkdir -p "$CPD/dir/sub"; echo one > "$CPD/a.txt"; echo two > "$CPD/dir/sub/b.txt"
+CPD=$(scratch_dir); mkdir -p "$CPD/dir/sub"; echo one > "$CPD/a.txt"; echo two > "$CPD/dir/sub/b.txt"
 $D run -d --name cpc alpine sleep 120 >/dev/null
 t cp-in-file "one" bash -c "$D cp $CPD/a.txt cpc:/tmp/ && $D exec cpc cat /tmp/a.txt"
 t cp-in-dir "two" bash -c "$D cp $CPD/dir cpc:/tmp/ && $D exec cpc cat /tmp/dir/sub/b.txt"
@@ -681,7 +684,7 @@ done
 printf '%s\n' "$KFEAT" | grep -qE '^[a-z0-9-]+ (ok|FAIL)' || t kernel-features "ok" printf '%s\n' "$KFEAT"
 
 section "images: tag, save, load"
-IMD=$(mktemp -d)
+IMD=$(scratch_dir)
 t tag "ctrs-test/alp:v1" bash -c "$D tag alpine ctrs-test/alp:v1 && $D images --format '{{.Repository}}:{{.Tag}}'"
 t tag-same-id "same" bash -c "[ \"\$($D images -q alpine:latest)\" = \"\$($D images -q ctrs-test/alp:v1)\" ] && echo same"
 t save "manifest.json" bash -c "$D save -o $IMD/a.tar ctrs-test/alp:v1 && tar -tf $IMD/a.tar"
@@ -694,7 +697,7 @@ code load-garbage 1 bash -c "echo nope | $D load"
 $D rmi ctrs-test/alp:v1 >/dev/null 2>&1; scratch_remove "$IMD"
 
 section "docker build (BuildKit in the VM)"
-BD=$(mktemp -d)
+BD=$(scratch_dir)
 # BuildKit builder for the engine under test, addressed by its endpoint,
 # never through a docker context. Re-point it every run: a scratch engine
 # gets a fresh socket, and a builder left over from an earlier run would
@@ -722,7 +725,7 @@ t create-empty-cmd "hello-from-image" bash -c "cid=\$(curl -s --unix-socket $SOC
 $D rmi ctrs-test/built ctrs-test/net ctrs-test/ep-cmd >/dev/null 2>&1; scratch_remove "$BD"
 
 section "registry: login, push, pull"
-REG=$(mktemp -d); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}
+REG=$(scratch_dir); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}
 # A throwaway client config: no keychain, nothing of the user's touched.
 mkdir -p "$REG/cfg"; echo '{"auths":{}}' > "$REG/cfg/config.json"; ln -s ~/.docker/cli-plugins "$REG/cfg/cli-plugins"; mkdir -p "$REG/cfg/contexts"
 $D run --rm httpd:2.4-alpine htpasswd -Bbn ctrsuser ctrspass > "$REG/htpasswd" 2>/dev/null
@@ -800,7 +803,7 @@ t connect-survives-restart "eth1" bash -c "$D restart -t 1 multi >/dev/null && $
 code connect-twice 1 $D network connect nb multi
 t disconnect "no-eth1" bash -c "$D network disconnect nb multi && ($D exec multi ip -o link | grep -q eth1 && echo still || echo no-eth1)"
 t disconnect-dns-gone "bad address" $D run --rm --network nb alpine wget -qO- -T 2 http://web2
-t compose-multi-net "PONG" bash -c "d=\$(mktemp -d); printf 'services:\n  db:\n    image: redis:7-alpine\n    networks: [back]\n  app:\n    image: redis:7-alpine\n    command: sh -c \"sleep 1; redis-cli -h db ping; sleep 30\"\n    networks: [front, back]\nnetworks:\n  front: {}\n  back: {}\n' > \$d/compose.yaml; cd \$d && $D compose -p ctrsnet up -d >/dev/null 2>&1; sleep 3; $D compose -p ctrsnet logs app; $D compose -p ctrsnet down >/dev/null 2>&1; scratch_remove \"\$d\""
+t compose-multi-net "PONG" bash -c "d=\$(scratch_dir); printf 'services:\n  db:\n    image: redis:7-alpine\n    networks: [back]\n  app:\n    image: redis:7-alpine\n    command: sh -c \"sleep 1; redis-cli -h db ping; sleep 30\"\n    networks: [front, back]\nnetworks:\n  front: {}\n  back: {}\n' > \$d/compose.yaml; cd \$d && $D compose -p ctrsnet up -d >/dev/null 2>&1; sleep 3; $D compose -p ctrsnet logs app; $D compose -p ctrsnet down >/dev/null 2>&1; scratch_remove \"\$d\""
 $D rm -f multi >/dev/null; $D network rm na nb >/dev/null
 
 section "events, prune, system df, search"
