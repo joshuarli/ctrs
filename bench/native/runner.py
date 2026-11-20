@@ -3413,8 +3413,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         engine = ctx.engines.get(key)
         if engine is None:
             engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane,
-                            fresh_dir=WORK / "engines" / ("ctrs-candidate-" + "-".join(
-                                f"{k.lower()}{v}" for k, v in sorted(overrides.items()))) if overrides else None,
+                            fresh_dir=candidate_dir(overrides) if overrides else None,
                             config_overrides=overrides)
             ctx.engines[key] = engine
         stop = not keep_warm
@@ -3695,6 +3694,28 @@ def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, slee
         sleep(15)
 
 
+def candidate_dir(overrides: dict) -> Path:
+    return WORK / "engines" / ("ctrs-candidate-" + "-".join(
+        f"{k.lower()}{v}" for k, v in sorted(overrides.items())))
+
+
+def clone_warm_engine(target: Path, source: Path | None = None) -> None:
+    """Start a candidate from a copy-on-write clone of the default warm
+    engine's data, so both slots hold the same images and state."""
+    source = source or WORK / "engines" / "ctrs-warm"
+    probe = Engine("ctrs", "clone-check", fresh_dir=source)
+    try:
+        probe.sh(["version"], timeout=10)
+    except Exception:
+        pass
+    else:
+        raise SystemExit(f"{source} has a running daemon; stop it before cloning")
+    if target.exists():
+        shutil.rmtree(target)
+    (target / "run").mkdir(parents=True)
+    subprocess.run(["cp", "-c", "-R", str(source / "data"), str(target / "data")], check=True)
+
+
 def cmd_baseline(args) -> int:
     ctx = RunContext(f"base-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
@@ -3707,6 +3728,7 @@ def cmd_baseline(args) -> int:
             raise SystemExit("--candidate-cpus needs --a ctrs --b ctrs --resource-lane installed-default")
         ctx.design = "candidate"
         ctx.slot_overrides = {"b": {"CTRS_CPUS": str(args.candidate_cpus)}}
+        clone_warm_engine(candidate_dir(ctx.slot_overrides["b"]))
     rng = random.Random(args.seed)
     failed = False
     try:

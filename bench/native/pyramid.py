@@ -42,6 +42,7 @@ class Workload:
     manual: str = ""
     report: bool = True
     cwd: Path = REPO
+    design: str = "paired"
 
     @property
     def seconds(self) -> float:
@@ -102,6 +103,9 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
 
 UNMEASURED_TRIAL_SECONDS = 120.0
 
+CPU_CANDIDATE = 9
+CPU_CANDIDATE_CELLS = ("w13-overlap", "w2-api", "w12-full-bind", "w6-build", "w14-idle-resume")
+
 
 def registry() -> list[Workload]:
     items = [
@@ -124,6 +128,19 @@ def registry() -> list[Workload]:
                               per_trial, 20, basis, ENGINES + extra + ("quiet-host",),
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=10),
                                     "--pair-quiet-load", str(QUIET["load1"]))))
+    for name, area, purpose, args, seconds, extra in CELLS:
+        if name not in CPU_CANDIDATE_CELLS:
+            continue
+        items.append(Workload(
+            f"{name}:cpus{CPU_CANDIDATE}", "scenario", area,
+            f"{purpose}: ctrs at {CPU_CANDIDATE} vCPUs against its default, memory and assets fixed",
+            seconds or UNMEASURED_TRIAL_SECONDS, 20, "observed" if seconds else "estimated",
+            ENGINES + extra + ("quiet-host",),
+            argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "ctrs",
+                  "--candidate-cpus", str(CPU_CANDIDATE), "--pairs", "10",
+                  "--resource-lane", "installed-default", *args,
+                  "--pair-quiet-load", str(QUIET["load1"])),
+            design="candidate"))
     items += [
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
                  "Kutt workspace with ctrs given OrbStack's vCPUs and memory", 124, 20, "observed",
@@ -317,12 +334,13 @@ def wait_quiet(deadline: float) -> bool:
     return False
 
 
-def judge(run_id: str) -> dict:
+def judge(run_id: str, design: str = "paired") -> dict:
     sys.path.insert(0, str(HERE))
     import reporting
     files = sorted((WORK / "native-perf/results").glob(f"{run_id}/trials.jsonl"))
     records, issues = reporting.load_records(files)
-    report = reporting.analyze(records, issues)
+    report = reporting.analyze(records, issues) if design == "paired" \
+        else reporting.analyze_noise(records, issues, design)
     cohorts = []
     for c in report["cohorts"]:
         cohorts.append({
@@ -356,7 +374,7 @@ def run(chosen: list[Workload], quiet_timeout: float) -> int:
         if w.report:
             run_ids = [line.split("/results/")[1].split("/")[0] for line in log.read_text().splitlines()
                        if line.startswith("results: ") and "/results/" in line]
-            entry["runs"] = {rid: judge(rid) for rid in run_ids}
+            entry["runs"] = {rid: judge(rid, w.design) for rid in run_ids}
             if not run_ids:
                 entry.update(status="failed", reason="no results line in the log")
         results.append(entry)
