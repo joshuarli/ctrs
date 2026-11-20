@@ -1,0 +1,544 @@
+diff -ruN b/fs/fuse/dir.c c/fs/fuse/dir.c
+--- b/fs/fuse/dir.c	2026-11-20 08:30:07
++++ c/fs/fuse/dir.c	2026-11-20 09:25:13
+@@ -358,19 +358,16 @@
+ 	fi->nlookup++;
+ 	spin_unlock(&fi->lock);
+ 	kfree(forget);
+-	same = test_bit(FUSE_I_CHANGED_HERE, &fi->state) &&
+-	       !(READ_ONCE(fi->inval_mask) &
+-		 (STATX_SIZE | STATX_MTIME | STATX_CTIME)) &&
+-	       outarg.attr.size == i_size_read(inode) &&
++	same = outarg.attr.size == i_size_read(inode) &&
+ 	       outarg.attr.mtime == inode_get_mtime_sec(inode) &&
+ 	       outarg.attr.mtimensec == inode_get_mtime_nsec(inode) &&
+ 	       outarg.attr.ctime == inode_get_ctime_sec(inode) &&
+ 	       outarg.attr.ctimensec == inode_get_ctime_nsec(inode);
+-	if (same)
++	if (same && test_bit(FUSE_I_CHANGED_HERE, &fi->state) &&
++	    !(READ_ONCE(fi->inval_mask) & (STATX_SIZE | STATX_MTIME | STATX_CTIME)))
+ 		return 1;
+-	if (recovery && test_bit(FUSE_I_CHANGED_HERE, &fi->state))
+-		return 2;
+-	clear_bit(FUSE_I_CHANGED_HERE, &fi->state);
++	if (!recovery || !same)
++		clear_bit(FUSE_I_CHANGED_HERE, &fi->state);
+ 	forget_all_cached_acls(inode);
+ 	fuse_change_attributes(inode, &outarg.attr, NULL,
+ 			       ATTR_TIMEOUT(&outarg), attr_version);
+@@ -410,6 +407,32 @@
+ int fuse_host_recovery_state(struct dentry *entry)
+ {
+ 	return fuse_host_state(entry, true);
++}
++
++u64 fuse_host_nodeid(struct inode *inode)
++{
++	return get_node_id(inode);
++}
++
++int fuse_host_lookup_nodeid(struct inode *dir, const struct qstr *name, u64 *nodeid)
++{
++	struct fuse_forget_link *forget = fuse_alloc_forget();
++	struct fuse_entry_out outarg;
++	struct fuse_mount *fm = get_fuse_mount(dir);
++	FUSE_ARGS(args);
++	int err;
++
++	if (!forget)
++		return -ENOMEM;
++	fuse_lookup_init(fm->fc, &args, get_node_id(dir), name, &outarg);
++	err = fuse_simple_request(fm, &args);
++	if (err || !outarg.nodeid) {
++		kfree(forget);
++		return err ? err : -ENOENT;
++	}
++	*nodeid = outarg.nodeid;
++	fuse_queue_forget(fm->fc, forget, outarg.nodeid, 1);
++	return 0;
+ }
+ 
+ /*
+diff -ruN b/fs/fuse/fuse_i.h c/fs/fuse/fuse_i.h
+--- b/fs/fuse/fuse_i.h	2026-11-20 08:30:07
++++ c/fs/fuse/fuse_i.h	2026-11-20 09:25:13
+@@ -1403,6 +1403,8 @@
+ void fuse_mark_changed_here(struct inode *inode);
+ int fuse_host_entry_state(struct dentry *entry);
+ int fuse_host_recovery_state(struct dentry *entry);
++u64 fuse_host_nodeid(struct inode *inode);
++int fuse_host_lookup_nodeid(struct inode *dir, const struct qstr *name, u64 *nodeid);
+ void fuse_host_rescan(struct inode *inode);
+ 
+ int fuse_flush_times(struct inode *inode, struct fuse_file *ff);
+diff -ruN b/fs/proc/ctrs_fsnotify.c c/fs/proc/ctrs_fsnotify.c
+--- b/fs/proc/ctrs_fsnotify.c	2026-11-20 08:51:48
++++ c/fs/proc/ctrs_fsnotify.c	2026-11-20 09:27:12
+@@ -31,6 +31,8 @@
+ 
+ int fuse_host_entry_state(struct dentry *entry);
+ int fuse_host_recovery_state(struct dentry *entry);
++u64 fuse_host_nodeid(struct inode *inode);
++int fuse_host_lookup_nodeid(struct inode *dir, const struct qstr *name, u64 *nodeid);
+ void fuse_host_rescan(struct inode *inode);
+ 
+ static bool may_forget(struct dentry *dentry)
+@@ -93,10 +95,15 @@
+ 			notify_renamed_in_place(d_inode(parent->dentry), p.dentry);
+ 		fsnotify_change(p.dentry, ATTR_SIZE);
+ 	}
+-	else if (d_is_dir(p.dentry))
+-		fsnotify_mkdir(d_inode(parent->dentry), p.dentry);
+-	else
+-		fsnotify_create(d_inode(parent->dentry), p.dentry);
++	else {
++		struct name_snapshot name;
++		u32 mask = FS_CREATE | (d_is_dir(p.dentry) ? FS_ISDIR : 0);
++
++		take_dentry_name_snapshot(&name, p.dentry);
++		fsnotify_name(mask, p.dentry, FSNOTIFY_EVENT_DENTRY,
++			      d_inode(parent->dentry), &name.name, 0);
++		release_dentry_name_snapshot(&name);
++	}
+ 	path_put(&p);
+ 	return 0;
+ }
+@@ -109,8 +116,14 @@
+ 	if (IS_ERR(child))
+ 		return PTR_ERR(child);
+ 	if (child && d_really_is_positive(child)) {
++		struct name_snapshot snapshot;
++
++		take_dentry_name_snapshot(&snapshot, child);
+ 		notify_unlinked(d_inode(child));
+-		fsnotify_delete(d_inode(parent->dentry), d_inode(child), child);
++		fsnotify_name(FS_DELETE | (d_is_dir(child) ? FS_ISDIR : 0),
++			      d_inode(child), FSNOTIFY_EVENT_INODE,
++			      d_inode(parent->dentry), &snapshot.name, 0);
++		release_dentry_name_snapshot(&snapshot);
+ 		if (may_forget(child))
+ 			d_invalidate(child);
+ 	} else {
+@@ -154,8 +167,10 @@
+ 	struct rb_node node;
+ 	u64 ino;
+ 	u64 seen;
++	u64 checked;
+ 	bool touched;
+ 	bool removed;
++	bool nodeid;
+ 	unsigned char type;
+ 	unsigned int len;
+ 	char name[];
+@@ -170,6 +185,7 @@
+ 	struct completion ready;
+ 	unsigned int refs;
+ 	u64 generation;
++	u64 visited;
+ 	bool populating;
+ 	bool degraded;
+ 	int error;
+@@ -239,7 +255,7 @@
+ 	}
+ }
+ 
+-static struct ctrs_name *ctrs_name_add_locked(struct ctrs_watch *watch, const struct qstr *name, u64 ino, unsigned int type, bool initial)
++static struct ctrs_name *ctrs_name_add_locked(struct ctrs_watch *watch, const struct qstr *name, u64 ino, unsigned int type, bool initial, bool nodeid)
+ {
+ 	struct rb_node **link = &watch->names.rb_node, *parent = NULL;
+ 	struct ctrs_name *item;
+@@ -259,8 +275,10 @@
+ 		if (!cmp) {
+ 			if (initial && item->touched)
+ 				return item;
+-			if (ino)
++			if (ino) {
+ 				item->ino = ino;
++				item->nodeid = nodeid;
++			}
+ 			if (type != DT_UNKNOWN)
+ 				item->type = type;
+ 			if (!initial && watch->populating)
+@@ -289,10 +307,12 @@
+ 	}
+ 	item->len = len;
+ 	item->ino = ino;
++	item->nodeid = nodeid;
+ 	item->type = type;
+ 	item->touched = !initial && watch->populating;
+ 	item->removed = false;
+ 	item->seen = watch->generation;
++	item->checked = 0;
+ 	memcpy(item->name, key.name, len);
+ 	item->name[len] = '\0';
+ 	rb_link_node(&item->node, parent, link);
+@@ -325,7 +345,9 @@
+ 	if ((len == 1 && name[0] == '.') ||
+ 	    (len == 2 && name[0] == '.' && name[1] == '.'))
+ 		return true;
+-	if (len > NAME_MAX || listing->count == RECOVERY_BATCH)
++	if (len > NAME_MAX)
++		return true;
++	if (listing->count == RECOVERY_BATCH)
+ 		return false;
+ 	item = &listing->names[listing->count].name;
+ 	listing->names[listing->count++].ino = ino;
+@@ -372,7 +394,7 @@
+ 			struct recovery_name *name = &listing->names[i].name;
+ 			struct qstr q = QSTR_LEN(name->name, name->len);
+ 
+-			ctrs_name_add_locked(watch, &q, listing->names[i].ino, name->type, true);
++			ctrs_name_add_locked(watch, &q, listing->names[i].ino, name->type, true, false);
+ 		}
+ 		if (err)
+ 			ctrs_degrade_locked(watch);
+@@ -507,7 +529,7 @@
+ 	mutex_lock(&watch->lock);
+ 	if (mask & (FS_DELETE | FS_MOVED_FROM)) {
+ 		if (watch->populating) {
+-			struct ctrs_name *item = ctrs_name_add_locked(watch, name, 0, mask & FS_ISDIR ? DT_DIR : DT_UNKNOWN, false);
++			struct ctrs_name *item = ctrs_name_add_locked(watch, name, 0, mask & FS_ISDIR ? DT_DIR : DT_UNKNOWN, false, false);
+ 
+ 			if (item)
+ 				item->removed = true;
+@@ -515,7 +537,10 @@
+ 			ctrs_name_remove_locked(watch, name);
+ 		}
+ 	} else if (mask & (FS_CREATE | FS_MOVED_TO)) {
+-		ctrs_name_add_locked(watch, name, inode ? inode->i_ino : 0, mask & FS_ISDIR ? DT_DIR : DT_UNKNOWN, false);
++		bool same_fs = inode && inode->i_sb == watch->inode->i_sb;
++
++		ctrs_name_add_locked(watch, name, same_fs ? fuse_host_nodeid(inode) : 0,
++				     mask & FS_ISDIR ? DT_DIR : DT_UNKNOWN, false, same_fs);
+ 	}
+ 	mutex_unlock(&watch->lock);
+ 	return 0;
+@@ -544,6 +569,7 @@
+ static struct path recovery_root;
+ static bool recovery_active;
+ static bool recovery_again;
++static u64 recovery_round;
+ static void recovery_run(struct work_struct *work);
+ static DECLARE_DELAYED_WORK(recovery_work, recovery_run);
+ 
+@@ -570,6 +596,20 @@
+ 		kfree(dir);
+ 		return -ENOMEM;
+ 	}
++	dir->watch = ctrs_watch_find(d_inode(dentry));
++	if (dir->watch) {
++		mutex_lock(&dir->watch->lock);
++		if (dir->watch->visited == recovery_round) {
++			mutex_unlock(&dir->watch->lock);
++			ctrs_watch_put(dir->watch);
++			dput(dir->cursor);
++			kfree(dir);
++			return 0;
++		}
++		dir->watch->visited = recovery_round;
++		dir->watch->generation++;
++		mutex_unlock(&dir->watch->lock);
++	}
+ 	list_add(&dir->link, &recovery_dirs);
+ 	return 0;
+ }
+@@ -602,7 +642,7 @@
+ 	return child;
+ }
+ 
+-static int recovery_check(struct dentry *child)
++static int recovery_check(struct dentry *child, struct ctrs_watch *watch)
+ {
+ 	struct inode *inode = d_inode(child);
+ 	struct dentry *parent_entry = dget_parent(child);
+@@ -641,16 +681,31 @@
+ 		}
+ 		if (may_forget(child))
+ 			d_invalidate(child);
+-	} else if (state == 2 || (state == 0 &&
++	} else if (state == 0 &&
+ 		   (size != i_size_read(inode) ||
+ 		    !timespec64_equal(&mtime, &new_mtime) ||
+-		    !timespec64_equal(&ctime, &new_ctime)))) {
++		    !timespec64_equal(&ctime, &new_ctime))) {
+ 		if (S_ISREG(inode->i_mode)) {
+ 			invalidate_mapping_pages(inode->i_mapping, 0, -1);
+ 			notify_renamed_in_place(parent, child);
+ 		}
+ 		fsnotify_change(child, ATTR_SIZE);
+ 	}
++	if (watch && state >= 0) {
++		struct name_snapshot name;
++		struct ctrs_name *item;
++		unsigned int seq = read_seqcount_begin(&child->d_seq);
++
++		take_dentry_name_snapshot(&name, child);
++		mutex_lock(&watch->lock);
++		if (!read_seqcount_retry(&child->d_seq, seq) && child->d_parent == parent_entry) {
++			item = ctrs_find_name(watch, &name.name);
++			if (item)
++				item->checked = watch->generation;
++		}
++		mutex_unlock(&watch->lock);
++		release_dentry_name_snapshot(&name);
++	}
+ out:
+ 	dput(parent_entry);
+ 	return result;
+@@ -665,7 +720,9 @@
+ 	if ((len == 1 && name[0] == '.') ||
+ 	    (len == 2 && name[0] == '.' && name[1] == '.'))
+ 		return true;
+-	if (len > NAME_MAX || listing->count == RECOVERY_BATCH)
++	if (len > NAME_MAX)
++		return true;
++	if (listing->count == RECOVERY_BATCH)
+ 		return false;
+ 	item = &listing->names[listing->count++];
+ 	item->len = len;
+@@ -676,6 +733,39 @@
+ 	return true;
+ }
+ 
++static bool ctrs_name_guard(void)
++{
++	struct ctrs_initial_listing *initial = kvzalloc(sizeof(*initial), GFP_KERNEL);
++	struct recovery_listing *recovery = kvzalloc(sizeof(*recovery), GFP_KERNEL);
++	char name[NAME_MAX + 2] = { 'x' };
++	bool ok = false;
++
++	if (initial && recovery &&
++	    ctrs_initial_emit(&initial->ctx, name, NAME_MAX + 1, 0, 1, DT_REG) &&
++	    recovery_emit(&recovery->ctx, name, NAME_MAX + 1, 0, 1, DT_REG) &&
++	    !initial->count && !recovery->count &&
++	    ctrs_initial_emit(&initial->ctx, name, 1, 0, 1, DT_REG) &&
++	    recovery_emit(&recovery->ctx, name, 1, 0, 1, DT_REG) &&
++	    initial->count == 1 && recovery->count == 1)
++		ok = true;
++	kvfree(initial);
++	kvfree(recovery);
++	return ok;
++}
++
++static bool ctrs_name_guard_passed;
++
++static ssize_t ctrs_name_guard_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
++{
++	const char *result = ctrs_name_guard_passed ? "ok\n" : "failed\n";
++
++	return simple_read_from_buffer(buf, count, ppos, result, strlen(result));
++}
++
++static const struct proc_ops ctrs_name_guard_ops = {
++	.proc_read = ctrs_name_guard_read,
++};
++
+ static void recovery_overflow(struct inode *inode)
+ {
+ 	fsnotify_inode(inode, FS_Q_OVERFLOW);
+@@ -691,19 +781,15 @@
+ 	loff_t before;
+ 	int err, i;
+ 
+-	if (!dir->watch) {
+-		dir->watch = ctrs_watch_find(inode);
+-		if (!dir->watch)
+-			return 1;
+-		mutex_lock(&dir->watch->lock);
+-		if (dir->watch->degraded) {
+-			mutex_unlock(&dir->watch->lock);
+-			recovery_overflow(inode);
+-			return 1;
+-		}
+-		dir->watch->generation++;
++	if (!dir->watch)
++		return 1;
++	mutex_lock(&dir->watch->lock);
++	if (dir->watch->degraded) {
+ 		mutex_unlock(&dir->watch->lock);
++		recovery_overflow(inode);
++		return 1;
+ 	}
++	mutex_unlock(&dir->watch->lock);
+ 	if (!dir->file) {
+ 		dir->file = dentry_open_nonotify(&path, O_RDONLY | O_DIRECTORY, current_cred());
+ 		if (IS_ERR(dir->file)) {
+@@ -724,17 +810,47 @@
+ 		struct recovery_name *name = &listing->names[i];
+ 		struct qstr q = QSTR_LEN(name->name, name->len);
+ 		struct ctrs_name *old;
+-		bool known, replaced, degraded;
++		bool known, replaced, unchecked, degraded, old_nodeid;
+ 		unsigned int old_type;
++		u64 previous, current_node = 0;
++		int lookup = 0;
+ 
+ 		mutex_lock(&dir->watch->lock);
+ 		old = ctrs_find_name(dir->watch, &q);
+ 		known = old != NULL;
+ 		old_type = old ? old->type : DT_UNKNOWN;
+-		replaced = old && old->ino && name->ino && old->ino != name->ino;
+-		ctrs_name_add_locked(dir->watch, &q, name->ino, name->type, false);
++		previous = old ? old->ino : 0;
++		old_nodeid = old && old->nodeid;
++		unchecked = old && old->checked != dir->watch->generation;
++		mutex_unlock(&dir->watch->lock);
++		if (old_nodeid) {
++			unsigned int attempt;
++
++			for (attempt = 0; attempt < 3; attempt++) {
++				lookup = fuse_host_lookup_nodeid(inode, &q, &current_node);
++				if (!lookup || lookup == -ENOENT || lookup == -ESTALE)
++					break;
++				if (attempt < 2)
++					msleep(25U << attempt);
++			}
++		}
++		replaced = previous && (old_nodeid ? (!lookup && previous != current_node) :
++					     (name->ino && previous != name->ino));
++		mutex_lock(&dir->watch->lock);
++		old = ctrs_find_name(dir->watch, &q);
++		if (known != (old != NULL) ||
++		    (known && (old->ino != previous || old->nodeid != old_nodeid)))
++			lookup = -EAGAIN;
++		if (!lookup)
++			ctrs_name_add_locked(dir->watch, &q, name->ino, name->type, false, false);
++		else if (old)
++			old->seen = dir->watch->generation;
+ 		degraded = dir->watch->degraded;
+ 		mutex_unlock(&dir->watch->lock);
++		if (lookup) {
++			recovery_overflow(inode);
++			continue;
++		}
+ 		if (degraded) {
+ 			recovery_overflow(inode);
+ 			err = 1;
+@@ -743,11 +859,48 @@
+ 		if (replaced)
+ 			fsnotify_name(FS_DELETE | (old_type == DT_DIR ? FS_ISDIR : 0),
+ 				      NULL, FSNOTIFY_EVENT_NONE, inode, &q, 0);
++		if (name->type == DT_DIR) {
++			struct dentry *child;
++
++			q.hash = full_name_hash(parent, q.name, q.len);
++			child = lookup_one_unlocked(mnt_idmap(path.mnt), &q, parent);
++			if (!IS_ERR(child)) {
++				struct inode *target = d_inode(child);
++				struct ctrs_watch *child_watch = target ? ctrs_watch_find(target) : NULL;
++
++				if (child_watch && !d_mountpoint(child))
++					err = recovery_push(child);
++				ctrs_watch_put(child_watch);
++				dput(child);
++				if (err)
++					break;
++			} else {
++				recovery_overflow(inode);
++			}
++		}
++		if (known && !replaced && unchecked && name->type != DT_DIR) {
++			struct dentry *child;
++
++			q.hash = full_name_hash(parent, q.name, q.len);
++			child = lookup_one_unlocked(mnt_idmap(path.mnt), &q, parent);
++			if (IS_ERR(child)) {
++				recovery_overflow(inode);
++			} else {
++				struct inode *target = d_inode(child);
++
++				if (target)
++					fsnotify(FS_MODIFY | FS_EVENT_ON_CHILD, target,
++						 FSNOTIFY_EVENT_INODE, inode, &q, target, 0);
++				else
++					recovery_overflow(inode);
++				dput(child);
++			}
++		}
+ 		if (!known || replaced) {
+ 			fsnotify_name(FS_CREATE | (name->type == DT_DIR ? FS_ISDIR : 0),
+ 				      NULL, FSNOTIFY_EVENT_NONE, inode, &q, 0);
+ 			mutex_lock(&dir->watch->lock);
+-			ctrs_name_add_locked(dir->watch, &q, name->ino, name->type, false);
++			ctrs_name_add_locked(dir->watch, &q, name->ino, name->type, false, false);
+ 			mutex_unlock(&dir->watch->lock);
+ 		}
+ 	}
+@@ -791,14 +944,30 @@
+ 	return err;
+ }
+ 
++static void recovery_file_watches(struct super_block *sb)
++{
++	struct ctrs_watch *watch;
++	unsigned int bucket;
++
++	mutex_lock(&ctrs_watch_mutex);
++	hash_for_each(ctrs_watches, bucket, watch, hash) {
++		if (watch->inode->i_sb == sb && !S_ISDIR(watch->inode->i_mode))
++			fsnotify_inode(watch->inode, FS_Q_OVERFLOW);
++	}
++	mutex_unlock(&ctrs_watch_mutex);
++}
++
+ static void recovery_run(struct work_struct *work)
+ {
+ 	unsigned int count = 0;
+ 	unsigned long delay = 0;
+ 	int err = 0;
+ 
+-	if (list_empty(&recovery_dirs))
++	if (list_empty(&recovery_dirs)) {
++		recovery_round++;
++		recovery_file_watches(recovery_root.dentry->d_sb);
+ 		err = recovery_push(recovery_root.dentry);
++	}
+ 	while (!err && !list_empty(&recovery_dirs) && count++ < RECOVERY_BATCH) {
+ 		struct recovery_dir *dir = list_first_entry(&recovery_dirs, struct recovery_dir, link);
+ 		struct dentry *child;
+@@ -834,7 +1003,7 @@
+ 			continue;
+ 		}
+ 		for (dir->retries = 0; dir->retries < 3; dir->retries++) {
+-			err = recovery_check(child);
++			err = recovery_check(child, dir->watch);
+ 			if (!err || err == -ENOENT || err == -ESTALE)
+ 				break;
+ 			if (dir->retries < 2)
+@@ -855,6 +1024,18 @@
+ 		while (!list_empty(&recovery_dirs))
+ 			recovery_pop();
+ 	}
++	if (list_empty(&recovery_dirs)) {
++		struct ctrs_watch *watch;
++		unsigned int bucket;
++
++		mutex_lock(&ctrs_watch_mutex);
++		hash_for_each(ctrs_watches, bucket, watch, hash) {
++			if (watch->inode->i_sb == recovery_root.dentry->d_sb &&
++			    S_ISDIR(watch->inode->i_mode) && READ_ONCE(watch->visited) != recovery_round)
++				recovery_overflow(watch->inode);
++		}
++		mutex_unlock(&ctrs_watch_mutex);
++	}
+ 	mutex_lock(&recovery_mutex);
+ 	if (list_empty(&recovery_dirs)) {
+ 		if (recovery_again) {
+@@ -1003,6 +1184,7 @@
+ {
+ 	struct proc_dir_entry *dir;
+ 
++	ctrs_name_guard_passed = ctrs_name_guard();
+ 	ctrs_name_limit = min_t(unsigned long, 64UL << 20, (totalram_pages() / 64) << PAGE_SHIFT);
+ 	ctrs_watch_group = fsnotify_alloc_group(&ctrs_watch_ops, FSNOTIFY_GROUP_DUPS);
+ 	if (IS_ERR(ctrs_watch_group))
+@@ -1010,7 +1192,8 @@
+ 	dir = proc_mkdir("ctrs", NULL);
+ 
+ 	if (!dir || (!proc_create("fsnotify", 0200, dir, &ctrs_fsnotify_ops) ||
+-	    !proc_create("watch_bytes", 0444, dir, &ctrs_name_bytes_ops)))
++	    !proc_create("watch_bytes", 0444, dir, &ctrs_name_bytes_ops) ||
++	    !proc_create("watch_name_guard", 0444, dir, &ctrs_name_guard_ops)))
+ 		return -ENOMEM;
+ 	return 0;
+ }

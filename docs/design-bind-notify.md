@@ -89,8 +89,12 @@ cannot prove redundant.
 - **Rescan.** A rescan bumps the FUSE connection epoch and schedules a
   recovery walk. The worker compares cached inode attributes and compares
   each watched directory's host listing with its retained name set. It
-  reports missing, new and replaced names to inotify. Directory failures
-  receive up to three attempts with backoff, then queue overflow. Entry
+  reports missing, new and replaced names to inotify. For a retained name
+  with no checked cached dentry, it performs a LOOKUP and reports a
+  modification because the previous attributes are unavailable. It also
+  uses watched inode marks to report overflow for per-file watches and for
+  directories the walk could not reach. Directory failures receive up to
+  three attempts with backoff, then queue overflow. Entry
   failures are retried and logged before they are skipped. The writer does
   not wait for FUSE operations held by the worker.
 - **Retained names.** Watches on the same virtiofs inode share a name set.
@@ -98,14 +102,21 @@ cannot prove redundant.
   An internal mark updates names on creates, deletes and moves. It does not
   subscribe to child writes. The set holds names and directory-entry inode
   numbers, but no dentry, mount or memcg references. Allocations are not
-  charged to the watching container's memcg.
+  charged to the watching container's memcg. On 64-bit guests each name has
+  56 bytes of fields before its bytes and allocator rounding. A six-byte
+  name occupies 64 bytes.
 - **Bounds and degraded recovery.** Name allocations use at most the lesser
   of 64 MiB and one sixty-fourth of guest RAM. `/proc/ctrs/watch_bytes`
   reports allocated bytes and the limit. If a name set cannot be retained,
   the kernel releases it, logs once, and reports `IN_Q_OVERFLOW` and
   `IN_ATTRIB` for that directory on recovery. Applications must rebuild
-  their view after overflow. The host's root updates share a single
-  coalescing wakeup. Writeback caching remains off.
+  their view after overflow. The budget is global and first come: one
+  container can exhaust it for others. Linux reports overflow with watch
+  descriptor -1. libuv can ignore that event, so its users cannot rely on
+  this degraded path to trigger a rebuild. The world-readable counter
+  exposes aggregate watch activity to guest users. These limitations are
+  accepted. The host's root updates share a single coalescing wakeup.
+  Writeback caching remains off.
 
 The opt-in `CTRS_TEST_FSEVENTS_GATE` is used only by
 `tests/watch-recovery.sh`. Its loss gate suppresses host callbacks. Its

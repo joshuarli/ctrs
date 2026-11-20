@@ -135,6 +135,9 @@ PY
   done
   if [ "$preflight" != 1 ]; then echo "FAIL $CASE: watcher preflight"; FAIL=1; docker rm -f "$CONTAINER" >/dev/null; continue; fi
   echo "PASS $CASE: initial artifact and live watcher"
+  if [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ] && ! docker exec "$CONTAINER" sh -c '[ "$(cat /proc/ctrs/watch_name_guard)" = ok ]'; then
+    echo "FAIL $CASE: overlong directory-name guard"; FAIL=1
+  fi
   if [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; then
     COUNTER=$(docker exec "$CONTAINER" cat /proc/ctrs/watch_bytes) || COUNTER=
     read -r BYTES LIMIT <<< "$COUNTER"
@@ -163,7 +166,7 @@ PY
     done
     if [ "$added_seen" != 1 ]; then echo "FAIL $CASE: added-name preflight"; FAIL=1; docker rm -f "$CONTAINER" >/dev/null; continue; fi
   fi
-  if [ -n "${CTRS_TEST_DROP_DCACHE:-}" ]; then
+  if [ -n "${CTRS_TEST_DROP_DCACHE:-}" ] || { [ "$CASE" = guest-overflow ] && [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; }; then
     docker exec --privileged "$CONTAINER" sh -c 'set -e; mkdir -p /tmp/recovery-proc; mount -t proc proc /tmp/recovery-proc; sync; echo 2 > /tmp/recovery-proc/sys/vm/drop_caches; umount /tmp/recovery-proc' || { echo "FAIL $CASE: cannot drop guest caches"; FAIL=1; docker rm -f "$CONTAINER" >/dev/null; continue; }
   fi
   LOG_OFFSET=$(($(wc -c < "$LOG") + 1))
@@ -263,7 +266,9 @@ PY2
     done
     echo "PASS $CASE: loss observed and watcher converged"
   else
-    echo "FAIL $CASE: watcher did not converge within 30 seconds"; FAIL=1
+    echo "FAIL $CASE: watcher did not converge within 30 seconds"
+    docker exec "$CONTAINER" sh -c 'for f in "$1" "$2" "$3" "$4/modified" "$4/deleted" "$4/created"; do printf "%s " "$f"; if [ -e "/tmp/derived/$f" ]; then cat "/tmp/derived/$f" 2>/dev/null || :; else echo missing; fi; done; echo events:; tail -20 /tmp/events' sh "$MODIFIED" "$DELETED" "$CREATED" "$BRANCH" || :
+    FAIL=1
   fi
   if [ "$converged" = 1 ] || [ -z "${CTRS_KEEP_WATCH_FAILURE:-}" ]; then docker rm -f "$CONTAINER" >/dev/null; fi
  done
@@ -293,7 +298,14 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
     if [ "$ready" != 1 ]; then
       echo "FAIL extra: watchers not ready"; FAIL=1
     else
-      docker exec "$P1" sh -c 'echo volume > /w/nested/sentinel; cat /w/atomic >/dev/null' || FAIL=1
+      docker exec "$P1" sh -c 'echo volume > /w/nested/sentinel; cat /w/atomic >/dev/null; echo guest > /w/guest-kept; echo guest > /w/guest-replaced; echo guest > /w/own; stat /w/own >/dev/null; a=$(stat -c %i /w/guest-kept); b=$(ls -ia /w | awk "\$2 == \"guest-kept\" { print \$1 }"); [ "$a" = "$b" ]' || { echo "FAIL extra: guest-created inode identity"; FAIL=1; }
+      for i in $(seq 1 100); do
+        if docker logs "$P1" 2>&1 | rg -q '^00000100 guest-kept$' && docker logs "$P2" 2>&1 | rg -q '^00000100 guest-kept$'; then break; fi
+        sleep .1
+      done
+      sleep 1
+      BEFORE1=$(($(docker logs "$P1" 2>&1 | wc -l) + 1))
+      BEFORE2=$(($(docker logs "$P2" 2>&1 | wc -l) + 1))
       chmod 000 "$EXTRA/denied"
       LOG_OFFSET=$(($(wc -c < "$LOG") + 1))
       touch "$GATE"
@@ -305,6 +317,8 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       done
       printf 'after\n' > "$EXTRA/replacement"
       mv "$EXTRA/replacement" "$EXTRA/atomic"
+      printf 'replacement\n' > "$EXTRA/new-guest"
+      mv "$EXTRA/new-guest" "$EXTRA/guest-replaced"
       rmdir "$EXTRA/old-dir"
       mkdir "$EXTRA/new-dir"
       docker exec "$P1" sh -c 'i=0; while [ "$i" -lt 100 ]; do mv /w/race-a /w/race-b 2>/dev/null || :; mv /w/race-b /w/race-a 2>/dev/null || :; i=$((i+1)); done' >/dev/null 2>&1 &
@@ -322,6 +336,8 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       for i in $(seq 1 300); do
         if docker logs "$P1" 2>&1 | rg -q '^00000200 atomic$' && docker logs "$P1" 2>&1 | rg -q '^00000100 atomic$' &&
            docker logs "$P2" 2>&1 | rg -q '^00000200 atomic$' && docker logs "$P2" 2>&1 | rg -q '^00000100 atomic$' &&
+           docker logs "$P1" 2>&1 | tail -n +"$BEFORE1" | rg -q '^00000200 guest-replaced$' && docker logs "$P1" 2>&1 | tail -n +"$BEFORE1" | rg -q '^00000100 guest-replaced$' &&
+           docker logs "$P2" 2>&1 | tail -n +"$BEFORE2" | rg -q '^00000200 guest-replaced$' && docker logs "$P2" 2>&1 | tail -n +"$BEFORE2" | rg -q '^00000100 guest-replaced$' &&
            docker logs "$P1" 2>&1 | rg -q '^40000200 old-dir$' && docker logs "$P1" 2>&1 | rg -q '^40000100 new-dir$' &&
            docker logs "$P2" 2>&1 | rg -q '^40000200 old-dir$' && docker logs "$P2" 2>&1 | rg -q '^40000100 new-dir$'; then observed=1; break; fi
         sleep .1
@@ -331,6 +347,15 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       else
         echo "PASS extra: replacement and directory events reached both watchers during guest rename"
       fi
+      if docker logs "$P1" 2>&1 | tail -n +"$BEFORE1" | rg -q '^000000(02|40|80) own$'; then
+        echo "FAIL extra: guest write was echoed during recovery"; FAIL=1
+      else echo "PASS extra: guest write echo suppressed"; fi
+      if docker logs "$P1" 2>&1 | tail -n +"$BEFORE1" | rg -q '^00000[12]00 guest-kept$' || docker logs "$P2" 2>&1 | tail -n +"$BEFORE2" | rg -q '^00000[12]00 guest-kept$'; then
+        echo "FAIL extra: guest-created name falsely reported replaced"
+        echo "watcher 1 after line $BEFORE1:"; docker logs "$P1" 2>&1 | tail -n +"$BEFORE1" | rg 'guest-kept' || :
+        echo "watcher 2 after line $BEFORE2:"; docker logs "$P2" 2>&1 | tail -n +"$BEFORE2" | rg 'guest-kept' || :
+        FAIL=1
+      else echo "PASS extra: guest-created inode identity retained"; fi
       if ! docker exec "$P1" sh -c '[ "$(cat /w/nested/sentinel)" = volume ]'; then
         echo "FAIL extra: nested volume detached"; FAIL=1
       else
@@ -344,6 +369,37 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       chmod 700 "$EXTRA/denied"
       if [ "$unreadable" != 1 ]; then echo "FAIL extra: unreadable directory was not observed"; FAIL=1
       else echo "PASS extra: unreadable directory skipped"; fi
+      P3=$(docker run -d -v "$EXTRA:/w" -v "$ROOT/watch-probe:/probe:ro" alpine /probe /w/atomic) || P3=
+      [ -z "$P3" ] || CREATED_CONTAINERS+=("$P3")
+      ready=0
+      for i in $(seq 1 100); do
+        if [ -n "$P3" ] && docker logs "$P3" 2>&1 | rg -q READY; then ready=1; break; fi
+        sleep .1
+      done
+      if [ "$ready" != 1 ]; then echo "FAIL extra: per-file watcher not ready"; FAIL=1
+      elif ! docker exec --privileged "$P1" sh -c 'set -e; mkdir -p /tmp/recovery-proc; mount -t proc proc /tmp/recovery-proc; sync; echo 2 > /tmp/recovery-proc/sys/vm/drop_caches; umount /tmp/recovery-proc'; then
+        echo "FAIL extra: cannot drop per-file dentry"; FAIL=1
+      else
+        LOG_OFFSET=$(($(wc -c < "$LOG") + 1))
+        touch "$GATE"
+        printf 'file-watch\n' > "$EXTRA/file-replacement"
+        mv "$EXTRA/file-replacement" "$EXTRA/atomic"
+        triggered=0
+        for i in $(seq 1 100); do
+          if tail -c +"$LOG_OFFSET" "$LOG" | rg -q 'test gate suppressed bind mount change notifications'; then triggered=1; break; fi
+          sleep .1
+        done
+        unlink "$GATE"
+        printf 'wake\n' > "$EXTRA/file-wake"
+        overflow=0
+        for i in $(seq 1 300); do
+          if docker logs "$P3" 2>&1 | rg -q '^00004000 '; then overflow=1; break; fi
+          sleep .1
+        done
+        if [ "$triggered" = 1 ] && [ "$overflow" = 1 ]; then echo "PASS extra: reclaimed per-file watch reported overflow"
+        else echo "FAIL extra: reclaimed per-file watch silent"; FAIL=1; fi
+      fi
+      [ -z "$P3" ] || docker rm -f "$P3" >/dev/null 2>&1 || :
     fi
     [ -z "$P1" ] || docker rm -f "$P1" >/dev/null 2>&1 || :
     [ -z "$P2" ] || docker rm -f "$P2" >/dev/null 2>&1 || :
