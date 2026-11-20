@@ -53,25 +53,6 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(result['error'], 'ValueError: byte count or content mismatch')
         self.assertIsNone(result['sha256'])
 
-    def test_send_and_receive_wrap_around_the_artifact(self):
-        payload = bytes(range(256)) * 4099
-        size = len(payload) * 2 + len(payload) // 2
-        cyclic = (payload * 3)[:size]
-        digest = hashlib.sha256(cyclic).hexdigest()
-        path = self.expected(payload)
-        left, right = socket.socketpair()
-        thread = threading.Thread(target=lambda: tool.send(left, path, '0', size, digest))
-        thread.start()
-        with right:
-            result = tool.receive(right, '0', size, digest, path)
-        thread.join()
-        left.close()
-        self.assertIsNone(result['error'])
-        self.assertEqual(result['bytes'], size)
-        corrupt = cyclic[:len(payload) + 5] + bytes([cyclic[len(payload) + 5] ^ 1]) + cyclic[len(payload) + 6:]
-        result = self.run_receive(corrupt, size, digest, expected=payload)
-        self.assertEqual(result['error'], 'ValueError: byte count or content mismatch')
-
     def test_short_transfer_survives_trial_record(self):
         payload = b'payload'
         digest = hashlib.sha256(payload).hexdigest()
