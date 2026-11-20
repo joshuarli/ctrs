@@ -425,9 +425,10 @@ current-host baseline. Fixture commands now reference w8-v5
       scratch; it diagnosed the spin fixed in `bf2ea2b`, so promote it
       only if W14 CPU (fresh 1.15×) needs it.
    6. W12 inputs (`kutt.tar.gz`, `w12-image.tar`) live in disposable
-      `.work/tmp`; preflight now fails when they are missing, but their
-      rebuild needs a documented command. W1, W4–W10 and W8 have no trial
-      records on this host, so their costs are estimates.
+      `.work/tmp`; preflight fails when they are missing and names the
+      rebuild (`fixtures/w12/prepare.py`, pinned by sha256 in its README).
+      Open: W1, W4–W10 and W8 have no trial records on this host, so their
+      costs are estimates until each runs once.
 
 All work stays native ARM64/macOS. Installed-default behavior, disclosed
 resource-matched default-driver results and identical-builder controls stay

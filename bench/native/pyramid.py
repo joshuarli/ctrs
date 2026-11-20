@@ -248,7 +248,7 @@ def check_requirement(key: str) -> tuple[str, str]:
             else ("fail", f"{pin} missing")
     if key == "w12-inputs":
         missing = [p.name for p in (WORK / "tmp/kutt.tar.gz", WORK / "tmp/w12-image.tar") if not p.is_file()]
-        return ("fail", f".work/tmp missing {', '.join(missing)}; rebuild per fixtures/w12 README") if missing \
+        return ("fail", f".work/tmp missing {', '.join(missing)}; rebuild with `TMPDIR=$PWD/.work/tmp python3 bench/native/fixtures/w12/prepare.py`") if missing \
             else ("ok", "")
     if key == "w8-layout":
         layout = WORK / "native-perf/inputs/w8-portfolio-v5/layout"
