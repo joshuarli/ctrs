@@ -49,7 +49,10 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
             transfers.append({'host_start': current[0], 'host_end': timestamp,
                               'receipts': data['streams']})
         else:
-            transfers[-1]['receipts'] = data
+            # The receiving side times the transfer: the server on upload,
+            # the client (the `end` data) on download.
+            if any('seconds' in receipt for receipt in data):
+                transfers[-1]['receipts'] = data
             (directory / 'w13-receipts.json').write_text(json.dumps(transfers, indent=2) + '\n')
 
     def transfer():

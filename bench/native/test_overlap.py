@@ -154,6 +154,23 @@ class OverlapTests(unittest.TestCase):
             rec = overlap.trial_overlap(Context(tmp), Engine(), 'warm', lead_seconds=0)
         self.assertEqual(rec['resources'], resources)
 
+    def test_a_download_keeps_the_client_receipts_that_time_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, engine = Context(tmp), Engine()
+            def w13(ctx, engine, state, **kwargs):
+                ctx.overlap_transfer_observer('start', 0, None)
+                ctx.overlap_transfer_observer('end', 8, {'streams': [receipt()]})
+                ctx.overlap_transfer_observer('receipts', 8, [{'id': '0'}])
+                return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': []}
+            def w2(ctx, engine, state, *args, **kwargs):
+                with ctx.overlap_workload():
+                    pass
+                return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': []}
+            with patch.object(runner, 'trial_w13', w13), patch.object(runner, 'trial_w2', w2), \
+                 patch.object(overlap.time, 'monotonic', side_effect=[3, 7]), patch.object(overlap.time, 'sleep'):
+                rec = overlap.trial_overlap(ctx, engine, 'warm', lead_seconds=0, direction='download')
+        self.assertEqual(rec['metrics']['overlap_fraction'], 1)
+
     def run_case(self, end):
         with tempfile.TemporaryDirectory() as tmp:
             ctx, engine = Context(tmp), Engine()
