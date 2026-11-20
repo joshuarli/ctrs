@@ -8,8 +8,10 @@ export DOCKER_HOST="unix://$SOCK"
 unset DOCKER_CONTEXT
 ROOT="$PWD/.work/tmp/watch-recovery-fixture-$$"
 mkdir -p "$ROOT" "$(dirname "$GATE")"
+printf 'fixture: %s\n' "$ROOT"
 FAIL=0
 for CASE in host-loss guest-overflow; do
+  if [ -n "${CTRS_WATCH_CASE:-}" ] && [ "$CTRS_WATCH_CASE" != "$CASE" ]; then continue; fi
   TREE="$ROOT/$CASE"
   CONTROL="$ROOT/$CASE-control"
   mkdir -p "$TREE" "$CONTROL"
@@ -48,6 +50,9 @@ PY
   done
   if [ "$preflight" != 1 ]; then echo "FAIL $CASE: watcher preflight"; FAIL=1; docker rm -f "wr-$CASE" >/dev/null; continue; fi
   echo "PASS $CASE: initial artifact and live watcher"
+  if [ -n "${CTRS_TEST_DROP_DCACHE:-}" ]; then
+    docker exec --privileged "wr-$CASE" sh -c 'set -e; mkdir -p /tmp/recovery-proc; mount -t proc proc /tmp/recovery-proc; sync; echo 2 > /tmp/recovery-proc/sys/vm/drop_caches; umount /tmp/recovery-proc' || { echo "FAIL $CASE: cannot drop guest caches"; FAIL=1; docker rm -f "wr-$CASE" >/dev/null; continue; }
+  fi
   LOG_OFFSET=$(($(wc -c < "$LOG") + 1))
   CONSOLE_OFFSET=$(($(wc -c < "$DATA/vm-console.log") + 1))
   if [ "$CASE" = host-loss ]; then
@@ -114,6 +119,6 @@ PY2
     echo "FAIL $CASE: host loss or test gate overflow"; FAIL=1
   fi
   if [ "$converged" = 1 ] && [ "$triggered" = 1 ]; then echo "PASS $CASE: loss observed and watcher converged"; else echo "FAIL $CASE: watcher did not converge within 30 seconds"; FAIL=1; fi
-  docker rm -f "wr-$CASE" >/dev/null
+  if [ "$converged" = 1 ] || [ -z "${CTRS_KEEP_WATCH_FAILURE:-}" ]; then docker rm -f "wr-$CASE" >/dev/null; fi
  done
 exit "$FAIL"
