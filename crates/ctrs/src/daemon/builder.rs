@@ -622,7 +622,8 @@ pub enum BuilderBoot {
     /// The stopped builder was replaced with the pin while this request was
     /// in flight; the id the caller holds no longer exists.
     Replaced,
-    /// The builder is stale or foreign; the caller must refuse the request.
+    /// The builder is stale or foreign, or its config could not be
+    /// written; the caller must refuse the request.
     Conflict(Error),
 }
 
@@ -647,7 +648,7 @@ fn create_locked(engine: &Engine, _say: &mut dyn FnMut(&str)) -> Result<String, 
     };
     crate::diag::info!("builder created", name = name);
     let id = made["Id"].as_str().unwrap_or_default().to_owned();
-    write_config(engine, &id);
+    write_config(engine, &id)?;
     Ok(id)
 }
 
@@ -690,10 +691,10 @@ pub fn before_start(engine: &Engine, key: &str) -> BuilderBoot {
         return BuilderBoot::Clean;
     };
     match classify(Some(&rec)) {
-        Assessment::Matching | Assessment::Fresh => {
-            write_config(engine, &rec.id);
-            BuilderBoot::Clean
-        }
+        Assessment::Matching | Assessment::Fresh => match write_config(engine, &rec.id) {
+            Ok(()) => BuilderBoot::Clean,
+            Err(e) => BuilderBoot::Conflict(e),
+        },
         Assessment::StaleStopped => match replace_stale(engine, &mut |_| {}) {
             Ok(_) => BuilderBoot::Replaced,
             Err(e) => BuilderBoot::Conflict(e),
@@ -721,16 +722,35 @@ pub fn exec_session_gate(engine: &Engine, key: &str) -> Option<Error> {
     }
 }
 
-/// The garbage collector's limits, for buildkitd's next start.
-fn write_config(engine: &Engine, id: &str) {
+/// The garbage collector's limits and this daemon's mirror, for
+/// buildkitd's next start. A builder started on an older file pushes to
+/// another daemon's mirror port and every build fails, so a write that
+/// still fails after the guest's first moments refuses the start.
+fn write_config(engine: &Engine, id: &str) -> Result<(), Error> {
     let archive = tar(&[("buildkit/", None), ("buildkit/buildkitd.toml", Some(config_toml(cache_limit(), &super::mirror::config(engine)).as_bytes()))]);
-    if let Err(e) = copy_in(engine, id, "/etc", &mut io::Cursor::new(archive)) {
-        crate::diag::warn!("builder config not written", error = format!("{e:?}"));
+    let deadline = Instant::now() + CONFIG_WRITE_WINDOW;
+    loop {
+        match copy_in(engine, id, "/etc", &mut io::Cursor::new(&archive)) {
+            Ok(()) => break,
+            Err(Error::Io(e)) if Instant::now() < deadline => {
+                crate::diag::debug!("builder config write retried", error = e);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                crate::diag::warn!("builder config not written", error = format!("{e:?}"));
+                return Err(e);
+            }
+        }
     }
     if ctrs_vmm::rosetta_installed() {
         hide_amd64_qemu(engine, id);
     }
+    Ok(())
 }
+
+/// How long a config write is retried: a copy right after the VM boots can
+/// be reset before the guest's copy service answers.
+const CONFIG_WRITE_WINDOW: Duration = Duration::from_secs(3);
 
 /// BuildKit's x86-64 emulator, which it runs amd64 build steps under when it
 /// thinks the machine can't run them itself.
@@ -851,7 +871,7 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: 
     }
     let needs_start = engine.with(id, |c| c.status != Status::Running).unwrap_or(true);
     if needs_start {
-        write_config(engine, id);
+        write_config(engine, id)?;
         say("Starting ctrs's builder (BuildKit)");
         engine.start(id)?;
     } else if engine.is_paused(id) {
