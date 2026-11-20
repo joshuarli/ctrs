@@ -115,24 +115,39 @@ protocol 9, host binary and agent from `bf2ea2b`, e2e 508/508. Done this round:
   (1.35 s agent CPU in one streaming run; 0.05 s after `bf2ea2b`).
   Host-bound split (Mac bytes over vsock) built and rejected: no gain.
 
-Next, in order (queue `.work/native-perf/matrix/run-k17f.sh`, log
-`k17f.log`; it waits for `.work/tmp/hold` absent, no OrbStack containers
-and a 1-minute load under 4 — unrelated builds held the load at 10–22
-from 11:30):
+Measured since (all D lane, 10 pairs unless noted; evidence
+`evidence/native-w12-w13-2026-11-18.md`, matrix rows W2, W3-v4, W12,
+W12-watch, W13, W14):
 
-1. Report W13 container-to-Mac download (does host-bound Mac→container
-   need the same vsock split?), then published-port upload and download
-   on `439b14e`, then W13-overlap (10 pairs), then all six W14 modes
-   (10 pairs each) on the spin fix.
-2. Report the W2 50,000-operation fixed-work D cohort, W12 full-bind M
-   and D, the first bind-source-plus-volume-deps cohort, W12-watch bind
-   (5 pairs, 120/120 per trial), W3-v4 functional + 10 pairs.
-3. If container→Mac download regressed: split host-bound connections the
-   same way (container bytes over NAT, Mac bytes over vsock). The
-   remaining guest→host gap is the single NAT flow (~1.9 GB/s) plus the
-   agent's 64 KiB poll-loop copy; a guest splice or multi-flow striping
-   needs its own attribution first. Then W14 CPU (streaming 2.2×,
-   cancel cleanup 1.14×).
+- Host-bound download over NAT 0.99 tool-limited (no regression);
+  published-port upload on the split 0.96 inconclusive, CPU/GiB 1.17
+  loss; published-port download still a ~1.7× loss (two invalid cohorts).
+- W14 after the spin fix: streaming CPU 0.28 win; reconnect p99 0.42 and
+  CPU 0.30 wins; persistent latency non-inferior (1.025), CPU 0.61 win;
+  idle-resume CPU 0.15 win, latency inconclusive; fresh p50 5.6 loss is
+  an admission confound (completion inconclusive), CPU 1.15 loss.
+- W2 50k fixed work: latency/rps wins, CPU/success 1.03 inconclusive.
+- W3-v4: every timing a win, not claimed until flush contracts are
+  shown equal (bound recorded in the matrix row).
+- W12 full-bind still a loss (~1.3); W12-watch 5-pair pilot 0.92.
+
+Harness changes this round: `pyramid.py` entrypoint (README
+"Entrypoint"); W13-overlap pairs on verified identity (`8b5709d`) and
+carries resources (`689b63f`); admission on CPU busy outside the engine
+and harness (`d211cae`, `886774f`), with a pre-pair idle-CPU wait.
+
+Next, in order:
+
+1. Queue `.work/native-perf/matrix/p2.log` (starts after p1, which ends
+   with W12 matched full-bind): W13-overlap, W12 bind-source-volume-deps,
+   W14 cancel, all on the new admission. Report each; the mixed layout
+   decides task 3 (keep/revert is already settled; the cell is unmeasured).
+2. Then `pyramid.py run --name w12-watch-bind:cohort` (10 pairs).
+3. Guest→host: the remaining published-port download loss (~1.7×) is the
+   single NAT flow (~1.9 GB/s) plus the agent copy; attribute it on a
+   quiet host before any intervention, and attribute ctrs's host-kernel
+   networking CPU, which the CPU metric does not charge to ctrs.
+4. W14 fresh CPU (1.15×) and the audit items in the ready queue (item 7).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
