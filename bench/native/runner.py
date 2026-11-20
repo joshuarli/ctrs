@@ -3646,6 +3646,14 @@ def cmd_run(args) -> int:
 
 
 HOLD = REPO / ".work" / "tmp" / "hold"
+HOLDS = REPO / ".work" / "tmp" / "holds"
+
+
+def held() -> list[Path]:
+    """Holds taken by builds or other heavy work: `.work/tmp/hold`, and one
+    file per holder under `.work/tmp/holds/`."""
+    found = [HOLD] if HOLD.exists() else []
+    return found + (sorted(HOLDS.iterdir()) if HOLDS.is_dir() else [])
 
 
 def idle_host_busy_cores(window: float = 5.0) -> float | None:
@@ -3665,7 +3673,7 @@ def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, slee
     the pair's outcome."""
     deadline = clock() + timeout
     while True:
-        if not HOLD.exists() and loadavg()[0] < load1:
+        if not held() and loadavg()[0] < load1:
             cores = busy()
             if cores is None or cores < busy_cores:
                 return

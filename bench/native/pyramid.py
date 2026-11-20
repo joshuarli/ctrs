@@ -22,7 +22,6 @@ WORK = REPO / ".work"
 RUNNER = HERE / "runner.py"
 CTRS_BIN = REPO / "target/release/ctrs"
 GUEST = REPO / "guest/out"
-HOLD = WORK / "tmp/hold"
 ORB_SOCKET = Path.home() / ".orbstack/run/docker.sock"
 OUT = WORK / "native-perf/pyramid"
 TIERS = ("edit", "change", "scenario", "full")
@@ -231,8 +230,9 @@ def check_requirement(key: str) -> tuple[str, str]:
         problem = _orbstack_reachable()
         return ("fail", problem + "; start OrbStack") if problem else ("ok", "")
     if key == "no-hold":
-        return ("fail", f"{HOLD} exists: a build owns the binaries; wait for it or remove the hold") \
-            if HOLD.exists() else ("ok", "")
+        holds = _holds()
+        return ("fail", ", ".join(map(str, holds)) + ": a build owns the host; wait for it or remove the hold") \
+            if holds else ("ok", "")
     if key == "no-foreign-daemon":
         found = _foreign_daemons()
         return ("fail", "a ctrs daemon is already running (" + "; ".join(found)[:200]
@@ -301,10 +301,16 @@ def print_preflight(rows: list[dict]) -> None:
         print(f"{r['status']:>4}  {r['requirement']}{users}{': ' + r['message'] if r['message'] else ''}")
 
 
+def _holds() -> list[Path]:
+    sys.path.insert(0, str(HERE))
+    import runner
+    return runner.held()
+
+
 def wait_quiet(deadline: float) -> bool:
     while time.time() < deadline:
         load = os.getloadavg()
-        if not HOLD.exists() and load[0] < QUIET["load1"] and load[1] < QUIET["load5"] \
+        if not _holds() and load[0] < QUIET["load1"] and load[1] < QUIET["load5"] \
                 and not _foreign_daemons():
             return True
         time.sleep(30)

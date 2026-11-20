@@ -7,21 +7,27 @@ import runner
 
 
 class QuietPairs(unittest.TestCase):
-    def wait(self, loads, timeout=100, hold=False, busy=None):
+    def wait(self, loads, timeout=100, hold=False, busy=None, holder=None):
         busy = iter(busy or [0.5] * 50)
         now = [0.0]
         sleeps = []
         loads = iter(loads)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "hold"
+            holds = Path(tmp) / "holds"
             if hold:
                 path.write_text("")
-            with patch.object(runner, "HOLD", path):
+            if holder:
+                holds.mkdir()
+                (holds / holder).write_text("")
+            with patch.object(runner, "HOLD", path), patch.object(runner, "HOLDS", holds):
                 def sleep(seconds):
                     sleeps.append(seconds)
                     now[0] += seconds
-                    if hold and len(sleeps) == 2:
-                        path.unlink()
+                    if len(sleeps) == 2:
+                        path.unlink(missing_ok=True)
+                        if holder:
+                            (holds / holder).unlink()
                 runner.wait_for_quiet_host(4.0, timeout, clock=lambda: now[0], sleep=sleep,
                                            loadavg=lambda: (next(loads), 0, 0), busy=lambda: next(busy))
         return sleeps
@@ -34,6 +40,9 @@ class QuietPairs(unittest.TestCase):
 
     def test_a_hold_file_holds_the_pair(self):
         self.assertEqual(len(self.wait([1.0, 1.0, 1.0], hold=True)), 2)
+
+    def test_any_named_holder_holds_the_pair(self):
+        self.assertEqual(len(self.wait([1.0, 1.0, 1.0], holder="watcher-build")), 2)
 
     def test_busy_cores_hold_the_pair_even_at_low_load(self):
         self.assertEqual(len(self.wait([1.0, 1.0, 1.0], busy=[3.0, 2.5, 1.0])), 2)
