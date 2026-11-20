@@ -3648,15 +3648,30 @@ def cmd_run(args) -> int:
 HOLD = REPO / ".work" / "tmp" / "hold"
 
 
+def idle_host_busy_cores(window: float = 5.0) -> float | None:
+    """Cores busy across the host over `window` seconds while no trial runs:
+    other work plus the engines at idle."""
+    import macos_counters
+    before = macos_counters.host_cpu_ticks()
+    time.sleep(window)
+    return macos_counters.busy_cores(before, macos_counters.host_cpu_ticks(), os.cpu_count())
+
+
 def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, sleep=time.sleep,
-                        loadavg=os.getloadavg) -> None:
-    """Hold the next pair until the 1-minute load is below `load1` and no
-    build holds the binaries. Decided before the pair runs, so it cannot
-    select on the pair's outcome."""
+                        loadavg=os.getloadavg, busy=idle_host_busy_cores, busy_cores: float = 2.0) -> None:
+    """Hold the next pair until no build holds the binaries, the 1-minute
+    load is below `load1`, and fewer than `busy_cores` cores are busy with
+    no trial running. Decided before the pair runs, so it cannot select on
+    the pair's outcome."""
     deadline = clock() + timeout
-    while HOLD.exists() or loadavg()[0] >= load1:
+    while True:
+        if not HOLD.exists() and loadavg()[0] < load1:
+            cores = busy()
+            if cores is None or cores < busy_cores:
+                return
         if clock() >= deadline:
-            raise RuntimeError(f"host not quiet (1-minute load < {load1}) within {timeout:.0f} s")
+            raise RuntimeError(f"host not quiet (1-minute load < {load1}, idle busy cores < {busy_cores}) "
+                               f"within {timeout:.0f} s")
         sleep(15)
 
 

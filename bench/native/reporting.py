@@ -333,6 +333,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
 
 
 FOREIGN_CORES = 2.0
+# Below this the host tick resolution (10 ms per core) dominates the estimate.
+FOREIGN_MIN_WALL_S = 1.0
 
 
 def foreign_cores(record: dict) -> float | None:
@@ -342,7 +344,10 @@ def foreign_cores(record: dict) -> float | None:
     measured = [(p.get("foreign_cpu_cores"), p.get("operation_wall_seconds")) for p in phases]
     if not measured or any(not _number(c) or not _number(w) or w <= 0 for c, w in measured):
         return None
-    return sum(c * w for c, w in measured) / sum(w for _, w in measured)
+    wall = sum(w for _, w in measured)
+    if wall < FOREIGN_MIN_WALL_S:
+        return None
+    return sum(c * w for c, w in measured) / wall
 
 
 def host_contended(record: dict) -> str | None:

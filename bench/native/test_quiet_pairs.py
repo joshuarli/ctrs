@@ -7,7 +7,8 @@ import runner
 
 
 class QuietPairs(unittest.TestCase):
-    def wait(self, loads, timeout=100, hold=False):
+    def wait(self, loads, timeout=100, hold=False, busy=None):
+        busy = iter(busy or [0.5] * 50)
         now = [0.0]
         sleeps = []
         loads = iter(loads)
@@ -22,7 +23,7 @@ class QuietPairs(unittest.TestCase):
                     if hold and len(sleeps) == 2:
                         path.unlink()
                 runner.wait_for_quiet_host(4.0, timeout, clock=lambda: now[0], sleep=sleep,
-                                           loadavg=lambda: (next(loads), 0, 0))
+                                           loadavg=lambda: (next(loads), 0, 0), busy=lambda: next(busy))
         return sleeps
 
     def test_a_quiet_host_starts_the_pair_at_once(self):
@@ -33,6 +34,9 @@ class QuietPairs(unittest.TestCase):
 
     def test_a_hold_file_holds_the_pair(self):
         self.assertEqual(len(self.wait([1.0, 1.0, 1.0], hold=True)), 2)
+
+    def test_busy_cores_hold_the_pair_even_at_low_load(self):
+        self.assertEqual(len(self.wait([1.0, 1.0, 1.0], busy=[3.0, 2.5, 1.0])), 2)
 
     def test_a_host_that_never_quiets_fails_the_run(self):
         with self.assertRaisesRegex(RuntimeError, "not quiet"):

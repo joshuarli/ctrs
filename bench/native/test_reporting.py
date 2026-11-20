@@ -152,6 +152,11 @@ class ReportingTests(unittest.TestCase):
                                            "run": {"foreign_cpu_cores": None, "operation_wall_seconds": 5}}}}
         self.assertIn("1-minute load 11.0", reporting.host_contended(record))
 
+    def test_a_trial_too_short_for_outside_cpu_falls_back_to_load(self):
+        record = {"engine": "ctrs", "host_load": {"cpus": 10, "start": [3.0], "end": [3.0]},
+                  "resources": {"phases": {"run": {"foreign_cpu_cores": 6.1, "operation_wall_seconds": 0.08}}}}
+        self.assertIsNone(reporting.host_contended(record))
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:
