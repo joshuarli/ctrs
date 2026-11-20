@@ -3618,6 +3618,21 @@ def cmd_run(args) -> int:
     return 0 if rec["correctness"]["ok"] else 1
 
 
+HOLD = REPO / ".work" / "tmp" / "hold"
+
+
+def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, sleep=time.sleep,
+                        loadavg=os.getloadavg) -> None:
+    """Hold the next pair until the 1-minute load is below `load1` and no
+    build holds the binaries. Decided before the pair runs, so it cannot
+    select on the pair's outcome."""
+    deadline = clock() + timeout
+    while HOLD.exists() or loadavg()[0] >= load1:
+        if clock() >= deadline:
+            raise RuntimeError(f"host not quiet (1-minute load < {load1}) within {timeout:.0f} s")
+        sleep(15)
+
+
 def cmd_baseline(args) -> int:
     ctx = RunContext(f"base-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
@@ -3629,6 +3644,8 @@ def cmd_baseline(args) -> int:
     failed = False
     try:
         for pair in range(1, args.pairs + 1):
+            if getattr(args, "pair_quiet_load", None) is not None:
+                wait_for_quiet_host(args.pair_quiet_load, args.pair_quiet_timeout)
             # Slots identify the configured A/B position, not the engine:
             # noise-control runs put the same engine in both slots.
             sides = [(a, "a"), (b, "b")]
@@ -3883,6 +3900,11 @@ def main() -> int:
     p.add_argument("--size-bytes", type=int, default=1 << 30, help="W13 bytes per transfer")
     p.add_argument("--repeats", type=int, default=3, help="W13 transfers per trial")
     p.add_argument("--lead-seconds", type=float, default=2.0, help="W13-overlap transfer lead")
+
+    p.add_argument("--pair-quiet-load", type=float, default=None,
+                   help="wait before each pair until the 1-minute load is below this")
+    p.add_argument("--pair-quiet-timeout", type=float, default=3600,
+                   help="seconds to wait for --pair-quiet-load before failing the run")
 
     p.add_argument("--lifecycle-mode", choices=("fresh", "persistent", "streaming", "cancel", "idle-resume", "reconnect"), default="fresh")
     p.add_argument("--lifecycle-clients", type=int, default=32)

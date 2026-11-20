@@ -387,8 +387,12 @@ current-host baseline. Fixture commands now reference w8-v5
       tool-limited on both engines; W14 reports every mode's metrics, most
       as "unmeasured". W13-overlap rejected every pair until `8b5709d`.
    4. A cohort with one load-rejected pair is invalid and reruns whole;
-      on 2026-11-19 four of nine cohorts were lost that way. Top up pairs
-      until ten are admitted, with a cap.
+      on 2026-11-19 four of nine cohorts were lost that way. Topping up
+      pairs was rejected: excluding pairs by their own end-of-trial load
+      would drop the pairs where ctrs used the most CPU and bias toward
+      ctrs. Instead `baseline --pair-quiet-load L` holds each pair until
+      the 1-minute load is below L (decided before the pair runs); the
+      scenario tier passes 4. Mid-pair foreign bursts are still rejected.
    5. Guest attribution for W13/W14 (sched_switch and syscall traces of the
       agent) ran from scratch scripts; resources record the VM process
       without a guest split. Promote them into `diagnostics/` with a doc.

@@ -45,7 +45,9 @@ W12 inputs in `.work/tmp`, the W8 layout, and `BENCH_W9_IMAGE_REF` for
 W9. A failure names the workloads that need it and nothing runs. Host
 load is information; the reporter rejects pairs measured above the CPU
 count. Scenario workloads wait (up to `--quiet-timeout`, default 2 h) for
-1-minute load < 4, 5-minute load < 6, no hold and no daemon.
+1-minute load < 4, 5-minute load < 6, no hold and no daemon, and pass
+`--pair-quiet-load 4` so the runner also holds each pair until the
+1-minute load is below 4.
 
 Each run writes `.work/native-perf/pyramid/<UTC>/`: a log per workload,
 `summary.json` and `summary.md` with exit status, duration, the

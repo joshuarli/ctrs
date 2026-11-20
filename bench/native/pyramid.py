@@ -124,14 +124,15 @@ def registry() -> list[Workload]:
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=1))))
         items.append(Workload(f"{name}:cohort", "scenario", area, purpose + " (paired cohort)",
                               per_trial, 2 * cohort, basis, ENGINES + extra + ("quiet-host",),
-                              argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=cohort))))
+                              argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=cohort),
+                                    "--pair-quiet-load", str(QUIET["load1"]))))
     items += [
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
                  "Kutt workspace with ctrs given OrbStack's vCPUs and memory", 124, 20, "observed",
                  ENGINES + ("w12-inputs", "quiet-host"),
                  argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "orbstack",
                        "--pairs", "10", "--resource-lane", "matched", "--case", "W12",
-                       "--workspace-layout", "full-bind")),
+                       "--workspace-layout", "full-bind", "--pair-quiet-load", str(QUIET["load1"]))),
         Workload("w8-pull:cohort", "scenario", "pull", "pinned portfolio pull and deploy from a local registry",
                  UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
                  argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",
