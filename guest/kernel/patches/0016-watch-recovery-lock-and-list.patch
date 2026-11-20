@@ -1,0 +1,172 @@
+--- a/fs/proc/ctrs_fsnotify.c
++++ b/fs/proc/ctrs_fsnotify.c
+@@ -573,10 +573,8 @@
+ static void recovery_run(struct work_struct *work);
+ static DECLARE_DELAYED_WORK(recovery_work, recovery_run);
+ 
+-static void recovery_pop(void)
++static void recovery_pop(struct recovery_dir *dir)
+ {
+-	struct recovery_dir *dir = list_first_entry(&recovery_dirs, struct recovery_dir, link);
+-
+ 	list_del(&dir->link);
+ 	if (dir->file)
+ 		fput(dir->file);
+@@ -731,41 +729,8 @@
+ 	memcpy(item->name, name, len);
+ 	item->name[len] = '\0';
+ 	return true;
+-}
+-
+-static bool ctrs_name_guard(void)
+-{
+-	struct ctrs_initial_listing *initial = kvzalloc(sizeof(*initial), GFP_KERNEL);
+-	struct recovery_listing *recovery = kvzalloc(sizeof(*recovery), GFP_KERNEL);
+-	char name[NAME_MAX + 2] = { 'x' };
+-	bool ok = false;
+-
+-	if (initial && recovery &&
+-	    ctrs_initial_emit(&initial->ctx, name, NAME_MAX + 1, 0, 1, DT_REG) &&
+-	    recovery_emit(&recovery->ctx, name, NAME_MAX + 1, 0, 1, DT_REG) &&
+-	    !initial->count && !recovery->count &&
+-	    ctrs_initial_emit(&initial->ctx, name, 1, 0, 1, DT_REG) &&
+-	    recovery_emit(&recovery->ctx, name, 1, 0, 1, DT_REG) &&
+-	    initial->count == 1 && recovery->count == 1)
+-		ok = true;
+-	kvfree(initial);
+-	kvfree(recovery);
+-	return ok;
+-}
+-
+-static bool ctrs_name_guard_passed;
+-
+-static ssize_t ctrs_name_guard_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+-{
+-	const char *result = ctrs_name_guard_passed ? "ok\n" : "failed\n";
+-
+-	return simple_read_from_buffer(buf, count, ppos, result, strlen(result));
+ }
+ 
+-static const struct proc_ops ctrs_name_guard_ops = {
+-	.proc_read = ctrs_name_guard_read,
+-};
+-
+ static void recovery_overflow(struct inode *inode)
+ {
+ 	fsnotify_inode(inode, FS_Q_OVERFLOW);
+@@ -944,17 +909,34 @@
+ 	return err;
+ }
+ 
+-static void recovery_file_watches(struct super_block *sb)
++static void recovery_unvisited_watches(struct super_block *sb, bool directories)
+ {
++	struct inode *inodes[RECOVERY_BATCH];
++	unsigned int count, bucket, i;
+ 	struct ctrs_watch *watch;
+-	unsigned int bucket;
+ 
+-	mutex_lock(&ctrs_watch_mutex);
+-	hash_for_each(ctrs_watches, bucket, watch, hash) {
+-		if (watch->inode->i_sb == sb && !S_ISDIR(watch->inode->i_mode))
+-			fsnotify_inode(watch->inode, FS_Q_OVERFLOW);
+-	}
+-	mutex_unlock(&ctrs_watch_mutex);
++	do {
++		count = 0;
++		mutex_lock(&ctrs_watch_mutex);
++		hash_for_each(ctrs_watches, bucket, watch, hash) {
++			if (watch->inode->i_sb != sb ||
++			    !!S_ISDIR(watch->inode->i_mode) != directories ||
++			    READ_ONCE(watch->visited) == recovery_round)
++				continue;
++			WRITE_ONCE(watch->visited, recovery_round);
++			inodes[count] = igrab(watch->inode);
++			if (inodes[count] && ++count == RECOVERY_BATCH)
++				break;
++		}
++		mutex_unlock(&ctrs_watch_mutex);
++		for (i = 0; i < count; i++) {
++			if (directories)
++				recovery_overflow(inodes[i]);
++			else
++				fsnotify_inode(inodes[i], FS_Q_OVERFLOW);
++			iput(inodes[i]);
++		}
++	} while (count == RECOVERY_BATCH);
+ }
+ 
+ static void recovery_run(struct work_struct *work)
+@@ -965,7 +947,7 @@
+ 
+ 	if (list_empty(&recovery_dirs)) {
+ 		recovery_round++;
+-		recovery_file_watches(recovery_root.dentry->d_sb);
++		recovery_unvisited_watches(recovery_root.dentry->d_sb, false);
+ 		err = recovery_push(recovery_root.dentry);
+ 	}
+ 	while (!err && !list_empty(&recovery_dirs) && count++ < RECOVERY_BATCH) {
+@@ -975,18 +957,18 @@
+ 
+ 		if (dir->listed_cache) {
+ 			if (!READ_ONCE(d_inode(dir->cursor->d_parent)->i_fsnotify_mask)) {
+-				recovery_pop();
++				recovery_pop(dir);
+ 				continue;
+ 			}
+ 			err = recovery_list(dir);
+ 			if (err == 1 || err == -ENOENT || err == -ESTALE) {
+ 				err = 0;
+-				recovery_pop();
++				recovery_pop(dir);
+ 			} else if (err < 0) {
+ 				pr_warn_ratelimited("ctrs: watch recovery directory failed: %d\n", err);
+ 				if (++dir->retries >= 3) {
+ 					recovery_overflow(d_inode(dir->cursor->d_parent));
+-					recovery_pop();
++					recovery_pop(dir);
+ 				} else {
+ 					delay = (HZ / 4) << (dir->retries - 1);
+ 				}
+@@ -1022,20 +1004,10 @@
+ 		pr_warn_ratelimited("ctrs: watch recovery failed: %d\n", err);
+ 		recovery_overflow(d_inode(recovery_root.dentry));
+ 		while (!list_empty(&recovery_dirs))
+-			recovery_pop();
++			recovery_pop(list_first_entry(&recovery_dirs, struct recovery_dir, link));
+ 	}
+-	if (list_empty(&recovery_dirs)) {
+-		struct ctrs_watch *watch;
+-		unsigned int bucket;
+-
+-		mutex_lock(&ctrs_watch_mutex);
+-		hash_for_each(ctrs_watches, bucket, watch, hash) {
+-			if (watch->inode->i_sb == recovery_root.dentry->d_sb &&
+-			    S_ISDIR(watch->inode->i_mode) && READ_ONCE(watch->visited) != recovery_round)
+-				recovery_overflow(watch->inode);
+-		}
+-		mutex_unlock(&ctrs_watch_mutex);
+-	}
++	if (list_empty(&recovery_dirs))
++		recovery_unvisited_watches(recovery_root.dentry->d_sb, true);
+ 	mutex_lock(&recovery_mutex);
+ 	if (list_empty(&recovery_dirs)) {
+ 		if (recovery_again) {
+@@ -1184,7 +1156,6 @@
+ {
+ 	struct proc_dir_entry *dir;
+ 
+-	ctrs_name_guard_passed = ctrs_name_guard();
+ 	ctrs_name_limit = min_t(unsigned long, 64UL << 20, (totalram_pages() / 64) << PAGE_SHIFT);
+ 	ctrs_watch_group = fsnotify_alloc_group(&ctrs_watch_ops, FSNOTIFY_GROUP_DUPS);
+ 	if (IS_ERR(ctrs_watch_group))
+@@ -1192,8 +1163,7 @@
+ 	dir = proc_mkdir("ctrs", NULL);
+ 
+ 	if (!dir || (!proc_create("fsnotify", 0200, dir, &ctrs_fsnotify_ops) ||
+-	    !proc_create("watch_bytes", 0444, dir, &ctrs_name_bytes_ops) ||
+-	    !proc_create("watch_name_guard", 0444, dir, &ctrs_name_guard_ops)))
++	    !proc_create("watch_bytes", 0444, dir, &ctrs_name_bytes_ops)))
+ 		return -ENOMEM;
+ 	return 0;
+ }

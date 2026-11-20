@@ -1,6 +1,6 @@
 # Design: Mac-side change notifications for bind mounts
 
-Status: **implemented 2026-11-18; coherence contract revised 2026-11-19.**
+Status: **implemented 2026-11-18; recovery contract revised 2026-11-20.**
 It adds host→guest `Msg::HostFsEvents` (wire protocol 6, rescan kind in 7)
 and guest kernel patches 0006 (`/proc/ctrs/fsnotify`) and 0012 (echo proof
 and rescan). The
@@ -78,28 +78,57 @@ cannot prove redundant.
   kept). The earlier rule (skip any name changed here within two seconds)
   hid a Mac edit that followed the guest's own; `bind-mixed-writer`
   reproduces that on the old kernel and passes on the new one.
-- **Loss.** FSEvents can coalesce or drop events. The host turns its
-  `MustScanSubDirs`, `UserDropped`, `KernelDropped`, `RootChanged`, `Mount`
-  and `Unmount` flags, and any batch that could not be sent whole, into a
-  rescan (kind `s`, protocol 7) of the affected bind directories, followed
-  by a walk of up to 20,000 entries that re-reports everything whose ctime
-  is at or after the last delivered batch (minus 2 s). A truncated walk is
-  logged. When bind roots change, the replacement stream replays from the
-  last event id, so the gap between streams is covered.
+- **Loss.** The host translates FSEvents loss flags and failed delivery
+  into a rescan. A resumable walk revisits at most 20,000 entries per loss
+  and 128 entries per turn. It stays on each bind root's device, skips
+  unreadable entries, and keeps its cursor when bind roots change. Failed
+  delivery retries only the undelivered batch.
 - **Guest queue.** The agent queues lines the pipe to its writer refuses
-  (1 MiB pipe, 8,192 queued lines) and retries every 20 ms. Beyond that,
-  the queue collapses into one rescan of the share and the agent logs the
-  count.
-- **Rescan.** A rescan bumps the FUSE connection epoch. On virtiofs a
-  dentry from an older epoch is revalidated with a LOOKUP rather than
-  dropped, so a volume mounted inside a bind mount stays attached when its
-  directory is unchanged (`bind-rescan-keeps-mounts`).
-- **Not covered.** A rescan restores cache coherence, and the walk
-  re-reports changed entries, but a watcher can still miss a deletion that
-  happened inside a lost interval: it sees the name gone on its next look,
-  without a delete event. Writeback caching stays off: Mac-side writers
-  bypass the guest's page cache, and these notifications do not order
-  guest dirty pages against them.
+  and retries every 20 ms. When its 8,192-line queue fills, it schedules a
+  share rescan and logs the count.
+- **Rescan.** A rescan bumps the FUSE connection epoch and schedules a
+  recovery walk. The worker compares cached inode attributes and compares
+  each watched directory's host listing with its retained name set. It
+  reports missing, new and replaced names to inotify. For a retained name
+  with no checked cached dentry, it performs a LOOKUP and reports a
+  modification because the previous attributes are unavailable. It also
+  uses watched inode marks to report overflow for per-file watches and for
+  directories the walk could not reach. Directory failures receive up to
+  three attempts with backoff, then queue overflow. Entry
+  failures are retried and logged before they are skipped. The writer does
+  not wait for FUSE operations held by the worker.
+  Overflow and attribute events for unvisited watches are sent after the
+  watch table lock is released, because an `IN_ONESHOT` watch tears its
+  mark down inside the event and re-takes that lock (patch 0016); the
+  `oneshot` case in `tests/watch-recovery.sh` hangs the guest on the
+  0013–0015 kernel and passes with 0016.
+- **Retained names.** Watches on the same virtiofs inode share a name set.
+  The initial set costs one directory scan, without a LOOKUP per entry.
+  An internal mark updates names on creates, deletes and moves. It does not
+  subscribe to child writes. The set holds names and directory-entry inode
+  numbers, but no dentry, mount or memcg references. Allocations are not
+  charged to the watching container's memcg. On 64-bit guests each name has
+  56 bytes of fields before its bytes and allocator rounding. A six-byte
+  name occupies 64 bytes.
+- **Bounds and degraded recovery.** Name allocations use at most the lesser
+  of 64 MiB and one sixty-fourth of guest RAM. `/proc/ctrs/watch_bytes`
+  reports allocated bytes and the limit. If a name set cannot be retained,
+  the kernel releases it, logs once, and reports `IN_Q_OVERFLOW` and
+  `IN_ATTRIB` for that directory on recovery. Applications must rebuild
+  their view after overflow. The budget is global and first come: one
+  container can exhaust it for others. Linux reports overflow with watch
+  descriptor -1. libuv can ignore that event, so its users cannot rely on
+  this degraded path to trigger a rebuild. The counter (mode `0444`)
+  exposes aggregate watch activity to guest users. These limitations are
+  accepted. The host's root updates share a single coalescing wakeup.
+  Writeback caching remains off.
+
+The opt-in `CTRS_TEST_FSEVENTS_GATE` is used only by
+`tests/watch-recovery.sh`. Its loss gate suppresses host callbacks. Its
+overflow gate buffers the real changes and sends them after a large test
+batch, so the regression can assert guest queue loss without host loss.
+Neither gate is active without that environment variable. The wire
+protocol remains version 9; no new message or event kind is required.
 
 Regressions in `tests/e2e.sh`: `bind-mixed-writer` (in-place overwrite and
 atomic replace by the Mac 0.3 s after the container's own write; final

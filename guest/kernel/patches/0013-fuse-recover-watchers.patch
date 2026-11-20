@@ -1,0 +1,421 @@
+--- a/fs/fuse/dir.c
++++ b/fs/fuse/dir.c
+@@ -306,12 +306,13 @@
+  * change: 1 if the guest changed the inode and the host's entry maps the
+  * name to the same node with the cached (valid) size, mtime and ctime; 0
+  * if it is the same node but otherwise (the cached attributes are
+- * refreshed from the reply); -1 if the name now maps to another node or
+- * none, or the lookup failed.
++ * refreshed from the reply); a negative errno if the name maps to another
++ * node or none, or the lookup failed.
+  */
+-int fuse_host_entry_state(struct dentry *entry)
++static int fuse_host_entry_state_at(struct dentry *entry, struct dentry *parent,
++				    const struct qstr *name, unsigned int seq)
+ {
+-	struct inode *dir = d_inode(entry->d_parent);
++	struct inode *dir = d_inode(parent);
+ 	struct inode *inode = d_inode(entry);
+ 	struct fuse_forget_link *forget;
+ 	struct fuse_entry_out outarg;
+@@ -322,27 +323,36 @@
+ 	bool same;
+ 	int err;
+ 
+-	if (entry->d_sb->s_magic != FUSE_SUPER_MAGIC || !inode ||
++	if (entry->d_sb->s_magic != FUSE_SUPER_MAGIC || !dir || !inode ||
+ 	    fuse_is_bad(inode))
+-		return -1;
++		return -EAGAIN;
+ 	fm = get_fuse_mount(inode);
+ 	fi = get_fuse_inode(inode);
+ 	forget = fuse_alloc_forget();
+ 	if (!forget)
+-		return -1;
++		return -ENOMEM;
+ 	attr_version = fuse_get_attr_version(fm->fc);
+-	fuse_lookup_init(fm->fc, &args, get_node_id(dir), &entry->d_name,
+-			 &outarg);
++	fuse_lookup_init(fm->fc, &args, get_node_id(dir), name, &outarg);
+ 	err = fuse_simple_request(fm, &args);
++	if (read_seqcount_retry(&entry->d_seq, seq)) {
++		if (!err && outarg.nodeid)
++			fuse_queue_forget(fm->fc, forget, outarg.nodeid, 1);
++		else
++			kfree(forget);
++		return -EAGAIN;
++	}
+ 	if (err || !outarg.nodeid) {
+ 		kfree(forget);
+-		return -1;
++		return err ? err : -ENOENT;
++	}
++	if (fuse_invalid_attr(&outarg.attr)) {
++		fuse_queue_forget(fm->fc, forget, outarg.nodeid, 1);
++		return -EIO;
+ 	}
+ 	if (outarg.nodeid != get_node_id(inode) ||
+-	    fuse_invalid_attr(&outarg.attr) ||
+ 	    fuse_stale_inode(inode, outarg.generation, &outarg.attr)) {
+ 		fuse_queue_forget(fm->fc, forget, outarg.nodeid, 1);
+-		return -1;
++		return -ESTALE;
+ 	}
+ 	spin_lock(&fi->lock);
+ 	fi->nlookup++;
+@@ -364,6 +374,30 @@
+ 			       ATTR_TIMEOUT(&outarg), attr_version);
+ 	fuse_change_entry_timeout(entry, &outarg);
+ 	return 0;
++}
++
++int fuse_host_entry_state(struct dentry *entry)
++{
++	struct name_snapshot name;
++	struct dentry *parent;
++	unsigned int seq;
++	int ret;
++
++	do {
++		seq = read_seqcount_begin(&entry->d_seq);
++		parent = dget_parent(entry);
++		take_dentry_name_snapshot(&name, entry);
++		if (!read_seqcount_retry(&entry->d_seq, seq))
++			break;
++		release_dentry_name_snapshot(&name);
++		dput(parent);
++	} while (1);
++	ret = fuse_host_entry_state_at(entry, parent, &name.name, seq);
++	if (read_seqcount_retry(&entry->d_seq, seq))
++		ret = -EAGAIN;
++	release_dentry_name_snapshot(&name);
++	dput(parent);
++	return ret;
+ }
+ 
+ /*
+--- a/fs/proc/ctrs_fsnotify.c
++++ b/fs/proc/ctrs_fsnotify.c
+@@ -26,10 +26,12 @@
+ #include <linux/dcache.h>
+ #include <linux/err.h>
+ #include <linux/fs.h>
++#include <linux/file.h>
+ #include <linux/fsnotify.h>
+ #include <linux/init.h>
+ #include <linux/limits.h>
+ #include <linux/mm.h>
++#include <linux/magic.h>
+ #include <linux/namei.h>
+ #include <linux/pagemap.h>
+ #include <linux/path.h>
+@@ -37,6 +39,8 @@
+ #include <linux/slab.h>
+ #include <linux/string.h>
+ #include <linux/uaccess.h>
++#include <linux/workqueue.h>
++#include <linux/mutex.h>
+ 
+ int fuse_host_entry_state(struct dentry *entry);
+ void fuse_host_rescan(struct inode *inode);
+@@ -126,6 +130,291 @@
+ 	return 0;
+ }
+ 
++#define RECOVERY_BATCH 128
++
++struct recovery_dir {
++	struct list_head link;
++	struct dentry *cursor;
++	struct file *file;
++	bool listed_cache;
++};
++
++struct recovery_name {
++	unsigned int len;
++	char name[NAME_MAX + 1];
++};
++
++struct recovery_listing {
++	struct dir_context ctx;
++	struct dentry *dir;
++	unsigned int count;
++	struct recovery_name names[RECOVERY_BATCH];
++};
++
++struct dentry *d_alloc_cursor(struct dentry *parent);
++
++static DEFINE_MUTEX(recovery_mutex);
++static LIST_HEAD(recovery_dirs);
++static struct path recovery_root;
++static bool recovery_active;
++static bool recovery_again;
++static void recovery_run(struct work_struct *work);
++static DECLARE_DELAYED_WORK(recovery_work, recovery_run);
++
++static void recovery_pop(void)
++{
++	struct recovery_dir *dir = list_first_entry(&recovery_dirs, struct recovery_dir, link);
++
++	list_del(&dir->link);
++	if (dir->file)
++		fput(dir->file);
++	dput(dir->cursor);
++	kfree(dir);
++}
++
++static int recovery_push(struct dentry *dentry)
++{
++	struct recovery_dir *dir = kzalloc(sizeof(*dir), GFP_KERNEL);
++
++	if (!dir)
++		return -ENOMEM;
++	dir->cursor = d_alloc_cursor(dentry);
++	if (!dir->cursor) {
++		kfree(dir);
++		return -ENOMEM;
++	}
++	list_add(&dir->link, &recovery_dirs);
++	return 0;
++}
++
++static struct dentry *recovery_next(struct recovery_dir *dir, bool *more)
++{
++	struct dentry *parent = dir->cursor->d_parent;
++	struct dentry *child = NULL, *candidate;
++	struct hlist_node *node;
++	unsigned int visited = 0;
++
++	spin_lock(&parent->d_lock);
++	if (hlist_unhashed(&dir->cursor->d_sib))
++		hlist_add_head(&dir->cursor->d_sib, &parent->d_children);
++	while ((node = dir->cursor->d_sib.next) && visited++ < RECOVERY_BATCH) {
++		candidate = hlist_entry(node, struct dentry, d_sib);
++		__hlist_del(&dir->cursor->d_sib);
++		hlist_add_behind(&dir->cursor->d_sib, &candidate->d_sib);
++		if (candidate->d_flags & DCACHE_DENTRY_CURSOR)
++			continue;
++		spin_lock_nested(&candidate->d_lock, DENTRY_D_LOCK_NESTED);
++		if (d_really_is_positive(candidate) && !d_unhashed(candidate))
++			child = dget_dlock(candidate);
++		spin_unlock(&candidate->d_lock);
++		if (child)
++			break;
++	}
++	*more = dir->cursor->d_sib.next != NULL;
++	spin_unlock(&parent->d_lock);
++	return child;
++}
++
++static int recovery_check(struct dentry *child)
++{
++	struct inode *inode = d_inode(child);
++	struct dentry *parent_entry = dget_parent(child);
++	struct inode *parent = d_inode(parent_entry);
++	int result = 0;
++	loff_t size;
++	struct timespec64 mtime, ctime, new_mtime, new_ctime;
++	int state;
++
++	if (!inode || !parent || d_mountpoint(child))
++		goto out;
++	if (!READ_ONCE(inode->i_fsnotify_mask) && !READ_ONCE(parent->i_fsnotify_mask))
++		goto out;
++	size = i_size_read(inode);
++	mtime = inode_get_mtime(inode);
++	ctime = inode_get_ctime(inode);
++	state = fuse_host_entry_state(child);
++	if (state < 0 && state != -ENOENT && state != -ESTALE) {
++		result = state;
++		goto out;
++	}
++	spin_lock(&child->d_lock);
++	if (child->d_parent != parent_entry)
++		result = -EAGAIN;
++	spin_unlock(&child->d_lock);
++	if (result)
++		goto out;
++	new_mtime = inode_get_mtime(inode);
++	new_ctime = inode_get_ctime(inode);
++	if (state == -ENOENT || state == -ESTALE) {
++		if (S_ISDIR(inode->i_mode))
++			fsnotify_inoderemove(inode);
++		else
++			notify_unlinked(inode);
++		fsnotify_delete(parent, inode, child);
++		if (may_forget(child))
++			d_invalidate(child);
++	} else if (state == 0 &&
++		   (size != i_size_read(inode) ||
++		    !timespec64_equal(&mtime, &new_mtime) ||
++		    !timespec64_equal(&ctime, &new_ctime))) {
++		if (S_ISREG(inode->i_mode)) {
++			invalidate_mapping_pages(inode->i_mapping, 0, -1);
++			notify_renamed_in_place(parent, child);
++		}
++		fsnotify_change(child, ATTR_SIZE);
++	}
++out:
++	dput(parent_entry);
++	return result;
++}
++
++static bool recovery_emit(struct dir_context *ctx, const char *name, int len,
++			  loff_t offset, u64 ino, unsigned int type)
++{
++	struct recovery_listing *listing = container_of(ctx, struct recovery_listing, ctx);
++	struct qstr q;
++	struct dentry *child;
++	struct recovery_name *item;
++
++	if ((len == 1 && name[0] == '.') ||
++	    (len == 2 && name[0] == '.' && name[1] == '.'))
++		return true;
++	if (len > NAME_MAX || listing->count == RECOVERY_BATCH)
++		return false;
++	q.name = name;
++	q.len = len;
++	q.hash = full_name_hash(listing->dir, name, len);
++	child = try_lookup_noperm(&q, listing->dir);
++	if (!IS_ERR_OR_NULL(child) && d_really_is_positive(child)) {
++		dput(child);
++		return true;
++	}
++	if (!IS_ERR_OR_NULL(child))
++		dput(child);
++	item = &listing->names[listing->count++];
++	item->len = len;
++	memcpy(item->name, name, len);
++	item->name[len] = '\0';
++	return true;
++}
++
++static int recovery_list(struct recovery_dir *dir)
++{
++	struct recovery_listing *listing;
++	struct dentry *parent = dir->cursor->d_parent;
++	struct path path = { .mnt = recovery_root.mnt, .dentry = parent };
++	loff_t before;
++	int err, i;
++
++	if (!dir->file) {
++		dir->file = dentry_open_nonotify(&path, O_RDONLY | O_DIRECTORY, current_cred());
++		if (IS_ERR(dir->file)) {
++			err = PTR_ERR(dir->file);
++			dir->file = NULL;
++			return err;
++		}
++	}
++	listing = kvzalloc(sizeof(*listing), GFP_KERNEL);
++	if (!listing)
++		return -ENOMEM;
++	listing->ctx.actor = recovery_emit;
++	listing->ctx.count = PAGE_SIZE;
++	listing->dir = parent;
++	before = dir->file->f_pos;
++	err = iterate_dir(dir->file, &listing->ctx);
++	for (i = 0; !err && i < listing->count; i++) {
++		struct recovery_name *name = &listing->names[i];
++		struct dentry *child;
++		struct qstr q = QSTR_LEN(name->name, name->len);
++
++		q.hash = full_name_hash(parent, name->name, name->len);
++		child = lookup_one_unlocked(mnt_idmap(path.mnt), &q, parent);
++		if (IS_ERR(child))
++			continue;
++		if (d_really_is_positive(child)) {
++			if (d_is_dir(child))
++				fsnotify_mkdir(d_inode(parent), child);
++			else
++				fsnotify_create(d_inode(parent), child);
++		}
++		dput(child);
++	}
++	kvfree(listing);
++	if (err)
++		return err;
++	return before == dir->file->f_pos ? 1 : 0;
++}
++
++static void recovery_run(struct work_struct *work)
++{
++	unsigned int count = 0;
++	int err = 0;
++
++	mutex_lock(&recovery_mutex);
++	if (list_empty(&recovery_dirs))
++		err = recovery_push(recovery_root.dentry);
++	while (!err && !list_empty(&recovery_dirs) && count++ < RECOVERY_BATCH) {
++		struct recovery_dir *dir = list_first_entry(&recovery_dirs, struct recovery_dir, link);
++		struct dentry *child;
++		bool more;
++
++		if (dir->listed_cache) {
++			if (!READ_ONCE(d_inode(dir->cursor->d_parent)->i_fsnotify_mask)) {
++				recovery_pop();
++				continue;
++			}
++			err = recovery_list(dir);
++			if (err == 1 || err == -ENOENT || err == -ESTALE) {
++				err = 0;
++				recovery_pop();
++			}
++			break;
++		}
++		child = recovery_next(dir, &more);
++		if (!child) {
++			if (!more)
++				dir->listed_cache = true;
++			continue;
++		}
++		err = recovery_check(child);
++		if (!err && d_is_dir(child) && !d_mountpoint(child) && !d_unhashed(child))
++			err = recovery_push(child);
++		dput(child);
++	}
++	if (err) {
++		pr_warn_ratelimited("ctrs: watch recovery failed: %d\n", err);
++		while (!list_empty(&recovery_dirs))
++			recovery_pop();
++		recovery_again = true;
++	}
++	if (list_empty(&recovery_dirs)) {
++		if (recovery_again) {
++			recovery_again = false;
++		} else {
++			path_put(&recovery_root);
++			recovery_active = false;
++		}
++	}
++	if (recovery_active)
++		queue_delayed_work(system_unbound_wq, &recovery_work, err ? HZ : 0);
++	mutex_unlock(&recovery_mutex);
++}
++
++static void recovery_start(struct path *path)
++{
++	mutex_lock(&recovery_mutex);
++	if (recovery_active) {
++		recovery_again = true;
++	} else {
++		recovery_root.mnt = path->mnt;
++		recovery_root.dentry = path->dentry->d_sb->s_root;
++		path_get(&recovery_root);
++		recovery_active = true;
++		queue_delayed_work(system_unbound_wq, &recovery_work, 0);
++	}
++	mutex_unlock(&recovery_mutex);
++}
++
+ static int notify_rescan(char *full)
+ {
+ 	struct path p;
+@@ -143,6 +432,8 @@
+ 	if (err)
+ 		return err;
+ 	fuse_host_rescan(d_inode(p.dentry));
++	if (d_inode(p.dentry)->i_sb->s_magic == FUSE_SUPER_MAGIC)
++		recovery_start(&p);
+ 	fsnotify_inode(d_inode(p.dentry), FS_ATTRIB);
+ 	path_put(&p);
+ 	return 0;
