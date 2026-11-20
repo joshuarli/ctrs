@@ -56,19 +56,32 @@ struct Reconcile {
     roots: std::vec::IntoIter<Root>,
     stack: Vec<std::fs::ReadDir>,
     cutoff: i64,
-    since: SystemTime,
+    device: Option<u64>,
+    visited: usize,
+    warned: bool,
 }
 impl Reconcile {
     fn new(roots: Vec<Root>, since: SystemTime) -> Self {
         let roots = roots.iter().filter(|root| !roots.iter().any(|other| !other.file && other.path != root.path && root.path.starts_with(&other.path))).cloned().collect::<Vec<_>>();
-        Self { roots: roots.into_iter(), stack: Vec::new(), cutoff: since.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64), since }
+        Self { roots: roots.into_iter(), stack: Vec::new(), cutoff: since.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64), device: None, visited: 0, warned: false }
     }
-    fn turn(&mut self, limit: usize, out: &mut Vec<(FsEventKind, String)>) -> std::io::Result<bool> {
+    fn warn(&mut self, error: &std::io::Error) {
+        if !self.warned && error.kind() != std::io::ErrorKind::NotFound {
+            crate::diag::warn!("bind mount reconciliation skipped an unreadable entry", error = error);
+            self.warned = true;
+        }
+    }
+    fn turn(&mut self, limit: usize, out: &mut Vec<(FsEventKind, String)>) -> bool {
         let mut visited = 0;
         while visited < limit {
+            if self.visited >= RECONCILE_LIMIT {
+                crate::diag::warn!("bind mount reconciliation reached its entry limit", limit = RECONCILE_LIMIT);
+                return true;
+            }
             if self.stack.is_empty() {
-                let Some(root) = self.roots.next() else { return Ok(true) };
+                let Some(root) = self.roots.next() else { return true };
                 visited += 1;
+                self.visited += 1;
                 if root.file {
                     match std::fs::symlink_metadata(&root.path) {
                         Ok(meta) if meta.ctime() >= self.cutoff => {
@@ -76,26 +89,32 @@ impl Reconcile {
                         }
                         Ok(_) => {},
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                        Err(e) => return Err(e),
+                        Err(e) => self.warn(&e),
                     }
                     continue;
                 }
+                self.device = match std::fs::symlink_metadata(&root.path) {
+                    Ok(meta) => Some(meta.dev()),
+                    Err(e) => { self.warn(&e); continue; }
+                };
                 match std::fs::read_dir(root.path) {
                     Ok(dir) => self.stack.push(dir),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                    Err(e) => return Err(e),
+                    Err(e) => self.warn(&e),
                 }
                 continue;
             }
             visited += 1;
+            self.visited += 1;
             let Some(entry) = self.stack.last_mut().unwrap().next() else { self.stack.pop(); continue };
-            let entry = entry?;
+            let entry = match entry { Ok(entry) => entry, Err(e) => { self.warn(&e); continue; } };
             let path = entry.path();
             let meta = match std::fs::symlink_metadata(&path) {
                 Ok(meta) => meta,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(e),
+                Err(e) => { self.warn(&e); continue; },
             };
+            if Some(meta.dev()) != self.device { continue; }
             if meta.ctime() >= self.cutoff {
                 if let Some(p) = path.to_str() { out.push((if meta.is_dir() { FsEventKind::Created } else { FsEventKind::Modified }, p.to_owned())); }
             }
@@ -103,11 +122,11 @@ impl Reconcile {
                 match std::fs::read_dir(path) {
                     Ok(dir) => self.stack.push(dir),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                    Err(e) => return Err(e),
+                    Err(e) => self.warn(&e),
                 }
             }
         }
-        Ok(false)
+        false
     }
 }
 
@@ -139,34 +158,35 @@ impl Roots {
     }
 }
 
-enum Change { Add(String, Vec<Root>), Remove(String), Clear, Wake }
-pub struct Watcher { changes: mpsc::SyncSender<Change>, stopping: Arc<AtomicBool> }
+enum Change { Wake }
+pub struct Watcher { changes: mpsc::SyncSender<Change>, roots: Arc<Mutex<Roots>>, stopping: Arc<AtomicBool> }
 impl Watcher {
     pub fn start(engine: Weak<Engine>) -> Self {
-        let (tx, rx) = mpsc::sync_channel(256);
+        let (tx, rx) = mpsc::sync_channel(1);
+        let roots = Arc::new(Mutex::new(Roots::default()));
+        let worker_roots = roots.clone();
         let wake = tx.clone();
         let stopping = Arc::new(AtomicBool::new(false));
         let stopped = stopping.clone();
         std::thread::spawn(move || {
-            let roots = Arc::new(Mutex::new(Roots::default()));
+            let roots = worker_roots;
             let state = Arc::new(Delivery::default());
             let mut stream = None;
             let mut watched = HashSet::new();
             let mut recovery: Option<Reconcile> = None;
             let mut retry_at = Instant::now();
+            let mut pending_entries: Option<(Vec<(FsEventKind, String)>, bool)> = None;
             loop {
                 if stopped.load(Ordering::Acquire) { break; }
                 let waiting = recovery.is_some() || state.reconcile_from.lock().unwrap().is_some();
                 let change = if waiting { rx.recv_timeout(Duration::from_millis(20)) } else { rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected) };
                 match change {
-                    Ok(change) => {
+                    Ok(Change::Wake) => {
                         let (next, directories) = {
-                            let mut roots = roots.lock().unwrap();
-                            match change { Change::Add(id, paths) => roots.insert(id, paths), Change::Remove(id) => roots.remove(&id), Change::Clear => *roots = Roots::default(), Change::Wake => {} }
+                            let roots = roots.lock().unwrap();
                             (roots.counts.keys().cloned().collect::<HashSet<_>>(), roots.directories())
                         };
                         if next != watched {
-                            if let Some(walk) = recovery.take() { state.schedule_reconcile(walk.since); }
                             if stream.take().is_none() { state.last_id.store(0, Ordering::Relaxed); }
                             if !directories.is_empty() {
                                 // Replaying from the last event seen covers the
@@ -203,26 +223,26 @@ impl Watcher {
                     }
                 }
                 if let Some(walk) = &mut recovery {
-                    let mut entries = Vec::new();
-                    let result = walk.turn(RECONCILE_LIMIT.min(128), &mut entries);
+                    if Instant::now() < retry_at { continue; }
+                    if pending_entries.is_none() {
+                        let mut entries = Vec::new();
+                        let done = walk.turn(128, &mut entries);
+                        pending_entries = Some((entries, done));
+                    }
+                    let (entries, done) = pending_entries.as_ref().unwrap();
                     let events: Vec<_> = entries.iter().map(|(kind, path)| FsEvent { kind: *kind, path }).collect();
-                    let delivered = engine.upgrade().is_some_and(|engine| engine.send_fs_events(&events));
-                    if result.is_err() || !delivered {
-                        if let Err(error) = result { crate::diag::warn!("bind mount reconciliation failed; retrying", error = error); }
-                        if !delivered {
-                            crate::diag::warn!("bind mount reconciliation delivery failed; retrying");
-                            state.undelivered.store(true, Ordering::Relaxed);
-                        }
-                        state.schedule_reconcile(walk.since);
+                    if engine.upgrade().is_some_and(|engine| engine.send_fs_events(&events)) {
+                        let done = *done;
+                        pending_entries = None;
+                        if done { recovery = None; }
+                    } else {
+                        crate::diag::warn!("bind mount reconciliation delivery failed; retrying");
                         retry_at = Instant::now() + Duration::from_secs(1);
-                        recovery = None;
-                    } else if result.unwrap() {
-                        recovery = None;
                     }
                 }
             }
         });
-        Self { changes: tx, stopping }
+        Self { changes: tx, roots, stopping }
     }
     pub fn roots(mounts: &[String]) -> Vec<Root> {
         mounts.iter().filter_map(|m| {
@@ -235,10 +255,11 @@ impl Watcher {
         }).collect::<HashSet<_>>().into_iter().collect()
     }
     pub fn add(&self, id: &str, roots: Vec<Root>) {
-        let _ = self.changes.send(Change::Add(id.to_owned(), roots));
+        self.roots.lock().unwrap().insert(id.to_owned(), roots);
+        let _ = self.changes.try_send(Change::Wake);
     }
-    pub fn remove(&self, id: &str) { let _ = self.changes.send(Change::Remove(id.to_owned())); }
-    pub fn clear(&self) { let _ = self.changes.send(Change::Clear); }
+    pub fn remove(&self, id: &str) { self.roots.lock().unwrap().remove(id); let _ = self.changes.try_send(Change::Wake); }
+    pub fn clear(&self) { *self.roots.lock().unwrap() = Roots::default(); let _ = self.changes.try_send(Change::Wake); }
 }
 impl Drop for Watcher {
     fn drop(&mut self) {
@@ -444,23 +465,41 @@ mod tests {
         std::fs::write(base.join("sub/new"), b"x").unwrap();
         let mut out = Vec::new();
         let root = Root { path: base.clone(), file: false };
-        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() - Duration::from_secs(60)).turn(100, &mut out).unwrap());
+        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() - Duration::from_secs(60)).turn(100, &mut out));
         let sub = base.join("sub").to_str().unwrap().to_owned();
         let new = base.join("sub/new").to_str().unwrap().to_owned();
         assert!(out.contains(&(FsEventKind::Created, sub)));
         assert!(out.contains(&(FsEventKind::Modified, new.clone())));
         out.clear();
-        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() + Duration::from_secs(60)).turn(100, &mut out).unwrap());
+        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() + Duration::from_secs(60)).turn(100, &mut out));
         assert!(out.is_empty());
         let mut walk = Reconcile::new(vec![root], UNIX_EPOCH);
-        assert!(!walk.turn(1, &mut out).unwrap());
-        while !walk.turn(1, &mut out).unwrap() {}
+        assert!(!walk.turn(1, &mut out));
+        while !walk.turn(1, &mut out) {}
         assert_eq!(out.len(), 2);
         out.clear();
         let file = Root { path: base.join("sub/new"), file: true };
-        assert!(Reconcile::new(vec![file], UNIX_EPOCH).turn(10, &mut out).unwrap());
+        assert!(Reconcile::new(vec![file], UNIX_EPOCH).turn(10, &mut out));
         assert_eq!(out, vec![(FsEventKind::Modified, new)]);
         std::fs::remove_dir_all(&base).unwrap();
+    }
+    #[test]
+    fn reconciliation_skips_unreadable_directory_and_finishes() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("ctrs-reconcile-denied-{}", std::process::id()));
+        let denied = base.join("denied");
+        std::fs::create_dir_all(&denied).unwrap();
+        std::fs::write(denied.join("hidden"), b"x").unwrap();
+        std::fs::write(base.join("visible"), b"x").unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        let mut walk = Reconcile::new(vec![Root { path: base.clone(), file: false }], UNIX_EPOCH);
+        let mut out = Vec::new();
+        while !walk.turn(1, &mut out) {}
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(out.contains(&(FsEventKind::Modified, base.join("visible").to_str().unwrap().to_owned())));
+        assert!(!out.contains(&(FsEventKind::Modified, denied.join("hidden").to_str().unwrap().to_owned())));
+        assert!(walk.warned);
     }
     #[test]
     fn root_refcounts_and_file_filter() {
