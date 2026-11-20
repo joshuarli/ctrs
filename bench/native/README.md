@@ -49,7 +49,10 @@ load is information; the reporter rejects pairs measured above the CPU
 count. Scenario workloads wait (up to `--quiet-timeout`, default 2 h) for
 1-minute load < 4, 5-minute load < 6, no hold and no daemon, and pass
 `--pair-quiet-load 4` so the runner also holds each pair until no hold
-remains and the 1-minute load is below 4.
+remains and the 1-minute load is below 4. Scenario cohorts also pass
+`--max-pairs 16`: the runner keeps adding pairs until ten are admitted
+(correct, at most 2 cores busy outside the engine and harness) or 16
+have run. Every pair, admitted or not, stays in the record.
 
 Each run writes `.work/native-perf/pyramid/<UTC>/`: a log per workload,
 `summary.json` and `summary.md` with exit status, duration, the

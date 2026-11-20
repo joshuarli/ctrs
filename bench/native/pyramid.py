@@ -104,6 +104,7 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
 UNMEASURED_TRIAL_SECONDS = 120.0
 
 CPU_CANDIDATE = 9
+MAX_PAIRS = 16
 CPU_CANDIDATE_CELLS = ("w13-overlap", "w2-api", "w12-full-bind", "w6-build", "w14-idle-resume")
 
 
@@ -154,7 +155,7 @@ def registry() -> list[Workload]:
         items.append(Workload(f"{name}:cohort", "scenario", area, purpose + " (paired cohort)",
                               per_trial, 20, basis, ENGINES + extra + ("quiet-host",),
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=10),
-                                    "--pair-quiet-load", str(QUIET["load1"]))))
+                                    "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS))))
     for name, area, purpose, args, seconds, extra in CELLS:
         if name not in CPU_CANDIDATE_CELLS:
             continue
@@ -166,7 +167,7 @@ def registry() -> list[Workload]:
             argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "ctrs",
                   "--candidate-cpus", str(CPU_CANDIDATE), "--pairs", "10",
                   "--resource-lane", "installed-default", *args,
-                  "--pair-quiet-load", str(QUIET["load1"])),
+                  "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS)),
             design="candidate"))
     items += [
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
@@ -174,7 +175,7 @@ def registry() -> list[Workload]:
                  ENGINES + ("w12-inputs", "quiet-host"),
                  argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "orbstack",
                        "--pairs", "10", "--resource-lane", "matched", "--case", "W12",
-                       "--workspace-layout", "full-bind", "--pair-quiet-load", str(QUIET["load1"]))),
+                       "--workspace-layout", "full-bind", "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS))),
         Workload("w8-pull:cohort", "scenario", "pull", "pinned portfolio pull and deploy from a local registry",
                  UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
                  argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",

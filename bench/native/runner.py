@@ -3769,7 +3769,12 @@ def cmd_baseline(args) -> int:
     rng = random.Random(args.seed)
     failed = False
     try:
-        for pair in range(1, args.pairs + 1):
+        import reporting
+        limit = max(args.pairs, getattr(args, "max_pairs", None) or args.pairs)
+        admitted = pair = 0
+        while pair < limit and (admitted < args.pairs if limit > args.pairs else pair < args.pairs):
+            pair += 1
+            pair_records = []
             if getattr(args, "pair_quiet_load", None) is not None:
                 wait_for_quiet_host(args.pair_quiet_load, args.pair_quiet_timeout)
             # Slots identify the configured A/B position, not the engine:
@@ -3825,9 +3830,13 @@ def cmd_baseline(args) -> int:
                               slot=slot, **kw)
                 ok = rec["correctness"]["ok"]
                 failed = failed or not ok or bool(rec.get("validation_errors"))
+                pair_records.append(rec)
                 wall = rec["metrics"].get("wall_seconds")
                 print(f"pair {pair} {eng} {'OK' if ok else 'FAIL'} "
                       f"wall={wall}", flush=True)
+            if all(r["correctness"]["ok"] and not r.get("validation_errors")
+                   and reporting.host_contended(r) is None for r in pair_records):
+                admitted += 1
     finally:
         for engine in ctx.engines.values():
             engine.stop()
@@ -3990,6 +3999,9 @@ def main() -> int:
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--max-pairs", type=int,
+                   help="keep running pairs past --pairs until --pairs of them are admitted "
+                        "(correct and uncontended) or this many have run; every pair stays in the record")
     p.add_argument("--candidate-cpus", type=int,
                    help="same-engine candidate: slot b runs ctrs with CTRS_CPUS=N in its own warm "
                         "engine dir, slot a the product default; memory and assets unchanged")

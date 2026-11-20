@@ -660,6 +660,27 @@ class ExitStatusTests(unittest.TestCase):
                          [("ctrs", "a"), ("ctrs", "b"),
                           ("ctrs", "b"), ("ctrs", "a")])
 
+    def test_max_pairs_runs_until_enough_pairs_are_admitted(self):
+        args = argparse.Namespace(a="ctrs", b="orbstack", seed=3, pairs=2, max_pairs=5,
+                                  randomize=False, case="W1", state="warm",
+                                  cold=False, concurrency=8, duration=20,
+                                  write_ratio=0.3)
+        context = Mock(engines={}, jsonl="trials.jsonl")
+        calls = []
+
+        def trial(ctx, engine, case, state, **kw):
+            calls.append(kw["pair_id"])
+            foreign = 3.0 if kw["pair_id"] == 2 else 0.5
+            return {"correctness": {"ok": True}, "metrics": {}, "engine": engine,
+                    "resources": {"phases": {"run": {"foreign_cpu_cores": foreign,
+                                                     "operation_wall_seconds": 5.0}}}}
+
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "run_one", side_effect=trial), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.cmd_baseline(args), 0)
+        self.assertEqual(sorted(set(calls)), [1, 2, 3])
+
     def test_noop_command_marks_noise_control(self):
         args = argparse.Namespace(engine="ctrs", pairs=3, case=None,
                                   state=None, cold=False, seed=None,
