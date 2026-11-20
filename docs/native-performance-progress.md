@@ -378,9 +378,16 @@ current-host baseline. Fixture commands now reference w8-v5
       or OrbStack drift, shows only if a reader compares cohorts by hand.
       Cheapest fix: a reporter mode that compares the ctrs side of two
       cohorts with the same identity.
-   2. Load admission samples the 1-minute load only at trial start and end;
-      a burst inside a trial passes. `collect.py` already samples loadavg
-      every 0.2 s; admit on the maximum sampled during the trial.
+   2. Load admission (`f366b36`) judged the 1-minute load, which counts
+      each engine's own vCPU threads: OrbStack's W12 trials ended at loads
+      up to 11.8 from the same start as ctrs's, so pairs were rejected for
+      the engine's behavior. `d211cae` records, per resource phase, cores
+      busy outside the engine and harness (host_statistics busy minus the
+      engine's counters minus the harness's rusage) and rejects above 2;
+      records without it keep the load rule. Open: confirm on the first
+      cohorts that the outside-CPU figure is near zero and alike for both
+      engines on a quiet host (an engine process missing from the match
+      would inflate its own figure).
    3. Metrics that do not measure what they name: W14 fresh p50 measures
       how many clients each engine admits at once (completion time is not
       a reported metric); W13 cells above half the loopback control are
