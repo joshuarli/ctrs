@@ -189,10 +189,11 @@ struct Delivery {
     delivered_at: Mutex<SystemTime>,
     /// Events were lost since then: the next batch starts with rescans.
     undelivered: AtomicBool,
+    test_drop_gate: Option<PathBuf>,
 }
 impl Default for Delivery {
     fn default() -> Self {
-        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false) }
+        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false), test_drop_gate: std::env::var_os("CTRS_TEST_FSEVENTS_GATE").map(PathBuf::from) }
     }
 }
 
@@ -230,6 +231,13 @@ unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths
     // SAFETY: FSEvents supplies arrays valid for this callback and the stream owns the context.
     let (callback, paths, flags, ids) = unsafe { (&*(info as *const Callback), std::slice::from_raw_parts(paths as *const *const c_char, count), std::slice::from_raw_parts(flags, count), std::slice::from_raw_parts(ids, count)) };
     let state = &callback.state;
+    if state.test_drop_gate.as_ref().is_some_and(|path| path.exists()) {
+        for id in ids { state.last_id.fetch_max(*id, Ordering::Relaxed); }
+        if !state.undelivered.swap(true, Ordering::Relaxed) {
+            crate::diag::warn!("test gate suppressed bind mount change notifications");
+        }
+        return;
+    }
     let started = SystemTime::now();
     let since = *state.delivered_at.lock().unwrap_or_else(|e| e.into_inner());
     let mut seen = HashSet::new();
