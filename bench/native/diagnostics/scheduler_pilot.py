@@ -1,6 +1,6 @@
 """Capture a filtered scheduler diagnostic; this command never qualifies timing."""
 import argparse
-import sys,os,json,time,secrets,subprocess
+import sys,json,time,secrets,subprocess
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import runner,ownership,collect,sched_trace,diagnostic_signals

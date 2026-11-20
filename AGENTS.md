@@ -29,13 +29,13 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 ## Verification
 
 - `make test` = `make test-rust` (workspace `--lib --tests`) + `make test-bench` (benchmark manifest
-  and Python unittest discovery, 398 tests); CI runs it in `macos` (PRs). Costs on a busy M-series
+  and Python unittest discovery, 399 tests); CI runs it in `macos` (PRs). Costs on a busy M-series
   Mac (load 14-24): cold 4m41s, warm 50s-1m52s; the Python half about 40s. ctrs-init is
-  Linux-only, so macOS runs 0 of its ~80 tests: CI `linux-musl` (x86_64, ARM64) runs them as root.
+  Linux-only, so macOS runs 0 of its ~80 tests: CI `linux-musl` (x86_64, ARM64) runs them as root; the ARM64 musl test binary passed 78 tests in a root container on tmpfs.
   `make test-bench` sets `TMPDIR` to `.work/tmp` itself. The Linux `benchmark-harness` job runs the
-  same 398 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
+  same 399 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
 - `make lint` (clippy, all targets, `-D warnings`): red at base, 51 errors in `crates/ctrs`
-  (DSLP-6); the other crates and Linux ctrs-init are clean. 28s warm. CI does not run it.
+  (CTRS-12); the other crates and Linux ctrs-init are clean. 28s warm. CI does not run it.
 - CLI flags and exit codes: none (`docker::tests::delegates_argv_and_env_to_a_stub_docker` covers
   delegation only). API: `daemon::api` and `daemon::http` unit tests; `conformance/run.sh` and
   `tests/e2e.sh` need a running engine (Needs environment; no CI job).
@@ -46,6 +46,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   tests (CI `linux-musl`); symlink-entry xattrs: `layers::tests::symlink_entry_xattrs_do_not_follow_the_link`. Privileged `tests/linux-host.sh`, `tests/kernel-features.sh`,
   `conformance/smoke.sh`, `isolation.sh`, `seccomp`: Needs environment (VM or privileged
   Linux container; no CI job). `arm64-compat` (QEMU) runs `tests/arm64-build.sh` cases.
+- Test tiers: Rust unit/integration and Python offline harness run by `make test` (warm 50s–1m52s); conformance and CLI e2e require a running engine. Empty conformance selections fail and are tested offline.
 - Performance: `bench/native/pyramid.py` (`check`, `run --tier edit|change`) over the workloads in
   `docs/campaign-native-performance.md`; hot paths are container lifecycle, image pull and bind IO.
   Scenario and full tiers need a named workload and an engine.
