@@ -851,6 +851,22 @@ def relay_delta(before: dict | None, after: dict | None, group: str) -> dict | N
     return {path: after[group][path] - before[group].get(path, 0) for path in after[group]}
 
 
+NAT_PATHS = ("nat", "nat_leg")
+
+
+def cpu_accounting(before: dict | None, after: dict | None) -> dict:
+    """Whether ctrs's charged CPU covers the trial's networking. Connections
+    the Mac's NAT carries cost host-kernel CPU no process is charged for."""
+    if after is None:
+        return {"complete": None, "reason": "relay counts unavailable"}
+    nat = sum(after[group][path] - ((before or {}).get(group) or {}).get(path, 0)
+              for group in after for path in after[group] if path in NAT_PATHS)
+    if nat:
+        return {"complete": False, "nat_connections": nat,
+                "reason": "host-kernel NAT networking is not charged to ctrs"}
+    return {"complete": True, "nat_connections": 0}
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -3418,7 +3434,10 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             ctx.engines[key] = engine
         stop = not keep_warm
     try:
+        relays_before = relay_counts(engine) if engine.name == "ctrs" else None
         rec = trial(ctx, engine, state, **kw)
+        if engine.name == "ctrs":
+            rec["cpu_accounting"] = cpu_accounting(relays_before, relay_counts(engine))
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
         rec["slot"] = slot

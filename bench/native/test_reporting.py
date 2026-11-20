@@ -413,6 +413,21 @@ class ReportingTests(unittest.TestCase):
         # Cross-engine scoring skips the same records entirely.
         self.assertEqual(reporting.analyze(records)["cohorts"], [])
 
+    def test_nat_carried_cpu_win_is_incomplete_but_a_loss_stands(self):
+        for ratio, expected in ((0.7, "incomplete"), (1.3, "loss")):
+            records = [r for n in range(1, 11) for r in pair(n, ratio=ratio, metric="cpu_seconds_est")]
+            for record in records:
+                record["metrics"] = {}
+                record["resources"].update(ownership_verified=True, resource_errors=[], cpu_counters_complete=True,
+                                           cpu_seconds_est=ratio if record["engine"] == "ctrs" else 1.0)
+                if record["engine"] == "ctrs":
+                    record["cpu_accounting"] = {"complete": False, "nat_connections": 3}
+            report = reporting.analyze(records)
+            result = metric_result(report, "cpu_seconds_est")
+            self.assertEqual(result["assessment"], expected)
+            self.assertEqual(result["cpu_accounting_incomplete_trials"], 10)
+            self.assertIn("NAT", reporting.render_markdown(report))
+
     def candidate_records(self, slot_a_value, slot_b_value, pairs=10):
         records = []
         for n in range(1, pairs + 1):

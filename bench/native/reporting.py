@@ -338,6 +338,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
                 for paths in recorded:
                     for name, n in paths.items():
                         transport[name] = transport.get(name, 0) + n
+        incomplete_cpu = None
+        if "cpu" in metric and "ctrs" in sides:
+            side = sides.index("ctrs") + 1
+            incomplete_cpu = sum((pair[side].get("cpu_accounting") or {}).get("complete") is False for pair in valid)
+            if incomplete_cpu and assessment in FAVORABLE + ("inconclusive",):
+                assessment = "incomplete"
         complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success")
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
@@ -347,6 +353,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             "evidence_status": "pilot", "promotion_eligible": False,
             **({"tool_limited_trials": limited} if limited is not None else {}),
             **({"ctrs_transport": transport} if transport is not None else {}),
+            **({"cpu_accounting_incomplete_trials": incomplete_cpu} if incomplete_cpu else {}),
         })
     return result
 
@@ -545,6 +552,10 @@ def render_markdown(report: dict) -> str:
                 if "tool_limited_trials" in metric:
                     counts = ", ".join(f"{side} {n}" for side, n in metric["tool_limited_trials"].items())
                     lines.append(f"- {metric['metric']}: tool-limited trials {counts}.")
+                if metric.get("cpu_accounting_incomplete_trials"):
+                    lines.append(f"- {metric['metric']}: {metric['cpu_accounting_incomplete_trials']} ctrs trials "
+                                 "carried connections over the Mac's NAT, whose host-kernel CPU is not charged "
+                                 "to ctrs; a CPU win or tie is incomplete, a loss stands.")
                 if "ctrs_transport" in metric:
                     paths = ", ".join(f"{name} {n}" for name, n in metric["ctrs_transport"].items())
                     lines.append(f"- {metric['metric']}: ctrs connections by path: {paths}.")
