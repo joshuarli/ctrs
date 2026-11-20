@@ -206,8 +206,18 @@ Next, in order:
    showed 1.2–2.5× more files/s split across two devices) tests whether
    the Virtualization.framework server serializes per device. Rerun in a
    quiet window before drawing a conclusion.
-4. W6/W7: profile the largest confirmed losing build phase once the
-   cohorts report.
+4. W6/W7 D-lane cohorts reported (2026-11-20, source `0536435`): no
+   build phase loses. W6 `base-20261120T143829-8345`: Rust 0.953×
+   non-inferior, zlib 0.641× win. W7 `base-20261120T150445-1408`: the
+   uncached hyperfine build is 0.997× non-inferior, every other cell
+   wins. The closest-to-losing phase is the uncached compile, which is
+   CPU-bound in the guest: the 9-vCPU W6 candidate (queue q6) is its
+   intervention. Resource metrics sampled only 8 of 10 pairs and stay
+   incomplete; find why two trials dropped their samples.
+   The 9-vCPU W6 candidate failed every slot-b build until `0536435`:
+   the builder config write was reset right after VM boot and the
+   builder started on a copied config naming the other daemon's mirror
+   port.
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
