@@ -60,7 +60,7 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
     resources = []
     sampler = trace = None
-    rec['metrics'].update(fixture_version='w13-v3', path=path, direction=direction,
+    rec['metrics'].update(fixture_version='w13-v5', path=path, direction=direction,
                           streams=streams, size_bytes=size_bytes, repeats=repeats,
                           controlled_egress='unsupported: no owned external endpoint', attempts=[])
     try:

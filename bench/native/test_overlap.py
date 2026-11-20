@@ -215,7 +215,7 @@ class OverlapTests(unittest.TestCase):
             self.assertTrue(rec['correctness']['ok'], rec['validation_errors'])
             self.assertEqual(rec['paired_inputs']['api_config'], 'sha256:c')
             self.assertEqual(rec['paired_inputs']['sha256_per_stream'], 'hash')
-            self.assertEqual(rec['metrics']['fixture_version'], 'w13-v3')
+            self.assertEqual(rec['metrics']['fixture_version'], 'w13-v5')
             creations = [c for c in engine.commands if c[:2] == ['network', 'create'] or c[:2] == ['run', '-d']]
             self.assertEqual(len(creations), 3)
             self.assertTrue(all('dev.ctrs.campaign.run=test-run' in c for c in creations))
