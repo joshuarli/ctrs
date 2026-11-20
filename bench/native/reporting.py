@@ -588,8 +588,9 @@ def _anchor_key(record: dict) -> str:
     params = identity["workload_params"]
     if isinstance(params, dict):
         identity["workload_params"] = {k: v for k, v in params.items() if v is not None}
+    identity["fixture_version"] = (record.get("metrics") or {}).get("fixture_version")
     return _canonical({k: identity[k] for k in ("host_id", "arch", "case", "state",
-                                                "workload_params", "builder_driver")})
+                                                "workload_params", "builder_driver", "fixture_version")})
 
 
 def _admitted(records: list[dict]) -> dict[str, list[dict]]:

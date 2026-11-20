@@ -183,6 +183,16 @@ class ReportingTests(unittest.TestCase):
         self.assertNotIn("reconnect_p99_ms", names)
         self.assertNotIn("chunk_lateness_p99_ms", names)
 
+    def test_anchor_never_compares_across_fixture_versions(self):
+        def run(run_id, version):
+            records = [r for i in range(1, 11) for r in pair(pair_id=i, run_id=run_id, case="W13",
+                       metric="goodput_bytes_per_second")]
+            for r in records:
+                r["design"] = "paired"
+                r["metrics"]["fixture_version"] = version
+            return records
+        self.assertEqual(reporting.analyze_anchor(run("a", "w13-v3"), run("b", "w13-v4")), [])
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:
