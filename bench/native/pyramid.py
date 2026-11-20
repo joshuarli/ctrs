@@ -66,9 +66,9 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
     ("w3v4-storage", "storage", "pgbench fixed work on a named volume",
      ("--case", "W3-v4"), 14, ("pinned-portfolio",)),
     ("w4-pipeline", "pipeline", "HTTP ingest through Redis workers to exact outputs on volumes",
-     ("--case", "W4"), None, ()),
+     ("--case", "W4"), None, ("w4-image",)),
     ("w5-esbuild-watch", "watch", "persistent esbuild watch to exact CLI output after edits",
-     ("--case", "W5"), None, ()),
+     ("--case", "W5"), None, ("w5-source",)),
     ("w6-build", "build", "docker build of Rust and C projects with artifact hashes",
      ("--case", "W6"), None, ()),
     ("w7-buildx", "build", "buildx to loaded runnable images, uncached, warm and incremental",
@@ -253,6 +253,19 @@ def check_requirement(key: str) -> tuple[str, str]:
     if key == "w8-layout":
         layout = WORK / "native-perf/inputs/w8-portfolio-v5/layout"
         return ("ok", "") if layout.is_dir() else ("fail", f"{layout} missing; see fixtures/w8-v3/README.md")
+    if key == "w4-image":
+        docker = shutil.which("docker")
+        found = docker and subprocess.run([docker, "-H", f"unix://{ORB_SOCKET}", "image", "inspect", "np-w4-events:v4"],
+                                          capture_output=True, timeout=20).returncode == 0
+        return ("ok", "present on OrbStack; ctrs is checked per trial") if found else \
+            ("fail", "np-w4-events:v4 missing; build both engines' inputs with `python3 bench/native/runner.py prepare`")
+    if key == "w5-source":
+        sys.path.insert(0, str(HERE))
+        import watch_loop
+        version = watch_loop.contract()["source"]["version"]
+        archive = WORK / "native-perf/inputs" / f"marked-{version}.tar.gz"
+        return ("ok", "") if archive.is_file() else \
+            ("fail", f"{archive.name} missing; fetch it with `python3 bench/native/runner.py prepare`")
     if key == "w9-image-ref":
         ref = os.environ.get("BENCH_W9_IMAGE_REF")
         return ("ok", ref) if ref else ("fail", "set BENCH_W9_IMAGE_REF to the preinstalled pinned Marked digest "
