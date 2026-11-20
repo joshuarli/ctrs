@@ -1654,7 +1654,6 @@ mod tests {
             "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cfg_digest, "size": cfg.len()},
             "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": layer_digest, "size": layer.len()}],
         })).unwrap();
-        let manifest_digest = digest_of(&manifest);
         let routes = vec![
             ("/v2/test/repo/manifests/latest".to_owned(), "application/vnd.oci.image.manifest.v1+json", manifest),
             (format!("/v2/test/repo/blobs/{cfg_digest}"), "application/vnd.oci.image.config.v1+json", cfg),

@@ -112,6 +112,10 @@ The gate does no build or engine setup. Full discovery previously took 13.477
 seconds for 201 tests. The first W2 selection ran 32 tests in 1.630 seconds;
 W8/resources costs and timeout adequacy remain unmeasured.
 
+`make test` runs the Rust workspace tests and full Python discovery, as CI does on
+pull requests; `make lint` runs clippy over all targets. The ceilings below govern
+iteration inside a lane, not that gate.
+
 Verification ceilings: **Edit** is a changed module plus `test_checks.py`;
 **Change** is one explicit component check plus changed tests (60 seconds,
 maximum 300); **Scenario** requires a named benchmark workload and separate
