@@ -3730,6 +3730,8 @@ def cmd_baseline(args) -> int:
                           "write_ratio": args.write_ratio, "seed": args.seed + pair * 10,
                           "operations": args.operations or 20000, "size_bytes": args.size_bytes,
                           "streams": args.streams, "lead_seconds": args.lead_seconds}
+                    if args.direction != "upload":
+                        kw["direction"] = args.direction
                 if args.case == "W14":
                     kw = {"mode": args.lifecycle_mode, "clients": args.lifecycle_clients,
                           "idle_seconds": args.idle_seconds}

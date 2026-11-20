@@ -29,7 +29,7 @@ def overlap_fraction(window, transfers):
 
 def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=0.3,
                   seed=1, operations=20000, size_bytes=1 << 30, repeats=1, streams=1,
-                  lead_seconds=2.0, loops=96):
+                  lead_seconds=2.0, loops=96, direction=None):
     import runner
     if lead_seconds < 0 or operations <= 0 or loops < 1 or repeats != 1:
         raise ValueError('invalid overlap parameters')
@@ -55,7 +55,7 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
     def transfer():
         try:
             results['transfer'] = runner.trial_w13(ctx, engine, state, size_bytes=size_bytes * loops, repeats=1, streams=streams,
-                                                   artifact_bytes=size_bytes // streams)
+                                                   artifact_bytes=size_bytes // streams, direction=direction or 'upload')
         except Exception as exc:
             results['error'] = f'{type(exc).__name__}: {exc}'
         finally:

@@ -106,7 +106,7 @@ class CyclicTransferTests(unittest.TestCase):
                 patch.object(runner, 'trial_w2', w2):
             rec = overlap.trial_overlap(Context(root), Engine(), 'warm', size_bytes=1 << 20, loops=8)
         self.assertFalse(rec['correctness']['ok'])
-        self.assertEqual(calls, [{'size_bytes': 8 << 20, 'repeats': 1, 'streams': 1, 'artifact_bytes': 1 << 20}])
+        self.assertEqual(calls, [{'size_bytes': 8 << 20, 'repeats': 1, 'streams': 1, 'artifact_bytes': 1 << 20, 'direction': 'upload'}])
 
 
 class OverlapTests(unittest.TestCase):
