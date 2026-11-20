@@ -113,7 +113,7 @@ cannot prove redundant.
   their view after overflow. The budget is global and first come: one
   container can exhaust it for others. Linux reports overflow with watch
   descriptor -1. libuv can ignore that event, so its users cannot rely on
-  this degraded path to trigger a rebuild. The world-readable counter
+  this degraded path to trigger a rebuild. The counter (mode `0444`)
   exposes aggregate watch activity to guest users. These limitations are
   accepted. The host's root updates share a single coalescing wakeup.
   Writeback caching remains off.
