@@ -176,7 +176,7 @@ diff -ruN a/fs/notify/inotify/inotify_user.c b/fs/notify/inotify/inotify_user.c
  }
 diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 --- a/fs/proc/ctrs_fsnotify.c	2026-11-20 08:23:11
-+++ b/fs/proc/ctrs_fsnotify.c	2026-11-20 08:30:07
++++ b/fs/proc/ctrs_fsnotify.c	2026-11-20 08:40:32
 @@ -1,28 +1,15 @@
  // SPDX-License-Identifier: GPL-2.0
 -/*
@@ -263,7 +263,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	char name[NAME_MAX + 1];
  };
  
-@@ -153,6 +150,360 @@
+@@ -153,6 +150,389 @@
  
  struct dentry *d_alloc_cursor(struct dentry *parent);
  
@@ -271,6 +271,8 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +	struct rb_node node;
 +	u64 ino;
 +	u64 seen;
++	bool touched;
++	bool removed;
 +	unsigned int len;
 +	char name[];
 +};
@@ -353,7 +355,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +	}
 +}
 +
-+static void ctrs_name_add_locked(struct ctrs_watch *watch, const struct qstr *name, u64 ino)
++static struct ctrs_name *ctrs_name_add_locked(struct ctrs_watch *watch, const struct qstr *name, u64 ino, bool initial)
 +{
 +	struct rb_node **link = &watch->names.rb_node, *parent = NULL;
 +	struct ctrs_name *item;
@@ -362,7 +364,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +	long used;
 +
 +	if (watch->degraded)
-+		return;
++		return NULL;
 +	while (*link) {
 +		int cmp;
 +
@@ -370,17 +372,22 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +		item = rb_entry(parent, struct ctrs_name, node);
 +		cmp = ctrs_name_cmp(name, item);
 +		if (!cmp) {
++			if (initial && item->touched)
++				return item;
 +			if (ino)
 +				item->ino = ino;
++			if (!initial && watch->populating)
++				item->touched = true;
++			item->removed = false;
 +			item->seen = watch->generation;
-+			return;
++			return item;
 +		}
 +		link = cmp < 0 ? &parent->rb_left : &parent->rb_right;
 +	}
 +	item = kmalloc(sizeof(*item) + len + 1, GFP_NOFS | __GFP_NOWARN);
 +	if (!item) {
 +		ctrs_degrade_locked(watch);
-+		return;
++		return NULL;
 +	}
 +	bytes = ksize(item);
 +	used = atomic_long_read(&ctrs_name_bytes);
@@ -388,18 +395,21 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +		if (bytes > ctrs_name_limit || used > ctrs_name_limit - bytes) {
 +			kfree(item);
 +			ctrs_degrade_locked(watch);
-+			return;
++			return NULL;
 +		}
 +		if (atomic_long_try_cmpxchg(&ctrs_name_bytes, &used, used + bytes))
 +			break;
 +	}
 +	item->len = len;
 +	item->ino = ino;
++	item->touched = !initial && watch->populating;
++	item->removed = false;
 +	item->seen = watch->generation;
 +	memcpy(item->name, name->name, len);
 +	item->name[len] = '\0';
 +	rb_link_node(&item->node, parent, link);
 +	rb_insert_color(&item->node, &watch->names);
++	return item;
 +}
 +
 +static void ctrs_name_remove_locked(struct ctrs_watch *watch, const struct qstr *name)
@@ -473,7 +483,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +			struct recovery_name *name = &listing->names[i].name;
 +			struct qstr q = QSTR_LEN(name->name, name->len);
 +
-+			ctrs_name_add_locked(watch, &q, listing->names[i].ino);
++			ctrs_name_add_locked(watch, &q, listing->names[i].ino, true);
 +		}
 +		if (err)
 +			ctrs_degrade_locked(watch);
@@ -569,6 +579,19 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +			ctrs_watch_populate(watch, path);
 +		mutex_lock(&watch->lock);
 +		watch->populating = false;
++		{
++			struct rb_node *node = rb_first(&watch->names);
++
++			while (node) {
++				struct ctrs_name *item = rb_entry(node, struct ctrs_name, node);
++
++				node = rb_next(node);
++				if (item->removed) {
++					rb_erase(&item->node, &watch->names);
++					ctrs_name_free(item);
++				}
++			}
++		}
 +		mutex_unlock(&watch->lock);
 +		watch->error = err;
 +		complete_all(&watch->ready);
@@ -593,12 +616,18 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +	if (!name || dir != watch->inode)
 +		return 0;
 +	mutex_lock(&watch->lock);
-+	if (watch->populating)
-+		ctrs_degrade_locked(watch);
-+	else if (mask & (FS_DELETE | FS_MOVED_FROM))
-+		ctrs_name_remove_locked(watch, name);
-+	else if (mask & (FS_CREATE | FS_MOVED_TO))
-+		ctrs_name_add_locked(watch, name, inode ? inode->i_ino : 0);
++	if (mask & (FS_DELETE | FS_MOVED_FROM)) {
++		if (watch->populating) {
++			struct ctrs_name *item = ctrs_name_add_locked(watch, name, 0, false);
++
++			if (item)
++				item->removed = true;
++		} else {
++			ctrs_name_remove_locked(watch, name);
++		}
++	} else if (mask & (FS_CREATE | FS_MOVED_TO)) {
++		ctrs_name_add_locked(watch, name, inode ? inode->i_ino : 0, false);
++	}
 +	mutex_unlock(&watch->lock);
 +	return 0;
 +}
@@ -624,7 +653,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  static DEFINE_MUTEX(recovery_mutex);
  static LIST_HEAD(recovery_dirs);
  static struct path recovery_root;
-@@ -168,6 +519,7 @@
+@@ -168,6 +548,7 @@
  	list_del(&dir->link);
  	if (dir->file)
  		fput(dir->file);
@@ -632,7 +661,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	dput(dir->cursor);
  	kfree(dir);
  }
-@@ -232,7 +584,7 @@
+@@ -232,7 +613,7 @@
  	size = i_size_read(inode);
  	mtime = inode_get_mtime(inode);
  	ctime = inode_get_ctime(inode);
@@ -641,7 +670,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	if (state < 0 && state != -ENOENT && state != -ESTALE) {
  		result = state;
  		goto out;
-@@ -246,17 +598,18 @@
+@@ -246,17 +627,18 @@
  	new_mtime = inode_get_mtime(inode);
  	new_ctime = inode_get_ctime(inode);
  	if (state == -ENOENT || state == -ESTALE) {
@@ -667,7 +696,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  		if (S_ISREG(inode->i_mode)) {
  			invalidate_mapping_pages(inode->i_mapping, 0, -1);
  			notify_renamed_in_place(parent, child);
-@@ -272,8 +625,6 @@
+@@ -272,8 +654,6 @@
  			  loff_t offset, u64 ino, unsigned int type)
  {
  	struct recovery_listing *listing = container_of(ctx, struct recovery_listing, ctx);
@@ -676,7 +705,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	struct recovery_name *item;
  
  	if ((len == 1 && name[0] == '.') ||
-@@ -281,31 +632,43 @@
+@@ -281,31 +661,43 @@
  		return true;
  	if (len > NAME_MAX || listing->count == RECOVERY_BATCH)
  		return false;
@@ -730,7 +759,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	if (!dir->file) {
  		dir->file = dentry_open_nonotify(&path, O_RDONLY | O_DIRECTORY, current_cred());
  		if (IS_ERR(dir->file)) {
-@@ -324,33 +687,76 @@
+@@ -324,33 +716,76 @@
  	err = iterate_dir(dir->file, &listing->ctx);
  	for (i = 0; !err && i < listing->count; i++) {
  		struct recovery_name *name = &listing->names[i];
@@ -752,7 +781,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +		old = ctrs_find_name(dir->watch, &q);
 +		known = old != NULL;
 +		replaced = old && old->ino && name->ino && old->ino != name->ino;
-+		ctrs_name_add_locked(dir->watch, &q, name->ino);
++		ctrs_name_add_locked(dir->watch, &q, name->ino, false);
 +		degraded = dir->watch->degraded;
 +		mutex_unlock(&dir->watch->lock);
 +		if (degraded) {
@@ -767,7 +796,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
 +			fsnotify_name(FS_CREATE | (name->type == DT_DIR ? FS_ISDIR : 0),
 +				      NULL, FSNOTIFY_EVENT_NONE, inode, &q, 0);
 +			mutex_lock(&dir->watch->lock);
-+			ctrs_name_add_locked(dir->watch, &q, name->ino);
++			ctrs_name_add_locked(dir->watch, &q, name->ino, false);
 +			mutex_unlock(&dir->watch->lock);
 +		}
  	}
@@ -822,7 +851,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	if (list_empty(&recovery_dirs))
  		err = recovery_push(recovery_root.dentry);
  	while (!err && !list_empty(&recovery_dirs) && count++ < RECOVERY_BATCH) {
-@@ -367,6 +773,17 @@
+@@ -367,6 +802,17 @@
  			if (err == 1 || err == -ENOENT || err == -ESTALE) {
  				err = 0;
  				recovery_pop();
@@ -840,7 +869,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  			}
  			break;
  		}
-@@ -376,17 +793,29 @@
+@@ -376,17 +822,29 @@
  				dir->listed_cache = true;
  			continue;
  		}
@@ -873,7 +902,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	if (list_empty(&recovery_dirs)) {
  		if (recovery_again) {
  			recovery_again = false;
-@@ -396,7 +825,7 @@
+@@ -396,7 +854,7 @@
  		}
  	}
  	if (recovery_active)
@@ -882,7 +911,7 @@ diff -ruN a/fs/proc/ctrs_fsnotify.c b/fs/proc/ctrs_fsnotify.c
  	mutex_unlock(&recovery_mutex);
  }
  
-@@ -532,9 +961,16 @@
+@@ -532,9 +990,16 @@
  
  static int __init ctrs_fsnotify_init(void)
  {
