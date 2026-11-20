@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 8
+Next: 9
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -56,3 +56,11 @@ Diagnose (DSLP-2): reviewed layer and `docker cp` extraction, host archive load,
 - **Fix with:** deslop
 - **Effort:** M
 
+### DSLP-8 · P3 · ARM64 qualification platform case fails under emulation
+
+- **Area:** Needs environment · ARM64 qualification
+- **Where:** .github/workflows/ci.yml ARM64 qualification job; tests/arm64-build.sh --case platform
+- **Problem:** After fixing the job's --case arguments (PR #7), the AMD64-to-ARM64 qualification runner executes its cases on the hosted runner. The platform case fails ("MISS platform case failed", logs under .work/tmp/qemu-accel/isolated-ctrs-platform-*) right after the multi-platform OCI load check. The job was already red on main (argument parsing), so this case had never run in CI. The other qualification cases (arch refusal, build scripts not emulated, failed pull surfaced) pass. Run 44770575746.
+- **Recommendation:** Download the preserved failure logs from a rerun with an artifact upload, or reproduce with tests/arm64-build.sh --case platform on an x86-64 Linux host with QEMU binfmt, then fix the case or the runner.
+- **Fix with:** root-cause
+- **Effort:** M
