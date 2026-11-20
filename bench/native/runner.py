@@ -859,8 +859,9 @@ def cpu_accounting(before: dict | None, after: dict | None) -> dict:
     the Mac's NAT carries cost host-kernel CPU no process is charged for."""
     if after is None:
         return {"complete": None, "reason": "relay counts unavailable"}
-    nat = sum(after[group][path] - ((before or {}).get(group) or {}).get(path, 0)
-              for group in after for path in after[group] if path in NAT_PATHS)
+    nat = sum(count - ((before or {}).get(group) or {}).get(path, 0)
+              for group, paths in after.items() if isinstance(paths, dict)
+              for path, count in paths.items() if path in NAT_PATHS)
     if nat:
         return {"complete": False, "nat_connections": nat,
                 "reason": "host-kernel NAT networking is not charged to ctrs"}

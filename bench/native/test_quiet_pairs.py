@@ -66,3 +66,13 @@ class ForeignCpu(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CpuAccounting(unittest.TestCase):
+    def test_nat_connections_make_cpu_incomplete_and_scalars_are_ignored(self):
+        before = {"published": {"nat_leg": 2, "vsock": 5}, "host_bound": {"nat": 0}, "active": 3}
+        after = {"published": {"nat_leg": 4, "vsock": 9}, "host_bound": {"nat": 1}, "active": 1}
+        self.assertEqual(runner.cpu_accounting(before, after)["nat_connections"], 3)
+        self.assertFalse(runner.cpu_accounting(before, after)["complete"])
+        self.assertTrue(runner.cpu_accounting(after, after)["complete"])
+        self.assertIsNone(runner.cpu_accounting(before, None)["complete"])
