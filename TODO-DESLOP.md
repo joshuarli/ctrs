@@ -17,6 +17,10 @@ Dead code (DSLP-5): `cargo rustc` force-warn scans exited 0 on macOS for all fiv
 
 Bench (DSLP-9): the existing pyramid has Edit, Change, Scenario and Full tiers and explicit preflight. Edit passed both harness tests and manifest validation; W1 Change preflight passed after building the signed host, initramfs, kernel and disk. A case-insensitive scratch directory collided kernel headers; a case-sensitive worktree-local APFS image fixed the build. The final `perf-gate-ready` returned 75 on a busy host, so the timed Change workload is deferred and the ticket remains open. No Full workload was run.
 
+Scorecard and review: relative to a572b42, Rust source lines and escape-hatch matching lines are unchanged; benchmark Python removes 13 unused bindings and adds one 17-line boundary test, with two fixture imports retained. The final `make test` passed (399 Python tests, 47.543s for that half); total warm time was not measured, so the step cost budget is unverified. Line/branch coverage and mutation counts are unmeasured. DSLP-7 was fixed before this lane; no new P1/P2 defect was established. DSLP-10 and DSLP-11 were filed as P3, DSLP-6 and DSLP-8 remain open. No dependency was removed, no CI minutes were spent, and no performance verdict or escaped-regression count was measured.
+
+Review: inspected the cumulative diff, conformance caller boundary, registry setup side effects and benchmark fixture hashing. Restored the two fixture imports to preserve benchmark identity; no other demonstrated defect remained. The false-pass test was proven against the original exit-0 behavior. Method feedback: a zero-selection negative control would have caught the conformance defect; force-warn on Linux exposed the feature-gated policy that the macOS scan could not see. The shared kache wrapper scans the sparse guest disk (DSLP-10); its input walk needs an owner fix. Engine e2e, timed Change, coverage, mutation and a measured test-time comparison remain unverified.
+
 ## Tickets
 
 ### DSLP-9 · P2 · Bench: audit and prove the pyramid
