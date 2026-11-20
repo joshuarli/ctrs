@@ -41,7 +41,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   store and archive tests. Container records: none.
 - Host/guest wire: `ctrs-proto::tests::round_trip`, `rejects_oversized_unknown_and_truncated`.
 - Layer and `docker cp` extraction, isolation: `ctrs-init` `layers::tests` and `copy`/`inroot`
-  tests (CI `linux-musl`). Privileged `tests/linux-host.sh`, `tests/kernel-features.sh`,
+  tests (CI `linux-musl`); no test yet for symlink-entry xattrs (DSLP-7). Privileged `tests/linux-host.sh`, `tests/kernel-features.sh`,
   `conformance/smoke.sh`, `isolation.sh`, `seccomp`: Needs environment (VM or privileged
   Linux container; no CI job). `arm64-compat` (QEMU) runs `tests/arm64-build.sh` cases.
 - Performance: `bench/native/pyramid.py` (`check`, `run --tier edit|change`) over the workloads in
