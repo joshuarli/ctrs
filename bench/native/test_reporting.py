@@ -413,6 +413,36 @@ class ReportingTests(unittest.TestCase):
         # Cross-engine scoring skips the same records entirely.
         self.assertEqual(reporting.analyze(records)["cohorts"], [])
 
+    def candidate_records(self, slot_a_value, slot_b_value, pairs=10):
+        records = []
+        for n in range(1, pairs + 1):
+            for record in noise_pair(n):
+                record["design"] = "candidate"
+                record["workload_params"]["resource_lane"] = "installed-default"
+                record["metrics"]["wall_seconds"] = slot_a_value if record["slot"] == "a" else slot_b_value
+                if record["slot"] == "b":
+                    record["config_overrides"] = {"CTRS_CPUS": "9"}
+                    record["resources"] = {"engine": {"ncpu": 9, "mem_total_bytes": 8 << 30}}
+                records.append(record)
+        return records
+
+    def test_candidate_ratio_is_candidate_over_current(self):
+        report = reporting.analyze_noise(self.candidate_records(1.0, 0.8), design="candidate")
+        self.assertEqual(report["input_issues"], [])
+        cohort = report["cohorts"][0]
+        self.assertEqual(cohort["valid_pairs"], 10)
+        self.assertEqual(cohort["config_overrides"], {"CTRS_CPUS": "9"})
+        self.assertAlmostEqual(metric_result(report)["ratio_median"], 0.8)
+        self.assertIn("CTRS_CPUS", reporting.render_noise_markdown(report))
+        self.assertEqual(reporting.analyze_noise(self.candidate_records(1.0, 0.8))["cohorts"], [])
+
+    def test_candidate_without_overrides_is_an_input_issue(self):
+        records = self.candidate_records(1.0, 1.0)
+        for record in records:
+            record.pop("config_overrides", None)
+        report = reporting.analyze_noise(records, design="candidate")
+        self.assertIn("config_overrides", report["input_issues"][0])
+
     def test_noise_pair_requires_both_slots_and_one_engine(self):
         records = noise_pair()
         records[1]["slot"] = "a"

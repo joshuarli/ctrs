@@ -425,24 +425,31 @@ def analyze(records: list[dict], input_issues: list[str] | None = None) -> dict:
     return result
 
 
-def analyze_noise(records: list[dict], input_issues: list[str] | None = None) -> dict:
-    """Same-engine A/B slot noise control.
+def analyze_noise(records: list[dict], input_issues: list[str] | None = None,
+                  design: str = "noise-control") -> dict:
+    """Same-engine A/B slot pairs.
 
-    Pairs slot "a" against slot "b" within each cohort. Ratios should
-    center on 1; they size run-to-run noise and are never engine
-    performance evidence.
+    noise-control: slot "a" against slot "b" with identical configuration;
+    ratios should center on 1 and size run-to-run noise. candidate: slot
+    "b" runs a configuration candidate (`config_overrides`) against the
+    current configuration in slot "a"; ratios are candidate/current. Neither
+    is ever ctrs-vs-OrbStack evidence.
     """
     groups: dict[str, tuple[dict, list[dict]]] = {}
     result = {"evidence_status": "pilot", "promotion_eligible": False,
               "input_issues": list(input_issues or []), "skipped_records": 0,
               "cohorts": [],
-              "note": "Same-engine noise control only; ratios near 1 indicate "
-                      "measurement noise, never an OrbStack comparison."}
+              "design": design,
+              "note": ("Same-engine noise control only; ratios near 1 indicate "
+                       "measurement noise, never an OrbStack comparison.")
+              if design == "noise-control" else
+              "Candidate configuration (slot b) over current (slot a) on one engine; "
+              "never an OrbStack comparison."}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             result["input_issues"].append(f"record {index}: expected an object")
             continue
-        if record.get("design") != "noise-control":
+        if record.get("design") != design:
             result["skipped_records"] += 1
             continue
         invalid = [k for k in IDENTITY_FIELDS
@@ -466,11 +473,19 @@ def analyze_noise(records: list[dict], input_issues: list[str] | None = None) ->
         identity = cohort_identity(record)
         key = _canonical(identity)
         groups.setdefault(key, (identity, []))[1].append(record)
-    result["cohorts"] = [
-        _analyze_cohort(identity, rows, sides=("a", "b"),
-                        side_of=lambda record: record.get("slot"),
-                        same_engine_required=True)
-        for _, (identity, rows) in sorted(groups.items())]
+    for _, (identity, rows) in sorted(groups.items()):
+        cohort = _analyze_cohort(identity, rows, sides=("a", "b") if design == "noise-control" else ("b", "a"),
+                                 side_of=lambda record: record.get("slot"),
+                                 same_engine_required=True)
+        if design == "candidate":
+            overrides = {_canonical(r.get("config_overrides") or {}) for r in rows if r.get("slot") == "b"}
+            current = [r for r in rows if r.get("slot") == "a" and r.get("config_overrides")]
+            if len(overrides) != 1 or overrides == {_canonical({})} or current:
+                result["input_issues"].append(
+                    f"{identity['run_id']}: candidate slot b needs one non-empty config_overrides and slot a none")
+            cohort["config_overrides"] = next((r["config_overrides"] for r in rows
+                                               if r.get("slot") == "b" and r.get("config_overrides")), None)
+        result["cohorts"].append(cohort)
     return result
 
 
@@ -537,10 +552,15 @@ def render_markdown(report: dict) -> str:
 
 
 def render_noise_markdown(report: dict) -> str:
-    lines = ["# Native noise-control report — same-engine slot pairs", "",
-             "Slot a vs slot b on ONE engine sizes measurement noise. These",
-             "ratios are never engine performance evidence and cannot",
-             "support any ctrs-vs-OrbStack claim.", ""]
+    if report.get("design") == "candidate":
+        lines = ["# Native candidate report — one engine, current vs candidate configuration", "",
+                 "Ratios are candidate (slot b) / current (slot a); below 1 favors the",
+                 "candidate. They cannot support any ctrs-vs-OrbStack claim.", ""]
+    else:
+        lines = ["# Native noise-control report — same-engine slot pairs", "",
+                 "Slot a vs slot b on ONE engine sizes measurement noise. These",
+                 "ratios are never engine performance evidence and cannot",
+                 "support any ctrs-vs-OrbStack claim.", ""]
     if report["input_issues"]:
         lines += ["## Invalid input", ""]
         lines += [f"- {issue}" for issue in report["input_issues"]]
@@ -548,7 +568,8 @@ def render_noise_markdown(report: dict) -> str:
         ident = cohort["identity"]
         lines += ["", f"## {ident['case']} / {ident['state']} / {ident['run_id']}", "",
                   f"Host: `{ident['host_id']}` (`{ident['arch']}`); source: `{ident['git_sha']}`.",
-                  f"Parameters: `{_canonical(ident['workload_params'])}`.", "",
+                  f"Parameters: `{_canonical(ident['workload_params'])}`.",
+                  *([f"Candidate: `{_canonical(cohort['config_overrides'])}`."] if cohort.get("config_overrides") else []), "",
                   "| Slot | Trials | Correct | Failed | Server versions |",
                   "| --- | ---: | ---: | ---: | --- |"]
         for side, info in cohort["engines"].items():
@@ -559,7 +580,8 @@ def render_noise_markdown(report: dict) -> str:
             lines += [f"- Pair {item['pair_id']}: {item['reason']}."
                       for item in cohort["rejections"]]
         if cohort["metrics"]:
-            lines += ["", "| Metric | Valid pairs | Missing pairs | Median ratio | 95% CI | Assessment (noise only) |",
+            label = "Assessment (candidate/current)" if report.get("design") == "candidate" else "Assessment (noise only)"
+            lines += ["", f"| Metric | Valid pairs | Missing pairs | Median ratio | 95% CI | {label} |",
                       "| --- | ---: | ---: | ---: | --- | --- |"]
             for metric in cohort["metrics"]:
                 median = metric["ratio_median"]
@@ -676,6 +698,8 @@ def main() -> int:
     parser.add_argument("--match", default="*")
     parser.add_argument("--noise", action="store_true",
                         help="report same-engine A/B slot noise control")
+    parser.add_argument("--candidate", action="store_true",
+                        help="report a same-engine configuration candidate (slot b) against current (slot a)")
     parser.add_argument("--anchor", help="run-id glob to compare --match against, engine by engine")
     args = parser.parse_args()
     if args.anchor:
@@ -691,8 +715,8 @@ def main() -> int:
     if not records and not issues:
         print("no trial records found")
         return 1
-    if args.noise:
-        report = analyze_noise(records, issues)
+    if args.noise or args.candidate:
+        report = analyze_noise(records, issues, "candidate" if args.candidate else "noise-control")
         print(render_noise_markdown(report), end="")
         return int(invalid_noise_report(report))
     report = analyze(records, issues)

@@ -580,12 +580,15 @@ class Engine:
     """One competitor engine: socket, env, and (for ctrs) daemon lifecycle."""
 
     def __init__(self, name: str, run_id: str, fresh_dir: Path | None = None,
-                 resource_lane: str = "matched"):
+                 resource_lane: str = "matched", config_overrides: dict | None = None):
         if name not in ("ctrs", "orbstack"):
             raise ValueError(f"unknown engine {name!r}")
         if resource_lane not in RESOURCE_LANES:
             raise ValueError(f"unknown resource lane {resource_lane!r}")
         self.resource_lane = resource_lane
+        if config_overrides and name != "ctrs":
+            raise ValueError("configuration candidates apply to ctrs only")
+        self.config_overrides = dict(config_overrides or {})
         self.name = name
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
@@ -766,6 +769,7 @@ class Engine:
             overrides = sorted(key for key in ("CTRS_CPUS", "CTRS_MEMORY_MIB") if key in env)
             if overrides:
                 raise ValueError(f"installed-default lane forbids {', '.join(overrides)}")
+        env.update(self.config_overrides)
         if res is not None:
             env.setdefault("CTRS_CPUS", str(res[0]))
             env.setdefault("CTRS_MEMORY_MIB",
@@ -3287,6 +3291,7 @@ class RunContext:
         # as engine performance.
         self.design = "paired"
         self.resource_lane = "matched"
+        self.slot_overrides: dict[str, dict] = {}
 
     def trial_dir(self, engine: str, case: str, state: str) -> Path:
         self._seq += 1
@@ -3403,16 +3408,23 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         # Warm trials share one daemon/VM per engine for the whole batch so
         # "warm" means hot engine on both sides (OrbStack's daemon is
         # always hot; ctrs must not be restarted per trial).
-        engine = ctx.engines.get(engine_name)
+        overrides = ctx.slot_overrides.get(slot) or {}
+        key = engine_name + "".join(f" {k}={v}" for k, v in sorted(overrides.items()))
+        engine = ctx.engines.get(key)
         if engine is None:
-            engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane)
-            ctx.engines[engine_name] = engine
+            engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane,
+                            fresh_dir=WORK / "engines" / ("ctrs-candidate-" + "-".join(
+                                f"{k.lower()}{v}" for k, v in sorted(overrides.items()))) if overrides else None,
+                            config_overrides=overrides)
+            ctx.engines[key] = engine
         stop = not keep_warm
     try:
         rec = trial(ctx, engine, state, **kw)
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
         rec["slot"] = slot
+        if engine.config_overrides:
+            rec["config_overrides"] = dict(engine.config_overrides)
         # The trial starts the engine. Sampling before ensure_up() records
         # a false version change on the first cold/stopped-engine trial.
         rec["engine_server_version"] = safe_version(engine)
@@ -3690,6 +3702,11 @@ def cmd_baseline(args) -> int:
                   else "paired")
     ctx.resource_lane = getattr(args, "resource_lane", "matched")
     a, b = args.a, args.b
+    if getattr(args, "candidate_cpus", None) is not None:
+        if (a, b) != ("ctrs", "ctrs") or ctx.resource_lane != "installed-default":
+            raise SystemExit("--candidate-cpus needs --a ctrs --b ctrs --resource-lane installed-default")
+        ctx.design = "candidate"
+        ctx.slot_overrides = {"b": {"CTRS_CPUS": str(args.candidate_cpus)}}
     rng = random.Random(args.seed)
     failed = False
     try:
@@ -3913,6 +3930,9 @@ def main() -> int:
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
     p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
     p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--candidate-cpus", type=int,
+                   help="same-engine candidate: slot b runs ctrs with CTRS_CPUS=N in its own warm "
+                        "engine dir, slot a the product default; memory and assets unchanged")
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--pairs", type=int, default=3)
     p.add_argument("--state", default="warm", choices=["warm", "cold"])

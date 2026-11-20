@@ -47,6 +47,7 @@ def fake_engine(name="orbstack"):
     engine.name = name
     engine.socket = f"unix:///bench/{name}.sock"
     engine.builder_name = f"np-dc-{name}-verified"
+    engine.config_overrides = {}
     engine.sh.return_value = completed()
     engine.compose.return_value = completed()
     return engine
@@ -586,7 +587,7 @@ class ExitStatusTests(unittest.TestCase):
     def test_w2_baseline_serializes_sampling_mode_and_requires_pins(self):
         engine = fake_engine()
         engine.system_df.return_value = None
-        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched")
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched", slot_overrides={})
 
         def trial(ctx, engine, state, sampling=runner.SamplingMode.PERIODIC, pinned_stack=False):
             self.assertIs(sampling, runner.SamplingMode.PERIODIC)
@@ -603,7 +604,7 @@ class ExitStatusTests(unittest.TestCase):
 
     def test_record_captures_executed_defaults_and_post_trial_version(self):
         engine = fake_engine()
-        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched")
+        context = Mock(run_id="one-run", _seq=0, engines={"orbstack": engine}, resource_lane="matched", slot_overrides={})
 
         def trial(ctx, engine, state, duration=300.0, window=30.0, seed=1):
             return {"correctness": {"ok": True}, "resources": {}, "validation_errors": []}

@@ -173,6 +173,16 @@ even when ctrs still beats OrbStack, and an OrbStack row that moved is
 host or OrbStack drift. It exits 1 when a ctrs row regressed or nothing
 matched.
 
+A ctrs configuration candidate is a same-engine paired run: slot a is the
+product default, slot b the candidate in its own warm engine dir, with
+memory, binary and guest assets unchanged. Ratios are candidate/current.
+
+```sh
+python3 bench/native/runner.py baseline --a ctrs --b ctrs --candidate-cpus 9 \
+  --resource-lane installed-default --pairs 10 --case W13-overlap
+python3 bench/native/reporting.py --candidate --match '<run-id>'
+```
+
 ## What a trial records
 
 One JSON line per trial (`schema.json`): wall time to *verified*
