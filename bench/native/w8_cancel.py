@@ -1,6 +1,5 @@
 """Interrupt one owned W8 pull after partial blob delivery and verify retry."""
 import json
-from pathlib import Path
 import secrets
 import signal
 import subprocess

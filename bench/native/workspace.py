@@ -118,7 +118,6 @@ def ready_image(engine, image, label, spec):
 
 
 def trial_w12(ctx, engine, state, layout='full-bind'):
-    import os
     import subprocess
     import runner
 
@@ -292,7 +291,6 @@ fs.writeFileSync(p,next)}'''
 
 
 def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
-    import os
     import re
     import subprocess
     import time

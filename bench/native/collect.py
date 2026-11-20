@@ -15,7 +15,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import time
 
 from macos_counters import Counters

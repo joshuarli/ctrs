@@ -13,16 +13,9 @@ Types (DSLP-3): clippy candidate scan exited 0 with 28 wildcard-enum, 20 redunda
 
 Tests (DSLP-4): finite boundary inventory: CLI delegation is guarded by `docker::tests::delegates_argv_and_env_to_a_stub_docker`, but flag/exit semantics lack an engine e2e run; HTTP/API by `daemon::api` and `daemon::http` units, full conformance needs a running engine; `vm.json` by its round-trip test, image records and archives by store/archive tests, container records have no direct test; host/guest wire by round-trip and malformed-input tests; extraction and isolation by Linux-only ctrs-init tests, Needs environment on macOS. Benchmark manifest, parsing, pairing and safety have offline Python tests. Conformance selection had a false pass: an unmatched selector returned 0; the new test failed against that fault and passes after the runner returns 1. Linux privileged and engine e2e remain Needs environment. Coverage and mutation were not run: the requested scope excludes a mutation lane and cargo-llvm-cov is unavailable.
 
+Dead code (DSLP-5): `cargo rustc` force-warn scans exited 0 on macOS for all five crates: ctrs has 469 unreachable-public visibility warnings and one `parse_release` warning (used by Linux kernel-version handling); ctrs-image has 9 and ctrs-proto 52 unreachable-public warnings; ctrs-init and ctrs-vmm have none on this target. Visibility warnings are retained: the items are reachable inside private modules (including protocol frame constants); narrowing visibility is not dead-code removal. Linux ctrs-init internals need a Linux scan. Ruff F401/F811/F841 found 15 unused imports or bindings; 13 removed while retaining the side-effecting registry call. Two unused fixture imports remain allowlisted to preserve fixture identity and performance comparability. Entrypoints are the native harness, diagnostics and fixtures; `make test` passed with the candidate. `cargo-machete` and debloat are Needs environment. No dependency removed.
+
 ## Tickets
-
-### DSLP-5 · P2 · Dead code: tools and debloat
-
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-6 · P3 · make lint is red: 51 clippy errors in crates/ctrs
 

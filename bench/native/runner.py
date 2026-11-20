@@ -49,7 +49,6 @@ import re
 import shlex
 import shutil
 import signal
-import statistics
 import tempfile
 import threading
 import socket
@@ -1623,7 +1622,6 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
     `under_load`, the W1 stack serves load.py while the pulls run — the
     EXP-1 responsiveness probe."""
     case_id = "W8"
-    proj = project_name(ctx.run_id, engine.name, case_id)
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     trial_dir.mkdir(parents=True, exist_ok=True)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
@@ -1633,7 +1631,7 @@ def trial_w8(ctx, engine: Engine, state: str, under_load: bool = False,
     load_out = trial_dir / "load.json"
     w1_proj = project_name(ctx.run_id, engine.name, "W1")
     try:
-        port = ensure_registry(engine)
+        ensure_registry(engine)
         portfolio = {}
         if PORTFOLIO_FILE.exists():
             portfolio = json.loads(PORTFOLIO_FILE.read_text()).get(

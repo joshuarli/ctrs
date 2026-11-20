@@ -165,7 +165,7 @@ def main():
                     refs[repository.rsplit('/', 1)[1]] = ref
                 result['deployment'] = deploy(engine, refs, args.layout, directory, run_id, contract)
                 print(name, 'healthy exact portfolio', flush=True)
-            except BaseException as exc:
+            except BaseException:
                 result['errors'].append(traceback.format_exc())
                 raise
             finally:

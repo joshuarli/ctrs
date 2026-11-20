@@ -1,7 +1,6 @@
 """Pinned Marked watch/rebuild/test workflow; all engine effects use its endpoint."""
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import queue
 import statistics
