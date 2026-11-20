@@ -108,6 +108,7 @@ def trial_overlap(ctx, engine, state, concurrency=8, duration=20.0, write_ratio=
     if not checks['transfer_overlapping']:
         rec['validation_errors'].append('transfer_not_overlapping')
     rec['inputs'] = {'w2': w2.get('inputs', {}), 'w13': w13.get('inputs', {})}
+    rec['resources'] = dict(w2.get('resources') or {})
     rec['paired_inputs'] = dict(w2.get('paired_inputs', {}))
     if rec['paired_inputs'] and w13.get('paired_inputs'):
         rec['paired_inputs']['transfer'] = dict(w13['paired_inputs'])

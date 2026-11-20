@@ -137,6 +137,23 @@ class OverlapTests(unittest.TestCase):
         self.assertEqual(ctrs, orbstack)
         self.assertEqual(ctrs['transfer']['api_config'], 'sha256:c')
 
+    def test_the_record_carries_the_engine_resources_of_the_measured_window(self):
+        resources = {'cpu_seconds_est': 12.0, 'phases': {'workload': {'foreign_cpu_cores': 0.7,
+                                                                      'operation_wall_seconds': 9}}}
+        def w13(ctx, engine, state, **kwargs):
+            ctx.overlap_transfer_observer('start', 0, None)
+            ctx.overlap_transfer_observer('end', 8, {'streams': [receipt()]})
+            return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': []}
+        def w2(ctx, engine, state, *args, **kwargs):
+            with ctx.overlap_workload():
+                pass
+            return {'metrics': {}, 'correctness': {'ok': True}, 'validation_errors': [], 'resources': resources}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(runner, 'trial_w13', w13), \
+                patch.object(runner, 'trial_w2', w2), \
+                patch.object(overlap.time, 'monotonic', side_effect=[3, 7]), patch.object(overlap.time, 'sleep'):
+            rec = overlap.trial_overlap(Context(tmp), Engine(), 'warm', lead_seconds=0)
+        self.assertEqual(rec['resources'], resources)
+
     def run_case(self, end):
         with tempfile.TemporaryDirectory() as tmp:
             ctx, engine = Context(tmp), Engine()
