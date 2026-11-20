@@ -78,54 +78,34 @@ cannot prove redundant.
   kept). The earlier rule (skip any name changed here within two seconds)
   hid a Mac edit that followed the guest's own; `bind-mixed-writer`
   reproduces that on the old kernel and passes on the new one.
-- **Loss.** FSEvents can coalesce or drop events. The host turns its
-  `MustScanSubDirs`, `UserDropped`, `KernelDropped`, `RootChanged`, `Mount`
-  and `Unmount` flags, and any batch that could not be sent whole, into a
-  rescan (kind `s`, protocol 7) of the affected bind directories. A
-  resumable DFS then re-reports entries whose ctime is at or after the last
-  delivered batch minus 2 s. Each turn visits at most 128 entries or
-  directory boundaries. The cursor retains one directory handle per depth,
-  and the pending cutoff coalesces losses while a walk is active. A failed
-  walk or delivery is logged and retried from the earliest pending cutoff.
-  When bind roots change, the replacement stream replays from the last
-  event id, so the gap between streams is covered.
+- **Loss.** The host translates FSEvents loss flags and failed delivery
+  into a rescan. A resumable walk revisits at most 20,000 entries per loss
+  and 128 entries per turn. It stays on each bind root's device, skips
+  unreadable entries, and keeps its cursor when bind roots change. Failed
+  delivery retries only the undelivered batch.
 - **Guest queue.** The agent queues lines the pipe to its writer refuses
-  (1 MiB pipe, 8,192 queued lines) and retries every 20 ms. Beyond that,
-  the queue collapses into one rescan of the share and the agent logs the
-  count.
+  and retries every 20 ms. When its 8,192-line queue fills, it schedules a
+  share rescan and logs the count.
 - **Rescan.** A rescan bumps the FUSE connection epoch and schedules a
-  guest recovery walk. The worker retains its directory cursors and performs
-  at most 128 cursor operations and one page of directory entries per turn.
-  Each cursor operation skips at most 128 cached links. One restart flag
-  coalesces additional rescans while it runs. It compares watched entries with host LOOKUP
-  replies and reads watched directories to find names absent from the
-  cache. The worker reports removed, replaced, modified and created names
-  to inotify. It retries failed walks with a one-second delay. On virtiofs
-  a stale-epoch dentry is revalidated with a LOOKUP rather than dropped, so
-  a volume mounted inside an unchanged bind directory stays attached
-  (`bind-rescan-keeps-mounts`).
-- **Retained names.** A virtiofs inotify watch retains its directory's
-  existing child dentries and metadata when the watch is installed. An
-  internal fsnotify mark tracks subsequent creates, moves, changes and
-  deletions, including events the user did not subscribe to. Watches on
-  the same inode share the retained set. The last watch releases the set.
-  This makes a missed deletion identifiable even after normal dcache
-  reclaim or an unrelated lookup. Initial retention failure rejects watch
-  installation. A later allocation failure is logged; recovery of a
-  subsequently lost deletion for that name cannot be guaranteed.
-- **Bounds and cost.** The host change channel holds at most 256 messages.
-  The guest agent retains its 8,192-line queue. Recovery has one active
-  work item, one restart flag, and a directory cursor per depth. Retained
-  names occupy space proportional to the distinct entries of watched
-  directories, rather than to the number of incoming events. In one scratch
-  run of a prototype with the same retained-entry layout and 22,001 entries,
-  the active FUSE inode, dentry and kmalloc-128
-  slab counts after reclaim were 22,032, 22,680 and 23,679, versus 36,
-  777 and 1,690 before the watch. At their reported object sizes this is
-  about 25.5 MiB of additional active slab objects. The watcher process
-  used four guest system CPU ticks during setup and one preflight event;
-  this excludes host virtiofs work. This is one observation on a busy
-  host, not a comparative timing result. Writeback caching remains off.
+  recovery walk. The worker compares cached inode attributes and compares
+  each watched directory's host listing with its retained name set. It
+  reports missing, new and replaced names to inotify. Directory failures
+  receive up to three attempts with backoff, then queue overflow. Entry
+  failures are retried and logged before they are skipped. The writer does
+  not wait for FUSE operations held by the worker.
+- **Retained names.** Watches on the same virtiofs inode share a name set.
+  The initial set costs one directory scan, without a LOOKUP per entry.
+  An internal mark updates names on creates, deletes and moves. It does not
+  subscribe to child writes. The set holds names and directory-entry inode
+  numbers, but no dentry, mount or memcg references. Allocations are not
+  charged to the watching container's memcg.
+- **Bounds and degraded recovery.** Name allocations use at most the lesser
+  of 64 MiB and one sixty-fourth of guest RAM. `/proc/ctrs/watch_bytes`
+  reports allocated bytes and the limit. If a name set cannot be retained,
+  the kernel releases it, logs once, and reports `IN_Q_OVERFLOW` and
+  `IN_ATTRIB` for that directory on recovery. Applications must rebuild
+  their view after overflow. The host's root updates share a single
+  coalescing wakeup. Writeback caching remains off.
 
 The opt-in `CTRS_TEST_FSEVENTS_GATE` is used only by
 `tests/watch-recovery.sh`. Its loss gate suppresses host callbacks. Its
