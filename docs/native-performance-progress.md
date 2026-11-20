@@ -136,18 +136,33 @@ Harness changes this round: `pyramid.py` entrypoint (README
 carries resources (`689b63f`); admission on CPU busy outside the engine
 and harness (`d211cae`, `886774f`), with a pre-pair idle-CPU wait.
 
-Next, in order:
+Guest→host intervention (2026-11-20): on a quiet host the NAT network
+carried a direct container→Mac flow at 3.9–5.3 GB/s and the relayed one
+at 1.5–3.1, so the agent's copy loop was the limit. The agent now splices
+bulk relay bytes (`4fdff1d`, e2e 508/508). Paired on that build:
+published-port download 0.93 and container→Mac upload 0.95 (were 1.7×
+and 2.2× losses), published-port upload 0.69, all tool-limited on both
+engines, with ctrs's own time 0.56× / 0.43× / 0.77× its previous build
+and OrbStack unchanged. Container→Mac download (Mac→container) looked
+worse (8 clean pairs 1.27) in a cohort partly contaminated by a tool
+edit; a held probe put the splice's cost there near 6 %.
 
-1. Queue `.work/native-perf/matrix/p2.log` (starts after p1, which ends
-   with W12 matched full-bind): W13-overlap, W12 bind-source-volume-deps,
-   W14 cancel, all on the new admission. Report each; the mixed layout
-   decides task 3 (keep/revert is already settled; the cell is unmeasured).
-2. Then `pyramid.py run --name w12-watch-bind:cohort` (10 pairs).
-3. Guest→host: the remaining published-port download loss (~1.7×) is the
-   single NAT flow (~1.9 GB/s) plus the agent copy; attribute it on a
-   quiet host before any intervention, and attribute ctrs's host-kernel
-   networking CPU, which the CPU metric does not charge to ctrs.
-4. W14 fresh CPU (1.15×) and the audit items in the ready queue (item 7).
+Next, in order (all chained in background shells; logs
+`.work/native-perf/matrix/p4.log`–`p7.log`):
+
+1. p4: W13-overlap, W14 cancel and fresh (fresh now records
+   `completion_seconds`); p5: W12-watch bind at 10 pairs.
+2. p6: container→Mac download again on the w13-v3 tool, to settle the
+   splice's download cost (paired against OrbStack and `--anchor`
+   against `base-20261119T133649-3bc7`).
+3. Then the chain fast-forwards `bench/w13-v4` (receiver compares an mmap
+   of the artifact, sender uses sendfile; anchor never crosses fixture
+   versions) and runs p7: the four W13 cells and W13-overlap on w13-v4,
+   whose higher capacity controls decide whether the parity cells are
+   wins. Report each, never calling a tool-limited cell a win.
+4. If download's paired loss holds on p6, attribute it (Mac→guest NAT
+   direction) before any change; then W14 fresh CPU and the open audit
+   items (ready queue item 7).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
