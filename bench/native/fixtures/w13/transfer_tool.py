@@ -1,6 +1,7 @@
 import concurrent.futures
 import hashlib
 import json
+import mmap
 import os
 import socket
 import sys
@@ -33,26 +34,15 @@ def line(sock):
 def send(sock, path, ident, size, digest):
     sock.sendall((json.dumps({'id': ident, 'bytes': size, 'sha256': digest}) + '\n').encode())
     with open(path, 'rb') as f:
-        remaining = size
-        while remaining:
-            data = f.read(min(CHUNK, remaining))
-            if not data:
-                f.seek(0)
-                continue
-            sock.sendall(data)
-            remaining -= len(data)
+        length = os.fstat(f.fileno()).st_size
+        sent = 0
+        while sent < size:
+            offset = sent % length
+            n = sock.sendfile(f, offset, min(length - offset, size - sent))
+            if not n:
+                raise OSError('sendfile sent nothing')
+            sent += n
     sock.shutdown(socket.SHUT_WR)
-
-
-def read_cyclic(f, count):
-    data = f.read(count)
-    while len(data) < count:
-        f.seek(0)
-        more = f.read(count - len(data))
-        if not more:
-            break
-        data += more
-    return data
 
 
 def receive(sock, ident, size, digest, expected_path):
@@ -68,22 +58,26 @@ def receive(sock, ident, size, digest, expected_path):
         if header != {'id': ident, 'bytes': size, 'sha256': digest}:
             raise ValueError('header mismatch')
         last = time.monotonic()
-        with open(expected_path, 'rb') as expected:
-            while True:
-                count = sock.recv_into(buffer)
-                now = time.monotonic()
-                if not count:
-                    break
-                if first is None:
-                    first = now - start
-                gaps.append(now - last)
-                last = now
-                total += count
-                if total > size:
-                    raise ValueError('excess bytes')
-                block = buffer if count == CHUNK else buffer[:count]
-                if block != read_cyclic(expected, count):
-                    exact = False
+        with open(expected_path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            with memoryview(mapped) as expected, memoryview(buffer) as received:
+                length = len(expected)
+                while True:
+                    count = sock.recv_into(buffer)
+                    now = time.monotonic()
+                    if not count:
+                        break
+                    if first is None:
+                        first = now - start
+                    gaps.append(now - last)
+                    last = now
+                    total += count
+                    if total > size:
+                        raise ValueError('excess bytes')
+                    at = (total - count) % length
+                    first_part = min(count, length - at)
+                    if received[:first_part] != expected[at:at + first_part] or \
+                            received[first_part:count] != expected[:count - first_part]:
+                        exact = False
         if total != size or not exact:
             raise ValueError('byte count or content mismatch')
     except Exception as exc:
