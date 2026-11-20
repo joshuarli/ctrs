@@ -134,6 +134,24 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual([r["pair_id"] for r in cohort["rejections"]], [2])
         self.assertIn("host contended", cohort["rejections"][0]["reason"])
 
+    def test_outside_cpu_decides_admission_where_it_was_measured(self):
+        records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
+        for record in records:
+            record["host_load"] = {"cpus": 10, "start": [3.0, 3, 3], "end": [12.0, 4, 4]}
+            record.setdefault("resources", {})["phases"] = {
+                "setup": {"foreign_cpu_cores": 0.4, "operation_wall_seconds": 1.0},
+                "measured": {"foreign_cpu_cores": 0.8, "operation_wall_seconds": 9.0}}
+        records[3]["resources"]["phases"]["measured"]["foreign_cpu_cores"] = 3.5
+        cohort = reporting.analyze(records)["cohorts"][0]
+        self.assertEqual([r["pair_id"] for r in cohort["rejections"]], [2])
+        self.assertIn("3.2 cores busy outside the engine", cohort["rejections"][0]["reason"])
+
+    def test_a_phase_without_outside_cpu_falls_back_to_load(self):
+        record = {"engine": "ctrs", "host_load": {"cpus": 10, "start": [11.0], "end": [3.0]},
+                  "resources": {"phases": {"setup": {"foreign_cpu_cores": 0.1, "operation_wall_seconds": 1},
+                                           "run": {"foreign_cpu_cores": None, "operation_wall_seconds": 5}}}}
+        self.assertIn("1-minute load 11.0", reporting.host_contended(record))
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:

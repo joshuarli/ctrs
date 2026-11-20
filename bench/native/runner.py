@@ -55,6 +55,7 @@ import threading
 import socket
 import subprocess
 import sys
+import resource
 import time
 import urllib.error
 import urllib.request
@@ -914,20 +915,46 @@ def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=(),
     return Sampler(proc, trace, stderr), trace
 
 
+def harness_cpu_seconds() -> float:
+    own = resource.getrusage(resource.RUSAGE_SELF)
+    children = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return own.ru_utime + own.ru_stime + children.ru_utime + children.ru_stime
+
+
+def foreign_cpu(host_before, host_after, harness_before, harness_after, engine_cpu, wall) -> dict:
+    """Average cores busy outside the engine and this harness over a phase:
+    host busy cores minus the engine's measured CPU and the harness's own
+    (itself and its waited-for children). Unlike the load average it does
+    not count the engine's vCPU threads, so admitting on it does not
+    select on the engine's own behavior."""
+    import macos_counters
+    busy = macos_counters.busy_cores(host_before, host_after, os.cpu_count())
+    if busy is None or engine_cpu is None or wall <= 0:
+        return {"foreign_cpu_cores": None, "host_busy_cores": busy}
+    harness = harness_after - harness_before
+    return {"foreign_cpu_cores": busy - (engine_cpu + harness) / wall, "host_busy_cores": busy,
+            "harness_cpu_seconds": harness}
+
+
 @contextmanager
 def resource_phase(engine, rec, name):
+    import macos_counters
     identity = engine.measurement_identity
     before = collect.cpu_boundary(identity)
+    host_before, harness_before = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
     started = time.monotonic()
     try:
         yield
     finally:
         ended = time.monotonic()
+        host_after, harness_after = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
         after = collect.cpu_boundary(identity)
         result = collect.cpu_delta(before, after)
         result.update({"operation_started_monotonic": started,
                        "operation_ended_monotonic": ended,
                        "operation_wall_seconds": ended - started})
+        result.update(foreign_cpu(host_before, host_after, harness_before, harness_after,
+                                  result.get("cpu_seconds"), ended - started))
         rec["resources"].setdefault("phases", {})[name] = result
 
 

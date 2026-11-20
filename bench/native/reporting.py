@@ -332,10 +332,31 @@ def _analyze_cohort(identity: dict, records: list[dict],
     return result
 
 
+FOREIGN_CORES = 2.0
+
+
+def foreign_cores(record: dict) -> float | None:
+    """Wall-weighted mean cores busy outside the engine and harness over a
+    trial's resource phases, or None when a phase lacks the measurement."""
+    phases = ((record.get("resources") or {}).get("phases") or {}).values()
+    measured = [(p.get("foreign_cpu_cores"), p.get("operation_wall_seconds")) for p in phases]
+    if not measured or any(not _number(c) or not _number(w) or w <= 0 for c, w in measured):
+        return None
+    return sum(c * w for c, w in measured) / sum(w for _, w in measured)
+
+
 def host_contended(record: dict) -> str | None:
-    """Why a trial ran on a contended host: its 1-minute load average, at
-    start or end, above the host's CPU count. The engine under test adds a
-    few runnable threads; other work on the Mac adds the rest."""
+    """Why a trial ran on a contended host. Records that measure CPU outside
+    the engine and harness are judged on it, because the load average also
+    counts the engine's own vCPU threads and would reject pairs for the
+    engine's behavior. Older records fall back to the 1-minute load average,
+    at start or end, above the CPU count."""
+    foreign = foreign_cores(record)
+    if foreign is not None:
+        if foreign > FOREIGN_CORES:
+            return (f"host contended: {record.get('engine')} trial had {foreign:.1f} cores busy "
+                    f"outside the engine and harness > {FOREIGN_CORES}")
+        return None
     load = record.get("host_load")
     if not load or not load.get("cpus"):
         return None

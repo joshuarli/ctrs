@@ -39,5 +39,17 @@ class QuietPairs(unittest.TestCase):
             self.wait([9.0] * 20, timeout=60)
 
 
+class ForeignCpu(unittest.TestCase):
+    def test_outside_cpu_excludes_the_engine_and_harness(self):
+        with patch.object(runner.os, "cpu_count", return_value=10):
+            got = runner.foreign_cpu([0, 0, 0, 0], [400, 100, 500, 0], 2.0, 7.0, engine_cpu=30.0, wall=10.0)
+        self.assertAlmostEqual(got["host_busy_cores"], 5.0)
+        self.assertAlmostEqual(got["foreign_cpu_cores"], 1.5)
+
+    def test_an_unmeasured_engine_leaves_outside_cpu_unknown(self):
+        got = runner.foreign_cpu([0, 0, 0, 0], [1, 0, 1, 0], 0.0, 0.0, engine_cpu=None, wall=1.0)
+        self.assertIsNone(got["foreign_cpu_cores"])
+
+
 if __name__ == "__main__":
     unittest.main()

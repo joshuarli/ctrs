@@ -48,3 +48,27 @@ class Counters:
                 'started_monotonic': started, 'ended_monotonic': time.monotonic(),
                 'counter_method': 'proc_pid_rusage RUSAGE_INFO_V0; Mach timebase conversion',
                 'footprint_method': 'rusage_info_v0.ri_phys_footprint'}
+
+
+HOST_CPU_LOAD_INFO = 3
+CPU_STATES = 4
+CPU_STATE_IDLE = 2
+
+
+def host_cpu_ticks(lib=None):
+    """Cumulative per-state CPU ticks over all cores from
+    host_statistics(HOST_CPU_LOAD_INFO). The counters are 32-bit and wrap;
+    the tick unit cancels in `busy_cores`."""
+    lib = lib or ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    lib.mach_host_self.restype = ctypes.c_uint32
+    ticks = (ctypes.c_uint32 * CPU_STATES)()
+    count = ctypes.c_uint32(CPU_STATES)
+    if lib.host_statistics(lib.mach_host_self(), HOST_CPU_LOAD_INFO, ticks, ctypes.byref(count)):
+        raise OSError('host_statistics(HOST_CPU_LOAD_INFO) failed')
+    return list(ticks)
+
+
+def busy_cores(before, after, cpus):
+    delta = [(b - a) % (1 << 32) for a, b in zip(before, after)]
+    total = sum(delta)
+    return (total - delta[CPU_STATE_IDLE]) / total * cpus if total else None
