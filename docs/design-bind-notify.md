@@ -1,6 +1,6 @@
 # Design: Mac-side change notifications for bind mounts
 
-Status: **implemented 2026-11-18; coherence contract revised 2026-11-19.**
+Status: **implemented 2026-11-18; recovery contract revised 2026-11-20.**
 It adds host→guest `Msg::HostFsEvents` (wire protocol 6, rescan kind in 7)
 and guest kernel patches 0006 (`/proc/ctrs/fsnotify`) and 0012 (echo proof
 and rescan). The
@@ -81,25 +81,58 @@ cannot prove redundant.
 - **Loss.** FSEvents can coalesce or drop events. The host turns its
   `MustScanSubDirs`, `UserDropped`, `KernelDropped`, `RootChanged`, `Mount`
   and `Unmount` flags, and any batch that could not be sent whole, into a
-  rescan (kind `s`, protocol 7) of the affected bind directories, followed
-  by a walk of up to 20,000 entries that re-reports everything whose ctime
-  is at or after the last delivered batch (minus 2 s). A truncated walk is
-  logged. When bind roots change, the replacement stream replays from the
-  last event id, so the gap between streams is covered.
+  rescan (kind `s`, protocol 7) of the affected bind directories. A
+  resumable DFS then re-reports entries whose ctime is at or after the last
+  delivered batch minus 2 s. Each turn visits at most 128 entries or
+  directory boundaries. The cursor retains one directory handle per depth,
+  and the pending cutoff coalesces losses while a walk is active. A failed
+  walk or delivery is logged and retried from the earliest pending cutoff.
+  When bind roots change, the replacement stream replays from the last
+  event id, so the gap between streams is covered.
 - **Guest queue.** The agent queues lines the pipe to its writer refuses
   (1 MiB pipe, 8,192 queued lines) and retries every 20 ms. Beyond that,
   the queue collapses into one rescan of the share and the agent logs the
   count.
-- **Rescan.** A rescan bumps the FUSE connection epoch. On virtiofs a
-  dentry from an older epoch is revalidated with a LOOKUP rather than
-  dropped, so a volume mounted inside a bind mount stays attached when its
-  directory is unchanged (`bind-rescan-keeps-mounts`).
-- **Not covered.** A rescan restores cache coherence, and the walk
-  re-reports changed entries, but a watcher can still miss a deletion that
-  happened inside a lost interval: it sees the name gone on its next look,
-  without a delete event. Writeback caching stays off: Mac-side writers
-  bypass the guest's page cache, and these notifications do not order
-  guest dirty pages against them.
+- **Rescan.** A rescan bumps the FUSE connection epoch and schedules a
+  guest recovery walk. The worker retains its directory cursors and performs
+  at most 128 cursor operations and one page of directory entries per turn.
+  Each cursor operation skips at most 128 cached links. One restart flag
+  coalesces additional rescans while it runs. It compares watched entries with host LOOKUP
+  replies and reads watched directories to find names absent from the
+  cache. The worker reports removed, replaced, modified and created names
+  to inotify. It retries failed walks with a one-second delay. On virtiofs
+  a stale-epoch dentry is revalidated with a LOOKUP rather than dropped, so
+  a volume mounted inside an unchanged bind directory stays attached
+  (`bind-rescan-keeps-mounts`).
+- **Retained names.** A virtiofs inotify watch retains its directory's
+  existing child dentries and metadata when the watch is installed. An
+  internal fsnotify mark tracks subsequent creates, moves, changes and
+  deletions, including events the user did not subscribe to. Watches on
+  the same inode share the retained set. The last watch releases the set.
+  This makes a missed deletion identifiable even after normal dcache
+  reclaim or an unrelated lookup. Initial retention failure rejects watch
+  installation. A later allocation failure is logged; recovery of a
+  subsequently lost deletion for that name cannot be guaranteed.
+- **Bounds and cost.** The host change channel holds at most 256 messages.
+  The guest agent retains its 8,192-line queue. Recovery has one active
+  work item, one restart flag, and a directory cursor per depth. Retained
+  names occupy space proportional to the distinct entries of watched
+  directories, rather than to the number of incoming events. In one scratch
+  run of a prototype with the same retained-entry layout and 22,001 entries,
+  the active FUSE inode, dentry and kmalloc-128
+  slab counts after reclaim were 22,032, 22,680 and 23,679, versus 36,
+  777 and 1,690 before the watch. At their reported object sizes this is
+  about 25.5 MiB of additional active slab objects. The watcher process
+  used four guest system CPU ticks during setup and one preflight event;
+  this excludes host virtiofs work. This is one observation on a busy
+  host, not a comparative timing result. Writeback caching remains off.
+
+The opt-in `CTRS_TEST_FSEVENTS_GATE` is used only by
+`tests/watch-recovery.sh`. Its loss gate suppresses host callbacks. Its
+overflow gate buffers the real changes and sends them after a large test
+batch, so the regression can assert guest queue loss without host loss.
+Neither gate is active without that environment variable. The wire
+protocol remains version 9; no new message or event kind is required.
 
 Regressions in `tests/e2e.sh`: `bind-mixed-writer` (in-place overwrite and
 atomic replace by the Mac 0.3 s after the container's own write; final

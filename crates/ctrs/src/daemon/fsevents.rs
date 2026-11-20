@@ -4,7 +4,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ctrs_proto::{FsEvent, FsEventKind};
 use super::engine::Engine;
@@ -32,7 +32,6 @@ fn classify(flags: u32, exists: bool) -> Vec<FsEventKind> {
     kinds
 }
 
-/// Entries a reconciliation walk visits before it stops.
 const RECONCILE_LIMIT: usize = 20_000;
 /// How far before the last delivered batch a reconciliation looks, for
 /// timestamp granularity and the stream's own latency.
@@ -53,30 +52,63 @@ fn lost_under(flags: u32, path: &Path, directories: &HashSet<PathBuf>) -> Vec<Pa
     }).collect()
 }
 
-/// Changes under `dir` whose ctime is at or after `since`, for the guest
-/// to recheck: directories as created, everything else as modified.
-/// Returns whether the walk finished within `limit` entries.
-fn reconcile(dir: &Path, since: SystemTime, limit: usize, out: &mut Vec<(FsEventKind, String)>) -> bool {
-    let cutoff = since.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-    let mut stack = vec![dir.to_path_buf()];
-    let mut seen = 0;
-    while let Some(next) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&next) else { continue };
-        for entry in entries.flatten() {
-            seen += 1;
-            if seen > limit { return false; }
+struct Reconcile {
+    roots: std::vec::IntoIter<Root>,
+    stack: Vec<std::fs::ReadDir>,
+    cutoff: i64,
+    since: SystemTime,
+}
+impl Reconcile {
+    fn new(roots: Vec<Root>, since: SystemTime) -> Self {
+        let roots = roots.iter().filter(|root| !roots.iter().any(|other| !other.file && other.path != root.path && root.path.starts_with(&other.path))).cloned().collect::<Vec<_>>();
+        Self { roots: roots.into_iter(), stack: Vec::new(), cutoff: since.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64), since }
+    }
+    fn turn(&mut self, limit: usize, out: &mut Vec<(FsEventKind, String)>) -> std::io::Result<bool> {
+        let mut visited = 0;
+        while visited < limit {
+            if self.stack.is_empty() {
+                let Some(root) = self.roots.next() else { return Ok(true) };
+                visited += 1;
+                if root.file {
+                    match std::fs::symlink_metadata(&root.path) {
+                        Ok(meta) if meta.ctime() >= self.cutoff => {
+                            if let Some(path) = root.path.to_str() { out.push((FsEventKind::Modified, path.to_owned())); }
+                        }
+                        Ok(_) => {},
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                        Err(e) => return Err(e),
+                    }
+                    continue;
+                }
+                match std::fs::read_dir(root.path) {
+                    Ok(dir) => self.stack.push(dir),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
+            visited += 1;
+            let Some(entry) = self.stack.last_mut().unwrap().next() else { self.stack.pop(); continue };
+            let entry = entry?;
             let path = entry.path();
-            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-            let changed = meta.ctime() >= cutoff;
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(meta) => meta,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e),
+            };
+            if meta.ctime() >= self.cutoff {
+                if let Some(p) = path.to_str() { out.push((if meta.is_dir() { FsEventKind::Created } else { FsEventKind::Modified }, p.to_owned())); }
+            }
             if meta.is_dir() {
-                if changed { if let Some(p) = path.to_str() { out.push((FsEventKind::Created, p.to_owned())); } }
-                stack.push(path);
-            } else if changed {
-                if let Some(p) = path.to_str() { out.push((FsEventKind::Modified, p.to_owned())); }
+                match std::fs::read_dir(path) {
+                    Ok(dir) => self.stack.push(dir),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                    Err(e) => return Err(e),
+                }
             }
         }
+        Ok(false)
     }
-    true
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -107,38 +139,90 @@ impl Roots {
     }
 }
 
-enum Change { Add(String, Vec<Root>), Remove(String), Clear }
-pub struct Watcher(mpsc::Sender<Change>);
+enum Change { Add(String, Vec<Root>), Remove(String), Clear, Wake }
+pub struct Watcher { changes: mpsc::SyncSender<Change>, stopping: Arc<AtomicBool> }
 impl Watcher {
     pub fn start(engine: Weak<Engine>) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(256);
+        let wake = tx.clone();
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stopped = stopping.clone();
         std::thread::spawn(move || {
             let roots = Arc::new(Mutex::new(Roots::default()));
             let state = Arc::new(Delivery::default());
             let mut stream = None;
             let mut watched = HashSet::new();
-            while let Ok(change) = rx.recv() {
-                let (next, directories) = {
-                    let mut roots = roots.lock().unwrap();
-                    match change { Change::Add(id, paths) => roots.insert(id, paths), Change::Remove(id) => roots.remove(&id), Change::Clear => *roots = Roots::default() }
-                    (roots.counts.keys().cloned().collect::<HashSet<_>>(), roots.directories())
-                };
-                if next != watched {
-                    if stream.take().is_none() { state.last_id.store(0, Ordering::Relaxed); }
-                    if !directories.is_empty() {
-                        // Replaying from the last event seen covers the
-                        // gap between the old stream and this one.
-                        stream = Stream::start(&directories, roots.clone(), engine.clone(), state.clone());
-                        if stream.is_none() {
-                            crate::diag::warn!("could not start bind mount FSEvents stream");
-                            state.undelivered.store(true, Ordering::Relaxed);
+            let mut recovery: Option<Reconcile> = None;
+            let mut retry_at = Instant::now();
+            loop {
+                if stopped.load(Ordering::Acquire) { break; }
+                let waiting = recovery.is_some() || state.reconcile_from.lock().unwrap().is_some();
+                let change = if waiting { rx.recv_timeout(Duration::from_millis(20)) } else { rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected) };
+                match change {
+                    Ok(change) => {
+                        let (next, directories) = {
+                            let mut roots = roots.lock().unwrap();
+                            match change { Change::Add(id, paths) => roots.insert(id, paths), Change::Remove(id) => roots.remove(&id), Change::Clear => *roots = Roots::default(), Change::Wake => {} }
+                            (roots.counts.keys().cloned().collect::<HashSet<_>>(), roots.directories())
+                        };
+                        if next != watched {
+                            if let Some(walk) = recovery.take() { state.schedule_reconcile(walk.since); }
+                            if stream.take().is_none() { state.last_id.store(0, Ordering::Relaxed); }
+                            if !directories.is_empty() {
+                                // Replaying from the last event seen covers the
+                                // gap between the old stream and this one.
+                                stream = Stream::start(&directories, roots.clone(), engine.clone(), state.clone(), wake.clone());
+                                if stream.is_none() {
+                                    crate::diag::warn!("could not start bind mount FSEvents stream");
+                                    state.undelivered.store(true, Ordering::Relaxed);
+                                }
+                            }
+                            watched = next;
                         }
                     }
-                    watched = next;
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                if recovery.is_none() && Instant::now() >= retry_at {
+                    let pending = state.reconcile_from.lock().unwrap().take();
+                    if let Some(since) = pending {
+                        let (dirs, targets) = {
+                            let roots = roots.lock().unwrap();
+                            (roots.directories().into_iter().collect::<Vec<_>>(), roots.counts.keys().cloned().collect::<Vec<_>>())
+                        };
+                        let rescans: Vec<_> = dirs.iter().filter_map(|dir| dir.to_str().map(|path| FsEvent { kind: FsEventKind::Rescan, path })).collect();
+                        let needs_rescan = state.undelivered.swap(false, Ordering::Relaxed);
+                        if !needs_rescan || engine.upgrade().is_some_and(|engine| engine.send_fs_events(&rescans)) {
+                            recovery = Some(Reconcile::new(targets, since));
+                        } else {
+                            crate::diag::warn!("bind mount rescan delivery failed; retrying");
+                            state.undelivered.store(true, Ordering::Relaxed);
+                            state.schedule_reconcile(since);
+                            retry_at = Instant::now() + Duration::from_secs(1);
+                        }
+                    }
+                }
+                if let Some(walk) = &mut recovery {
+                    let mut entries = Vec::new();
+                    let result = walk.turn(RECONCILE_LIMIT.min(128), &mut entries);
+                    let events: Vec<_> = entries.iter().map(|(kind, path)| FsEvent { kind: *kind, path }).collect();
+                    let delivered = engine.upgrade().is_some_and(|engine| engine.send_fs_events(&events));
+                    if result.is_err() || !delivered {
+                        if let Err(error) = result { crate::diag::warn!("bind mount reconciliation failed; retrying", error = error); }
+                        if !delivered {
+                            crate::diag::warn!("bind mount reconciliation delivery failed; retrying");
+                            state.undelivered.store(true, Ordering::Relaxed);
+                        }
+                        state.schedule_reconcile(walk.since);
+                        retry_at = Instant::now() + Duration::from_secs(1);
+                        recovery = None;
+                    } else if result.unwrap() {
+                        recovery = None;
+                    }
                 }
             }
         });
-        Self(tx)
+        Self { changes: tx, stopping }
     }
     pub fn roots(mounts: &[String]) -> Vec<Root> {
         mounts.iter().filter_map(|m| {
@@ -151,10 +235,16 @@ impl Watcher {
         }).collect::<HashSet<_>>().into_iter().collect()
     }
     pub fn add(&self, id: &str, roots: Vec<Root>) {
-        let _ = self.0.send(Change::Add(id.to_owned(), roots));
+        let _ = self.changes.send(Change::Add(id.to_owned(), roots));
     }
-    pub fn remove(&self, id: &str) { let _ = self.0.send(Change::Remove(id.to_owned())); }
-    pub fn clear(&self) { let _ = self.0.send(Change::Clear); }
+    pub fn remove(&self, id: &str) { let _ = self.changes.send(Change::Remove(id.to_owned())); }
+    pub fn clear(&self) { let _ = self.changes.send(Change::Clear); }
+}
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        let _ = self.changes.try_send(Change::Wake);
+    }
 }
 
 type Ref = *const c_void;
@@ -189,26 +279,33 @@ struct Delivery {
     delivered_at: Mutex<SystemTime>,
     /// Events were lost since then: the next batch starts with rescans.
     undelivered: AtomicBool,
+    reconcile_from: Mutex<Option<SystemTime>>,
     test_drop_gate: Option<PathBuf>,
     test_overflow_events: Mutex<Option<Vec<(FsEventKind, String)>>>,
 }
 impl Default for Delivery {
     fn default() -> Self {
-        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false), test_drop_gate: std::env::var_os("CTRS_TEST_FSEVENTS_GATE").map(PathBuf::from), test_overflow_events: Mutex::new(None) }
+        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false), reconcile_from: Mutex::new(None), test_drop_gate: std::env::var_os("CTRS_TEST_FSEVENTS_GATE").map(PathBuf::from), test_overflow_events: Mutex::new(None) }
+    }
+}
+impl Delivery {
+    fn schedule_reconcile(&self, since: SystemTime) {
+        let mut pending = self.reconcile_from.lock().unwrap();
+        *pending = Some(pending.map_or(since, |old| old.min(since)));
     }
 }
 
-struct Callback { roots: Arc<Mutex<Roots>>, engine: Weak<Engine>, state: Arc<Delivery> }
+struct Callback { roots: Arc<Mutex<Roots>>, engine: Weak<Engine>, state: Arc<Delivery>, wake: mpsc::SyncSender<Change> }
 struct Stream { stream: StreamRef, queue: *mut c_void, callback: *mut Callback }
 impl Stream {
-    fn start(paths: &HashSet<PathBuf>, roots: Arc<Mutex<Roots>>, engine: Weak<Engine>, state: Arc<Delivery>) -> Option<Self> {
+    fn start(paths: &HashSet<PathBuf>, roots: Arc<Mutex<Roots>>, engine: Weak<Engine>, state: Arc<Delivery>, wake: mpsc::SyncSender<Change>) -> Option<Self> {
         let strings: Vec<_> = paths.iter().filter_map(|p| CString::new(p.to_str()?).ok()).collect();
         // SAFETY: CoreFoundation copies the strings and the stream copies the array.
         unsafe {
             let values: Vec<Ref> = strings.iter().map(|s| CFStringCreateWithCString(std::ptr::null(), s.as_ptr(), 0x08000100)).filter(|p| !p.is_null()).collect();
             let array = CFArrayCreate(std::ptr::null(), values.as_ptr(), values.len() as isize, std::ptr::null());
             let since = match state.last_id.load(Ordering::Relaxed) { 0 => u64::MAX, id => id };
-            let callback = Box::into_raw(Box::new(Callback { roots, engine, state }));
+            let callback = Box::into_raw(Box::new(Callback { roots, engine, state, wake }));
             let mut context = Context { version: 0, info: callback.cast(), retain: None, release: None, description: None };
             let stream = FSEventStreamCreate(std::ptr::null(), events, &mut context, array, since, 0.01, 0x10 | 0x2 | 0x4);
             CFRelease(array);
@@ -252,7 +349,12 @@ unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths
             }
             return;
         }
-        if let Some(events) = pending.take() {
+        let captured = pending.take();
+        drop(pending);
+        if let Some(events) = captured {
+            for (kind, path) in &events {
+                crate::diag::warn!("test gate captured bind mount event", kind = *kind as u8, path = path);
+            }
             let mut batch = vec![FsEvent { kind: FsEventKind::Modified, path: "/" }; 10_000];
             batch.extend(events.iter().map(|(kind, path)| FsEvent { kind: *kind, path }));
             if let Some(engine) = callback.engine.upgrade() {
@@ -293,19 +395,24 @@ unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths
     for dir in &lost {
         let Some(p) = dir.to_str() else { continue };
         rescans.push((FsEventKind::Rescan, p.to_owned()));
-        let from = since.checked_sub(RECONCILE_SLACK).unwrap_or(UNIX_EPOCH);
-        if !reconcile(dir, from, RECONCILE_LIMIT, &mut rescans) {
-            crate::diag::warn!("bind mount changes were lost; reconciliation stopped early", dir = p, limit = RECONCILE_LIMIT);
-        }
     }
-    if !lost.is_empty() { crate::diag::warn!("bind mount change notifications were lost; the guest revalidates", dirs = lost.len()); }
+    if !lost.is_empty() {
+        crate::diag::warn!("bind mount change notifications were lost; the guest revalidates", dirs = lost.len());
+    }
     rescans.extend(ordered);
     let Some(engine) = callback.engine.upgrade() else { return };
     let events: Vec<_> = rescans.iter().map(|(kind, path)| FsEvent { kind: *kind, path }).collect();
     if engine.send_fs_events(&events) {
+        if !lost.is_empty() {
+            let from = since.checked_sub(RECONCILE_SLACK).unwrap_or(UNIX_EPOCH);
+            state.schedule_reconcile(from);
+            let _ = callback.wake.try_send(Change::Wake);
+        }
         *state.delivered_at.lock().unwrap_or_else(|e| e.into_inner()) = started;
     } else {
         state.undelivered.store(true, Ordering::Relaxed);
+        state.schedule_reconcile(since.checked_sub(RECONCILE_SLACK).unwrap_or(UNIX_EPOCH));
+        let _ = callback.wake.try_send(Change::Wake);
     }
 }
 
@@ -336,15 +443,23 @@ mod tests {
         std::fs::create_dir_all(base.join("sub")).unwrap();
         std::fs::write(base.join("sub/new"), b"x").unwrap();
         let mut out = Vec::new();
-        assert!(reconcile(&base, SystemTime::now() - Duration::from_secs(60), 100, &mut out));
+        let root = Root { path: base.clone(), file: false };
+        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() - Duration::from_secs(60)).turn(100, &mut out).unwrap());
         let sub = base.join("sub").to_str().unwrap().to_owned();
         let new = base.join("sub/new").to_str().unwrap().to_owned();
         assert!(out.contains(&(FsEventKind::Created, sub)));
-        assert!(out.contains(&(FsEventKind::Modified, new)));
+        assert!(out.contains(&(FsEventKind::Modified, new.clone())));
         out.clear();
-        assert!(reconcile(&base, SystemTime::now() + Duration::from_secs(60), 100, &mut out));
+        assert!(Reconcile::new(vec![root.clone()], SystemTime::now() + Duration::from_secs(60)).turn(100, &mut out).unwrap());
         assert!(out.is_empty());
-        assert!(!reconcile(&base, UNIX_EPOCH, 1, &mut out));
+        let mut walk = Reconcile::new(vec![root], UNIX_EPOCH);
+        assert!(!walk.turn(1, &mut out).unwrap());
+        while !walk.turn(1, &mut out).unwrap() {}
+        assert_eq!(out.len(), 2);
+        out.clear();
+        let file = Root { path: base.join("sub/new"), file: true };
+        assert!(Reconcile::new(vec![file], UNIX_EPOCH).turn(10, &mut out).unwrap());
+        assert_eq!(out, vec![(FsEventKind::Modified, new)]);
         std::fs::remove_dir_all(&base).unwrap();
     }
     #[test]
