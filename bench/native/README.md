@@ -26,7 +26,7 @@ python3 bench/native/pyramid.py run --name w13-pp-down:cohort    # a 10-pair sco
 | --- | --- | --- |
 | edit | the harness's own tests (`test_*.py`, with `TMPDIR` under `.work`) and manifest validation | 34 s observed |
 | change | one ctrs/OrbStack pair of a real workload, installed-default lane | 16 s – 6 min per workload |
-| scenario | the 10-pair cohort of the same workload (5 for W12-watch, plus W12 matched and W8), started only on a quiet host | 3 – 41 min per workload |
+| scenario | the 10-pair cohort of the same workload (plus W12 matched and W8), started only on a quiet host | 3 – 57 min per workload |
 | full | `holdout`, `w11-soak` | manual only |
 
 Selectors: `--tier` is a ceiling; `--name` and `--area` select by workload

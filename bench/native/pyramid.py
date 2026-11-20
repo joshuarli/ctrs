@@ -117,14 +117,13 @@ def registry() -> list[Workload]:
     for name, area, purpose, args, seconds, extra in CELLS:
         basis = "observed" if seconds is not None else "estimated"
         per_trial = seconds or UNMEASURED_TRIAL_SECONDS
-        cohort = 5 if name.startswith("w12-watch") else 10
         image = ("--image-ref", os.environ.get("BENCH_W9_IMAGE_REF", "$BENCH_W9_IMAGE_REF")) \
             if "w9-image-ref" in extra else ()
         items.append(Workload(name, "change", area, purpose, per_trial, 2, basis, ENGINES + extra,
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=1))))
         items.append(Workload(f"{name}:cohort", "scenario", area, purpose + " (paired cohort)",
-                              per_trial, 2 * cohort, basis, ENGINES + extra + ("quiet-host",),
-                              argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=cohort),
+                              per_trial, 20, basis, ENGINES + extra + ("quiet-host",),
+                              argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=10),
                                     "--pair-quiet-load", str(QUIET["load1"]))))
     items += [
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
