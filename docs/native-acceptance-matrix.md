@@ -29,12 +29,12 @@ OrbStack's). Never pool lanes.
 | W1 | Compose up API+PG+Redis, restart | yes | yes | yes (one-pair pilot `base-20261120T053409-f584`) | no | pilot only: health 0.69×; no verdict below 10 pairs |
 | W2 | API fixed work, published port | yes | yes | yes (both lanes) | D: `base-20261118T090126-7b92`; M: `base-20261118T040927-4162`, `base-20261118T081857-9b61` | D at 2 vCPUs: all cells win (CPU/success 0.874). D at the 5-vCPU default (`base-20261119T053846-4c9b`): rps 0.70, p99 0.56, footprint 0.032, all strict wins; CPU/success was unmeasured (useful-work counts differed within every pair). D fixed work, 50,000 operations (`base-20261119T164542-ece1`, 10/10 pairs, per-pair quiet wait): rps 0.64 [0.61, 0.65], p50 0.66, p99 0.49 [0.41, 0.59], footprint 0.019, all strict wins; **CPU/success 1.03 [1.01, 1.05] inconclusive** (measured, not a win). M: latency/rps/footprint win; **CPU/success inconclusive 1.045 [1.015, 1.085]**, parked ([evidence](evidence/native-w2-ipi-2026-11-18.md)) |
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
-| W4 | Queue workers 1/4/16 | yes | yes | no | no | unmeasured |
-| W5 | Marked esbuild watch (bind, volume) | yes | yes | no | no | unmeasured; 5 edits per trial cannot support tails |
+| W4 | Queue workers 1/4/16 | yes | yes | yes (one-pair pilot `base-20261120T061132-4479`, inputs from `prepare --only W4`) | no | unmeasured |
+| W5 | Marked esbuild watch (bind, volume) | yes | yes | yes (one-pair pilot `base-20261120T061159-14e4`) | no | unmeasured; 5 edits per trial cannot support tails |
 | W6 | Default-builder Rust+C CI build | yes | yes | yes (one-pair pilot after `d692709`) | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
 | W7 | Default buildx → loaded images | yes | yes | yes (one-pair pilot after `d692709`) | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
-| W9 | Parallel fixed build/test jobs | yes | yes | no | no | unmeasured |
+| W9 | Parallel fixed build/test jobs | yes | yes | yes (one-pair pilot `base-20261120T061332-4abb`, pinned Marked digest) | no | unmeasured |
 | W10 | Interrupt/recover service/DB/queue | yes | yes | yes (one-pair pilot, change tier) | no | unmeasured; engine-interruption parity needs isolated OrbStack |
 | W11 | 12 h mixed reliability | yes | yes (parked branch) | no | n/a | unqualified |
 
