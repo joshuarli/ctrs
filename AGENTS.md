@@ -46,6 +46,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   tests (CI `linux-musl`); symlink-entry xattrs: `layers::tests::symlink_entry_xattrs_do_not_follow_the_link`. Privileged `tests/linux-host.sh`, `tests/kernel-features.sh`,
   `conformance/smoke.sh`, `isolation.sh`, `seccomp`: Needs environment (VM or privileged
   Linux container; no CI job). `arm64-compat` (QEMU) runs `tests/arm64-build.sh` cases.
+- Test tiers: Rust unit/integration and Python offline harness run by `make test` (warm 50s–1m52s); conformance and CLI e2e require a running engine. Empty conformance selections fail and are tested offline.
 - Performance: `bench/native/pyramid.py` (`check`, `run --tier edit|change`) over the workloads in
   `docs/campaign-native-performance.md`; hot paths are container lifecycle, image pull and bind IO.
   Scenario and full tiers need a named workload and an engine.

@@ -11,16 +11,9 @@ Diagnose (DSLP-2): reviewed layer and `docker cp` extraction, host archive load,
 
 Types (DSLP-3): clippy candidate scan exited 0 with 28 wildcard-enum, 20 redundant-clone, 39 needless-pass-by-value, 638 unwrap/expect (including test targets), and numerous cast warnings; no rule adopted without a verified defect witness. The single-variant wildcard candidate produced no diagnostic. Ruff 0.17.5 reported 2,855 diagnostics across ANN, ANN401, PGH003, TC, B and RET (2,727 ANN, 122 B, 6 RET); no candidate adopted. ty 0.0.104 reported 400 diagnostics with the three proposed rules enabled; 13 were unsound-return and 104 missing-type-argument or unused-ignore diagnostics. These are leads, not verified defects. Rust escape-hatch matching lines: 1,261; Python: 0 (the literal scan is a lower bound). Linux-only ctrs-init was not checked on macOS. No type contracts or escape hatches changed.
 
+Tests (DSLP-4): finite boundary inventory: CLI delegation is guarded by `docker::tests::delegates_argv_and_env_to_a_stub_docker`, but flag/exit semantics lack an engine e2e run; HTTP/API by `daemon::api` and `daemon::http` units, full conformance needs a running engine; `vm.json` by its round-trip test, image records and archives by store/archive tests, container records have no direct test; host/guest wire by round-trip and malformed-input tests; extraction and isolation by Linux-only ctrs-init tests, Needs environment on macOS. Benchmark manifest, parsing, pairing and safety have offline Python tests. Conformance selection had a false pass: an unmatched selector returned 0; the new test failed against that fault and passes after the runner returns 1. Linux privileged and engine e2e remain Needs environment. Coverage and mutation were not run: the requested scope excludes a mutation lane and cargo-llvm-cov is unavailable.
+
 ## Tickets
-
-### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
-
-- **Area:** deslop · tests
-- **Where:** test suites and CI
-- **Problem:** Coverage and mutation results are unmeasured; no deslop mutation lane exists.
-- **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
-- **Fix with:** deslop
-- **Effort:** L
 
 ### DSLP-5 · P2 · Dead code: tools and debloat
 
