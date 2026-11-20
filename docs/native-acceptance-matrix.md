@@ -26,16 +26,16 @@ OrbStack's). Never pool lanes.
 
 | ID | Workflow | Spec | Impl | Functional (this host) | Compared (this host) | Critical result (this host) |
 | --- | --- | --- | --- | --- | --- | --- |
-| W1 | Compose up API+PG+Redis, restart | yes | yes | no | no | unmeasured |
+| W1 | Compose up API+PG+Redis, restart | yes | yes | yes (one-pair pilot `base-20261120T053409-f584`) | no | pilot only: health 0.69×; no verdict below 10 pairs |
 | W2 | API fixed work, published port | yes | yes | yes (both lanes) | D: `base-20261118T090126-7b92`; M: `base-20261118T040927-4162`, `base-20261118T081857-9b61` | D at 2 vCPUs: all cells win (CPU/success 0.874). D at the 5-vCPU default (`base-20261119T053846-4c9b`): rps 0.70, p99 0.56, footprint 0.032, all strict wins; CPU/success was unmeasured (useful-work counts differed within every pair). D fixed work, 50,000 operations (`base-20261119T164542-ece1`, 10/10 pairs, per-pair quiet wait): rps 0.64 [0.61, 0.65], p50 0.66, p99 0.49 [0.41, 0.59], footprint 0.019, all strict wins; **CPU/success 1.03 [1.01, 1.05] inconclusive** (measured, not a win). M: latency/rps/footprint win; **CPU/success inconclusive 1.045 [1.015, 1.085]**, parked ([evidence](evidence/native-w2-ipi-2026-11-18.md)) |
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
 | W4 | Queue workers 1/4/16 | yes | yes | no | no | unmeasured |
 | W5 | Marked esbuild watch (bind, volume) | yes | yes | no | no | unmeasured; 5 edits per trial cannot support tails |
-| W6 | Default-builder Rust+C CI build | yes | yes | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
-| W7 | Default buildx → loaded images | yes | yes | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
+| W6 | Default-builder Rust+C CI build | yes | yes (one-pair pilot after `d692709`) | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
+| W7 | Default buildx → loaded images | yes | yes (one-pair pilot after `d692709`) | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
 | W9 | Parallel fixed build/test jobs | yes | yes | no | no | unmeasured |
-| W10 | Interrupt/recover service/DB/queue | yes | yes | no | no | unmeasured; engine-interruption parity needs isolated OrbStack |
+| W10 | Interrupt/recover service/DB/queue | yes | yes (one-pair pilot, change tier) | no | no | unmeasured; engine-interruption parity needs isolated OrbStack |
 | W11 | 12 h mixed reliability | yes | yes (parked branch) | no | n/a | unqualified |
 
 ## Filesystem and networking coverage (2026-11-18 steering)
@@ -46,7 +46,7 @@ OrbStack's). Never pool lanes.
 | W12-watch | `tsc --watch` (fs.watch backend): save, atomic replace, create+import, rename, delete, five-file bursts, 120 results per trial | yes | yes (`w12-watch-v2`) | yes, v2 both mounts | D bind: `base-20261118T174235-c732` (k7, 10 pairs), `base-20261118T212940-afee` (k8, 3 pairs), `-215543-cd5e` / `-220619-ab8e` (k10 / k9, 2 pairs each), `base-20261118T234824-4ef9` (k11, 2 pairs), **`base-20261119T013944-e94b` (k13, 10 pairs)** | **Scored on the splice build (`base-20261120T014028-c06b`, 10/10 pairs, outside-CPU admission): edit-to-result p50 0.90 [0.90, 0.91] strict win, p95 0.98 [0.96, 1.01] non-inferior, CPU 1.07 [1.06, 1.08] loss, footprint 0.07.** Earlier on `bf2ea2b` (`base-20261119T191032-ccdc`, 5 pairs, pilot only, no verdict): edit-to-result p50 0.92 [0.89, 0.93], p95 0.97, CPU 0.91, all trials correct. **Parity (kernel k13, 10 pairs; k14 `base-20261119T040227-c39c` and k15 `base-20261119T080909-d4d8` 600/600 on both, 5 pairs each):** ctrs bind 1,200/1,200 correct, 0 stale; OrbStack 1,200/1,200; detection p50 0.65 s on both, p95 2.0 s on both. Before notifications ctrs missed 120/120. Native-semantics kernels (k8–k10) reached 97/120, missing the in-place edits after an atomic replace that `tsc` also misses on volumes on both engines; k11 raises an in-place Mac edit as a rename of the name onto itself, as OrbStack does. |
 | W13 | Artifact transfer up/down: published port, container↔container, container→Mac; 1 and 4 streams; byte-exact receivers | yes | yes (`w13-v2`) | yes | D: seven cells; M: published-port upload; rx64 (patch 0005): three host→guest cells | critical. **Splice build (`4fdff1d`): published-port download 0.93 [0.92, 0.94] tool-limited (was 1.64–1.78× loss), upload 0.69 tool-limited, container→Mac upload 0.95 [0.94, 0.97] tool-limited (was 2.23×); ctrs time 0.56× / 0.77× / 0.43× its previous build with OrbStack unchanged (`base-20261120T000004-f614`, `base-20261119T235251-7eb8`, `base-20261120T000743-a0eb`). Every guest→host cell is now at the tool's ceiling, so no win is claimed. Container→Mac download (Mac→container bytes) regressed to 1.21 spliced and is back to 1.06 [1.01, 1.18] inconclusive with that direction copied (`ade0b80`, `base-20261120T030035-4a43`; pre-splice 1.04).** Before: **Guest→host loss, reduced:** over the NAT relay and legs (protocol 9), container→Mac upload 2.23× (was 7.0×), published-port download 1.64× (was 5.1×); every ctrs trial records its transport (nat/nat_leg 30, vsock 0). One NAT flow caps near 1.9 GB/s here. Host→guest after patch 0005: published-port upload 1.02 (parity) over vsock; the leg-only build regressed it to 1.14×; `439b14e` (client bytes over vsock) restored 0.96 [0.85, 1.07] inconclusive, CPU/GiB 1.17× loss (`base-20261119T134339-6c08`); Mac→container 1.03 over vsock and 0.99 [0.97, 1.02] tool-limited over NAT (`base-20261119T133649-3bc7`, non-regressing, not a win), 4-stream upload 1.25 loss. Container↔container **win** 0.82 ([evidence](evidence/native-w12-w13-2026-11-18.md)). Controlled egress unsupported (no owned endpoint) |
 | W13-overlap | One transfer condition alongside W2: interactive latency | yes | yes (`8b5709d` pairing, `689b63f` resources) | no | D: `base-20261120T034141-3333` (adopted guest, 10/10) | **loss:** W2 p99 1.70 [1.61, 1.82], rps 1.21 loss, CPU 1.19 loss; transfer 0.95 non-inferior. Attributed to guest CPU at the 5-vCPU default: with the bulk reversed to download ctrs leads (p99 13 vs 15 ms), and on the matched lane (9 vCPUs) ctrs leads in 2 of 3 diagnostic pairs; the vCPU default is an owner decision ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
-| W14 | Connection lifecycle: fresh, persistent/streaming, cancel, idle→resume, reconnect | yes | yes (`w14-v2`) | yes, all six modes, both engines | D: fresh (v2), streaming, reconnect (v1) | **CPU loss**: fresh 1.30, streaming 1.75 (lateness p99 1.16 loss), restart 5.1. Reconnect p99 non-inferior, cleanup win. Fresh p50 5.7× is confounded by OrbStack SYN drops (p99 about 1 s); completion about 1.05×. Persistent, cancel, idle-resume: functional only ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
+| W14 | Connection lifecycle: fresh, persistent/streaming, cancel, idle→resume, reconnect | yes | yes (`w14-v2`) | yes, all six modes, both engines | D: fresh (v2), streaming, reconnect (v1) | Scored after the pending-connect spin fix (`bf2ea2b`), D lane, 10 pairs each: streaming CPU 0.28 win; reconnect p99 0.42 and CPU 0.30 wins; persistent latency 1.025 non-inferior, CPU 0.61 win; idle-resume CPU 0.15 win, latency inconclusive; cancel wins (`base-20261120T013827-ffd6`); fresh completion 1.00 inconclusive (`base-20261120T052835-f228`; fresh p50 is confounded by OrbStack SYN drops), CPU ~1.02–1.15 loss. Earlier CPU losses (fresh 1.30, streaming 1.75) are superseded ([evidence](evidence/native-w12-w13-2026-11-18.md)) |
 | W3-v4 | Persistent storage: meaningful dataset, sustained read/write/checkpoint, declared working set and durability | yes | yes (pgbench fixed work) | no | D: `base-20261119T170441-5abe` (10/10 pairs, per-pair quiet wait) | D: every timing metric a strict win: rw tps 0.46 [0.45, 0.48], rw p95 0.27, checkpoint 0.41, restart 0.33, ro tps 0.81; CPU 0.81, footprint 0.064; pgdata allocation 1.0001. **Not a storage-leadership claim yet:** the flush contracts are not shown equal. Bound from the same records: OrbStack commits at 1.4–1.5 ms p50 and about 4,000 tps with 8 clients, which rules out a permanent-storage flush (`F_FULLFSYNC`, about 12 ms per WAL sync in ctrs's `Full` diagnostic, `native-ci-wal-2026-11-17.md`) per commit; a direct probe (2,000 × 4 KiB write + `fdatasync` on a named volume, 3 runs each, 2026-11-20) puts OrbStack's flush at p50 0.6–2.0 ms against ctrs's 0.26–0.28 ms, so OrbStack likely does more than a host `fsync` (a barrier-class flush) but less than `F_FULLFSYNC`; ctrs's write-path wins therefore plausibly come from a weaker flush and stay unclaimed. Virtualization.framework offers only `Fsync` (current) and `Full` (about 10× slower): an owner durability decision (ready queue item 5) |
 
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
@@ -85,17 +85,24 @@ Mbps only. It is not reusable as a verified-transfer metric.
 
 ## Ranked OrbStack deficits (this host)
 
-0. Bind-mount file-change notification: **parity** (W12-watch bind 1,200/1,200 on kernel k13, 10 pairs; 0/120 before).
-1. W13 guest→host transfer: container→Mac upload 7.0×, published-port
-   download 5.1× (VZ vsock device ceiling; needs a different device path).
-2. W12 full-bind workflow 1.28× D (5 vCPUs) / 1.23× M on kernel k15 (`base-20261119T072809-bc40`, `-064359-1f0c`; install 1.9×, test discovery 2.2–2.4× on the Mac share). The Mac's virtiofs server is throughput-bound (about 25,000 requests/s, one request queue); only fewer or off-critical-path requests can help.
-3. W12 all-volume D lane: closed by the half-the-Mac vCPU default (1.02 inconclusive, was 1.29 at 2 vCPUs; `148136f`).
-4. W13 4-stream published-port upload 1.25× after patch 0005.
-4a. W14 lifecycle CPU: fresh 1.30×, streaming 1.75× (lateness p99 1.16×).
-5. W2 M-lane CPU per success: inconclusive, +4.5% median. Parked.
-6. Unmeasured on this host: W1, W3–W11, W3-v4, W12 bind-source + volume
-   deps, W13-overlap, W14 persistent/cancel/idle-resume cohorts. W6/W7 default-build losses are
-   historical only.
+Current ranking (2026-11-20, guest `e217587c…`): [Ranked measured
+deficits](evidence/native-w12-w13-2026-11-18.md#ranked-measured-deficits).
+States are kept apart: a **loss**, **inconclusive**, **tool-limited**
+(the transfer tool, not the engine, may bound the result), **incomplete**
+(a metric that omits part of the engine's cost, such as host-kernel NAT
+networking) and **qualified** (none yet).
+
+1. W12 full-bind ~1.25–1.33× loss (Mac virtiofs share). Bind source +
+   volume deps is a separate layout (1.027 inconclusive), not a fix.
+2. W13-overlap loss: W2 p99 1.70×, rps 1.21×, CPU 1.19× at the 5-vCPU
+   default.
+3. CPU-only losses: W12-watch 1.07×, published-port upload CPU/GiB 1.08×,
+   W14 fresh ~1.02–1.15×; NAT-path CPU is incomplete.
+4. Guest→host bulk transfer: the 5–7× losses are closed to the tool's
+   ceiling (0.72–0.94, tool-limited); container→Mac download 1.06
+   inconclusive.
+5. Unscored: W1, W4, W5, W8, W9, W10 (pilots at most); W6/W7 cohorts
+   pending.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.
