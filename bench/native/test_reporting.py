@@ -174,6 +174,15 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(ctrs["verdict"], "regressed")
         self.assertEqual(rows[("orbstack", "goodput_bytes_per_second")]["verdict"], "no regression")
 
+    def test_w14_scores_only_the_metrics_its_mode_produces(self):
+        records = [r for i in range(1, 3) for r in pair(pair_id=i, case="W14", metric="completion_seconds")]
+        for r in records:
+            r["workload_params"]["mode"] = "fresh"
+        names = [m["metric"] for m in reporting.analyze(records)["cohorts"][0]["metrics"]]
+        self.assertEqual(names[:4], ["completion_seconds", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms"])
+        self.assertNotIn("reconnect_p99_ms", names)
+        self.assertNotIn("chunk_lateness_p99_ms", names)
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:

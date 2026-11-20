@@ -46,7 +46,7 @@ CASE_METRICS = {
     "W12-watch": ["edit_to_result_p50_s", "edit_to_result_p95_s"],
     "W13-overlap": ["w2_latency_p50_ms", "w2_latency_p99_ms", "w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction"],
     "W13": ["goodput_bytes_per_second", "completion_seconds", "cpu_seconds_per_verified_gib"],
-    "W14": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"],
+    "W14": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "completion_seconds", "chunk_lateness_p99_ms", "cleanup_latency_ms", "post_cancel_latency_ms", "reconnect_p99_ms", "successes"],
 }
 HIGHER_BETTER = {"w2_rps", "transfer_goodput_bytes_per_second", "overlap_fraction", "rps", "tx_tps", "rw_tps", "ro_tps", "load_rps", "goodput_bytes_per_second", "successes"} | {f"{W9_THROUGHPUT}{c}" for c in W9_CONCURRENCIES}
 TRANSFER_TIMING = ("goodput_bytes_per_second", "completion_seconds")
@@ -54,6 +54,25 @@ FAVORABLE = ("strict-win", "non-inferior")
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")
+
+
+W14_MODE_METRICS = {
+    "fresh": ["completion_seconds", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms"],
+    "persistent": ["completion_seconds", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms"],
+    "streaming": ["chunk_lateness_p99_ms"],
+    "cancel": ["post_cancel_latency_ms", "chunk_lateness_p99_ms"],
+    "idle-resume": ["latency_p50_ms", "latency_p95_ms", "latency_p99_ms"],
+    "reconnect": ["reconnect_p99_ms"],
+}
+
+
+def case_metrics(case: str, params) -> list[str]:
+    """The metrics a cohort produces. W14 modes each measure a different
+    lifecycle; listing every mode's metrics showed most as unmeasured."""
+    mode = params.get("mode") if isinstance(params, dict) else None
+    if case == "W14" and mode in W14_MODE_METRICS:
+        return [*W14_MODE_METRICS[mode], "cleanup_latency_ms", "successes"]
+    return CASE_METRICS.get(case, [])
 
 
 def _canonical(value: object) -> str:
@@ -271,7 +290,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
     if identity["case"] == "W11":
         result["note"] = "Reliability observations only; no request/window/churn speed verdicts."
         return result
-    metrics = [*CASE_METRICS.get(identity["case"], []), *RESOURCE_METRICS]
+    metrics = [*case_metrics(identity["case"], params), *RESOURCE_METRICS]
     if paired_w8:
         metrics = ["pull_to_health_s", "cpu_seconds_est", "peak_phys_footprint_bytes"]
         if identity["workload_params"].get("under_load"):
@@ -606,10 +625,11 @@ def analyze_anchor(anchor: list[dict], candidate: list[dict]) -> list[dict]:
     rows = []
     for key in sorted(before.keys() & after.keys()):
         case = json.loads(key)["case"]
+        wanted = case_metrics(case, json.loads(key)["workload_params"])
         for engine in ("ctrs", "orbstack"):
             a = [r for r in before[key] if r.get("engine") == engine]
             c = [r for r in after[key] if r.get("engine") == engine]
-            for metric in CASE_METRICS[case] + [m for m in RESOURCE_METRICS if m not in CASE_METRICS[case]]:
+            for metric in wanted + [m for m in RESOURCE_METRICS if m not in wanted]:
                 va = [v for v in (_metric(r, metric)[0] for r in a) if v is not None]
                 vc = [v for v in (_metric(r, metric)[0] for r in c) if v is not None]
                 if metric in HIGHER_BETTER:

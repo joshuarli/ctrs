@@ -67,6 +67,8 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
                           idle_seconds, timeout, restart=lambda: engine.sh(['restart', name], timeout=120),
                           phase=lambda: runner.resource_phase(engine, rec, 'lifecycle'))
         rec['metrics'].update(result)
+        if mode in ('fresh', 'persistent'):
+            rec['metrics']['completion_seconds'] = rec['resources'].get('phases', {}).get('lifecycle', {}).get('operation_wall_seconds')
         rec['correctness']['checks'].update(results_exact=result['successes'] == result['expected_successes'] and not any(result['errors'].values()),
                                             no_leaked_sessions=result['leaked_sessions'] == 0)
         if not result['ok']:
