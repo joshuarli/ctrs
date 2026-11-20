@@ -387,7 +387,10 @@ current-host baseline. Fixture commands now reference w8-v5
       records without it keep the load rule. Open: confirm on the first
       cohorts that the outside-CPU figure is near zero and alike for both
       engines on a quiet host (an engine process missing from the match
-      would inflate its own figure).
+      would inflate its own figure). First cohort: quiet trials 0.9–1.4
+      cores, ctrs about 0.2 above OrbStack in every W13 NAT pair, which
+      points at host kernel networking charged to no engine process; the
+      CPU metric undercounts ctrs on NAT paths until that is attributed.
    3. Metrics that do not measure what they name: W14 fresh p50 measures
       how many clients each engine admits at once (completion time is not
       a reported metric); W13 cells above half the loopback control are
