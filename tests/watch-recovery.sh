@@ -269,7 +269,7 @@ PY2
  done
 if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; then
   EXTRA="$ROOT/extra"
-  mkdir -p "$EXTRA/nested" "$EXTRA/denied"
+  mkdir -p "$EXTRA/nested" "$EXTRA/denied" "$EXTRA/old-dir"
   printf 'before\n' > "$EXTRA/atomic"
   printf 'before\n' > "$EXTRA/race-a"
   VOLUME="wr-volume-$$"
@@ -305,6 +305,8 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       done
       printf 'after\n' > "$EXTRA/replacement"
       mv "$EXTRA/replacement" "$EXTRA/atomic"
+      rmdir "$EXTRA/old-dir"
+      mkdir "$EXTRA/new-dir"
       docker exec "$P1" sh -c 'i=0; while [ "$i" -lt 100 ]; do mv /w/race-a /w/race-b 2>/dev/null || :; mv /w/race-b /w/race-a 2>/dev/null || :; i=$((i+1)); done' >/dev/null 2>&1 &
       RACE_PID=$!
       unlink "$GATE"
@@ -319,13 +321,15 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
       observed=0
       for i in $(seq 1 300); do
         if docker logs "$P1" 2>&1 | rg -q '^00000200 atomic$' && docker logs "$P1" 2>&1 | rg -q '^00000100 atomic$' &&
-           docker logs "$P2" 2>&1 | rg -q '^00000200 atomic$' && docker logs "$P2" 2>&1 | rg -q '^00000100 atomic$'; then observed=1; break; fi
+           docker logs "$P2" 2>&1 | rg -q '^00000200 atomic$' && docker logs "$P2" 2>&1 | rg -q '^00000100 atomic$' &&
+           docker logs "$P1" 2>&1 | rg -q '^40000200 old-dir$' && docker logs "$P1" 2>&1 | rg -q '^40000100 new-dir$' &&
+           docker logs "$P2" 2>&1 | rg -q '^40000200 old-dir$' && docker logs "$P2" 2>&1 | rg -q '^40000100 new-dir$'; then observed=1; break; fi
         sleep .1
       done
       if [ "$triggered" != 1 ] || [ "$observed" != 1 ]; then
-        echo "FAIL extra: atomic replace events or loss trigger"; docker logs "$P1" 2>&1 | tail -20; docker logs "$P2" 2>&1 | tail -20; FAIL=1
+        echo "FAIL extra: replacement, directory events, or loss trigger"; docker logs "$P1" 2>&1 | tail -20; docker logs "$P2" 2>&1 | tail -20; FAIL=1
       else
-        echo "PASS extra: atomic replace recovered by both watchers during guest rename"
+        echo "PASS extra: replacement and directory events reached both watchers during guest rename"
       fi
       if ! docker exec "$P1" sh -c '[ "$(cat /w/nested/sentinel)" = volume ]'; then
         echo "FAIL extra: nested volume detached"; FAIL=1
