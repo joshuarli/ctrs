@@ -157,18 +157,33 @@ W13-overlap is a scored loss (p99 1.70) attributed to guest CPU at the
 5-vCPU default. Scored: W12-watch p50 0.90, W14 cancel wins. Ranked list:
 `evidence/native-w12-w13-2026-11-18.md` "Ranked measured deficits".
 
+Since (2026-11-20, later): W14 fresh scored on `completion_seconds`
+(1.00, inconclusive; `base-20261120T052835-f228`); W12 mixed layout
+(bind source, volume deps) 1.027 inconclusive (`-045710-1dc3`); the
+W3-v4 flush probe recorded each engine's `fdatasync` cost (OrbStack
+p50 0.6–2.0 ms, ctrs 0.26 ms; VZ offers only `Fsync` or `Full`).
+buildx 0.37's docker-driver `--load` sent `prefer-image-digest`, which
+ctrs's build gRPC rewrite rejected; `d692709` drops it (e2e 508/508),
+restoring W6/W7. Change-tier pilots W1, W6, W7, W10 pass; costs are in
+the `pyramid.py` registry.
+
 Next, in order:
 
-1. Report `.work/native-perf/matrix/p11.log`: W14 fresh (scores
-   `completion_seconds` for the first time) and W12 bind-source + volume
-   deps (needs one valid 10-pair cohort to score task 3's mixed layout).
-2. Owner decision to surface, not take: the 5-vCPU default costs
-   W13-overlap (and W12 D) against OrbStack's 9.
+1. Report the 10-pair W6/W7 cohorts (`pyramid.py run --name
+   w6-build:cohort --name w7-buildx:cohort`, log
+   `.work/native-perf/matrix/p13.log`) into matrix rows W6/W7. Check
+   each rejected trial's outside-CPU: OrbStack build CPU may run outside
+   the Helper process and be charged as foreign.
+2. Owner decisions to surface, not take: the 5-vCPU default (costs
+   W13-overlap and W12 D against OrbStack's 9); VZ `Fsync` vs `Full`
+   (gates any W3-v4 claim); whether to run `runner.py prepare` for W4
+   and W5 inputs (preflight names them).
 3. W12 full-bind: the Mac virtiofs server ceiling; the measured way out
    is the mixed layout. Any engine work there needs a new attribution.
-4. W13 wins need a native receiver (or the 4-stream cells); W3-v4 needs
-   the flush-contract comparison (ready queue item 5) before any claim.
-5. Ready queue item 7 audit leftovers (costs for W1, W4–W10, W8).
+4. W13 wins need a native receiver (or the 4-stream cells). CPU-only
+   losses: W12-watch 1.07, published-port upload CPU/GiB 1.08; NAT
+   paths undercount ctrs CPU in the host kernel.
+5. W8 and W9 cohorts (W9 needs `BENCH_W9_IMAGE_REF`).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
