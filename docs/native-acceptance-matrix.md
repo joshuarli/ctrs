@@ -31,11 +31,11 @@ OrbStack's). Never pool lanes.
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
 | W4 | Queue workers 1/4/16 | yes | yes | no | no | unmeasured |
 | W5 | Marked esbuild watch (bind, volume) | yes | yes | no | no | unmeasured; 5 edits per trial cannot support tails |
-| W6 | Default-builder Rust+C CI build | yes | yes (one-pair pilot after `d692709`) | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
-| W7 | Default buildx → loaded images | yes | yes (one-pair pilot after `d692709`) | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
+| W6 | Default-builder Rust+C CI build | yes | yes | yes (one-pair pilot after `d692709`) | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
+| W7 | Default buildx → loaded images | yes | yes | yes (one-pair pilot after `d692709`) | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
 | W9 | Parallel fixed build/test jobs | yes | yes | no | no | unmeasured |
-| W10 | Interrupt/recover service/DB/queue | yes | yes (one-pair pilot, change tier) | no | no | unmeasured; engine-interruption parity needs isolated OrbStack |
+| W10 | Interrupt/recover service/DB/queue | yes | yes | yes (one-pair pilot, change tier) | no | unmeasured; engine-interruption parity needs isolated OrbStack |
 | W11 | 12 h mixed reliability | yes | yes (parked branch) | no | n/a | unqualified |
 
 ## Filesystem and networking coverage (2026-11-18 steering)
