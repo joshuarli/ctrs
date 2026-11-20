@@ -418,9 +418,12 @@ current-host baseline. Fixture commands now reference w8-v5
       ctrs. Instead `baseline --pair-quiet-load L` holds each pair until
       the 1-minute load is below L (decided before the pair runs); the
       scenario tier passes 4. Mid-pair foreign bursts are still rejected.
-   5. Guest attribution for W13/W14 (sched_switch and syscall traces of the
-      agent) ran from scratch scripts; resources record the VM process
-      without a guest split. Promote them into `diagnostics/` with a doc.
+   5. Guest attribution: W13 already has an in-tree per-process guest CPU
+      diagnostic (`diagnostics/w13_guest_cpu.py`, /proc snapshots around
+      each transfer); use it for the remaining published-port download
+      gap. Only the W14 agent syscall trace (tracefs, `common_pid==1`) was
+      scratch; it diagnosed the spin fixed in `bf2ea2b`, so promote it
+      only if W14 CPU (fresh 1.15×) needs it.
    6. W12 inputs (`kutt.tar.gz`, `w12-image.tar`) live in disposable
       `.work/tmp`; preflight now fails when they are missing, but their
       rebuild needs a documented command. W1, W4–W10 and W8 have no trial
