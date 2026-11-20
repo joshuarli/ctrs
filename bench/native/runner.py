@@ -3536,11 +3536,36 @@ def cmd_prepare(args) -> int:
         return prepare_engines(args, Path(temporary) / "marked.tar")
 
 
+def prepare_w4_w5(engine, cases: set[str], w5_image_archive: Path) -> None:
+    if "W4" in cases:
+        w4_dir = FIXTURES / "w4"
+        engine.sh(["build", "--load", "--platform", "linux/arm64", "-t", W4_LATENCY_IMAGE,
+                   "-f", str(w4_dir / "Dockerfile.latency"), str(w4_dir)], timeout=300)
+    if "W5" in cases:
+        w5_source = watch_loop.contract()["source"]
+        w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
+            "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")
+        watch_loop.prepare_shared_image(engine, w5_archive, w5_image_archive)
+
+
 def prepare_engines(args, w5_image_archive: Path) -> int:
     """Untimed setup: pull service images and build the fixture API image
     on each selected engine."""
     engines = args.engines.split(",")
+    only = set(args.only.split(",")) if getattr(args, "only", None) else None
+    if only is not None and not only <= {"W4", "W5"}:
+        raise SystemExit("--only takes W4 and/or W5")
     ctx = RunContext(f"prep-{datetime.now().strftime('%Y%m%dT%H%M%S')}")
+    if only is not None:
+        for name in engines:
+            engine = Engine(name, ctx.run_id)
+            try:
+                engine.ensure_up()
+                prepare_w4_w5(engine, only, w5_image_archive)
+                print(f"{name}: prepared {', '.join(sorted(only))}")
+            finally:
+                engine.stop()
+        return 0
     for pin in W6_SOURCES.values():
         ensure_pinned_source(pin, W6_DIR)
     summary = {}
@@ -3570,13 +3595,7 @@ def prepare_engines(args, w5_image_archive: Path) -> int:
             if odd:
                 print(f"{name}: WARNING non-arm64 images: {odd}")
 
-            w4_dir = FIXTURES / "w4"
-            engine.sh(["build", "--load", "--platform", "linux/arm64", "-t", W4_LATENCY_IMAGE,
-                       "-f", str(w4_dir / "Dockerfile.latency"), str(w4_dir)], timeout=300)
-            w5_source = watch_loop.contract()["source"]
-            w5_archive = ensure_pinned_source({"file": f"marked-{w5_source['version']}.tar.gz",
-                "url": w5_source["url"], "sha256": w5_source["sha256"]}, WORK / "inputs")
-            watch_loop.prepare_shared_image(engine, w5_archive, w5_image_archive)
+            prepare_w4_w5(engine, {"W4", "W5"}, w5_image_archive)
 
             # W8: local registry + relocated-image portfolio. Builds load
             # locally (buildkit inside the VM cannot reach the host-side
@@ -3926,6 +3945,7 @@ def main() -> int:
 
     p = sub.add_parser("prepare")
     p.add_argument("--engines", default="ctrs,orbstack")
+    p.add_argument("--only", help="W4,W5: build just those inputs; leaves pulls, the API image and the W8 portfolio alone")
 
     p = sub.add_parser("run")
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])

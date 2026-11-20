@@ -42,8 +42,9 @@ the ctrs binary and guest assets (a warning, not a failure, when they
 are older than their sources), OrbStack answering, no hold (`.work/tmp/hold`, or any file under
 `.work/tmp/holds/`, one per concurrent build),
 no ctrs daemon already running, 20 GB free, the pinned portfolio, the
-W12 inputs in `.work/tmp`, the W8 layout, and `BENCH_W9_IMAGE_REF` for
-W9. A failure names the workloads that need it and nothing runs. Host
+W12 inputs in `.work/tmp`, the W8 layout, the W4 image and W5 source
+(`runner.py prepare --only W4,W5` builds just those), and for W9 the
+pinned Marked digest on OrbStack (or `BENCH_W9_IMAGE_REF`). A failure names the workloads that need it and nothing runs. Host
 load is information; the reporter rejects pairs measured above the CPU
 count. Scenario workloads wait (up to `--quiet-timeout`, default 2 h) for
 1-minute load < 4, 5-minute load < 6, no hold and no daemon, and pass

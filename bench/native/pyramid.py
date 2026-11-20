@@ -66,15 +66,15 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
     ("w3v4-storage", "storage", "pgbench fixed work on a named volume",
      ("--case", "W3-v4"), 14, ("pinned-portfolio",)),
     ("w4-pipeline", "pipeline", "HTTP ingest through Redis workers to exact outputs on volumes",
-     ("--case", "W4"), None, ("w4-image",)),
+     ("--case", "W4"), 13, ("w4-image",)),
     ("w5-esbuild-watch", "watch", "persistent esbuild watch to exact CLI output after edits",
-     ("--case", "W5"), None, ("w5-source",)),
+     ("--case", "W5"), 9, ("w5-source",)),
     ("w6-build", "build", "docker build of Rust and C projects with artifact hashes",
      ("--case", "W6"), 79, ()),
     ("w7-buildx", "build", "buildx to loaded runnable images, uncached, warm and incremental",
      ("--case", "W7"), 72, ()),
     ("w9-jobs", "build", "16 fixed TypeScript build and test jobs at rising concurrency",
-     ("--case", "W9"), None, ("w9-image-ref",)),
+     ("--case", "W9"), 17, ("w9-image-ref",)),
     ("w10-recovery", "recovery", "interrupt an owned service and verify exact recovered work",
      ("--case", "W10"), 27, ()),
     ("w12-full-bind", "workspace", "Kutt install, build, typecheck and tests on a bind mount",
@@ -107,6 +107,33 @@ CPU_CANDIDATE = 9
 CPU_CANDIDATE_CELLS = ("w13-overlap", "w2-api", "w12-full-bind", "w6-build", "w14-idle-resume")
 
 
+W9_REF = "$BENCH_W9_IMAGE_REF"
+
+
+def resolved(argv: tuple[str, ...]) -> list[str]:
+    return [w9_image_ref() or arg if arg == W9_REF else arg for arg in argv]
+
+
+def w9_image_ref() -> str | None:
+    """`BENCH_W9_IMAGE_REF`, else the OrbStack image whose repo digest is the
+    pinned Marked manifest (the W8 portfolio installs it on both engines;
+    the runner checks ctrs per trial)."""
+    if os.environ.get("BENCH_W9_IMAGE_REF"):
+        return os.environ["BENCH_W9_IMAGE_REF"]
+    sys.path.insert(0, str(HERE))
+    import ci_jobs
+    docker = shutil.which("docker")
+    if not docker or not ORB_SOCKET.exists():
+        return None
+    try:
+        out = subprocess.run([docker, "-H", f"unix://{ORB_SOCKET}", "image", "ls", "--digests",
+                              "--format", "{{.Repository}}@{{.Digest}}"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except subprocess.TimeoutExpired:
+        return None
+    return next((line for line in out.split() if line.endswith("/np-v5/marked@" + ci_jobs.IMAGE_DIGEST)), None)
+
+
 def registry() -> list[Workload]:
     items = [
         Workload("harness-tests", "edit", "harness", "the harness's parsing, pairing, gates and cleanup",
@@ -120,7 +147,7 @@ def registry() -> list[Workload]:
     for name, area, purpose, args, seconds, extra in CELLS:
         basis = "observed" if seconds is not None else "estimated"
         per_trial = seconds or UNMEASURED_TRIAL_SECONDS
-        image = ("--image-ref", os.environ.get("BENCH_W9_IMAGE_REF", "$BENCH_W9_IMAGE_REF")) \
+        image = ("--image-ref", W9_REF) \
             if "w9-image-ref" in extra else ()
         items.append(Workload(name, "change", area, purpose, per_trial, 2, basis, ENGINES + extra,
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=1))))
@@ -275,18 +302,18 @@ def check_requirement(key: str) -> tuple[str, str]:
         found = docker and subprocess.run([docker, "-H", f"unix://{ORB_SOCKET}", "image", "inspect", "np-w4-events:v4"],
                                           capture_output=True, timeout=20).returncode == 0
         return ("ok", "present on OrbStack; ctrs is checked per trial") if found else \
-            ("fail", "np-w4-events:v4 missing; build both engines' inputs with `python3 bench/native/runner.py prepare`")
+            ("fail", "np-w4-events:v4 missing; build both engines' inputs with `python3 bench/native/runner.py prepare --only W4`")
     if key == "w5-source":
         sys.path.insert(0, str(HERE))
         import watch_loop
         version = watch_loop.contract()["source"]["version"]
         archive = WORK / "native-perf/inputs" / f"marked-{version}.tar.gz"
         return ("ok", "") if archive.is_file() else \
-            ("fail", f"{archive.name} missing; fetch it with `python3 bench/native/runner.py prepare`")
+            ("fail", f"{archive.name} missing; fetch it with `python3 bench/native/runner.py prepare --only W5`")
     if key == "w9-image-ref":
-        ref = os.environ.get("BENCH_W9_IMAGE_REF")
-        return ("ok", ref) if ref else ("fail", "set BENCH_W9_IMAGE_REF to the preinstalled pinned Marked digest "
-                                              "reference (fixtures/w9-v2/README.md)")
+        ref = w9_image_ref()
+        return ("ok", ref) if ref else ("fail", "no image on OrbStack carries the pinned Marked digest; install the "
+                                              "w8-v5 portfolio or set BENCH_W9_IMAGE_REF (fixtures/w9-v2/README.md)")
     if key == "quiet-host":
         return "ok", "waited for at run time (1-minute load < 4, 5-minute < 6, no hold)"
     raise ValueError(f"unknown requirement {key}")
@@ -360,7 +387,7 @@ def run(chosen: list[Workload], quiet_timeout: float) -> int:
     (WORK / "tmp").mkdir(exist_ok=True)
     results = []
     for w in chosen:
-        entry = {"name": w.name, "tier": w.tier, "area": w.area, "command": list(w.argv)}
+        entry = {"name": w.name, "tier": w.tier, "area": w.area, "command": resolved(w.argv)}
         if "quiet-host" in w.requires and not wait_quiet(time.time() + quiet_timeout):
             entry.update(status="excluded", reason=f"host not quiet within {quiet_timeout:.0f} s")
             results.append(entry)
@@ -368,7 +395,7 @@ def run(chosen: list[Workload], quiet_timeout: float) -> int:
         log = out / f"{w.name.replace(':', '_')}.log"
         started = time.monotonic()
         with log.open("w") as fh:
-            cp = subprocess.run(w.argv, cwd=w.cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
+            cp = subprocess.run(entry["command"], cwd=w.cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
         entry.update(status="ok" if cp.returncode == 0 else "failed", exit=cp.returncode,
                      seconds=round(time.monotonic() - started, 1), log=str(log))
         if w.report:
@@ -459,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"plan: {len(chosen)} workloads, about {total / 60:.0f} min "
           f"(estimated: {', '.join(w.name for w in chosen if w.cost_basis == 'estimated') or 'none'})")
     for w in chosen:
-        print(f"  {w.tier:<9} {w.name:<30} {' '.join(w.argv) if w.argv else w.manual}")
+        print(f"  {w.tier:<9} {w.name:<30} {' '.join(resolved(w.argv)) if w.argv else w.manual}")
     if not ready:
         print("preflight failed; nothing ran")
         return 1
