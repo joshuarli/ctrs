@@ -503,6 +503,20 @@ impl Sids {
 /// rewrite to a mirror push. Anything else fails closed to the plain
 /// proxy path.
 const CARRY_ATTRS: &[&str] = &["oci-mediatypes", "compression", "compression-level", "force-compression", "rewrite-timestamp"];
+/// Exporter attributes that only shape what buildx reports back and are
+/// meaningless for the mirror push: accepted, not carried. buildx 0.37
+/// sends `prefer-image-digest` with every docker-driver `--load`.
+const DROP_ATTRS: &[&str] = &["prefer-image-digest"];
+
+/// The first exporter attribute the rewrite cannot honor, if any: it
+/// fails closed on attestations, platform pins, store selection and
+/// unknown knobs.
+fn unsupported_attr(attrs: &[(String, String)]) -> Option<&str> {
+    attrs
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .find(|k| k.starts_with("annotation") || !(*k == "name" || *k == "push" || CARRY_ATTRS.contains(k) || DROP_ATTRS.contains(k)))
+}
 
 fn varint(msg: &[u8], i: &mut usize) -> Option<u64> {
     let mut v = 0u64;
@@ -669,13 +683,9 @@ fn rewrite_solve(msg: &[u8], engine: &Arc<Engine>) -> Option<(Vec<u8>, String, V
         crate::diag::debug!("solve rewrite skipped", reason = "no name attr");
         return None;
     };
-    // Fail closed on anything we don't recognize: attestations,
-    // platform pins, store selection, unknown knobs.
-    for (k, _) in &attrs {
-        if k.starts_with("annotation") || !(k == "name" || k == "push" || CARRY_ATTRS.contains(&k.as_str())) {
-            crate::diag::debug!("solve rewrite skipped", reason = format!("attr {k}"));
-            return None;
-        }
+    if let Some(k) = unsupported_attr(&attrs) {
+        crate::diag::debug!("solve rewrite skipped", reason = format!("attr {k}"));
+        return None;
     }
     let tags: Vec<String> = name.split(',').map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned).collect();
     if tags.is_empty() {
@@ -1373,4 +1383,25 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
     let _ = sender.join();
     let _ = be.shutdown(Shutdown::Both);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unsupported_attr;
+
+    fn attrs(keys: &[&str]) -> Vec<(String, String)> {
+        keys.iter().map(|k| (k.to_string(), "v".to_string())).collect()
+    }
+
+    #[test]
+    fn a_buildx_load_with_prefer_image_digest_is_rewritten() {
+        assert_eq!(unsupported_attr(&attrs(&["name", "prefer-image-digest"])), None);
+        assert_eq!(unsupported_attr(&attrs(&["name", "push", "oci-mediatypes", "compression"])), None);
+    }
+
+    #[test]
+    fn unknown_or_annotation_attrs_still_fail_closed() {
+        assert_eq!(unsupported_attr(&attrs(&["name", "store"])), Some("store"));
+        assert_eq!(unsupported_attr(&attrs(&["name", "annotation.org.x"])), Some("annotation.org.x"));
+    }
 }
