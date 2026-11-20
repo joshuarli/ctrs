@@ -35,7 +35,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   `make test-bench` sets `TMPDIR` to `.work/tmp` itself. The Linux `benchmark-harness` job runs the
   same 399 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
 - `make lint` (clippy, all targets, `-D warnings`): red at base, 51 errors in `crates/ctrs`
-  (DSLP-6); the other crates and Linux ctrs-init are clean. 28s warm. CI does not run it.
+  (CTRS-12); the other crates and Linux ctrs-init are clean. 28s warm. CI does not run it.
 - CLI flags and exit codes: none (`docker::tests::delegates_argv_and_env_to_a_stub_docker` covers
   delegation only). API: `daemon::api` and `daemon::http` unit tests; `conformance/run.sh` and
   `tests/e2e.sh` need a running engine (Needs environment; no CI job).
