@@ -190,10 +190,11 @@ struct Delivery {
     /// Events were lost since then: the next batch starts with rescans.
     undelivered: AtomicBool,
     test_drop_gate: Option<PathBuf>,
+    test_overflow_events: Mutex<Option<Vec<(FsEventKind, String)>>>,
 }
 impl Default for Delivery {
     fn default() -> Self {
-        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false), test_drop_gate: std::env::var_os("CTRS_TEST_FSEVENTS_GATE").map(PathBuf::from) }
+        Self { last_id: AtomicU64::new(0), delivered_at: Mutex::new(SystemTime::now()), undelivered: AtomicBool::new(false), test_drop_gate: std::env::var_os("CTRS_TEST_FSEVENTS_GATE").map(PathBuf::from), test_overflow_events: Mutex::new(None) }
     }
 }
 
@@ -231,6 +232,35 @@ unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths
     // SAFETY: FSEvents supplies arrays valid for this callback and the stream owns the context.
     let (callback, paths, flags, ids) = unsafe { (&*(info as *const Callback), std::slice::from_raw_parts(paths as *const *const c_char, count), std::slice::from_raw_parts(flags, count), std::slice::from_raw_parts(ids, count)) };
     let state = &callback.state;
+    if let Some(gate) = &state.test_drop_gate {
+        let mut pending = state.test_overflow_events.lock().unwrap();
+        if gate.with_extension("overflow").exists() {
+            let events = pending.get_or_insert_with(|| {
+                crate::diag::warn!("test gate collecting bind mount changes for guest overflow");
+                Vec::new()
+            });
+            let roots = callback.roots.lock().unwrap();
+            for ((path, flags), id) in paths.iter().zip(flags).zip(ids) {
+                state.last_id.fetch_max(*id, Ordering::Relaxed);
+                let Ok(path) = unsafe { CStr::from_ptr(*path) }.to_str() else { continue };
+                if roots.accepts(Path::new(path)) {
+                    for kind in classify(*flags, Path::new(path).exists()) {
+                        if events.len() < 4096 { events.push((kind, path.to_owned())); }
+                        else { crate::diag::warn!("test overflow gate capacity exceeded"); }
+                    }
+                }
+            }
+            return;
+        }
+        if let Some(events) = pending.take() {
+            let mut batch = vec![FsEvent { kind: FsEventKind::Modified, path: "/" }; 10_000];
+            batch.extend(events.iter().map(|(kind, path)| FsEvent { kind: *kind, path }));
+            if let Some(engine) = callback.engine.upgrade() {
+                if !engine.send_fs_events(&batch) { state.undelivered.store(true, Ordering::Relaxed); }
+            }
+            crate::diag::warn!("test gate delivered guest overflow batch", events = events.len());
+        }
+    }
     if state.test_drop_gate.as_ref().is_some_and(|path| path.exists()) {
         for id in ids { state.last_id.fetch_max(*id, Ordering::Relaxed); }
         if !state.undelivered.swap(true, Ordering::Relaxed) {

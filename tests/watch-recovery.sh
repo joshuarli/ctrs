@@ -58,15 +58,10 @@ PY
       sleep .1
     done
   else
-    python3 - "$CONTROL" <<'PY' &
-import os, sys
-for i in range(40000):
-    with open(os.path.join(sys.argv[1], f'n{i:05}'), 'w') as f: f.write('x')
-PY
-    BURST=$!
+    touch "$GATE.overflow"
     triggered=0
-    for i in $(seq 1 300); do
-      if tail -c +"$CONSOLE_OFFSET" "$DATA/vm-console.log" | rg -q 'host change events did not fit; the share is rescanned'; then triggered=1; break; fi
+    for i in $(seq 1 100); do
+      if tail -c +"$LOG_OFFSET" "$LOG" | rg -q 'test gate collecting bind mount changes for guest overflow'; then triggered=1; break; fi
       sleep .1
     done
   fi
@@ -89,7 +84,16 @@ with open(sys.argv[2], 'w') as f: f.write(f'{modified} {deleted} {created}\n')
 PY2
   then echo "FAIL $CASE: fixture order"; FAIL=1; fi
   read -r MODIFIED DELETED CREATED < "$ROOT/names"
-  if [ "$CASE" = host-loss ]; then sleep 2; unlink "$GATE"; else wait "$BURST"; fi
+  if [ "$CASE" = host-loss ]; then
+    sleep 2; unlink "$GATE"
+  else
+    sleep 2; unlink "$GATE.overflow"
+    for i in $(seq 1 100); do
+      if tail -c +"$CONSOLE_OFFSET" "$DATA/vm-console.log" | rg -q 'host change events did not fit; the share is rescanned'; then break; fi
+      sleep .1
+    done
+    if ! tail -c +"$CONSOLE_OFFSET" "$DATA/vm-console.log" | rg -q 'host change events did not fit; the share is rescanned'; then triggered=0; fi
+  fi
   if [ "$triggered" != 1 ]; then
     echo "FAIL $CASE: loss condition not observed"; FAIL=1
   elif [ "$CASE" = host-loss ]; then
@@ -106,6 +110,9 @@ PY2
     fi
     sleep 1
   done
+  if [ "$CASE" = guest-overflow ] && tail -c +"$LOG_OFFSET" "$LOG" | rg -q 'bind mount change notifications were lost; the guest revalidates|test overflow gate capacity exceeded'; then
+    echo "FAIL $CASE: host loss or test gate overflow"; FAIL=1
+  fi
   if [ "$converged" = 1 ] && [ "$triggered" = 1 ]; then echo "PASS $CASE: loss observed and watcher converged"; else echo "FAIL $CASE: watcher did not converge within 30 seconds"; FAIL=1; fi
   docker rm -f "wr-$CASE" >/dev/null
  done
