@@ -147,22 +147,28 @@ and OrbStack unchanged. Container→Mac download (Mac→container) looked
 worse (8 clean pairs 1.27) in a cohort partly contaminated by a tool
 edit; a held probe put the splice's cost there near 6 %.
 
-Next, in order (all chained in background shells; logs
-`.work/native-perf/matrix/p4.log`–`p7.log`):
+Since: the NAT host-bound Mac→container direction went back to the copy
+loop (`ade0b80`; download 1.21 spliced → 1.06, pre-splice 1.04); on that
+guest (`e217587c…`, e2e 508/508) published-port download 0.92,
+container→Mac upload 0.94, published-port upload 0.72, all tool-limited.
+Two W13 tool rewrites were reverted (`a68248e` memoryview compare,
+`60f6036` no in-trial gain): Mac single-flow loopback caps the tool.
+W13-overlap is a scored loss (p99 1.70) attributed to guest CPU at the
+5-vCPU default. Scored: W12-watch p50 0.90, W14 cancel wins. Ranked list:
+`evidence/native-w12-w13-2026-11-18.md` "Ranked measured deficits".
 
-1. p4: W13-overlap, W14 cancel and fresh (fresh now records
-   `completion_seconds`); p5: W12-watch bind at 10 pairs.
-2. p6: container→Mac download again on the w13-v3 tool, to settle the
-   splice's download cost (paired against OrbStack and `--anchor`
-   against `base-20261119T133649-3bc7`).
-3. Then the chain fast-forwards `bench/w13-v4` (receiver compares an mmap
-   of the artifact, sender uses sendfile; anchor never crosses fixture
-   versions) and runs p7: the four W13 cells and W13-overlap on w13-v4,
-   whose higher capacity controls decide whether the parity cells are
-   wins. Report each, never calling a tool-limited cell a win.
-4. If download's paired loss holds on p6, attribute it (Mac→guest NAT
-   direction) before any change; then W14 fresh CPU and the open audit
-   items (ready queue item 7).
+Next, in order:
+
+1. Report `.work/native-perf/matrix/p11.log`: W14 fresh (scores
+   `completion_seconds` for the first time) and W12 bind-source + volume
+   deps (needs one valid 10-pair cohort to score task 3's mixed layout).
+2. Owner decision to surface, not take: the 5-vCPU default costs
+   W13-overlap (and W12 D) against OrbStack's 9.
+3. W12 full-bind: the Mac virtiofs server ceiling; the measured way out
+   is the mixed layout. Any engine work there needs a new attribution.
+4. W13 wins need a native receiver (or the 4-stream cells); W3-v4 needs
+   the flush-contract comparison (ready queue item 5) before any claim.
+5. Ready queue item 7 audit leftovers (costs for W1, W4–W10, W8).
 
 Kernel experiments build in a labeled copy of `ctrs-kbuild`
 (`ctrs-kbuild-exp-*`, label `dev.ctrs.campaign.run=bind-notify`) and are
