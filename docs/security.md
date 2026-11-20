@@ -57,12 +57,14 @@ fail-closed check (CTRS-21): an entry whose path escapes the layer root
 previously unpacked silently-skipped yet was recorded as loaded; now the
 layer is refused outright.
 
-Known gap (DSLP-7, reproduced): the pax xattrs of a layer entry are applied
-after the unpack with `setxattr`, which follows a symlink at the final
-component, so a symlink entry can label a file outside the layer. On Linux
-hosts the agent is root on the host kernel, so an image can set, for
-example, `security.capability` on a host file; on macOS the target is the
-guest's own filesystem.
+Pax xattrs of a layer entry (and of a `docker cp` member) are applied after
+the unpack with `lsetxattr`, which does not follow a symlink at the final
+component (DSLP-7: `setxattr` did, so a symlink entry could label a file
+outside the layer, such as `security.capability` on a host binary). A symlink
+entry's xattrs therefore only ever land on the link itself; Linux refuses
+`user.*` there and, like Docker and containerd, the agent ignores that error
+(application stays best-effort). Regression test:
+`layers::tests::symlink_entry_xattrs_do_not_follow_the_link`.
 
 ### Seccomp (the container's filter)
 

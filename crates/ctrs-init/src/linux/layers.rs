@@ -286,18 +286,20 @@ pub(crate) fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<V
     Ok(out)
 }
 
-/// Best-effort setxattr for one pax keyword: a layer whose xattrs the
+/// Best-effort `lsetxattr` for one pax keyword: a layer whose xattrs the
 /// filesystem refuses still unpacks, matching how Docker treats xattr
 /// application as non-fatal.
 ///
-/// Known defect (DSLP-7): `setxattr` follows a symlink at the last component,
-/// so a symlink entry's xattrs land on its target, outside the layer.
+/// `lsetxattr` never follows a symlink at the last component, so a symlink
+/// entry's xattrs can only label the link itself, never its target outside the
+/// layer (DSLP-7). Linux refuses `user.*` on a symlink (EPERM); like Docker
+/// (`pkg/archive`) and containerd, that error is ignored with the rest.
 pub(crate) fn set_pax_xattr(path: &Path, key: &[u8], value: &[u8]) {
     let (Ok(p), Ok(k)) = (sys::cstr(path), std::ffi::CString::new(key)) else { return };
     // SAFETY: valid NUL-terminated path and name; value is an arbitrary
     // byte string with an explicit length.
     unsafe {
-        libc::setxattr(p.as_ptr(), k.as_ptr(), value.as_ptr().cast(), value.len(), 0);
+        libc::lsetxattr(p.as_ptr(), k.as_ptr(), value.as_ptr().cast(), value.len(), 0);
     }
 }
 
@@ -391,6 +393,69 @@ mod tests {
         let n = unsafe { libc::lgetxattr(p.as_ptr(), c"user.note".as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
         assert_eq!(&buf[..n as usize], b"hello");
         let _ = fs::remove_dir_all(&dest);
+    }
+
+    fn xattr_of(path: &Path, name: &std::ffi::CStr) -> Option<Vec<u8>> {
+        let p = sys::cstr(path).unwrap();
+        let mut buf = [0u8; 64];
+        // SAFETY: valid path, name, buffer and length.
+        let n = unsafe { libc::lgetxattr(p.as_ptr(), name.as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+        (n >= 0).then(|| buf[..n as usize].to_vec())
+    }
+
+    /// A pax xattr header followed by a symlink entry aimed outside the layer
+    /// must not label the link's target (DSLP-7); a regular file's xattrs are
+    /// still applied. `security.capability` is root-only, as in CI.
+    #[test]
+    fn symlink_entry_xattrs_do_not_follow_the_link() {
+        // VFS_CAP_REVISION_2 blob granting CAP_SETUID.
+        let mut cap = vec![1, 0, 0, 2, 0x80, 0, 0, 0];
+        cap.resize(20, 0);
+        // SAFETY: geteuid has no preconditions.
+        let root = unsafe { libc::geteuid() } == 0;
+        let base = scratch("xattr-outside");
+        let dest = base.join(".tmp-layer");
+        fs::create_dir_all(&dest).unwrap();
+        let victim = base.join("victim");
+        fs::write(&victim, b"host").unwrap();
+
+        let mut b = tar::Builder::new(Vec::new());
+        let mut add = |name: &str, link: Option<&str>| {
+            let mut pax = pax_record("SCHILY.xattr.user.deslop", b"pwned");
+            if root {
+                pax.extend(pax_record("SCHILY.xattr.security.capability", &cap));
+            }
+            let mut h = header(pax.len() as u64, 0o644);
+            h.set_entry_type(tar::EntryType::XHeader);
+            b.append_data(&mut h, format!("PaxHeader.0/{name}"), &pax[..]).unwrap();
+            match link {
+                Some(to) => {
+                    let mut h = header(0, 0o777);
+                    h.set_entry_type(tar::EntryType::Symlink);
+                    b.append_link(&mut h, name, to).unwrap();
+                }
+                None => {
+                    let mut h = header(1, 0o644);
+                    b.append_data(&mut h, name, &b"x"[..]).unwrap();
+                }
+            }
+        };
+        add("abs", Some(victim.to_str().unwrap()));
+        add("rel", Some("../victim"));
+        add("plain", None);
+        let bytes = b.into_inner().unwrap();
+        untar(Capped { inner: &bytes[..], left: u64::MAX }, &dest).unwrap();
+
+        assert_eq!(fs::read_link(dest.join("abs")).unwrap(), victim);
+        assert_eq!(fs::read_link(dest.join("rel")).unwrap(), Path::new("../victim"));
+        assert_eq!(xattr_of(&victim, c"user.deslop"), None, "user xattr followed the symlink");
+        assert_eq!(xattr_of(&victim, c"security.capability"), None, "capability followed the symlink");
+        // Behaviour kept: the regular file carries its records.
+        assert_eq!(xattr_of(&dest.join("plain"), c"user.deslop").as_deref(), Some(&b"pwned"[..]));
+        if root {
+            assert_eq!(xattr_of(&dest.join("plain"), c"security.capability"), Some(cap));
+        }
+        let _ = fs::remove_dir_all(&base);
     }
 
     /// A layer whose first entry makes `foo` a symlink to `/` and whose
