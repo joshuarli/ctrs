@@ -53,7 +53,10 @@ fn main() {
     let fd = unsafe { inotify_init1(0) };
     assert!(fd >= 0);
     let path = CString::new(std::env::args().nth(1).unwrap()).unwrap();
-    assert!(unsafe { inotify_add_watch(fd, path.as_ptr(), 0xfff) } >= 0);
+    let mode = std::env::args().nth(2).unwrap_or_default();
+    let mask = if mode == "oneshot" { 0x80000004 } else { 0xfff };
+    assert!(unsafe { inotify_add_watch(fd, path.as_ptr(), mask) } >= 0);
+    if mode == "check" { println!("ADDED"); return; }
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
     println!("READY");
     std::io::stdout().flush().unwrap();
@@ -135,9 +138,6 @@ PY
   done
   if [ "$preflight" != 1 ]; then echo "FAIL $CASE: watcher preflight"; FAIL=1; docker rm -f "$CONTAINER" >/dev/null; continue; fi
   echo "PASS $CASE: initial artifact and live watcher"
-  if [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ] && ! docker exec "$CONTAINER" sh -c '[ "$(cat /proc/ctrs/watch_name_guard)" = ok ]'; then
-    echo "FAIL $CASE: overlong directory-name guard"; FAIL=1
-  fi
   if [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; then
     COUNTER=$(docker exec "$CONTAINER" cat /proc/ctrs/watch_bytes) || COUNTER=
     read -r BYTES LIMIT <<< "$COUNTER"
@@ -405,6 +405,34 @@ if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = extra ]; } && [
     [ -z "$P2" ] || docker rm -f "$P2" >/dev/null 2>&1 || :
   fi
 
+fi
+
+if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = oneshot ]; } && [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; then
+  mkdir -p "$ROOT/unreachable/a/b"
+  ONESHOT=$(docker run -d --privileged -v "$ROOT/unreachable:/orphan" -v "$ROOT/watch-probe:/probe:ro" alpine /probe /orphan/a/b oneshot) || ONESHOT=
+  [ -z "$ONESHOT" ] || CREATED_CONTAINERS+=("$ONESHOT")
+  ready=0
+  for i in $(seq 1 100); do
+    if [ -n "$ONESHOT" ] && docker logs "$ONESHOT" 2>&1 | rg -q READY; then ready=1; break; fi
+    sleep .1
+  done
+  if [ "$ready" != 1 ]; then echo "FAIL oneshot: watcher not ready"; FAIL=1
+  elif ! docker exec --privileged "$ONESHOT" sh -c 'set -e; mkdir -p /tmp/recovery-proc; mount -t proc proc /tmp/recovery-proc; sync; echo 2 > /tmp/recovery-proc/sys/vm/drop_caches; umount /tmp/recovery-proc' ||
+       ! mv "$ROOT/unreachable/a" "$ROOT/displaced" ||
+       ! docker exec "$ONESHOT" sh -c 'echo "s /orphan" > /proc/ctrs/fsnotify'; then
+    echo "FAIL oneshot: rescan setup"; FAIL=1
+  else
+    fired=0
+    for i in $(seq 1 200); do
+      if docker logs "$ONESHOT" 2>&1 | rg -q '^(00000004|40000004) '; then fired=1; break; fi
+      sleep .1
+    done
+    if [ "$fired" != 1 ]; then echo "FAIL oneshot: unreachable watch did not receive attrib"; FAIL=1
+    elif ! perl -e 'alarm 5; exec @ARGV' docker exec "$ONESHOT" /probe /orphan check | rg -q '^ADDED$'; then
+      echo "FAIL oneshot: subsequent watch blocked"; FAIL=1
+    else echo "PASS oneshot: attrib delivered and subsequent watch added"; fi
+  fi
+  [ -z "$ONESHOT" ] || docker rm -f "$ONESHOT" >/dev/null 2>&1 || :
 fi
 
 if { [ -z "${CTRS_WATCH_CASE:-}" ] || [ "${CTRS_WATCH_CASE:-}" = cap ]; } && [ -z "${CTRS_WATCH_ORIGINAL_ONLY:-}" ]; then

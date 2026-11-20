@@ -13,6 +13,11 @@
 # Exits non-zero if any check fails.
 
 set -u
+if [ -z "${TMPDIR:-}" ]; then
+  TMPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.work/tmp"
+  mkdir -p "$TMPDIR"
+  export TMPDIR
+fi
 SOCK=${CTRS_SOCKET:?set CTRS_SOCKET to the engine socket}
 export DOCKER_HOST="unix://$SOCK"
 unset DOCKER_CONTEXT

@@ -97,6 +97,11 @@ cannot prove redundant.
   three attempts with backoff, then queue overflow. Entry
   failures are retried and logged before they are skipped. The writer does
   not wait for FUSE operations held by the worker.
+  Overflow and attribute events for unvisited watches are sent after the
+  watch table lock is released, because an `IN_ONESHOT` watch tears its
+  mark down inside the event and re-takes that lock (patch 0016); the
+  `oneshot` case in `tests/watch-recovery.sh` hangs the guest on the
+  0013–0015 kernel and passes with 0016.
 - **Retained names.** Watches on the same virtiofs inode share a name set.
   The initial set costs one directory scan, without a LOOKUP per entry.
   An internal mark updates names on creates, deletes and moves. It does not
