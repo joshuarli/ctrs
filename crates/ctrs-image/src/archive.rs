@@ -57,18 +57,15 @@ pub fn load(store: &Store, archive: impl Read) -> io::Result<Vec<Image>> {
     // of truth, so an image whose put_image wrote images.json but failed
     // later keeps its blobs. If the index cannot be read, nothing is
     // removed.
-    match store.images() {
-        Ok(images) => {
-            let used = |d: &str| images.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
-            for d in ingested.iter().filter(|d| !used(d)) {
-                if let Ok(path) = store.blob_path(d) {
-                    let _ = std::fs::remove_file(path);
-                }
+    // An unreadable index prunes nothing: orphaned blobs are harmless; a blob
+    // an image still needs is not.
+    if let Ok(images) = store.images() {
+        let used = |d: &str| images.iter().any(|i| i.config_digest == d || i.layers.iter().any(|l| l.digest == d));
+        for d in ingested.iter().filter(|d| !used(d)) {
+            if let Ok(path) = store.blob_path(d) {
+                let _ = std::fs::remove_file(path);
             }
         }
-        // The index is unreadable, so nothing can be pruned safely.
-        // Orphaned blobs are harmless; a blob an image still needs is not.
-        Err(_) => {}
     }
     result.map(|()| loaded)
 }

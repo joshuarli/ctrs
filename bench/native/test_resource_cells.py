@@ -105,7 +105,9 @@ class AcceptanceTests(unittest.TestCase):
             self.assertEqual(snapshot['allocated_bytes'], st.st_blocks * 512)
             self.assertEqual(snapshot['files'][0]['logical_bytes'], 8 * 1024 * 1024 + 1)
             self.assertEqual((snapshot['files'][0]['device'], snapshot['files'][0]['inode']), (st.st_dev, st.st_ino))
-            self.assertEqual(snapshot['files'][0]['filesystem_free_bytes'], os.statvfs(path).f_bavail * os.statvfs(path).f_frsize)
+            # Free space moves while other processes write; the snapshot only has to agree with the live figure.
+            free = os.statvfs(path)
+            self.assertAlmostEqual(snapshot['files'][0]['filesystem_free_bytes'], free.f_bavail * free.f_frsize, delta=64 << 20)
             self.assertIsNone(snapshot['exclusive_allocated_bytes'])
             self.assertEqual(snapshot['exclusive_allocation_status'], 'unsupported')
             missing = cells.allocation_snapshot([path, Path(directory) / 'missing'])

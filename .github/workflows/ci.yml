@@ -27,9 +27,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate benchmark contracts and regression checks
-        run: |
-          python3 bench/native/runner.py validate-manifest
-          python3 -m unittest discover -s bench/native -p 'test_*.py' -v
+        run: make test-bench
 
   macos:
     name: Test (macOS)
@@ -50,7 +48,7 @@ jobs:
         with:
           key: macos-latest
       - name: Test
-        run: cargo test --workspace --lib --tests --no-fail-fast
+        run: make test
 
   arm64-compat:
     name: ARM64 qualification (AMD64 to ARM64)
@@ -84,7 +82,7 @@ jobs:
       - name: Run the ARM64 qualification runner
         env:
           CARGO_ENCODED_RUSTFLAGS: ''
-        run: bash tests/arm64-build.sh --case environment compatibility platform cross identity lifecycle
+        run: bash tests/arm64-build.sh --case environment --case compatibility --case platform --case cross --case identity --case lifecycle
 
   linux-musl:
     name: Test (Linux ${{ matrix.arch }} musl)

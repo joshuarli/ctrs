@@ -289,6 +289,9 @@ pub(crate) fn pax_xattrs<R: Read>(entry: &mut tar::Entry<'_, R>) -> io::Result<V
 /// Best-effort setxattr for one pax keyword: a layer whose xattrs the
 /// filesystem refuses still unpacks, matching how Docker treats xattr
 /// application as non-fatal.
+///
+/// Known defect (DSLP-7): `setxattr` follows a symlink at the last component,
+/// so a symlink entry's xattrs land on its target, outside the layer.
 pub(crate) fn set_pax_xattr(path: &Path, key: &[u8], value: &[u8]) {
     let (Ok(p), Ok(k)) = (sys::cstr(path), std::ffi::CString::new(key)) else { return };
     // SAFETY: valid NUL-terminated path and name; value is an arbitrary

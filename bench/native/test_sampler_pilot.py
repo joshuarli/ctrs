@@ -1,6 +1,7 @@
 import copy
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -11,6 +12,14 @@ from unittest.mock import patch
 
 from diagnostics import sampler_pilot as pilot
 from test_safety import FixtureContext, fake_engine
+
+
+@contextmanager
+def native_host():
+    """Present the host as native ARM64 macOS, which run_calibration requires."""
+    with patch.object(pilot.sys, 'platform', 'darwin'), \
+            patch.object(pilot.os, 'uname', return_value=SimpleNamespace(machine='arm64')):
+        yield
 
 
 def trial():
@@ -64,6 +73,7 @@ class ObserverControls(unittest.TestCase):
         for failure in ('engine', 'registry', 'result-save'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 results = Path(directory)
+                self.enterContext(native_host())
                 written, engines, trial_events = [], [], []
                 class Context:
                     def __init__(self, run_id):
@@ -194,7 +204,7 @@ class ObserverControls(unittest.TestCase):
         with patch.object(pilot.runner, 'sha256_file', return_value='wrong'), \
                 patch.object(pilot.runner, 'RunContext') as context, \
                 patch.object(pilot.resource_pilot, 'ResourceEngine') as engine:
-            with self.assertRaisesRegex(ValueError, 'differs.*pin'):
+            with native_host(), self.assertRaisesRegex(ValueError, 'differs.*pin'):
                 pilot.run_calibration(run_id='sampler-control-test', portfolio_layout=Path('/unused'),
                                       ctrs_binary=Path(sys.executable), pairs=1, operations=1000)
         context.assert_not_called()

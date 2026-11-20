@@ -57,6 +57,13 @@ fail-closed check (CTRS-21): an entry whose path escapes the layer root
 previously unpacked silently-skipped yet was recorded as loaded; now the
 layer is refused outright.
 
+Known gap (DSLP-7, reproduced): the pax xattrs of a layer entry are applied
+after the unpack with `setxattr`, which follows a symlink at the final
+component, so a symlink entry can label a file outside the layer. On Linux
+hosts the agent is root on the host kernel, so an image can set, for
+example, `security.capability` on a host file; on macOS the target is the
+guest's own filesystem.
+
 ### Seccomp (the container's filter)
 
 Default profile = Docker's deny-list shape, enforced per container:
