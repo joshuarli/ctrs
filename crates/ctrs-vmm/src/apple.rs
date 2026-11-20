@@ -435,6 +435,13 @@ fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Resul
             let fs = VZVirtioFileSystemDeviceConfiguration::initWithTag(VZVirtioFileSystemDeviceConfiguration::alloc(), &NSString::from_str(tag));
             fs.setShare(Some(&share));
             shares.push(Retained::into_super(fs));
+            for extra in 2..=std::env::var("CTRS_EXP_SHARE_DEVICES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1) {
+                let shared = VZSharedDirectory::initWithURL_readOnly(VZSharedDirectory::alloc(), &dir_url, false);
+                let share = VZSingleDirectoryShare::initWithDirectory(VZSingleDirectoryShare::alloc(), &shared);
+                let fs = VZVirtioFileSystemDeviceConfiguration::initWithTag(VZVirtioFileSystemDeviceConfiguration::alloc(), &NSString::from_str(&format!("{tag}{extra}")));
+                fs.setShare(Some(&share));
+                shares.push(Retained::into_super(fs));
+            }
         }
         // Rosetta for Linux exists only on Apple Silicon.
         #[cfg(target_arch = "aarch64")]
