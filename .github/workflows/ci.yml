@@ -82,7 +82,7 @@ jobs:
       - name: Run the ARM64 qualification runner
         env:
           CARGO_ENCODED_RUSTFLAGS: ''
-        run: bash tests/arm64-build.sh --case environment compatibility platform cross identity lifecycle
+        run: bash tests/arm64-build.sh --case environment --case compatibility --case platform --case cross --case identity --case lifecycle
 
   linux-musl:
     name: Test (Linux ${{ matrix.arch }} musl)

@@ -15,6 +15,10 @@ SCRIPT = Path(__file__).with_name('durable_job.py').resolve()
 PYTHON = str(Path(sys.executable).resolve())
 
 
+NATIVE = sys.platform == 'darwin' and os.uname().machine == 'arm64'
+
+
+@unittest.skipUnless(NATIVE, 'durable_job launches only on native ARM64 macOS')
 class DurableJobTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=os.environ['TMPDIR'])

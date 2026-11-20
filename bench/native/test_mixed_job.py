@@ -29,7 +29,7 @@ class MixedJob(unittest.TestCase):
 
     def test_separate_deadlines_and_frozen_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()  # receipts record resolved paths (/var -> /private/var on macOS)
             for name in ('portfolio', 'worker'):
                 (root / name).mkdir()
                 (root / name / 'blob').write_text(name)
@@ -69,6 +69,8 @@ class MixedJob(unittest.TestCase):
             self.assertEqual(marker.read_text(), 'cleaned')
 
 
+@unittest.skipUnless(sys.platform == 'darwin' and os.uname().machine == 'arm64',
+                     'the detached supervisor runs only on native ARM64 macOS')
 class SupervisorOutcome(unittest.TestCase):
     def test_nonzero_child_status_is_preserved(self):
         import contextlib

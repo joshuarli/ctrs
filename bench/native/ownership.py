@@ -45,7 +45,9 @@ def artifact(record, started):
     with path.open('rb') as source:
         for block in iter(lambda: source.read(1024 * 1024), b''):
             digest.update(block)
-    if path.stat() != st:
+    # Compare identity fields only: reading the file updates st_atime on Linux.
+    identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+    if identity(path.stat()) != identity(st):
         raise ValueError(f'artifact changed while hashing: {path}')
     return {'path': str(path), 'inode': st.st_ino, 'size': st.st_size,
             'sha256': digest.hexdigest()}

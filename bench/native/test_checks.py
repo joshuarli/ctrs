@@ -15,6 +15,11 @@ class ComponentCheckTests(unittest.TestCase):
     def completed(self, returncode=0, stdout="", stderr="Ran 3 tests in 0.01s\n\nOK\n"):
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
+    def run_quietly(self, **kwargs):
+        """Run the component check while keeping its simulated failure output out of the log."""
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return runner.run_component_check("w2", **kwargs)
+
     def test_component_runs_exact_nonempty_native_selection_without_full_path(self):
         calls = []
 
@@ -55,26 +60,26 @@ class ComponentCheckTests(unittest.TestCase):
     def test_nonzero_test_exit_cannot_pass(self):
         result = self.completed(returncode=1,
                                 stderr="Ran 1 test in 0.01s\n\nFAILED (failures=1)\n")
-        self.assertEqual(runner.run_component_check("w2", run=lambda *a, **k: result), 1)
+        self.assertEqual(self.run_quietly(run=lambda *a, **k: result), 1)
 
     def test_import_or_discovery_error_cannot_pass(self):
         result = self.completed(returncode=1,
                                 stderr="ImportError: Failed to import test module\n")
-        self.assertEqual(runner.run_component_check("w2", run=lambda *a, **k: result), 1)
+        self.assertEqual(self.run_quietly(run=lambda *a, **k: result), 1)
 
     def test_required_skip_cannot_pass(self):
         result = self.completed(stderr="Ran 2 tests in 0.01s\n\nOK (skipped=1)\n")
-        self.assertEqual(runner.run_component_check("w2", run=lambda *a, **k: result), 1)
+        self.assertEqual(self.run_quietly(run=lambda *a, **k: result), 1)
 
     def test_zero_match_cannot_pass(self):
         result = self.completed(stderr="Ran 0 tests in 0.00s\n\nOK\n")
-        self.assertEqual(runner.run_component_check("w2", run=lambda *a, **k: result), 1)
+        self.assertEqual(self.run_quietly(run=lambda *a, **k: result), 1)
 
     def test_timeout_cannot_pass(self):
         def timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
-        self.assertEqual(runner.run_component_check("w2", timeout=1, run=timeout), 1)
+        self.assertEqual(self.run_quietly(timeout=1, run=timeout), 1)
 
 
 if __name__ == "__main__":
