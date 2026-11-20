@@ -9,16 +9,9 @@ Ground (DSLP-1, base ddaf012): code lines Rust 34.6k (`ctrs` 24k, `ctrs-init` 12
 
 Diagnose (DSLP-2): reviewed layer and `docker cp` extraction, host archive load, whiteout and symlink handling; process lifecycle and container setup were not reviewed in depth. Filed DSLP-7 (P1, reproduced in a Linux container): the xattr call after layer extraction follows a symlink. The path checks themselves held for symlink parents, symlink-then-file, hardlink-to-outside-then-file and symlink-then-directory entries.
 
+Types (DSLP-3): clippy candidate scan exited 0 with 28 wildcard-enum, 20 redundant-clone, 39 needless-pass-by-value, 638 unwrap/expect (including test targets), and numerous cast warnings; no rule adopted without a verified defect witness. The single-variant wildcard candidate produced no diagnostic. Ruff 0.17.5 reported 2,855 diagnostics across ANN, ANN401, PGH003, TC, B and RET (2,727 ANN, 122 B, 6 RET); no candidate adopted. ty 0.0.104 reported 400 diagnostics with the three proposed rules enabled; 13 were unsound-return and 104 missing-type-argument or unused-ignore diagnostics. These are leads, not verified defects. Rust escape-hatch matching lines: 1,261; Python: 0 (the literal scan is a lower bound). Linux-only ctrs-init was not checked on macOS. No type contracts or escape hatches changed.
+
 ## Tickets
-
-### DSLP-3 · P2 · Types: strict profile and typing findings
-
-- **Area:** deslop · types
-- **Where:** type checker and lint configuration; Rust/Python sources
-- **Problem:** The strict-profile candidates in the deslop skill's tools reference have not been measured here.
-- **Recommendation:** Run the deslop Types step. Accept: clean at the adopted profile, escape hatches not increased, witnesses recorded.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
 
