@@ -63,6 +63,24 @@ nginx_up() { for _ in $(seq 50); do $D exec "$1" wget -qO- -T 1 http://127.0.0.1
 # the user's: cleanup removes only what the suite made.
 KEEP_C=" $($D ps -aq --no-trunc | tr '\n' ' ') "
 KEEP_N=" $($D network ls -q --no-trunc --filter type=custom 2>/dev/null | tr '\n' ' ') "
+scratch_remove() {
+  python3 - "$1" <<'PYREMOVE'
+import os, sys
+path = os.path.abspath(sys.argv[1])
+root = os.path.realpath(os.environ['TMPDIR'])
+if os.path.commonpath((root, os.path.realpath(path))) != root or path == root:
+    raise SystemExit('refusing to remove a path outside TMPDIR')
+for parent, dirs, files in os.walk(path, topdown=False, followlinks=False):
+    for name in files: os.unlink(os.path.join(parent, name))
+    for name in dirs:
+        item = os.path.join(parent, name)
+        if os.path.islink(item): os.unlink(item)
+        else: os.rmdir(item)
+os.rmdir(path)
+PYREMOVE
+}
+export -f scratch_remove
+
 cleanup() {
   for c in $($D ps -aq --no-trunc); do [[ "$KEEP_C" == *" $c "* ]] || $D rm -f "$c" >/dev/null 2>&1; done
   for n in $($D network ls -q --no-trunc --filter type=custom 2>/dev/null); do [[ "$KEEP_N" == *" $n "* ]] || $D network rm "$n" >/dev/null 2>&1; done
@@ -161,7 +179,7 @@ if [ "${SLOW:-0}" = 1 ]; then
       $D rm -f e2e-stdin-end >/dev/null 2>&1
     fi
   done
-  rm -f "$out"
+  unlink "$out"
   t stdin-end-every-time "hung 0, wrong 0" echo "hung $hung, wrong $wrong"
 fi
 
@@ -213,7 +231,7 @@ code rm-with-restart-refused 125 $D run --rm --restart always alpine true
 # (the file it wrote on the first run is still there on the second):
 # the layer is sent again, not "layer ... is not unpacked". busybox's single
 # layer is the one with bin/busybox and no alpine-release.
-t start-restores-layer "KEPT AGAIN" bash -c "$D rm -f relayer >/dev/null 2>&1; $D run --name relayer busybox:1.36 sh -c '[ -e /kept ] && echo AGAIN >> /kept || echo KEPT > /kept' && $D run --rm --privileged alpine sh -c 'mkdir -p /m && mount -t ext4 /dev/vda /m && for d in /m/layers/*/; do [ -e \$d/bin/busybox ] && [ ! -e \$d/etc/alpine-release ] && rm -rf \$d \${d%/}.done; done; umount /m' && $D start -a relayer >/dev/null && $D cp relayer:/kept - | tar -xO | tr '\\n' ' '; $D rm -f relayer >/dev/null"
+t start-restores-layer "KEPT AGAIN" bash -c "$D rm -f relayer >/dev/null 2>&1; $D run --name relayer busybox:1.36 sh -c '[ -e /kept ] && echo AGAIN >> /kept || echo KEPT > /kept' && $D run --rm --privileged alpine sh -c 'mkdir -p /m && mount -t ext4 /dev/vda /m && for d in /m/layers/*/; do [ -e \$d/bin/busybox ] && [ ! -e \$d/etc/alpine-release ] && find \$d ! -type d -exec unlink {} \\; && find \$d -depth -type d -exec rmdir {} \\; && unlink \${d%/}.done 2>/dev/null || :; done; umount /m' && $D start -a relayer >/dev/null && $D cp relayer:/kept - | tar -xO | tr '\\n' ' '; $D rm -f relayer >/dev/null"
 
 section "networking"
 t default-ip "172.17." $D run --rm alpine sh -c 'ip -4 addr show eth0'
@@ -521,8 +539,8 @@ echo two > "$RS/proj/f"
 t bind-rescan-keeps-mounts "vol two" $D exec e2e-rescan sh -c 'echo "s /w" > /proc/ctrs/fsnotify && echo "$(cat /w/deps/marker) $(cat /w/f)"'
 mv "$RS/proj" "$RS/moved"; echo three > "$RS/moved/f"; mv "$RS/moved" "$RS/proj"
 t bind-root-renamed "three" $D exec e2e-rescan sh -c 'for i in $(seq 40); do [ "$(cat /w/f)" = three ] && break; sleep 0.1; done; cat /w/f'
-$D rm -f e2e-rescan >/dev/null; $D volume rm e2e-rescan >/dev/null; rm -rf "$RS"
-$D rm -f e2e-mix >/dev/null; rm -rf "$MIX"
+$D rm -f e2e-rescan >/dev/null; $D volume rm e2e-rescan >/dev/null; scratch_remove "$RS"
+$D rm -f e2e-mix >/dev/null; scratch_remove "$MIX"
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
 t vol-inspect "/var/lib/ctrs/volumes/tvol/_data" $D volume inspect -f '{{.Mountpoint}}' tvol
@@ -536,7 +554,7 @@ t vol-copyup-not-over "1 mine" bash -c "$D run --rm -v tkeep:/usr/share/nginx/ht
 t redis-volume "PONG OK running" bash -c "$D run -d --name rv -v tredis:/data redis:7-alpine >/dev/null; for i in \$(seq 50); do $D exec rv redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 0.2; done; p=\$($D exec rv redis-cli ping); s=\$($D exec rv redis-cli save); sleep 1; echo \$p \$s \$($D inspect -f '{{.State.Status}}' rv)"
 # A volume over part of a bind (`./:/app` and `/app/node_modules`) is filled
 # from the image, as Docker does, never from the host's folder under it.
-t vol-copyup-under-bind "index.html" bash -c "h=\$(mktemp -d); mkdir \$h/html; echo mac > \$h/html/from-host.txt; $D run --rm -v \$h:/usr/share/nginx -v /usr/share/nginx/html nginx:alpine sh -c 'cd /usr/share/nginx/html; [ -e from-host.txt ] && echo from the host || ls'; rm -rf \$h"
+t vol-copyup-under-bind "index.html" bash -c "h=\$(mktemp -d); mkdir \$h/html; echo mac > \$h/html/from-host.txt; $D run --rm -v \$h:/usr/share/nginx -v /usr/share/nginx/html nginx:alpine sh -c 'cd /usr/share/nginx/html; [ -e from-host.txt ] && echo from the host || ls'; scratch_remove \"\$h\""
 $D rm -f rv >/dev/null 2>&1; $D volume rm towner tapk tkeep tredis >/dev/null 2>&1
 t vol-in-use "in use" bash -c "$D run -d --name vu -v tvol:/v alpine sleep 30 >/dev/null; $D volume rm tvol"
 $D rm -f vu >/dev/null
@@ -556,7 +574,7 @@ $D volume rm "$(cat $PGK_VOL 2>/dev/null)" >/dev/null 2>&1; unlink "$PGK_VOL"
 # Prune only what this suite labels: never the user's own volumes.
 t vol-prune "prunev" bash -c "$D volume create --label ctrs-e2e=1 prunev >/dev/null; $D volume prune -af --filter label=ctrs-e2e=1"
 $D volume rm made-vol >/dev/null 2>&1
-rm -rf "$BIND"
+scratch_remove "$BIND"
 
 section "filters"
 $D run -d --name fa --label team=a --label tier=web alpine sleep 60 >/dev/null
@@ -619,7 +637,7 @@ t compose-down "Removed" bash -c "cd $CP && $D compose -p ctrstest down -v 2>&1"
 t compose-clean "0" bash -c "$D ps -aq --filter label=com.docker.compose.project=ctrstest | wc -l | tr -d ' '"
 t compose-bystander "bystander" $D ps --format '{{.Names}}'
 $D rm -f bystander >/dev/null
-rm -rf "$CP"
+scratch_remove "$CP"
 
 section "docker cp"
 CPD=$(mktemp -d); mkdir -p "$CPD/dir/sub"; echo one > "$CPD/a.txt"; echo two > "$CPD/dir/sub/b.txt"
@@ -639,7 +657,7 @@ code cp-into-missing-dir 1 $D cp "$CPD/a.txt" cpc:/nodir/
 $D create --name cpcreated alpine cat /tmp/a.txt >/dev/null
 t cp-into-created "one" bash -c "$D cp $CPD/a.txt cpcreated:/tmp/ && $D start -a cpcreated"
 t cp-from-stopped "a.txt" bash -c "$D cp cpcreated:/tmp/a.txt - | tar -t"
-$D rm -f cpc cpcreated >/dev/null; rm -rf "$CPD"
+$D rm -f cpc cpcreated >/dev/null; scratch_remove "$CPD"
 
 section "privileged"
 t priv-caps "000001ffffffffff" $D run --rm --privileged alpine grep CapEff /proc/self/status
@@ -673,7 +691,7 @@ t load "Loaded image: ctrs-test/alp:v1" $D load -i "$IMD/a.tar"
 t load-runs "3." $D run --rm ctrs-test/alp:v1 cat /etc/alpine-release
 t load-stdin "Loaded image" bash -c "$D rmi ctrs-test/alp:v1 >/dev/null; $D load < $IMD/a.tar"
 code load-garbage 1 bash -c "echo nope | $D load"
-$D rmi ctrs-test/alp:v1 >/dev/null 2>&1; rm -rf "$IMD"
+$D rmi ctrs-test/alp:v1 >/dev/null 2>&1; scratch_remove "$IMD"
 
 section "docker build (BuildKit in the VM)"
 BD=$(mktemp -d)
@@ -701,12 +719,12 @@ t build-fails "exit code: 3" bash -c "cd $BD && printf 'FROM alpine\nRUN exit 3\
 printf 'FROM alpine\nENTRYPOINT ["/bin/echo"]\nCMD ["hello-from-image"]\n' > "$BD/Dockerfile.ep"
 BUILDX_BUILDER=$BX $D build -f "$BD/Dockerfile.ep" -t ctrs-test/ep-cmd "$BD" >/dev/null 2>&1 || echo "  FAIL build-ep-cmd (image did not build)"
 t create-empty-cmd "hello-from-image" bash -c "cid=\$(curl -s --unix-socket $SOCK -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"ctrs-test/ep-cmd\",\"Cmd\":[]}' http://x/containers/create | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"Id\"])') && curl -s --unix-socket $SOCK -X POST \"http://x/containers/\$cid/start\" -o /dev/null && sleep 1 && out=\$(curl -s --unix-socket $SOCK \"http://x/containers/\$cid/logs?stdout=true\") && echo \"\$out\" | grep -o hello-from-image; curl -s --unix-socket $SOCK -X DELETE \"http://x/containers/\$cid?force=true\" -o /dev/null"
-$D rmi ctrs-test/built ctrs-test/net ctrs-test/ep-cmd >/dev/null 2>&1; rm -rf "$BD"
+$D rmi ctrs-test/built ctrs-test/net ctrs-test/ep-cmd >/dev/null 2>&1; scratch_remove "$BD"
 
 section "registry: login, push, pull"
 REG=$(mktemp -d); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}
 # A throwaway client config: no keychain, nothing of the user's touched.
-mkdir -p "$REG/cfg"; echo '{"auths":{}}' > "$REG/cfg/config.json"; ln -s ~/.docker/cli-plugins "$REG/cfg/cli-plugins"; ln -s ~/.docker/contexts "$REG/cfg/contexts"
+mkdir -p "$REG/cfg"; echo '{"auths":{}}' > "$REG/cfg/config.json"; ln -s ~/.docker/cli-plugins "$REG/cfg/cli-plugins"; mkdir -p "$REG/cfg/contexts"
 $D run --rm httpd:2.4-alpine htpasswd -Bbn ctrsuser ctrspass > "$REG/htpasswd" 2>/dev/null
 $D run -d --name reg -p 5055:5000 -v "$REG:/auth" -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=ctrs -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd registry:2 >/dev/null
 ready http://localhost:5055/v2/
@@ -723,7 +741,7 @@ t pull-no-auth "pull access denied" bash -c "$R logout localhost:5055 >/dev/null
 t push-no-auth "authentication required" bash -c "$R tag alpine localhost:5055/team/alp:2 && $R push localhost:5055/team/alp:2 2>&1"
 # Not pushed, so no RepoDigest: not alpine's from Docker Hub, nor one made up.
 t push-failed-no-digest "[]" $R image inspect localhost:5055/team/alp:2 --format '{{json .RepoDigests}}'
-$D rmi localhost:5055/team/alp:2 >/dev/null 2>&1; $D rm -f reg >/dev/null; rm -rf "$REG"
+$D rmi localhost:5055/team/alp:2 >/dev/null 2>&1; $D rm -f reg >/dev/null; scratch_remove "$REG"
 
 section "limits, stats, top, pause, update"
 $D run -d --name lim --memory 128m --cpus 0.5 --pids-limit 50 --cpu-shares 512 nginx:alpine >/dev/null; sleep 0.5
@@ -782,7 +800,7 @@ t connect-survives-restart "eth1" bash -c "$D restart -t 1 multi >/dev/null && $
 code connect-twice 1 $D network connect nb multi
 t disconnect "no-eth1" bash -c "$D network disconnect nb multi && ($D exec multi ip -o link | grep -q eth1 && echo still || echo no-eth1)"
 t disconnect-dns-gone "bad address" $D run --rm --network nb alpine wget -qO- -T 2 http://web2
-t compose-multi-net "PONG" bash -c "d=\$(mktemp -d); printf 'services:\n  db:\n    image: redis:7-alpine\n    networks: [back]\n  app:\n    image: redis:7-alpine\n    command: sh -c \"sleep 1; redis-cli -h db ping; sleep 30\"\n    networks: [front, back]\nnetworks:\n  front: {}\n  back: {}\n' > \$d/compose.yaml; cd \$d && $D compose -p ctrsnet up -d >/dev/null 2>&1; sleep 3; $D compose -p ctrsnet logs app; $D compose -p ctrsnet down >/dev/null 2>&1; rm -rf \$d"
+t compose-multi-net "PONG" bash -c "d=\$(mktemp -d); printf 'services:\n  db:\n    image: redis:7-alpine\n    networks: [back]\n  app:\n    image: redis:7-alpine\n    command: sh -c \"sleep 1; redis-cli -h db ping; sleep 30\"\n    networks: [front, back]\nnetworks:\n  front: {}\n  back: {}\n' > \$d/compose.yaml; cd \$d && $D compose -p ctrsnet up -d >/dev/null 2>&1; sleep 3; $D compose -p ctrsnet logs app; $D compose -p ctrsnet down >/dev/null 2>&1; scratch_remove \"\$d\""
 $D rm -f multi >/dev/null; $D network rm na nb >/dev/null
 
 section "events, prune, system df, search"
