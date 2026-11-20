@@ -31,8 +31,8 @@ OrbStack's). Never pool lanes.
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
 | W4 | Queue workers 1/4/16 | yes | yes | no | no | unmeasured |
 | W5 | Marked esbuild watch (bind, volume) | yes | yes | no | no | unmeasured; 5 edits per trial cannot support tails |
-| W6 | Default-builder Rust+C CI build | yes | yes | no | no | unmeasured; historical **loss** |
-| W7 | Default buildx → loaded images | yes | yes | no | no | unmeasured; historical **loss** |
+| W6 | Default-builder Rust+C CI build | yes | yes | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054245-0bb6` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
+| W7 | Default buildx → loaded images | yes | yes | no | no | **Was broken on ctrs:** buildx 0.37's `prefer-image-digest` made the store rewrite fail closed (`exporter "moby" could not be found`); fixed in `d692709` (e2e 508/508). One-pair pilot `base-20261120T054523-c9e8` correct on both engines, diagnostic only; 10-pair cohort queued. Historical **loss** |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
 | W9 | Parallel fixed build/test jobs | yes | yes | no | no | unmeasured |
 | W10 | Interrupt/recover service/DB/queue | yes | yes | no | no | unmeasured; engine-interruption parity needs isolated OrbStack |
