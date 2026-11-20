@@ -162,7 +162,15 @@ It can also run independently:
 
 ```sh
 python3 bench/native/reporting.py --match '<exact-run-id>'
+python3 bench/native/reporting.py --anchor '<earlier-run-id>' --match '<later-run-id>'
 ```
+
+`--anchor` compares each engine with itself across two runs of the same
+workload on the same host (admitted pairs only, unpaired bootstrap of the
+median ratio): a ctrs row that regressed is a build-to-build regression
+even when ctrs still beats OrbStack, and an OrbStack row that moved is
+host or OrbStack drift. It exits 1 when a ctrs row regressed or nothing
+matched.
 
 ## What a trial records
 

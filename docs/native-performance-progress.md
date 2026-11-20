@@ -388,11 +388,11 @@ current-host baseline. Fixture commands now reference w8-v5
    regression, then by wasted iteration. The entrypoint
    (`bench/native/pyramid.py`, README "Entrypoint") replaced the scratch
    queue scripts; the rest is open:
-   1. No anchor between ctrs builds. Every verdict is ctrs against OrbStack
-      inside one cohort, so a ctrs regression that stays ahead of OrbStack,
-      or OrbStack drift, shows only if a reader compares cohorts by hand.
-      Cheapest fix: a reporter mode that compares the ctrs side of two
-      cohorts with the same identity.
+   1. Done: `reporting.py --anchor A --match B` compares each engine with
+      itself across runs of the same workload and host. First use:
+      container→Mac download vsock (`base-20261118T142833-063e`) against
+      NAT (`base-20261119T133649-3bc7`) moved both engines 0.90 in step,
+      so that cell's change is host drift, not the transport.
    2. Load admission (`f366b36`) judged the 1-minute load, which counts
       each engine's own vCPU threads: OrbStack's W12 trials ended at loads
       up to 11.8 from the same start as ctrs's, so pairs were rejected for

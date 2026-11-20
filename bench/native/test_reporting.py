@@ -157,6 +157,23 @@ class ReportingTests(unittest.TestCase):
                   "resources": {"phases": {"run": {"foreign_cpu_cores": 6.1, "operation_wall_seconds": 0.08}}}}
         self.assertIsNone(reporting.host_contended(record))
 
+    def test_anchor_separates_a_ctrs_regression_from_orbstack_drift(self):
+        def run(run_id, ctrs_ratio):
+            records = [r for i in range(1, 11) for r in pair(pair_id=i, run_id=run_id, case="W13",
+                       metric="goodput_bytes_per_second", ratio=ctrs_ratio)]
+            for r in records:
+                r["design"] = "paired"
+                if run_id == "b":
+                    r["workload_params"]["artifact_bytes"] = None
+            return records
+        anchor, candidate = run("a", 2.0), run("b", 1.0)
+        rows = {(r["engine"], r["metric"]): r for r in reporting.analyze_anchor(anchor, candidate)}
+        ctrs = rows[("ctrs", "goodput_bytes_per_second")]
+        self.assertEqual((ctrs["anchor_n"], ctrs["candidate_n"]), (10, 10))
+        self.assertAlmostEqual(ctrs["ratio"], 2.0)
+        self.assertEqual(ctrs["verdict"], "regressed")
+        self.assertEqual(rows[("orbstack", "goodput_bytes_per_second")]["verdict"], "no regression")
+
     def test_w13_reports_which_path_ctrs_connections_took(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]
         for record in records[:4]:

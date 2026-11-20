@@ -560,6 +560,89 @@ def invalid_noise_report(report: dict) -> bool:
     return bool(report["input_issues"] or any(c["rejections"] for c in report["cohorts"]))
 
 
+ANCHOR_VERDICTS = {"strict-win": "improved", "loss": "regressed", "non-inferior": "no regression",
+                   "inconclusive": "inconclusive", "pilot": "pilot", "unmeasured": "unmeasured"}
+
+
+def _anchor_key(record: dict) -> str:
+    identity = cohort_identity(record)
+    params = identity["workload_params"]
+    if isinstance(params, dict):
+        identity["workload_params"] = {k: v for k, v in params.items() if v is not None}
+    return _canonical({k: identity[k] for k in ("host_id", "arch", "case", "state",
+                                                "workload_params", "builder_driver")})
+
+
+def _admitted(records: list[dict]) -> dict[str, list[dict]]:
+    """Records of each engine from the pairs the paired analysis admits."""
+    by_cohort: dict[str, list[dict]] = {}
+    for record in records:
+        if record.get("design") == "paired" and record.get("case") in CASE_METRICS:
+            by_cohort.setdefault(_canonical(cohort_identity(record)), []).append(record)
+    admitted: dict[str, list[dict]] = {}
+    for rows in by_cohort.values():
+        rejected = {r["pair_id"] for r in _analyze_cohort(cohort_identity(rows[0]), rows)["rejections"]}
+        admitted.setdefault(_anchor_key(rows[0]), []).extend(
+            r for r in rows if r.get("pair_id") not in rejected and _correct(r))
+    return admitted
+
+
+def _median_ratio_ci(anchor: list[float], candidate: list[float], iters: int = 2000,
+                     seed: int = 7) -> tuple[float, float]:
+    if len(anchor) < 2 or len(candidate) < 2:
+        return (float("nan"), float("nan"))
+    rng = random.Random(seed)
+    def resample(values):
+        return statistics.median(values[rng.randrange(len(values))] for _ in values)
+    samples = sorted(resample(candidate) / resample(anchor) for _ in range(iters))
+    return samples[int(0.025 * (iters - 1))], samples[int(0.975 * (iters - 1))]
+
+
+def analyze_anchor(anchor: list[dict], candidate: list[dict]) -> list[dict]:
+    """Each engine's candidate run against its own anchor run of the same
+    workload on the same host: ctrs build-to-build movement and OrbStack
+    drift, which the ctrs/OrbStack ratio alone cannot separate."""
+    before, after = _admitted(anchor), _admitted(candidate)
+    rows = []
+    for key in sorted(before.keys() & after.keys()):
+        case = json.loads(key)["case"]
+        for engine in ("ctrs", "orbstack"):
+            a = [r for r in before[key] if r.get("engine") == engine]
+            c = [r for r in after[key] if r.get("engine") == engine]
+            for metric in CASE_METRICS[case] + [m for m in RESOURCE_METRICS if m not in CASE_METRICS[case]]:
+                va = [v for v in (_metric(r, metric)[0] for r in a) if v is not None]
+                vc = [v for v in (_metric(r, metric)[0] for r in c) if v is not None]
+                if metric in HIGHER_BETTER:
+                    va, vc = [1 / v for v in va], [1 / v for v in vc]
+                low, high = _median_ratio_ci(va, vc)
+                rows.append({
+                    "case": case, "engine": engine, "metric": metric,
+                    "anchor_runs": sorted({r["run_id"] for r in a}),
+                    "candidate_runs": sorted({r["run_id"] for r in c}),
+                    "anchor_n": len(va), "candidate_n": len(vc),
+                    "ratio": statistics.median(vc) / statistics.median(va) if va and vc else None,
+                    "ci95": [low, high] if math.isfinite(low) else None,
+                    "verdict": ANCHOR_VERDICTS[classify(min(len(va), len(vc)), low, high)]})
+    return rows
+
+
+def render_anchor_markdown(rows: list[dict]) -> str:
+    if not rows:
+        return "No workload appears in both the anchor and the candidate on the same host.\n"
+    lines = ["# Candidate against anchor (same engine, same host)", "",
+             "Ratio is candidate/anchor in time-like units (throughput inverted); below 1 is",
+             "faster. Unpaired across runs; admitted pairs only. An OrbStack row that moved",
+             "is host or OrbStack drift, not a ctrs change.", "",
+             "| Case | Engine | Metric | n (anchor/candidate) | Ratio | 95% CI | Verdict |",
+             "| --- | --- | --- | ---: | ---: | --- | --- |"]
+    for r in rows:
+        ratio = f"{r['ratio']:.3f}" if r["ratio"] is not None else "—"
+        ci = f"[{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}]" if r["ci95"] else "—"
+        lines.append(f"| {r['case']} | {r['engine']} | {r['metric']} | {r['anchor_n']}/{r['candidate_n']} | "
+                     f"{ratio} | {ci} | {r['verdict']} |")
+    return "\n".join(lines) + "\n"
+
+
 def invalid_report(report: dict) -> bool:
     return bool(report["input_issues"] or any(c["rejections"] for c in report["cohorts"]))
 
@@ -572,7 +655,16 @@ def main() -> int:
     parser.add_argument("--match", default="*")
     parser.add_argument("--noise", action="store_true",
                         help="report same-engine A/B slot noise control")
+    parser.add_argument("--anchor", help="run-id glob to compare --match against, engine by engine")
     args = parser.parse_args()
+    if args.anchor:
+        anchor, anchor_issues = load_records(sorted(args.results.glob(f"{args.anchor}/trials.jsonl")))
+        candidate, candidate_issues = load_records(sorted(args.results.glob(f"{args.match}/trials.jsonl")))
+        for issue in anchor_issues + candidate_issues:
+            print(f"input issue: {issue}")
+        rows = analyze_anchor(anchor, candidate)
+        print(render_anchor_markdown(rows), end="")
+        return int(not rows or any(r["verdict"] == "regressed" and r["engine"] == "ctrs" for r in rows))
     files = sorted(args.results.glob(f"{args.match}/trials.jsonl"))
     records, issues = load_records(files)
     if not records and not issues:
