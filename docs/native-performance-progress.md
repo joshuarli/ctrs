@@ -194,8 +194,13 @@ Next, in order:
    next-use budgets (`resource_cycles.BUDGETS`); if adopted, change
    `default_cpus`, record policy and candidate identity in
    `docs/decisions.md`, and re-run the D-lane cohorts at the new default.
-2. Land `fix/watch-recovery` after review: watch-recovery.sh passes
-   both cases with the loss asserted, e2e 0 failed.
+2. Watcher recovery landed (`f291b04`, kernel patches 0013–0016,
+   lane kernel `3e1b55bd…`, host `b2b1679f…`; e2e 508/0/0,
+   watch-recovery.sh passes with and without dropped caches). Not yet
+   deployed to `guest/out`: install it (`cargo xtask kernel`, then
+   `cargo xtask all`) only after the measurement queue drains, then
+   re-run W12-watch (a rescan now raises one event per uncached
+   retained name; review note D3) and record the asset change.
 3. Full-bind boundary: a two-virtiofs-device probe
    (`exp/fs-devices`, `CTRS_EXP_SHARE_DEVICES=2`, a noisy first run
    showed 1.2–2.5× more files/s split across two devices) tests whether
