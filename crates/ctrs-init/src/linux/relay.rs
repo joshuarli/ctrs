@@ -33,18 +33,76 @@ pub fn listen_vsock(port: u32) -> io::Result<OwnedFd> {
     super::transport::listen(port)
 }
 
+/// Bytes a direction may hold in its kernel pipe.
+const SPLICE_CAP: usize = 1 << 20;
+/// A direction moves to splice after copying this much: short connections
+/// never pay for a pipe or its descriptors.
+const SPLICE_AFTER: usize = 256 * 1024;
+
 /// One direction of a relay.
 struct Pipe {
+    /// Bytes to write before anything in `kernel`: a frame's length, or
+    /// what the copy fallback read.
     buf: Vec<u8>,
     /// The reading side reached EOF; once `buf` drains, shut the writer.
     eof: bool,
     shut: bool,
+    /// Bytes move from socket to socket through a kernel pipe, never
+    /// through `buf`, once the direction has copied `SPLICE_AFTER`.
+    kernel: Option<KernelPipe>,
+    /// Bytes copied through `buf` so far.
+    copied: usize,
+    /// splice or a pipe was refused; copy through `buf` for good.
+    copy_only: bool,
+}
+
+struct KernelPipe {
+    read: OwnedFd,
+    write: OwnedFd,
+    held: usize,
 }
 
 impl Pipe {
     fn new() -> Pipe {
-        Pipe { buf: Vec::with_capacity(BUF), eof: false, shut: false }
+        Pipe { buf: Vec::new(), eof: false, shut: false, kernel: None, copied: 0, copy_only: false }
     }
+
+    fn held(&self) -> usize {
+        self.kernel.as_ref().map_or(0, |k| k.held)
+    }
+
+    /// Room to read more: the copy buffer, or the kernel pipe (one frame
+    /// at a time when framed, so a length always precedes its bytes).
+    fn wants_input(&self, framed: bool) -> bool {
+        !self.eof && match &self.kernel {
+            None => self.buf.len() < BUF,
+            Some(k) if framed => self.buf.is_empty() && k.held == 0,
+            Some(k) => self.buf.is_empty() && k.held < SPLICE_CAP,
+        }
+    }
+
+    fn has_output(&self) -> bool {
+        !self.buf.is_empty() || self.held() > 0
+    }
+}
+
+fn kernel_pipe() -> Option<KernelPipe> {
+    let mut fds = [0; 2];
+    // SAFETY: pipe2 fills two fresh descriptors that we own at once.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
+        return None;
+    }
+    // SAFETY: both descriptors are fresh and owned by nothing else.
+    let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+    // SAFETY: F_SETPIPE_SZ on a pipe we own; a smaller limit keeps the default size.
+    unsafe { libc::fcntl(write.as_raw_fd(), libc::F_SETPIPE_SZ, SPLICE_CAP as libc::c_int) };
+    Some(KernelPipe { read, write, held: 0 })
+}
+
+fn splice(from: RawFd, to: RawFd, len: usize) -> io::Result<usize> {
+    // SAFETY: splice between descriptors we own, with no offsets.
+    let n = unsafe { libc::splice(from, std::ptr::null_mut(), to, std::ptr::null_mut(), len, libc::SPLICE_F_NONBLOCK | libc::SPLICE_F_MOVE) };
+    if n < 0 { Err(io::Error::last_os_error()) } else { Ok(n as usize) }
 }
 
 pub struct Relay {
@@ -158,7 +216,7 @@ fn would_block(e: &io::Error) -> bool {
 impl Relay {
     /// (fd, events) pairs to poll for this relay.
     pub fn interest(&self, out: &mut Vec<libc::pollfd>) {
-        let reading_up = !self.up.eof && self.up.buf.len() < BUF;
+        let reading_up = self.up.wants_input(false);
         // A leg's host side carries only its header up; the client's bytes
         // come from `up_src`.
         // Nothing is read from the host while the container's connect is
@@ -166,7 +224,7 @@ impl Relay {
         // again, until a dropped SYN is sent again a second later.
         let host_in = if self.leg { self.target.is_none() && !self.refusing } else { self.target.is_none() || (self.connected && reading_up) };
         let host_ev = (if host_in { libc::POLLIN } else { 0 })
-            | (if self.down.buf.is_empty() { 0 } else { libc::POLLOUT })
+            | (if self.down.has_output() { libc::POLLOUT } else { 0 })
             | if self.refusing { libc::POLLOUT } else { 0 };
         out.push(libc::pollfd { fd: self.host.as_raw_fd(), events: host_ev, revents: 0 });
         if let Some(u) = &self.up_src {
@@ -180,8 +238,8 @@ impl Relay {
             let ev = if !self.connected {
                 libc::POLLOUT
             } else {
-                (if !self.down.eof && self.down.buf.len() < BUF { libc::POLLIN } else { 0 })
-                    | if self.up.buf.is_empty() { 0 } else { libc::POLLOUT }
+                (if self.down.wants_input(self.framed) { libc::POLLIN } else { 0 })
+                    | if self.up.has_output() { libc::POLLOUT } else { 0 }
             };
             out.push(libc::pollfd { fd: t.as_raw_fd(), events: ev, revents: 0 });
         }
@@ -341,6 +399,78 @@ impl Relay {
 /// Moves bytes from `from` to `to` through `pipe`, passing EOF on as a
 /// half-close once everything read has been written.
 fn pump(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()> {
+    if pipe.kernel.is_none() && !pipe.copy_only && pipe.copied >= SPLICE_AFTER && pipe.buf.is_empty() {
+        pipe.kernel = kernel_pipe();
+        pipe.copy_only = pipe.kernel.is_none();
+    }
+    if pipe.kernel.is_none() {
+        return pump_copy(from, to, pipe, framed);
+    }
+    match pump_splice(from, to, pipe, framed) {
+        Err(e) if e.raw_os_error() == Some(libc::EINVAL) && pipe.held() == 0 && pipe.buf.is_empty() => {
+            pipe.kernel = None;
+            pipe.copy_only = true;
+            pump_copy(from, to, pipe, framed)
+        }
+        r => r,
+    }
+}
+
+/// `pump` without copying through user space: the socket's bytes go into
+/// a kernel pipe and out of it. A frame's length is written before its
+/// bytes, and a frame is one splice's worth.
+fn pump_splice(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()> {
+    flush_splice(to, pipe)?;
+    if pipe.wants_input(framed) {
+        let k = pipe.kernel.as_mut().expect("splice pipe");
+        match splice(from, k.write.as_raw_fd(), SPLICE_CAP - k.held) {
+            Ok(0) => {
+                pipe.eof = true;
+                if framed {
+                    pipe.buf.extend_from_slice(&0u32.to_be_bytes());
+                }
+            }
+            Ok(n) => {
+                k.held += n;
+                if framed {
+                    pipe.buf.extend_from_slice(&(n as u32).to_be_bytes());
+                }
+            }
+            Err(e) if would_block(&e) => {}
+            Err(e) => return Err(e),
+        }
+        flush_splice(to, pipe)?;
+    }
+    if pipe.eof && !pipe.has_output() && !pipe.shut {
+        // SAFETY: half-closing a socket we own.
+        unsafe { libc::shutdown(to, libc::SHUT_WR) };
+        pipe.shut = true;
+    }
+    Ok(())
+}
+
+fn flush_splice(to: RawFd, pipe: &mut Pipe) -> io::Result<()> {
+    match write_from(to, &mut pipe.buf) {
+        Ok(()) => {}
+        Err(e) if would_block(&e) => return Ok(()),
+        Err(e) => return Err(e),
+    }
+    if !pipe.buf.is_empty() {
+        return Ok(());
+    }
+    let k = pipe.kernel.as_mut().expect("splice pipe");
+    while k.held > 0 {
+        match splice(k.read.as_raw_fd(), to, k.held) {
+            Ok(0) => break,
+            Ok(n) => k.held -= n,
+            Err(e) if would_block(&e) => break,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn pump_copy(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()> {
     if !pipe.eof && pipe.buf.len() < BUF {
         let read = if framed { read_frame_into(from, &mut pipe.buf, BUF) } else { read_into(from, &mut pipe.buf, BUF) };
         match read {
@@ -350,11 +480,13 @@ fn pump(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()>
             Err(e) => return Err(e),
         }
     }
+    let before = pipe.buf.len();
     match write_from(to, &mut pipe.buf) {
         Ok(()) => {}
         Err(e) if would_block(&e) => {}
         Err(e) => return Err(e),
     }
+    pipe.copied += before - pipe.buf.len();
     if pipe.eof && pipe.buf.is_empty() && !pipe.shut {
         // SAFETY: half-closing a socket we own.
         unsafe { libc::shutdown(to, libc::SHUT_WR) };
@@ -704,6 +836,85 @@ mod tests {
         // No room for a frame: not read, and not taken for EOF.
         let full = buf.len() + 4;
         assert_eq!(super::read_frame_into(r.as_raw_fd(), &mut buf, full).unwrap(), 1);
+    }
+
+    fn pair() -> (OwnedFd, OwnedFd) {
+        let mut fds = [0; 2];
+        // SAFETY: `fds` has room for the two descriptors socketpair writes.
+        assert_eq!(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) }, 0);
+        // SAFETY: socketpair succeeded, so both are fresh and ours.
+        unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) }
+    }
+
+    /// Pumps `len` patterned bytes from one socket pair to another and
+    /// returns what came out, and whether the direction moved to splice.
+    fn relay_bytes(len: usize, framed: bool) -> (Vec<u8>, Vec<u8>, bool) {
+        use std::io::{Read, Write};
+        let (src_far, src) = pair();
+        let (dst, dst_far) = pair();
+        let sent: Vec<u8> = (0..len).map(|i| (i * 31 % 251) as u8).collect();
+        let input = sent.clone();
+        let writer = std::thread::spawn(move || {
+            // SAFETY: the thread owns this end; blocking writes are what it wants.
+            unsafe { libc::fcntl(src_far.as_raw_fd(), libc::F_SETFL, 0) };
+            let mut f = std::fs::File::from(src_far);
+            f.write_all(&input).unwrap();
+        });
+        let reader = std::thread::spawn(move || {
+            // SAFETY: as above.
+            unsafe { libc::fcntl(dst_far.as_raw_fd(), libc::F_SETFL, 0) };
+            let mut out = Vec::new();
+            std::fs::File::from(dst_far).read_to_end(&mut out).unwrap();
+            out
+        });
+        let mut pipe = super::Pipe::new();
+        let mut spliced = false;
+        while !pipe.shut {
+            let mut fds = [
+                libc::pollfd { fd: src.as_raw_fd(), events: if pipe.wants_input(framed) { libc::POLLIN } else { 0 }, revents: 0 },
+                libc::pollfd { fd: dst.as_raw_fd(), events: if pipe.has_output() { libc::POLLOUT } else { 0 }, revents: 0 },
+            ];
+            // SAFETY: a valid pollfd array.
+            unsafe { libc::poll(fds.as_mut_ptr(), 2, 1000) };
+            super::pump(src.as_raw_fd(), dst.as_raw_fd(), &mut pipe, framed).unwrap();
+            spliced |= pipe.kernel.is_some();
+        }
+        writer.join().unwrap();
+        drop(dst);
+        (sent, reader.join().unwrap(), spliced)
+    }
+
+    #[test]
+    fn bulk_bytes_move_through_splice_unchanged() {
+        let (sent, got, spliced) = relay_bytes(5 << 20, false);
+        assert!(spliced);
+        assert!(got == sent, "{} bytes out of {}", got.len(), sent.len());
+    }
+
+    #[test]
+    fn spliced_frames_carry_their_length_and_end_with_an_empty_frame() {
+        let (sent, got, spliced) = relay_bytes(5 << 20, true);
+        assert!(spliced);
+        let mut payload = Vec::new();
+        let mut rest = &got[..];
+        loop {
+            let len = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+            rest = &rest[4..];
+            if len == 0 {
+                break;
+            }
+            payload.extend_from_slice(&rest[..len]);
+            rest = &rest[len..];
+        }
+        assert!(rest.is_empty(), "{} bytes after the end frame", rest.len());
+        assert!(payload == sent, "{} payload bytes out of {}", payload.len(), sent.len());
+    }
+
+    #[test]
+    fn a_short_connection_never_opens_a_pipe() {
+        let (sent, got, spliced) = relay_bytes(64 * 1024, false);
+        assert!(!spliced);
+        assert!(got == sent);
     }
 
     #[test]
