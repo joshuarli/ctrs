@@ -67,6 +67,12 @@ impl Pipe {
         Pipe { buf: Vec::new(), eof: false, shut: false, kernel: None, copied: 0, copy_only: false }
     }
 
+    /// A direction that never splices: the Mac's bytes arriving over the NAT
+    /// network, measured slower spliced than copied into the container.
+    fn copied_only() -> Pipe {
+        Pipe { copy_only: true, ..Pipe::new() }
+    }
+
     fn held(&self) -> usize {
         self.kernel.as_ref().map_or(0, |k| k.held)
     }
@@ -683,7 +689,7 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&Na
     let mut target = [127, 0, 0, 1, 0, 0];
     target[4..].copy_from_slice(&port.to_be_bytes());
     if let Some(host) = nat.and_then(|nat| dial_nat(nat, NAT_HOST_BOUND, target)) {
-        return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false, leg_id: 0, up_src: None, attach: None });
+        return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::copied_only(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false, leg_id: 0, up_src: None, attach: None });
     }
     let Ok(host) = dial_host(HOST_FRAMED_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
     // The Mac connects to its own loopback: services bound to 127.0.0.1 work.
