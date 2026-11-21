@@ -137,6 +137,54 @@ changes inside a container-made directory), `bind-burst` (20,000 Mac
 creates past the guest queue), `bind-root-churn` (stream replacement while
 the Mac edits), `bind-rescan-keeps-mounts` and `bind-root-renamed`.
 
+## Host descriptor bound (2026-11-20)
+
+Virtualization.framework's virtiofs server keeps one host file descriptor
+open for each inode the guest has looked up. It closes the descriptor when
+the guest sends `FUSE_FORGET`, which happens only when the guest evicts the
+inode. The guest has enough memory that its dcache is rarely reclaimed.
+Walking a bind-mounted tree therefore pins one Mac descriptor per file. On
+one scratch engine, a 150,000-file walk raised the VM process from 38 to
+150,192 descriptors. After `echo 2 > /proc/sys/vm/drop_caches` in the
+guest, the process held 48. On this Mac `kern.maxfilesperproc` is 245,760
+and `kern.maxvnodes` is 263,168, and the vnode table is shared by every
+process. W12 full-bind cohorts reached ENFILE on the Mac and failed module
+resolution in the guest.
+
+Kernel patch 0017 bounds the live virtiofs inodes in each guest, across all
+virtiofs mounts, because one VM process serves every share. The default
+bound is 65,536, about a quarter of the per-process limit. With it, two
+VMs together stay at about half of the vnode table. `/proc/ctrs/fuse_inodes`
+reads `<live> <bound>`; a `CAP_SYS_ADMIN` write sets the bound, and 0
+removes it. When a new inode takes the count past the bound, a work item
+prunes unused virtiofs dentries in LRU order (referenced dentries get a
+second pass) until the count is at most seven eighths of the bound. Each
+pass walks every memory cgroup's dentry list with its own budget. A first
+version walked the lists with one shared budget, root list first. After
+`tests/watch-recovery.sh`, that budget never reached the walking
+container's list: the next 150,000-file walk reached 196,963 descriptors.
+The work visits only virtiofs superblocks, so it never waits on another
+filesystem's mount or unmount. FUSE
+evicts an inode on its last reference, so each pruned dentry sends
+`FUSE_FORGET`. In-use dentries are skipped: open files, working
+directories and mount points stay. Inodes with an inotify mark stay too,
+because the mark holds an inode reference. Retained watch names (patch
+0014) are not dentries and are not touched. Progress is counted in evicted
+inodes, not isolated dentries. If two passes evict nothing because every
+inode is in use, pruning pauses for one second.
+
+The cost is a fresh LOOKUP for a pruned name, and the loss of that file's
+guest page cache. Working sets under the bound are unaffected. A walk-and-
+read of 150,000 files took 31.3 s without the bound and 32.8–34.9 s with it, on
+a loaded host.
+
+`tests/fuse-inode-bound.sh` walks a tree larger than the bound. It asserts
+that the VM process stays under the bound plus a margin, that every file
+and every file held open across the walk reads back its own path, and that
+descriptors return after the guest drops its caches. The walk check fails
+on the 0001–0016 kernel and passes with 0017, on a fresh boot and right
+after `tests/watch-recovery.sh`.
+
 ## Remaining questions
 
 - **Ordering and latency.** W12-watch's missed/stale counts and

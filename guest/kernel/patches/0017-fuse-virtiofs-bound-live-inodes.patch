@@ -1,0 +1,281 @@
+# Header: Virtualization.framework's virtiofs server keeps one host file
+# descriptor open for every inode the guest holds a lookup on, until the
+# guest sends FUSE_FORGET. A guest with ample memory never reclaims its
+# dcache, so walking a large bind mount pinned one host descriptor per file
+# and exhausted the Mac's per-process and system-wide file limits. Live
+# virtiofs inodes are now counted; above the bound (65536 by default,
+# /proc/ctrs/fuse_inodes reads "live bound" and accepts a new bound, 0
+# disables it) a work item prunes unused dentries LRU-first until the count
+# is 7/8 of the bound. FUSE drops inodes on their last reference, so each
+# pruned dentry evicts its inode and sends FUSE_FORGET. Dentries in use
+# (open files, cwd, mounts) and inodes pinned by watches are never pruned.
+# Each memory cgroup's dentry list gets its own budget per pass, so one
+# cgroup's list cannot starve another's. Pruning visits only virtiofs
+# superblocks, so another filesystem's mount or unmount cannot stall it.
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -32,6 +32,7 @@
+ #include <linux/bit_spinlock.h>
+ #include <linux/rculist_bl.h>
+ #include <linux/list_lru.h>
++#include <linux/memcontrol.h>
+ #include "internal.h"
+ #include "mount.h"
+ 
+@@ -1262,7 +1263,27 @@
+ 	} while (list_lru_count(&sb->s_dentry_lru) > 0);
+ }
+ EXPORT_SYMBOL(shrink_dcache_sb);
++
++void shrink_dcache_sb_unused(struct super_block *sb, unsigned long nr)
++{
++	struct mem_cgroup *memcg = mem_cgroup_iter(NULL, NULL, NULL);
++
++	do {
++		int nid;
+ 
++		for_each_node_state(nid, N_NORMAL_MEMORY) {
++			LIST_HEAD(dispose);
++			unsigned long walk = nr;
++
++			list_lru_walk_one(&sb->s_dentry_lru, nid, memcg,
++					  dentry_lru_isolate, &dispose, &walk);
++			shrink_dentry_list(&dispose);
++		}
++		cond_resched();
++	} while ((memcg = mem_cgroup_iter(NULL, memcg, NULL)));
++}
++EXPORT_SYMBOL_GPL(shrink_dcache_sb_unused);
++
+ /**
+  * enum d_walk_ret - action to talke during tree walk
+  * @D_WALK_CONTINUE:	contrinue walk
+--- a/include/linux/dcache.h
++++ b/include/linux/dcache.h
+@@ -257,6 +257,7 @@
+ extern struct dentry * d_obtain_alias(struct inode *);
+ extern struct dentry * d_obtain_root(struct inode *);
+ extern void shrink_dcache_sb(struct super_block *);
++extern void shrink_dcache_sb_unused(struct super_block *, unsigned long);
+ extern void shrink_dcache_parent(struct dentry *);
+ extern void d_invalidate(struct dentry *);
+ 
+--- a/fs/fuse/fuse_i.h
++++ b/fs/fuse/fuse_i.h
+@@ -235,6 +235,7 @@
+ 	FUSE_I_CACHE_IO_MODE,
+ 	/* Changed by this guest since a host notification last named it */
+ 	FUSE_I_CHANGED_HERE,
++	FUSE_I_BOUNDED,
+ };
+ 
+ struct fuse_conn;
+@@ -852,6 +853,7 @@
+ 
+ 	/* Use pages instead of pointer for kernel I/O */
+ 	unsigned int use_pages_for_kvec_io:1;
++	unsigned int bounded_inodes:1;
+ 
+ 	/* Is link not implemented by fs? */
+ 	unsigned int no_link:1;
+@@ -1400,6 +1402,8 @@
+ 
+ bool fuse_write_update_attr(struct inode *inode, loff_t pos, ssize_t written);
+ 
++void fuse_set_bounded_fs_type(struct file_system_type *type);
++
+ void fuse_mark_changed_here(struct inode *inode);
+ int fuse_host_entry_state(struct dentry *entry);
+ int fuse_host_recovery_state(struct dentry *entry);
+--- a/fs/fuse/inode.c
++++ b/fs/fuse/inode.c
+@@ -26,6 +26,10 @@
+ #include <linux/exportfs.h>
+ #include <linux/posix_acl.h>
+ #include <linux/pid_namespace.h>
++#include <linux/proc_fs.h>
++#include <linux/capability.h>
++#include <linux/workqueue.h>
++#include <linux/jiffies.h>
+ #include <uapi/linux/magic.h>
+ 
+ MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
+@@ -153,11 +157,125 @@
+ 	fuse_queue_forget(fc, sl->forget, sl->nodeid, 1);
+ 	sl->forget = NULL;
+ 	kfree(sl);
++}
++
++/*
++ * The virtiofs server in Apple's Virtualization.framework holds one host file
++ * descriptor per inode the guest has looked up until FUSE_FORGET, so cached
++ * inodes consume the host's per-process and system-wide file limits.
++ */
++#define FUSE_PRUNE_BATCH 1024
++
++static atomic_long_t fuse_live_inodes = ATOMIC_LONG_INIT(0);
++static atomic_long_t fuse_evicted_inodes = ATOMIC_LONG_INIT(0);
++static unsigned long fuse_inode_cap = 65536;
++static unsigned long fuse_prune_idle_until = INITIAL_JIFFIES;
++static struct file_system_type *fuse_bounded_type;
++
++static unsigned long fuse_prune_target(unsigned long cap)
++{
++	return cap - cap / 8;
++}
++
++static void fuse_prune_sb(struct super_block *sb, void *arg)
++{
++	if (sb->s_fs_info && get_fuse_conn_super(sb)->bounded_inodes)
++		shrink_dcache_sb_unused(sb, FUSE_PRUNE_BATCH);
++}
++
++static void fuse_prune_run(struct work_struct *work)
++{
++	unsigned int idle = 0;
++
++	for (;;) {
++		struct file_system_type *type = READ_ONCE(fuse_bounded_type);
++		unsigned long cap = READ_ONCE(fuse_inode_cap);
++		long evicted = atomic_long_read(&fuse_evicted_inodes);
++
++		if (!type || !cap ||
++		    atomic_long_read(&fuse_live_inodes) <= fuse_prune_target(cap))
++			break;
++		iterate_supers_type(type, fuse_prune_sb, NULL);
++		if (atomic_long_read(&fuse_evicted_inodes) != evicted) {
++			idle = 0;
++		} else if (++idle == 2) {
++			WRITE_ONCE(fuse_prune_idle_until, jiffies + HZ);
++			break;
++		}
++		cond_resched();
++	}
++}
++
++static DECLARE_WORK(fuse_prune_work, fuse_prune_run);
++
++static void fuse_prune_kick(bool now)
++{
++	if (now)
++		WRITE_ONCE(fuse_prune_idle_until, jiffies);
++	else if (time_before(jiffies, READ_ONCE(fuse_prune_idle_until)))
++		return;
++	queue_work(system_unbound_wq, &fuse_prune_work);
++}
++
++void fuse_set_bounded_fs_type(struct file_system_type *type)
++{
++	WRITE_ONCE(fuse_bounded_type, type);
++	if (!type)
++		cancel_work_sync(&fuse_prune_work);
+ }
++EXPORT_SYMBOL_GPL(fuse_set_bounded_fs_type);
+ 
++static void fuse_count_inode(struct inode *inode)
++{
++	unsigned long cap = READ_ONCE(fuse_inode_cap);
++
++	set_bit(FUSE_I_BOUNDED, &get_fuse_inode(inode)->state);
++	if (atomic_long_inc_return(&fuse_live_inodes) > cap && cap)
++		fuse_prune_kick(false);
++}
++
++static ssize_t fuse_inodes_read(struct file *file, char __user *buf,
++				size_t count, loff_t *ppos)
++{
++	char text[48];
++	int len = scnprintf(text, sizeof(text), "%ld %lu\n",
++			    atomic_long_read(&fuse_live_inodes),
++			    READ_ONCE(fuse_inode_cap));
++
++	return simple_read_from_buffer(buf, count, ppos, text, len);
++}
++
++static ssize_t fuse_inodes_write(struct file *file, const char __user *buf,
++				 size_t count, loff_t *ppos)
++{
++	unsigned long cap;
++	int err;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	err = kstrtoul_from_user(buf, count, 10, &cap);
++	if (err)
++		return err;
++	WRITE_ONCE(fuse_inode_cap, cap);
++	if (cap && atomic_long_read(&fuse_live_inodes) > cap)
++		fuse_prune_kick(true);
++	return count;
++}
++
++static const struct proc_ops fuse_inodes_ops = {
++	.proc_read = fuse_inodes_read,
++	.proc_write = fuse_inodes_write,
++	.proc_lseek = default_llseek,
++};
++
+ static void fuse_evict_inode(struct inode *inode)
+ {
+ 	struct fuse_inode *fi = get_fuse_inode(inode);
++
++	if (test_and_clear_bit(FUSE_I_BOUNDED, &fi->state)) {
++		atomic_long_dec(&fuse_live_inodes);
++		atomic_long_inc(&fuse_evicted_inodes);
++	}
+ 
+ 	/* Will write inode on close/munmap and in all other dirtiers */
+ 	WARN_ON(inode->i_state & I_DIRTY_INODE);
+@@ -511,6 +629,8 @@
+ 			inode->i_flags |= S_NOCMTIME;
+ 		inode->i_generation = generation;
+ 		fuse_init_inode(inode, attr, fc);
++		if (fc->bounded_inodes)
++			fuse_count_inode(inode);
+ 		unlock_new_inode(inode);
+ 	} else if (fuse_stale_inode(inode, generation, attr)) {
+ 		/* nodeid was reused, any I/O on the old inode should fail */
+@@ -2298,6 +2418,8 @@
+ 
+ 	sanitize_global_limit(&max_user_bgreq);
+ 	sanitize_global_limit(&max_user_congthresh);
++	if (!proc_create("ctrs/fuse_inodes", 0644, NULL, &fuse_inodes_ops))
++		pr_warn("cannot create /proc/ctrs/fuse_inodes\n");
+ 
+ 	return 0;
+ 
+@@ -2315,6 +2437,8 @@
+ {
+ 	pr_debug("exit\n");
+ 
++	remove_proc_entry("ctrs/fuse_inodes", NULL);
++	cancel_work_sync(&fuse_prune_work);
+ 	fuse_ctl_cleanup();
+ 	fuse_sysfs_cleanup();
+ 	fuse_fs_cleanup();
+--- a/fs/fuse/virtio_fs.c
++++ b/fs/fuse/virtio_fs.c
+@@ -1700,6 +1700,7 @@
+ 	fc->auto_submounts = true;
+ 	fc->sync_fs = true;
+ 	fc->use_pages_for_kvec_io = true;
++	fc->bounded_inodes = true;
+ 
+ 	/* Tell FUSE to split requests that exceed the virtqueue's size */
+ 	fc->max_pages_limit = min_t(unsigned int, fc->max_pages_limit,
+@@ -1803,6 +1804,7 @@
+ 	ret = register_filesystem(&virtio_fs_type);
+ 	if (ret < 0)
+ 		goto unregister_virtio_driver;
++	fuse_set_bounded_fs_type(&virtio_fs_type);
+ 
+ 	return 0;
+ 
+@@ -1816,6 +1818,7 @@
+ 
+ static void __exit virtio_fs_exit(void)
+ {
++	fuse_set_bounded_fs_type(NULL);
+ 	unregister_filesystem(&virtio_fs_type);
+ 	unregister_virtio_driver(&virtio_fs_driver);
+ 	virtio_fs_sysfs_exit();
