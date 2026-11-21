@@ -28,11 +28,11 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 ## Verification
 
 - `make test` = `make test-rust` (workspace `--lib --tests`) + `make test-bench` (benchmark manifest
-  and Python unittest discovery, 399 tests); CI runs it in `macos` (PRs). Costs on a busy M-series
+  and Python unittest discovery, 426 tests); CI runs it in `macos` (PRs). Costs on a busy M-series
   Mac (load 14-24): cold 4m41s, warm 50s-1m52s; the Python half about 40s. ctrs-init is
   Linux-only, so macOS runs 0 of its ~80 tests: CI `linux-musl` (x86_64, ARM64) runs them as root; the ARM64 musl test binary passed 78 tests in a root container on tmpfs.
   `make test-bench` sets `TMPDIR` to `.work/tmp` itself. The Linux `benchmark-harness` job runs the
-  same 399 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
+  same 426 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
 - `make lint` (clippy, all targets, `-D warnings`): clean on macOS and the aarch64 musl
   target since `8681103`. 28s warm. CI does not run it.
 - CLI help: `crates/ctrs/tests/help.rs` (offline top-level and per-command help, footer). `ctrs CMD --help`

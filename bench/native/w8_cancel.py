@@ -1,5 +1,6 @@
 """Interrupt one owned W8 pull after partial blob delivery and verify retry."""
 import json
+from pathlib import Path
 import secrets
 import signal
 import subprocess
@@ -13,6 +14,7 @@ import runner
 
 
 REPOSITORY = 'np-v5/marked'
+FIXTURE_VERSION = 'w8-cancel-v1'
 
 
 def cancel_pull(engine, ref, portfolio, pause, layer, directory):
@@ -99,7 +101,7 @@ def run_cancel(args):
     retry = registry_portfolio.prepare_layout(layout, {REPOSITORY: image['reference']})
     pause = registry_portfolio.TransferPause(REPOSITORY, layer['digest'])
     engine = runner.Engine(args.engine, run)
-    result = {'state': args.content, 'engine': args.engine, 'target_layer': layer,
+    result = {'fixture_version': FIXTURE_VERSION, 'state': args.content, 'engine': args.engine, 'target_layer': layer,
               'measurement_valid': False, 'correctness': False, 'errors': []}
     refs = []
     print(f'results: {directory}', flush=True)

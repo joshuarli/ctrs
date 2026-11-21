@@ -258,14 +258,15 @@ W8_IMAGES = [
 CHECK_COMPONENTS = {
     "w1": ("test_w1", "test_safety"),
     "uprobes": ("test_w2_uprobes", "test_uprobe_trace", "test_safety"),
-    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_mixed_resources", "test_qualification", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
+    "w2": ("test_w2", "test_cpu_profile", "test_mixed_cycle", "test_sampler_pilot", "test_collect", "test_reporting", "test_safety"),
     "w5": ("test_w5", "test_resource_cycles", "test_reporting", "test_safety"),
     "w8": ("test_w8_benchmark", "test_w8_prepare", "test_w8_under_pull",
            "test_registry_portfolio", "test_registry_variant",
            "test_registry_variant_pilot", "test_safety"),
     "resources": ("test_resource_cells", "test_resource_cycles", "test_resource_pilot", "test_wal_trace_guest",
                   "test_collect", "test_storage_space",
-                  "test_system_df_cache", "test_mixed_resources", "test_qualification", "test_reporting", "test_safety"),
+                  "test_system_df_cache", "test_reporting", "test_safety"),
+    "w11": ("test_qualification", "test_mixed_job", "test_mixed_cycle", "test_mixed_resources", "test_durable_job"),
 }
 CHECK_TIMEOUT_SECONDS = 60
 TOOL_CONTRACTS = {
@@ -2274,13 +2275,6 @@ def _recover_queue(engine, queue_id, queue, app, directory, outage):
     if elapsed > outage.recovery_timeout:
         raise TimeoutError("W10 queue recovery deadline")
     return before, {"recovery_s": elapsed, "retries_until_recovery": retries}
-
-
-W4_FIXED_WORK = {
-    'jobs': w4_fixture.JOBS,
-    'events': w4_fixture.JOBS * w4_fixture.EVENTS,
-    'artifacts': w4_fixture.JOBS * len(w4_fixture.filenames(1)),
-}
 
 
 def trial_w4(ctx, engine: Engine, state: str,

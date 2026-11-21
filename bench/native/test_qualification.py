@@ -37,9 +37,8 @@ class Readiness(unittest.TestCase):
             path = root / name; path.write_text(name)
             artifacts[name] = durable_job.receipt(path)
         proof = artifacts['proof']
-        versions = {key: key + '-v-test' for key in gate.CASES}
-        versions['W11'] = gate.mixed_resources.VERSION
-        contract = {key: {**cell, 'fixture_version': versions[cell['workload']]}
+        versions = gate.fixture_versions()
+        contract = {key: {'fixture_version': versions[cell['workload']], **cell}
                     for key, cell in gate.W1_W10_CELLS.items()}
         contract.update(copy.deepcopy(gate.W11_CELLS))
         contract['extra'] = {**contract[EDIT_CELL], 'metric': 'extra_metric'}
@@ -48,7 +47,7 @@ class Readiness(unittest.TestCase):
         self.assets.write_text(f'[freeze]\nstatus="frozen"\ncell_contract_sha256="{contract_digest}"\n[tools]\npython="test-version"\n'
             'docker_cli="test-version"\ndocker_compose="test-version"\ndocker_buildx="test-version"\n[images]\n' +
             '\n'.join(f'{name}="example/{name}@{gate.PIN["images"][image]["manifest"]}"' for name, image in
-                (('postgres', 'np-v2/postgres'), ('redis', 'np-v2/redis'), ('fixture_api', 'np-v2/api'), ('api_base', 'np-v2/api'))))
+                (('postgres', 'np-v5/postgres'), ('redis', 'np-v5/redis'), ('fixture_api', 'np-v5/api'), ('api_base', 'np-v5/api'))))
         review = root / 'review.json'
         review.write_text(json.dumps({'kind': 'native-cell-contract-review', 'reviewer': 'test-reviewer',
             'conclusion': 'complete', 'cell_contract_sha256': contract_digest}))
@@ -138,6 +137,27 @@ class Readiness(unittest.TestCase):
         with patch.object(durable_job, 'check_receipt') as verify, self.assertRaisesRegex(gate.ReadinessError, 'not frozen'):
             self.check()
         verify.assert_not_called()
+
+    def test_stale_fixture_version_is_rejected_even_when_all_its_cells_agree(self):
+        self.doc['fixtures']['W5']['version'] = 'w5-v2-marked'
+        for cell in self.doc['cell_contract'].values():
+            if cell['workload'] == 'W5':
+                cell['fixture_version'] = 'w5-v2-marked'
+        with self.assertRaisesRegex(gate.ReadinessError, 'fixture version differs from cases.toml: W5'):
+            self.check()
+
+    def test_offered_rate_cells_require_the_rate_producer_version(self):
+        from fixtures.w2.v3 import FIXTURE_VERSION
+        from w8_cancel import FIXTURE_VERSION as cancellation_version
+
+        name = next(name for name in self.doc['cell_contract'] if 'published-port-fixed-offered-rate' in name)
+        self.assertEqual(self.doc['cell_contract'][name]['fixture_version'], FIXTURE_VERSION)
+        for cell in self.doc['cell_contract'].values():
+            if cell['workload'] == 'W8' and cell['load'] == 'cancelled-delivery':
+                self.assertEqual(cell['fixture_version'], cancellation_version)
+        self.doc['cell_contract'][name]['fixture_version'] = self.doc['fixtures']['W2']['version']
+        with self.assertRaisesRegex(gate.ReadinessError, 'cell fixture version differs'):
+            self.check()
 
     def test_missing_failed_or_incomparable_prerequisites_cannot_admit(self):
         mutations = (
@@ -307,6 +327,38 @@ class ToolIdentity(unittest.TestCase):
 
 
 class ManualAdmission(unittest.TestCase):
+    def test_required_sources_cover_shared_runner_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            readiness = root / 'readiness.json'
+            readiness.write_text('{}')
+            with patch.object(gate, 'require_readiness', side_effect=gate.ReadinessError('stop after inventory')) as require:
+                with self.assertRaisesRegex(gate.ReadinessError, 'stop after inventory'):
+                    gate.require_leg_readiness(readiness, ctrs_binary=root / 'ctrs', guest=root,
+                                               portfolio_layout=root, worker_layout=root)
+            required = require.call_args.kwargs['required_paths']
+            self.assertIn(gate.runner.BENCH / 'runner.py', required)
+            self.assertIn(gate.runner.RATE_LOAD_PY, required)
+            self.assertIn(gate.runner.FIXTURES / 'w4/latency.py', required)
+            self.assertIn(gate.runner.FIXTURES / 'w8-v5/portfolio.json', required)
+            self.assertIn(gate.runner.FIXTURES / 'w2/v3.py', required)
+            self.assertIn(gate.runner.FIXTURES / 'w13/transfer_tool.py', required)
+            self.assertIn(gate.runner.FIXTURES / 'w14/lifecycle_tool.py', required)
+
+    def test_fixture_inventory_rejects_empty_missing_and_duplicate_workloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = Path(tmp) / 'cases.toml'
+            valid = ''.join(f'[[case]]\nid="{name}"\nfixture_version="test"\n' for name in gate.CASES)
+            for contents, message in (
+                ('case=[]', 'must declare fixture versions'),
+                (valid.replace('fixture_version="test"', 'fixture_version=""', 1), 'nonempty string'),
+                (valid + '[[case]]\nid="W1"\nfixture_version="test"\n', 'duplicate workload'),
+            ):
+                with self.subTest(message=message), patch.object(gate.runner, 'CASES_FILE', cases):
+                    cases.write_text(contents)
+                    with self.assertRaisesRegex(gate.ReadinessError, message):
+                        gate.fixture_versions()
+
     def test_primary_failure_survives_engine_registry_and_result_cleanup(self):
         for stage in ('engine', 'registry', 'save'):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
@@ -340,6 +392,8 @@ class ManualAdmission(unittest.TestCase):
                     if stage == 'save' and path.name == 'driver-result.json': raise OSError('result write failed')
                     save(path, value)
                 with contextlib.redirect_stdout(io.StringIO()), \
+                     patch.object(mixed_pilot.sys, 'platform', 'darwin'), \
+                     patch.object(mixed_pilot.os, 'uname', return_value=SimpleNamespace(machine='arm64')), \
                      patch('sys.argv', ['mixed_pilot', '--portfolio-layout', '/unused', '--worker-layout', '/unused',
                         '--ctrs-binary', sys.executable, '--engines', 'orbstack', '--cycles', '1']), \
                      patch.object(mixed_pilot.registry_portfolio, 'prepare_pinned_portfolio', return_value=common), \
@@ -368,6 +422,8 @@ class ManualAdmission(unittest.TestCase):
                 '--ctrs-binary', '/missing', *extra]
         errors = io.StringIO()
         with patch('sys.argv', args), contextlib.redirect_stderr(errors), \
+             patch.object(mixed_pilot.sys, 'platform', 'darwin'), \
+             patch.object(mixed_pilot.os, 'uname', return_value=SimpleNamespace(machine='arm64')), \
              patch.object(mixed_pilot.runner, 'find_docker') as docker, \
              patch.object(mixed_pilot.diagnostic_signals, 'install_cleanup_signals') as signals:
             with self.assertRaises(SystemExit) as error:

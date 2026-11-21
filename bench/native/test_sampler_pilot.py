@@ -7,7 +7,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from diagnostics import sampler_pilot as pilot
 from test_safety import FixtureContext, fake_engine

@@ -90,8 +90,8 @@ above stay open until they are measured on a Mac. Steps:
 4. Building the guest kernel with 0013–0017 (`CARGO_ENCODED_RUSTFLAGS=""
    cargo xtask kernel`, which needs Docker) proves the macOS series
    applies and builds. Record the new kernel hash.
-5. Offline harness work (`make test-bench`) runs anywhere. That includes
-   finishing the W11 admission branch above.
+5. Offline harness work (`make test-bench`) runs anywhere. W11 frozen
+   admission is integrated; qualification still needs the Mac evidence below.
 
 **On the Mac.** Rebuild the assets (`cargo xtask all`) and the fixtures
 (`bench/native/runner.py prepare`, `bench/native/fixtures/w12/prepare.py`
@@ -420,10 +420,14 @@ The [W3 pinned transaction proof](evidence/native-performance.md#w3-commit-laten
 passed all 300 commit receipts and exact persisted rows on both engines.
 The [W9 fixed-work diagnostic](evidence/native-performance.md#w9-job-completion-measurement)
 passed all four concurrency conditions per engine.
-The parked W11 qualification branch `f0250a9` includes main through
-`99ca94d` and verifies the declared fixture revisions against the case
-manifest. Its [bounded checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
+W11 qualification admission from `f0250a9` is integrated, with current
+portfolio pins and recursive shared-runner source receipts. It verifies
+fixture revisions against the case manifest. Its historical
+[bounded checks](evidence/native-mixed-retention-2026-11-17.md#qualification-branch-refresh)
 passed 49 W11 tests and 117 W2 tests. The asset lock remains in pilot status.
+Landing checks on Linux: `make test-bench` ran 426 tests (15 skips);
+`runner.py check w11` ran 50 (11 skips), and `check w2` ran 142 (3 skips).
+No test failures; component checks still refuse native-only skips.
 [W2 placement](../bench/native/diagnostics/w2-fixed-rate.md#native-placement-proof)
 verified exact persisted work on the published port and guest network
 in all twelve pinned trials. The two OrbStack offered-rate trials
@@ -527,13 +531,13 @@ current-host baseline. Fixture commands now reference w8-v5
 1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
    `bench/native/diagnostics/w2-counters.md` and `w2-fixed-rate.md`.
-2. Parked `campaign/w11-bind-completed-cycles` binds the contract digest to
+2. Integrated W11 admission binds the contract digest to
    `assets.lock` and validates the complete mixed workload and resource
    observation per cycle. The archived
    [native v4 proof](evidence/native-mixed-retention-2026-11-17.md#w11-v4-post-cleanup-observations)
    passed on both engines, with 181 frozen receipts unchanged. Complete
    the fixture producers, conditions and evidence needed to freeze the
-   proposed cell contract. The parked
+   proposed cell contract. The integrated
    `mixed_job.py` uses the finite supervisor for admitted qualification
    legs. Launch the two 12-hour legs after their admission requirements
    are satisfied.
@@ -550,7 +554,7 @@ current-host baseline. Fixture commands now reference w8-v5
    before storage leadership claims. Full and50ms refusal-cache branches need
    separate exclusive confirmations. Preserve250ms/default Fsync meanwhile.
 6. Resolve known correctness gaps, freeze candidate/inputs and a complete
-   per-cell status matrix. Implement actual frozen-readiness/resource-growth
+   per-cell status matrix. Use the integrated frozen-readiness/resource-growth
    qualification admission; existing short W11 proofs must not be repeated as
    substitutes. Then execute the owner-requested full paired comparison,
    independent batch, fresh held-out app and finite12h W11 for each engine.

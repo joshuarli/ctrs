@@ -63,6 +63,22 @@ def _unique(pairs):
     return result
 
 
+def fixture_versions():
+    with runner.CASES_FILE.open('rb') as case_file:
+        cases = tomllib.load(case_file)['case']
+    versions = {}
+    for case in cases:
+        name = case['id']
+        if name not in CASES:
+            continue
+        if name in versions:
+            raise ReadinessError('duplicate workload in cases.toml: ' + name)
+        versions[name] = _text(case.get('fixture_version'), 'cases.toml fixture version: ' + name)
+    if set(versions) != set(CASES):
+        raise ReadinessError('cases.toml must declare fixture versions for W1 through W11')
+    return versions
+
+
 def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), admission_epoch=None):
     """Verify a frozen declaration and receipts; reviewers own its scientific attestations.
 
@@ -118,7 +134,7 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         for name in ('postgres', 'redis', 'api_base', 'fixture_api'):
             if re.fullmatch(r'.+@sha256:[0-9a-f]{64}', str(assets.get('images', {}).get(name))) is None:
                 raise ReadinessError('unfrozen service image: ' + name)
-        for name, image in (('postgres', 'np-v2/postgres'), ('redis', 'np-v2/redis'), ('fixture_api', 'np-v2/api')):
+        for name, image in (('postgres', 'np-v5/postgres'), ('redis', 'np-v5/redis'), ('fixture_api', 'np-v5/api')):
             if not assets['images'][name].endswith('@' + PIN['images'][image]['manifest']):
                 raise ReadinessError('assets.lock service image differs from running portfolio: ' + name)
         inputs = doc.get('inputs')
@@ -142,9 +158,11 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         fixtures = _object(doc.get('fixtures'), 'fixtures')
         if set(fixtures) != set(CASES):
             raise ReadinessError('require versioned W1 through W11 fixtures')
+        expected_versions = fixture_versions()
         for name, fixture in fixtures.items():
             fixture = _object(fixture, 'fixtures.' + name)
-            _text(fixture.get('version'), 'fixtures.' + name + '.version')
+            if fixture.get('version') != expected_versions[name]:
+                raise ReadinessError('fixture version differs from cases.toml: ' + name)
             receipt(fixture.get('evidence'), 'fixtures.' + name + '.evidence')
         prerequisites = _object(doc.get('prerequisites'), 'prerequisites')
         if set(prerequisites) != set(PREREQUISITES):
@@ -207,7 +225,8 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
             workload, dimension = specification.get('workload'), specification.get('dimension')
             if workload not in CASES or dimension not in DIMENSIONS:
                 raise ReadinessError('unknown workload or dimension in cell: ' + name)
-            if specification.get('fixture_version') != fixtures[workload]['version']:
+            version = W1_W10_CELLS.get(name, {}).get('fixture_version', expected_versions[workload])
+            if specification.get('fixture_version') != version:
                 raise ReadinessError('cell fixture version differs: ' + name)
             for field in ('metric', 'state', 'load', 'unit'):
                 _text(specification.get(field), 'cell_contract.' + name + '.' + field)
@@ -260,12 +279,14 @@ def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_
     artifacts = {'ctrs_binary': ctrs_binary, 'guest_kernel': guest / 'Image',
                  'guest_initramfs': guest / 'initramfs.cpio'}
     required = [Path(sys.executable), *artifacts.values(), template, runner.COMPOSE_FILE,
-                runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
-                runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w8-v2/portfolio.json',
+                runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.RATE_LOAD_PY,
+                runner.FIXTURES / 'w4/app.py', runner.FIXTURES / 'w4/latency.py',
+                runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w5-v2/mounted-inputs.mjs',
+                runner.FIXTURES / 'w8-v5/portfolio.json',
                 ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
                 runner.BENCH / 'schema.json', W11_CELLS_FILE, W1_W10_CELLS_FILE]
-    required += [file for file in runner.BENCH.glob('*.py') if not file.name.startswith('test_')]
-    required += list((runner.BENCH / 'diagnostics').glob('*.py'))
+    required += [file for file in runner.BENCH.rglob('*.py')
+                 if not file.name.startswith('test_') and '__pycache__' not in file.parts]
     for layout in (portfolio_layout, worker_layout):
         if not layout.is_dir():
             raise ReadinessError(f'layout missing: {layout}')

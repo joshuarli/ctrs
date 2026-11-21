@@ -374,6 +374,7 @@ class GuestPlacementTests(unittest.TestCase):
                                        (2, None, "source-mismatch")):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 engine = fake_engine()
+                engine.measurement_identity = {}
                 pinned = mode == "fixed-rate"
                 engine.compose.side_effect = lambda _, args, **kw: completed(f"{args[-1]}-id") if "ps" in args else completed()
                 args_seen = {}
