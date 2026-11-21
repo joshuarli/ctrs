@@ -815,3 +815,41 @@ What landed at this milestone:
 | equivalent-work benchmark | `bench/arm64-build.sh --samples 5 --all-states` (S6) | **measured 2026-11-15 (90 samples, 0 rejected; host Ryzen 9 9950X; load 1.91 at start). C (cross) beats B (emulated) in every cell: rust cold 5.30 s vs 77.79 s; c-cpp cold 35.26 s vs 104.92 s. A (old pin) is neutral vs B. Objective met for these workloads on this host; not a general claim** |
 | static binaries, checksums, local manifest | S7 commands; `docs/evidence/release.md` (S7 section) | **done 2026-11-15 (Linux only): four static musl ELFs (2×x86_64 PIE, 2×AArch64 EXEC), zips + SHA256SUMS verified, hashes committed there; macOS row not rebuilt here** |
 | environment prerequisites | `--case environment` | **passing 2026-11-14 (22 ok, 0 missing, 0.2–1 s)** |
+
+## CI qualification failure investigation (2026-11-20)
+
+The last green main workflow run was [43645921846](https://github.com/joshuarli/ctrs/actions/runs/43645921846), SHA `d61e9ff1372da00f395ae15b0011f65d9a53cefb`; it had no ARM64 qualification job. The first subsequent main run, [43674689893](https://github.com/joshuarli/ctrs/actions/runs/43674689893), SHA `9386f70868d0ed2a42e8332e71f6945697f87d29`, failed that job. There is no green qualification run to bisect against. `git log --oneline d61e9ff..9386f70` includes `90bee60`, which introduced the job with `--case environment compatibility platform cross identity lifecycle`. The first run's failing step was **Run the ARM64 qualification runner**:
+
+```text
+Run bash tests/arm64-build.sh --case environment compatibility platform cross identity lifecycle
+unknown argument: compatibility
+Process completed with exit code 2.
+```
+
+The parser accepts one name per `--case` (`tests/arm64-build.sh:43-52`). `b721aa9` corrected the workflow arguments, exposing further failures. In [run 44853584973](https://github.com/joshuarli/ctrs/actions/runs/44853584973) at `d5625e903f16289787b4cd0f9cd94a671b1399a7`, the same step reported:
+
+```text
+MISS kache (rustc wrapper not on PATH)
+ok   two-platform OCI export built
+MISS OCI index does not carry both entries: {"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.index.v1+json", ...}]}
+tests/arm64-build.sh: line 728: jaq: command not found
+MISS OCI amd64 manifest config is /
+MISS OCI arm64 manifest config is /
+MISS builder did not answer after docker restart
+runner: 130 passed, 7 failed
+```
+
+The first counted failure is the missing `kache`: the environment case explicitly requires it and increments `FAIL`. The platform case invokes `jaq` to descend into a nested index; its first invocations suppress errors, so without `jaq` it inspects the outer index and reports the misleading missing-entries message. Subsequent invocations expose `jaq: command not found`. The workflow installs neither tool. These observations establish missing runner prerequisites, not an ARM64 image metadata defect. They do not establish that the nested index contains correct platform entries: that check never executed successfully.
+
+Proposed workflow change, before **Run the ARM64 qualification runner** (after Rust installation), install both pinned executables into the runner's Cargo bin directory and verify them on `PATH`:
+
+```yaml
+      - name: Install qualification tools
+        run: |
+          cargo install --locked --git https://github.com/joshuarli/kache --rev 88537005c6c5d90968c6064585ec51a7096093e5 kache
+          cargo install --locked --git https://github.com/01mf02/jaq --rev 0ee33bbcf44aed00c91748071e5031e8a5410339 jaq
+          command -v kache
+          command -v jaq
+```
+
+This proposal has not been executed on the hosted image; validate the pinned installs and rerun the job. It does not promise a green job: the separate identity failure follows `docker restart` with one immediate `buildctl debug workers` call, whose stderr is suppressed (`tests/arm64-build.sh:352-356`); its cause remains unproven. Preserve the isolated harness logs and capture that command's stderr on an AMD64 Linux host with Docker and QEMU binfmt to investigate. The deslop closeout's DSLP-8, now CTRS-13 in `TODO.md`, recorded the platform case as needing evidence; the missing `jaq` explains the reported platform failure, but a successful platform qualification and handler-free proof remain outstanding. The hosted run reports a visible `qemu-aarch64` binfmt handler and therefore cannot prove handler independence.
