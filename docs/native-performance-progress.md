@@ -60,19 +60,38 @@ Decisions, including the vCPU default and kernel patch 0017, are in
 
 ### Resuming
 
-**On a Linux host.** The campaign compares against OrbStack on Apple
-Silicon, so no gate can be measured on Linux. These steps can run there:
+**On a Linux host.** On Linux, ctrs runs its agent directly on the host
+kernel, and the baseline is the Docker daemon on the same host (normally
+Docker Engine: dockerd with containerd), not OrbStack. That is a new
+lane. Its results never pool with the macOS cells, and the macOS gates
+above stay open until they are measured on a Mac. Steps:
 
 1. `./scripts/setup-dev`, then `make test` and `make lint`. Run
    `ctrs-init`'s Linux-only tests as root:
    `cargo test -p ctrs-init --target <arch>-unknown-linux-musl`.
-2. Build the guest kernel with 0013–0017 (`CARGO_ENCODED_RUSTFLAGS=""
-   cargo xtask kernel`, which needs Docker). This proves the series
+2. Bring up the Linux engine (`cargo xtask linux`; run
+   `tests/linux-host.sh` and `tests/kernel-features.sh` in a privileged
+   container) and run `tests/e2e.sh` against it. Run e2e against the
+   host's dockerd too, so both engines are known to complete the same
+   work.
+3. Add a Docker Engine adapter to the harness. Today it accepts only
+   `ctrs` and `orbstack` (`runner.py --a/--b/--engine`, `mixed_job.py`,
+   and `pyramid.py` `ENGINES`, which requires `macos-arm64`). Its
+   resource accounting is macOS-only too: `ri_phys_footprint`, and
+   process matching on Virtualization.framework (`collect.py`). On Linux,
+   account by cgroup: the dockerd, containerd and shim processes plus
+   the container cgroups for Docker, and the ctrs daemon and agent plus
+   their container cgroups for ctrs. Every container runs on the same
+   kernel, so per-cgroup CPU, memory and IO compare directly. Then write
+   the Linux lane into `campaign-native-performance.md`, with the host,
+   Docker version, storage driver and cgroup version as identity, and
+   start with W2, W6/W7 and W13. Bind mounts on Linux are native, so the
+   W12 virtiofs loss does not apply.
+4. Building the guest kernel with 0013–0017 (`CARGO_ENCODED_RUSTFLAGS=""
+   cargo xtask kernel`, which needs Docker) proves the macOS series
    applies and builds. Record the new kernel hash.
-3. `tests/linux-host.sh` and `tests/kernel-features.sh` in a privileged
-   container cover the Linux engine.
-4. Offline harness work (`bench/native`, `make test-bench`) runs
-   anywhere. That includes finishing the W11 admission branch above.
+5. Offline harness work (`make test-bench`) runs anywhere. That includes
+   finishing the W11 admission branch above.
 
 **On the Mac.** Rebuild the assets (`cargo xtask all`) and the fixtures
 (`bench/native/runner.py prepare`, `bench/native/fixtures/w12/prepare.py`

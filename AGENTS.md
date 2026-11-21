@@ -10,7 +10,9 @@ Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 The native ARM64 macOS versus OrbStack campaign is paused with no gate
 passed. To resume, read `docs/campaign-native-performance.md`, then the
 "Wound down" section of `docs/native-performance-progress.md`, which gives
-separate steps for a Linux host and a Mac. Gates are measured only on the Mac.
+separate steps for a Linux host and a Mac. On Linux the baseline is the
+host's Docker Engine (a new lane that needs a harness adapter), and the
+macOS-vs-OrbStack gates still need a Mac.
 
 ## Commands
 
