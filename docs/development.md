@@ -8,22 +8,22 @@ On Ubuntu 24.04 or Debian, from a fresh clone run:
 
 ```sh
 ./scripts/setup-dev
-export PATH="$HOME/.local/ctrs-dev-python/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
 make test
 make lint
 ```
 
 The setup uses `sudo` when run as a non-root user, installs the pinned Rust
-nightly, builds Python 3.13 for the test harness, and fetches locked Cargo dependencies. It needs network access to the
+nightly and fetches locked Cargo dependencies. It needs network access to the
 Ubuntu or Debian package mirrors, rustup and crates.io. Run it again safely to
 refresh the installed packages and dependencies.
 
 | Package | Consumer |
 | --- | --- |
-| build-essential, make, libffi-dev, libssl-dev, zlib1g-dev | Rust native dependencies and Python interpreter build |
+| build-essential, make | Rust native dependencies and `make test` |
 | ca-certificates, curl | rustup and HTTPS downloads |
 | git | clone and Git dependencies |
-| python3 | system interpreter used by distribution tools |
+| python3 (3.12 or newer) | benchmark harness tests (`make test-bench`) |
 | nodejs | JavaScript fixture tests |
 
 Docker is optional for guest assets and engine integration tests; install it
