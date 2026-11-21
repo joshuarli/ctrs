@@ -115,6 +115,177 @@ above through `bench/native/pyramid.py run --name <cell>:cohort` and
 refresh the ranked deficits. After that, the first open item is W12
 full-bind.
 
+## Linux lane pilot (amd64) — 2026-11-21
+
+**Separate native Linux pilot; closes no macOS gate.** Do not pool these
+samples with the macOS/OrbStack matrix or the earlier one-pair Linux smokes.
+Measured 07:28:58–08:49:45 UTC: **80m 47s**, within the 2.5-hour budget.
+Ten attempted pairs per workload, 80 trials total; no count reduction,
+replacement pairs or retries. All four cohort commands exited 0.
+
+### Design and identity
+
+The contract's [Measurement rules](campaign-native-performance.md#measurement-rules),
+**Same work and state**, requires alternating AB/BA or balanced randomization.
+The **Consistent statistics** rule says “Three pairs are pilots” and requires
+at least ten valid complete pairs for a qualified cell. This pilot used ten
+pairs per case, alternating AB/BA (ctrs/dockerd, then dockerd/ctrs: ABBA
+repeated), seed 7, with shared per-pair seeds/stamps and no randomization.
+Ten pairs alone do not establish qualification. Counts, primary metrics and
+admission rules were frozen before running; no performance-based exclusion.
+
+Host: Ubuntu 22.04.5 LTS, Linux `6.8.0-1060-aws`, x86_64, 8 CPUs,
+33,655,406,592 bytes RAM. Dockerd **29.9.2**, `overlayfs` storage driver,
+systemd cgroup driver, cgroup v2. Both engines ran natively, without VM caps;
+both remained resident while either was measured. Warm engine/base-image
+stores were retained, without global pruning. No concurrent campaign builds,
+tests or load jobs were run. Absolute resource values include each engine's
+resident service/store state, including the preexisting host Docker services.
+
+Harness worktree HEAD was `c57ec08`; frozen Linux inputs were
+`linux-amd64-v1`, sampler `2-linux-cgroup-v2-memory-stat`, with structural
+BuildKit ownership. The externally managed ctrs build includes the forwarding
+coexistence fix (PR #14), with actual running executable SHA-256
+`5e80c7f8011af060a541b756d62ff2ffe6f79f9876b528c70925343e6a9202f7`.
+Daemon and agent file hashes were unchanged after all measurements. Raw trial
+`git_sha` is `unknown` in this sudo execution; the pre-run worktree revision
+is recorded separately, and runner, sampler, fixture/lock and running-binary
+hashes remain in the provenance. Raw records have not been relabeled.
+
+Frozen cells, all `--state warm --resource-lane matched` (native host, no VM cap):
+
+- **W2:** 50,000 fixed-work operations, C8, write ratio 0.3, host client,
+  no offered-rate throttle. Primary time: `p99_ms`; completion wall time is
+  also shown below. Pair seeds are `7 + 10 * pair_id`.
+- **W6:** default builder, uncached Rust and zlib compile/test builds,
+  base images retained, frozen native artifact hashes checked. Primary:
+  `build_rust_s`; zlib is a separate companion, not averaged away.
+- **W7:** default builder, both real apps in uncached/warm/incremental
+  states, loaded-image version/note/cache assertions and first-use probes.
+  Primary: `hyperfine_uncached_s` (build/load); first use remains separate.
+- **W13:** published-port upload, one stream, 1 GiB per transfer, three
+  transfers per trial, exact receiver SHA-256/byte checks and capacity
+  controls. Primary: `completion_seconds`.
+
+### Primary timing scorecard
+
+Values are median **[Q1, Q3]**, using linear quartiles. Ratios are the median
+of whole-pair **ctrs/dockerd** ratios, not the ratio of marginal medians;
+smaller favors ctrs. Brackets on ratios are 95% percentile bootstrap intervals
+of that same paired median (2,000 whole-pair resamples, seed 20261121).
+All ten complete, correct, host-admitted pairs contribute to each timing row.
+
+| Workload / primary | ctrs median [Q1, Q3] | dockerd median [Q1, Q3] | Paired C/D [95% CI] |
+| --- | --- | --- | --- |
+| W2 p99 (ms) | 27.486 [25.424, 30.007] | 24.449 [23.071, 27.874] | 1.086 [1.034, 1.201] |
+| W6 Rust build (s) | 86.784 [84.081, 89.849] | 90.733 [87.504, 96.711] | 0.956 [0.914, 1.011] |
+| W7 hyperfine uncached build/load (s) | 28.710 [28.259, 31.269] | 29.198 [28.511, 31.357] | 0.993 [0.911, 1.136] |
+| W13 completion (s), tool-limited | 0.539 [0.493, 0.615] | 0.508 [0.483, 0.590] | 1.032 [0.840, 1.275] |
+
+W2's p99 pilot favors dockerd. W6's point estimate favors ctrs, but its
+interval crosses 1; W7's primary interval is also inconclusive. W13 is
+**inconclusive for engine attribution**: every trial hit the tool-limit flag
+(over half the slower capacity control). Do not interpret its descriptive
+timing distribution as network parity or an engine win/loss.
+
+### Resource medians and validity
+
+CPU is estimated whole-sampled-trial CPU seconds, not CPU isolated to the
+primary timing phase. Memory is the median of trial peaks, in MiB. Footprint
+means the peak coincident **anon + kernel** sum; `memory.current` is secondary
+and includes file cache. Anon/file/kernel components remain separately in
+the traces. CPU from exited Docker transients is a sampled lower bound;
+these are not macOS physical-footprint or resource-qualification results.
+
+| Case | Resource-valid complete pairs | CPU s, ctrs / dockerd | Anon+kernel MiB, ctrs / dockerd | memory.current MiB, ctrs / dockerd |
+| --- | --- | --- | --- | --- |
+| W2 | 10/10 | 75.068 / 74.105 | 75.71 / 890.39 | 150.60 / 13,795.49 |
+| W6 | 10/10 | 193.295 / 199.915 | 1,216.88 / 1,764.83 | 4,802.42 / 15,691.68 |
+| W7 | 10/10 | 74.375 / 79.965 | 1,681.05 / 1,819.85 | 9,166.34 / 15,390.27 |
+| W13 | 7/10 | 2.898 / 3.285 | 832.70 / 915.34 | 9,917.87 / 15,825.19 |
+
+| Case | Correct trials | Complete/no-host-contention timing pairs | Resource-valid pairs | Tool-limited trials |
+| --- | --- | --- | --- | --- |
+| W2 | 20/20 | 10/10 | 10/10 | 0/20 |
+| W6 | 20/20 | 10/10 | 10/10 | 0/20 |
+| W7 | 20/20 | 10/10 | 10/10 | 0/20 |
+| W13 | 20/20 | 10/10 | 7/10 | 20/20 |
+
+Ctrs resource coverage was 40/40 trials; dockerd was 37/40. W13 dockerd
+trials in pairs **2, 4, 6** failed strict sampling with
+`unverified process in Docker transient cgroup: system.slice/docker-<id>.scope`.
+Those resource values remain invalid/missing, never zero. The W13 resource
+medians use only the seven complete resource-valid pairs for **both** engines;
+no replacement pairs were run. The underlying member-attribution failure was
+not diagnosed or bypassed. W13 resources and timing attribution remain open.
+Host admission used the existing reporter's foreign-CPU/load rule; there
+were no host-contention exclusions. Missing resource attribution did not
+invalidate the separately correct byte/completion observations.
+
+### Companion timings (seconds; no family averaging)
+
+Build/load and first use remain separate. All rows use the same ten timing
+pairs, median [Q1, Q3], and paired C/D bootstrap procedure. In particular,
+httpie uncached first use is slower on ctrs; do not hide it behind its faster
+build or behind the hyperfine primary. Hyperfine warm build is also a
+slower point estimate. W7's fixture still executes its `pip wheel` path;
+no new transitive-dependency or WAN-timing qualification was performed.
+
+| Metric | ctrs median [Q1, Q3] | dockerd median [Q1, Q3] | Paired C/D [95% CI] |
+| --- | --- | --- | --- |
+| W2 fixed-work completion | 61.225 [58.774, 65.716] | 55.342 [52.926, 59.726] | 1.078 [1.034, 1.179] |
+| W6 zlib build | 2.584 [2.437, 2.959] | 2.809 [2.646, 2.989] | 0.897 [0.815, 1.028] |
+| W7 hyperfine uncached first use | 0.0640 [0.0504, 0.0741] | 0.2893 [0.2766, 0.3048] | 0.1815 [0.1648, 0.2642] |
+| W7 hyperfine warm build/load | 0.2838 [0.2698, 0.3045] | 0.2589 [0.2306, 0.2752] | 1.1648 [0.9867, 1.3304] |
+| W7 hyperfine warm first use | 0.0378 [0.0304, 0.0411] | 0.2726 [0.2454, 0.2798] | 0.1313 [0.0924, 0.1586] |
+| W7 hyperfine incremental build/load | 0.2859 [0.2664, 0.3150] | 0.4698 [0.4384, 0.5235] | 0.6339 [0.5591, 0.6849] |
+| W7 hyperfine incremental first use | 0.0331 [0.0306, 0.0374] | 0.2806 [0.2744, 0.2842] | 0.1171 [0.1029, 0.1439] |
+| W7 httpie uncached build/load | 9.7688 [9.4661, 10.4690] | 11.3303 [10.7696, 12.7281] | 0.8757 [0.8179, 0.9440] |
+| W7 httpie uncached first use | 0.8396 [0.7815, 0.8876] | 0.5846 [0.5803, 0.7617] | 1.3411 [1.1913, 1.4014] |
+| W7 httpie warm build/load | 0.1625 [0.1571, 0.1733] | 0.2288 [0.2101, 0.2821] | 0.6888 [0.5869, 0.8688] |
+| W7 httpie warm first use | 0.2917 [0.2609, 0.3710] | 0.5633 [0.5226, 0.6987] | 0.5264 [0.4764, 0.6268] |
+| W7 httpie incremental build/load | 0.3637 [0.3363, 0.3903] | 0.5442 [0.5083, 0.6265] | 0.6104 [0.5181, 0.7339] |
+| W7 httpie incremental first use | 0.3090 [0.2729, 0.3567] | 0.5692 [0.5376, 0.6442] | 0.5218 [0.4093, 0.7688] |
+
+### Evidence, cleanup and unchanged macOS gates
+
+Raw cohort directories under `.work/native-perf/results/`, each with
+`trials.jsonl`, per-trial provenance, BuildKit logs and cgroup traces:
+
+| Case | Run |
+| --- | --- |
+| W2 | `base-20261121T072858-c236` |
+| W6 | `base-20261121T075122-4767` |
+| W7 | `base-20261121T082337-13db` |
+| W13 | `base-20261121T083950-75d8` |
+
+Frozen design, exact commands, logs, deterministic analysis program/output,
+host identity, binary hashes and pre/post daemon identity are under
+`.work/linux-pilot-20261121/`. The commands were
+`runner.py --lane linux-amd64 baseline --a ctrs --b dockerd --case <case> --pairs 10 --seed 7`,
+with `--operations 50000 --concurrency 8 --write-ratio 0.3` for W2; W13 used
+the default 1 GiB, three-repeat published-port upload. Fixture preparation
+was not timed or repeated; the committed Linux lock was not regenerated.
+
+Ctrs stopped successfully: MainPID 0, inactive, no remaining cgroup or owned
+firewall rules. Dockerd stayed PID **599**, active since
+`Sat 2026-11-21 05:39:22 UTC`; pre/post identity matched exactly. No daemon
+restart/configuration change or global prune. Owned containers were cleaned up.
+
+All [macOS finish gates](campaign-native-performance.md#finish-criteria-coverage-parity-leadership)
+remain **open, unchanged**:
+
+- **Coverage:** representative W1–W10 cells/states/loads on the Mac.
+- **Meet OrbStack:** all critical paired timing/resource upper bounds and correctness/recovery gates.
+- **Exceed OrbStack:** family aggregate and default W6/W7 improvements, without hidden losses.
+- **Reliability:** each engine's 12-hour W11 qualification and growth/durability budgets.
+- **Reproducibility:** fresh signed release/isolated-root reproduction and independent holdout.
+
+Mac asset/kernel/watch-test rebuilds and the parked q7 cohorts above still
+need the Mac. Before Linux resource qualification, investigate the three
+Docker-scope attribution failures and W13 tool limits; do not treat this
+scorecard as full Linux or macOS qualification.
+
 ## Status at wind-down (history)
 
 **Active 2026-11-18 after new-host migration.** The development host moved to
