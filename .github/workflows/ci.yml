@@ -77,6 +77,11 @@ jobs:
           key: ubuntu-26.04-arm64-qual
       - name: Install pinned kache
         run: cargo install --locked --git https://github.com/joshuarli/kache --rev bcb257a6f8901a2bade7804121f562acae98de8b kache
+      - name: Install pinned jaq
+        run: |
+          curl -fL --retry 3 https://github.com/01mf02/jaq/releases/download/v3.2.0/jaq-x86_64-unknown-linux-musl -o "$RUNNER_TEMP/jaq"
+          echo "3ae029d4af2f7392aa48fa87670651efc960250c9421acda8933c3661945925f  $RUNNER_TEMP/jaq" | sha256sum -c -
+          install -m 755 "$RUNNER_TEMP/jaq" "$HOME/.cargo/bin/jaq"
       - name: Build the Linux engine (native AMD64)
         env:
           CARGO_ENCODED_RUSTFLAGS: ''

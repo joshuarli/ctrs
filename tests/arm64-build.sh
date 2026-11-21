@@ -101,7 +101,7 @@ case_environment() {
   ok "kernel $(uname -r)"
 
   local v
-  for v in bash git od sha256sum grep sed cut sort timeout tar; do
+  for v in bash git od sha256sum grep sed cut sort timeout tar jaq; do
     command -v "$v" >/dev/null 2>&1 && ok "tool $v" || miss "tool $v"
   done
 
@@ -616,6 +616,60 @@ case_identity() {
 # plus a real export/load/inspect round trip in a disposable harness.
 BASE_ALPINE=alpine@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
 
+inspect_oci_export() {
+  local oci_dir=$1
+  if ! command -v jaq >/dev/null 2>&1; then
+    miss "OCI inspection requires jaq on PATH"
+    return 1
+  fi
+  local platform_index="$oci_dir/index.json"
+  local hop with_platform nested architectures
+  for hop in 1 2 3; do
+    if ! with_platform=$(jaq -er '[.manifests[] | select(.platform != null)] | length' "$platform_index" 2>&1); then
+      miss "OCI index parsing failed ($platform_index): $with_platform"
+      return 1
+    fi
+    [ "$with_platform" != 0 ] && break
+    if ! nested=$(jaq -er '[.manifests[] | select(.mediaType == "application/vnd.oci.image.index.v1+json")] | .[0].digest' "$platform_index" 2>&1); then
+      miss "OCI index has no platform entries or readable nested index ($platform_index): $nested"
+      return 1
+    fi
+    platform_index="$oci_dir/blobs/sha256/${nested#sha256:}"
+  done
+  if ! architectures=$(jaq -cer '[.manifests[].platform.architecture] | sort' "$platform_index" 2>&1); then
+    miss "OCI platform parsing failed ($platform_index): $architectures"
+    return 1
+  fi
+  local oci_rc=0
+  if [ "$architectures" = '["amd64","arm64"]' ]; then
+    ok "OCI index carries linux/amd64 and linux/arm64 entries"
+  else
+    miss "OCI index does not carry both entries: $(cat "$platform_index")"; oci_rc=1
+  fi
+  local darch manifest_blob cfg_digest cfg_os cfg_arch
+  for darch in amd64 arm64; do
+    if ! manifest_blob=$(jaq -er ".manifests[] | select(.platform.architecture == \"$darch\") | .digest" "$platform_index" 2>&1); then
+      miss "OCI $darch manifest lookup failed: $manifest_blob"; oci_rc=1; continue
+    fi
+    if ! cfg_digest=$(jaq -er '.config.digest' "$oci_dir/blobs/sha256/${manifest_blob#sha256:}" 2>&1); then
+      miss "OCI $darch config lookup failed: $cfg_digest"; oci_rc=1; continue
+    fi
+    local cfg_path="$oci_dir/blobs/sha256/${cfg_digest#sha256:}"
+    if ! cfg_os=$(jaq -er '.os' "$cfg_path" 2>&1); then
+      miss "OCI $darch config OS parsing failed: $cfg_os"; oci_rc=1; continue
+    fi
+    if ! cfg_arch=$(jaq -er '.architecture' "$cfg_path" 2>&1); then
+      miss "OCI $darch config architecture parsing failed: $cfg_arch"; oci_rc=1; continue
+    fi
+    if [ "$cfg_os" = linux ] && [ "$cfg_arch" = "$darch" ]; then
+      ok "OCI $darch manifest config is $cfg_os/$cfg_arch"
+    else
+      miss "OCI $darch manifest config is $cfg_os/$cfg_arch"; oci_rc=1
+    fi
+  done
+  return "$oci_rc"
+}
+
 case_platform() {
   echo "== platform"
   local t0=$SECONDS
@@ -702,38 +756,7 @@ case_platform() {
     local oci_dir="$WORK/oci-extract"
     mkdir -p "$oci_dir"
     tar -xf "$WORK/export.oci.tar" -C "$oci_dir"
-    # buildx's OCI export may wrap the platform-bearing manifests in a
-    # nested image index; descend past index entries to the leaf that
-    # names platforms.
-    local platform_index="$oci_dir/index.json"
-    local hop
-    for hop in 1 2 3; do
-      local with_platform
-      with_platform=$(jaq -r '[.manifests[] | select(.platform != null)] | length' "$platform_index" 2>/dev/null || echo 0)
-      [ "$with_platform" != 0 ] && break
-      local nested
-      nested=$(jaq -r '[.manifests[] | select(.mediaType == "application/vnd.oci.image.index.v1+json")] | .[0].digest' "$platform_index" 2>/dev/null | sed 's/sha256://')
-      [ -n "$nested" ] && [ "$nested" != null ] || break
-      platform_index="$oci_dir/blobs/sha256/$nested"
-    done
-    if jaq -e '[.manifests[].platform.architecture] | sort == ["amd64", "arm64"]' "$platform_index" >/dev/null 2>&1; then
-      ok "OCI index carries linux/amd64 and linux/arm64 entries"
-    else
-      miss "OCI index does not carry both entries: $(cat "$platform_index")"; plat_rc=1
-    fi
-    local darch
-    for darch in amd64 arm64; do
-      local manifest_blob cfg_digest cfg_os cfg_arch
-      manifest_blob=$(jaq -r ".manifests[] | select(.platform.architecture == \"$darch\") | .digest" "$platform_index" | sed 's/sha256://')
-      cfg_digest=$(jaq -r '.config.digest' "$oci_dir/blobs/sha256/$manifest_blob" | sed 's/sha256://')
-      cfg_os=$(jaq -r '.os' "$oci_dir/blobs/sha256/$cfg_digest")
-      cfg_arch=$(jaq -r '.architecture' "$oci_dir/blobs/sha256/$cfg_digest")
-      if [ "$cfg_os" = "linux" ] && [ "$cfg_arch" = "$darch" ]; then
-        ok "OCI $darch manifest config is $cfg_os/$cfg_arch"
-      else
-        miss "OCI $darch manifest config is $cfg_os/$cfg_arch"; plat_rc=1
-      fi
-    done
+    inspect_oci_export "$oci_dir" || plat_rc=1
   else
     miss "could not copy the OCI export out of the harness"; plat_rc=1
   fi
