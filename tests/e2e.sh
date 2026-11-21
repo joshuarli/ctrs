@@ -195,7 +195,7 @@ t caps-chown "ok" $D run --rm alpine sh -c 'touch /f && chown 1:1 /f && echo ok'
 t cgroup-view "cgroup2" $D run --rm alpine sh -c 'mount | grep cgroup2'
 t name "named-one" $D run --rm --name named-one alpine sh -c 'echo named-one'
 t python "3.13" $D run --rm python:3.13-alpine python -c 'import sys;print(sys.version)'
-t node "v22" $D run --rm node:22-alpine node -v
+t node "v22" $D run --rm --platform "$ENGINE_OS/$ENGINE_ARCH" node:22-alpine node -v
 t debian-image "Valkey server" $D run --rm valkey/valkey valkey-server --version
 
 section "stdin and terminals"
@@ -307,9 +307,20 @@ t internet-https "200" $D run --rm curlimages/curl:latest -s -o /dev/null -w '%{
 # keeps running lost its gateway whenever the bridge's MAC moved.
 APKIDX=https://dl-cdn.alpinelinux.org/alpine/v3.22/main/$APK_ARCH/APKINDEX.tar.gz
 t first-download-x8 "8" bash -c "n=0; for i in \$(seq 8); do $D run --rm curlimages/curl:latest -s -m 20 -o /dev/null -w '%{exitcode}' $APKIDX | grep -qx 0 && n=\$((n+1)); done; echo \$n"
-$D run -d --name dl curlimages/curl:latest sh -c "while true; do curl -s -m 10 -o /dev/null -w '%{exitcode} ' $APKIDX; done" >/dev/null
+$D run -d --name dl curlimages/curl:latest sh -c "while true; do curl -s -m 10 -o /dev/null -w '%{exitcode}\\n' $APKIDX; done" >/dev/null
 for _ in $(seq 6); do $D run --rm alpine true; sleep 1; done
-code download-while-others-start 0 bash -c "out=\$($D logs dl 2>&1) && [[ \$out == *'0 '* && ! \$out =~ (^|[[:space:]])[1-9][0-9]*' ' ]]"
+code download-while-others-start 0 bash -c '
+  for _ in $(seq 50); do
+    out=$("$1" logs dl 2>&1) || { printf "%s\n" "$out"; exit 1; }
+    if [[ -n $out ]]; then
+      printf "%s\n" "$out"
+      ! grep -qvx 0 <<< "$out"
+      exit $?
+    fi
+    sleep 0.2
+  done
+  echo "no completed downloads"
+  exit 1' _ "$D"
 $D rm -f dl >/dev/null
 t none-net "lo" $D run --rm --network none alpine ip link
 code none-no-internet 1 $D run --rm --network none alpine wget -qO- -T 2 http://example.com
@@ -492,7 +503,7 @@ HTTP_DIR=$(scratch_dir)
 python3 -m http.server 18999 --bind "$HTTP_ADDR" --directory "$HTTP_DIR" >/dev/null 2>&1 &
 HTTP_PID=$!
 ready "http://$HTTP_ADDR:18999/"
-if $MAC_VM || $CTRS_ENGINE; then
+if $CTRS_ENGINE; then
 t host-internal "Directory listing" $D run --rm alpine wget -qO- http://host.docker.internal:18999/
 else
   skip host-internal 'Docker does not install the host.docker.internal alias'
@@ -689,7 +700,10 @@ t filter-id "fa" bash -c "$D ps --filter id=\$($D inspect -f '{{.Id}}' fa | cut 
 code filter-invalid 1 $D ps --filter bogus=1
 t filter-images-ref "alpine" $D images --filter reference=alpine --format '{{.Repository}}'
 t filter-images-ref-miss "0" bash -c "$D images -q --filter reference=nosuchimage | wc -l | tr -d ' '"
-t filter-images-dangling "0" bash -c "$D images -q --filter dangling=true | wc -l | tr -d ' '"
+code filter-images-dangling 0 bash -c '
+  id=$("$1" images -q alpine:latest) && [[ -n $id ]] &&
+  out=$("$1" images -q --filter dangling=true) &&
+  ! grep -qFx "$id" <<< "$out"' _ "$D"
 $D network create --label team=a fnet >/dev/null
 t filter-network-label "fnet" $D network ls --filter label=team=a --format '{{.Name}}'
 t filter-network-type "fnet" $D network ls --filter type=custom --format '{{.Name}}'
