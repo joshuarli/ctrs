@@ -137,5 +137,37 @@ wait_builder_ready managed 0
         self.assertIn("last probe: no output", result.stdout)
 
 
+class CompatibilityGuardTests(unittest.TestCase):
+    def test_prior_case_failure_does_not_block_compatibility(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+            binary = Path(temp) / "ctrs"
+            binary.touch()
+            binary.chmod(0o755)
+            for failures in (0, 1):
+                result = run_shell("case_compatibility", '''
+ROOT=$1
+BIN=$2
+FAIL=$3
+REQUIRE_NO_BINFMT=0
+source() { echo reached-harness; exit 0; }
+case_compatibility
+''', ROOT, temp, failures)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("reached-harness", result.stdout)
+
+    def test_missing_fixtures_still_block_compatibility(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+            result = run_shell("case_compatibility", '''
+ROOT=$1
+FAIL=1
+miss() { FAIL=$((FAIL + 1)); echo "MISS $*"; }
+source() { echo reached-harness; exit 0; }
+case_compatibility
+''', temp)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MISS fixture", result.stdout)
+        self.assertNotIn("reached-harness", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

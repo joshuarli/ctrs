@@ -1245,6 +1245,7 @@ COMPAT_IMAGE_TAG_PREFIX=ctrsaccel/compat
 case_compatibility() {
   echo "== compatibility"
   local t0=$SECONDS
+  local failures_before=$FAIL
   local fixture_dir="$ROOT/tests/fixtures/arm64-build/shell-child-script"
   local slow_fixture="$ROOT/tests/fixtures/arm64-build/slow"
   [ -f "$fixture_dir/Dockerfile.alpine" ] || miss "fixture $fixture_dir/Dockerfile.alpine"
@@ -1252,7 +1253,7 @@ case_compatibility() {
   [ -x "$fixture_dir/build-id.sh" ] || miss "fixture $fixture_dir/build-id.sh (not executable)"
   [ -x "$fixture_dir/child.sh" ] || miss "fixture $fixture_dir/child.sh (not executable)"
   [ -f "$slow_fixture/Dockerfile" ] || miss "fixture $slow_fixture/Dockerfile"
-  [ $FAIL = 0 ] || return 1
+  [ "$FAIL" = "$failures_before" ] || return 1
 
   BIN=${BIN:-$ROOT/target/linux-x86_64/release}
   [ -x "$BIN/ctrs" ] || { miss "AMD64 artifacts at $BIN (build: cargo xtask linux --arch amd64)"; return 1; }
