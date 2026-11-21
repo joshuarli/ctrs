@@ -19,9 +19,15 @@ use super::http::{self, Request};
 use super::time;
 
 /// Serves one client connection until it closes.
-pub fn serve(stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
+pub fn serve(mut stream: UnixStream, engine: Arc<Engine>) -> io::Result<()> {
+    let result = serve_requests(&stream, engine);
+    http::lingering_close(&mut stream);
+    result
+}
+
+fn serve_requests(stream: &UnixStream, engine: Arc<Engine>) -> io::Result<()> {
     let mut w = stream.try_clone()?;
-    let mut r = BufReader::new(stream);
+    let mut r = BufReader::new(stream.try_clone()?);
     while let Some(req) = match http::read_request(&mut r, &mut w, streams_body) {
         Ok(x) => x,
         Err(e) => {
@@ -2712,6 +2718,36 @@ pub(super) fn parse_signal(raw: &str) -> Result<u32, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn early_build_error_survives_an_unfinished_upload() {
+        let root = std::env::temp_dir().join(format!("ctrs-early-close-{}", super::super::engine::random_hex(8)));
+        let engine = Engine::boot(ctrs_image::Store::open(&root).unwrap()).unwrap();
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(b"POST /build?version=2 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 131072\r\n\r\n").unwrap();
+        let serving = std::thread::spawn(move || serve(server, engine));
+        let mut upload = client.try_clone().unwrap();
+        let writing = std::thread::spawn(move || {
+            let result = upload.write_all(&vec![b'x'; 131072]);
+            let _ = upload.shutdown(std::net::Shutdown::Write);
+            result
+        });
+        let mut response = String::new();
+        let received = client.read_to_string(&mut response);
+        let uploaded = writing.join().unwrap();
+        serving.join().unwrap().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(received.is_ok(), "early response was truncated: {received:?}; {response}");
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{response}");
+        let (head, body) = response.split_once("\r\n\r\n").unwrap();
+        let length: usize = head.lines().find_map(|line| line.strip_prefix("Content-Length: ")).unwrap().parse().unwrap();
+        assert_eq!(body.len(), length);
+        assert!(body.contains("classic builder API"), "{body}");
+        assert!(uploaded.is_ok(), "upload lost the early response connection: {uploaded:?}");
+    }
 
     #[test]
     fn image_rootfs_reports_uncompressed_diff_ids_and_rejects_missing_identity() {

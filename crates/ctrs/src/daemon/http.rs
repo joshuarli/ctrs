@@ -5,6 +5,32 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
+use std::time::{Duration, Instant};
+
+pub fn lingering_close(stream: &mut UnixStream) {
+    let _ = stream.flush();
+    if stream.shutdown(std::net::Shutdown::Write).is_ok() {
+        drain_input(stream, 256 << 10, Duration::from_millis(500));
+    }
+}
+
+fn drain_input(stream: &mut UnixStream, mut remaining: usize, window: Duration) {
+    let deadline = Instant::now() + window;
+    let mut buf = [0u8; 8192];
+    while remaining > 0 {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        if wait.is_zero() || stream.set_read_timeout(Some(wait)).is_err() {
+            break;
+        }
+        let want = remaining.min(buf.len());
+        match stream.read(&mut buf[..want]) {
+            Ok(0) => break,
+            Ok(n) => remaining -= n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => break,
+        }
+    }
+}
 
 /// API version this daemon speaks. The Docker CLI negotiates down to it.
 pub const API_VERSION: &str = "1.47";
@@ -570,6 +596,52 @@ mod framing_tests {
     #[test]
     fn chunked_roundtrip_is_recognized_identically() {
         assert_eq!(parse_framing(&h(&[("transfer-encoding", "chunked")])).unwrap(), Framing::Chunked);
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+
+    #[test]
+    fn lingering_close_handles_empty_input() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        error(&mut server, 400, "early error").unwrap();
+        lingering_close(&mut server);
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.ends_with("{\"message\":\"early error\"}"), "{response}");
+    }
+
+    #[test]
+    fn drain_stops_at_the_byte_cap() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        client.write_all(b"12345678").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        drain_input(&mut server, 4, Duration::from_secs(2));
+        let mut remaining = String::new();
+        server.read_to_string(&mut remaining).unwrap();
+        assert_eq!(remaining, "5678");
+    }
+
+    #[test]
+    fn drain_has_an_absolute_deadline_even_with_trickling_input() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        let writing = std::thread::spawn(move || {
+            for _ in 0..200 {
+                if client.write_all(b"x").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let began = Instant::now();
+        drain_input(&mut server, 4096, Duration::from_millis(80));
+        let elapsed = began.elapsed();
+        drop(server);
+        writing.join().unwrap();
+        assert!(elapsed < Duration::from_secs(1), "{elapsed:?}");
     }
 }
 
