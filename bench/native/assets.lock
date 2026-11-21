@@ -24,8 +24,8 @@ docker_compose = "v5.5.0"
 binary = ".work/tmp/readiness-main-target/release/ctrs (cargo build --release -p ctrs, ad-hoc signed + virtualization entitlement; SHA256 be929fe2a81b960d0b4e2d3a02da864d91349eb9d1438cd74cd24be13795e9f2 at 08cdce8)"
 api_version = "1.47"
 vm = "Virtualization.framework, guest kernel 6.18.58, allnoconfig"
-kernel_image_sha256 = "ea4853411fa057bc9a1ea164dbf2198d6a4f0e2590277eff2d4d86426cb4d589"
-kernel_note = "rebuilt 2026-11-18 from pinned source/config/patches; 18,800,648 bytes (same size as the 2026-11 accepted image); hash differs from 35087713… because kernel builds embed a build timestamp"
+kernel_image_sha256 = "f953d09d34b0f3fe5ca2fd089727ce64ee6e9942ba2c52a896a769477d7c2225"
+kernel_note = "2026-11-20 build proof: ARM64 Linux 6.18.58 with patches 0001–0017, 18,802,696 bytes, 212.01 s on x86_64 Linux (host clock 2026-11-21 UTC); not booted or qualified on the Mac; replaces the historical ea485341… build, not its measurements; builds embed timestamps; pins and AMD64 hash in docs/native-performance-progress.md resume step 4"
 initramfs_sha256 = "6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2"
 
 [engines.orbstack]

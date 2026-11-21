@@ -44,8 +44,8 @@ Decisions, including the vCPU default and kernel patch 0017, are in
 
 - Kernel patches 0013–0016 (watcher recovery, `f291b04`) and 0017 (a
   bound on live virtiofs inodes, so a large bind walk can no longer
-  exhaust the Mac's file table) are on main. They are **not yet built
-  into `guest/out`**: rebuild the kernel and run
+  exhaust the Mac's file table) are on main. Both guest architectures
+  build on Linux (resume step 4); Mac boot/runtime checks remain: run
   `tests/watch-recovery.sh` and `tests/fuse-inode-bound.sh` before any
   measurement. 0017's descriptor results come from the session that
   wrote it and were not run again here.
@@ -87,9 +87,24 @@ above stay open until they are measured on a Mac. Steps:
    Docker version, storage driver and cgroup version as identity, and
    start with W2, W6/W7 and W13. Bind mounts on Linux are native, so the
    W12 virtiofs loss does not apply.
-4. Building the guest kernel with 0013–0017 (`CARGO_ENCODED_RUSTFLAGS=""
-   cargo xtask kernel`, which needs Docker) proves the macOS series
-   applies and builds. Record the new kernel hash.
+4. **2026-11-20: build proof complete.** All patches 0001–0017 applied
+   and Linux 6.18.58 built from empty Docker cache volumes on an 8-CPU
+   x86_64 Linux host; no patch fixes. With `CARGO_ENCODED_RUSTFLAGS=""`,
+   `cargo xtask kernel` built AMD64 in 186.10 s (Linux defaults to the
+   host arch); `cargo xtask kernel --arch arm64` built the Mac's ARM64
+   guest in 212.01 s. Wall times include package/source downloads;
+   AMD64 also includes the cold image pull. SHA-256 (`sha256sum`):
+   - ARM64 `guest/out/Image` (18,802,696 bytes):
+     `f953d09d34b0f3fe5ca2fd089727ce64ee6e9942ba2c52a896a769477d7c2225`.
+   - AMD64 `guest/out/x86_64/bzImage` (10,400,768 bytes):
+     `67032e023cb67185ff1746b2ed4ab8130c76d7723c56402b4ceacaf4a5933b4e`.
+   Builder: `debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6`
+   (linux/amd64); GCC / aarch64-linux-gnu-gcc 14.2.0 (Debian
+   14.2.0-19), GNU ld 2.44; Docker client/server 29.9.2; xtask Rust
+   nightly-2026-11-09 (`rustc 1.102.0-nightly`, `5b7b37aef`). The image
+   is pinned, apt packages are not. Hashes include build timestamps
+   (host clock 2026-11-21 UTC); this is build proof, not Mac runtime
+   qualification. Run both watch tests on the Mac before measurement.
 5. Offline harness work (`make test-bench`) runs anywhere. W11 frozen
    admission is integrated; qualification still needs the Mac evidence below.
 
