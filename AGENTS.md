@@ -5,15 +5,12 @@ compatible container engine for macOS (Virtualization.framework guest) and
 Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 `docs/`.
 
-## Active performance campaign
+## Performance campaign (paused 2026-11-20)
 
-For performance/hillclimb work, first read
-`docs/campaign-native-performance.md` and
-`docs/native-performance-progress.md`, then execute the saved next action.
-The current lane is native ARM64 macOS versus OrbStack. Healthy soak/watch
-counters are not progress: do not repeat monitoring turns or stop at an
-arbitrary candidate count. Persist an exact continuation before an external
-turn limit; the campaign remains active until its measured gates pass.
+The native ARM64 macOS versus OrbStack campaign is paused with no gate
+passed. To resume, read `docs/campaign-native-performance.md`, then the
+"Wound down" section of `docs/native-performance-progress.md`, which gives
+separate steps for a Linux host and a Mac. Gates are measured only on the Mac.
 
 ## Commands
 
@@ -82,8 +79,8 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
-| macOS OrbStack performance hillclimb (current contract) | `docs/campaign-native-performance.md` |
-| Performance work queue and continuation checkpoint | `docs/native-performance-progress.md` |
+| macOS OrbStack performance hillclimb (paused contract) | `docs/campaign-native-performance.md` |
+| Performance standing at pause, resume steps, history | `docs/native-performance-progress.md` |
 | Performance acceptance matrix (status per cell) | `docs/native-acceptance-matrix.md` |
 | Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |
 | Bind-mount change-notification design (proposal) | `docs/design-bind-notify.md` |

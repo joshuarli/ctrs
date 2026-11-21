@@ -1,6 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**Active 2026-11-17 after owner resume.** This is the current execution contract. It supersedes the previous campaign's
+**Paused 2026-11-20 by the owner; no gate has passed.** The standing at the pause and the resume steps (Linux or Mac) are in [the progress file](native-performance-progress.md#wound-down-2026-11-20). This contract still applies when the campaign resumes. Before the pause it read: active 2026-11-17 after owner resume; this is the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
 [`native-performance-progress.md`](native-performance-progress.md).

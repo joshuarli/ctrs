@@ -1,6 +1,6 @@
 # macOS campaign acceptance matrix
 
-Single status table for [the campaign](campaign-native-performance.md). The
+Single status table for [the campaign](campaign-native-performance.md), which is paused (2026-11-20). Every raw result was deleted at the pause; the statuses below are what was recorded. The
 work queue and next action live in
 [native-performance-progress.md](native-performance-progress.md). Host: M1 Max,
 10 CPUs, 64 GiB, macOS 27.2.1, OrbStack 2.2.5 (from 2026-11-18). Every

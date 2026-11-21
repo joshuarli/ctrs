@@ -1,6 +1,87 @@
 # macOS performance campaign: progress and continuation
 
-## Status
+## Wound down 2026-11-20
+
+The owner paused the campaign on 2026-11-20. No gate in
+[the campaign contract](campaign-native-performance.md#finish-criteria-coverage-parity-leadership)
+has passed, and no cell is qualified. Every measured job was stopped. The
+raw results, fixtures, warm engine copies and traces under
+`.work/native-perf/` (103 GB) were deleted with the rest of `.work/`, so
+the only record left is the evidence and decision docs. Every cohort run
+must be measured again.
+
+### Where ctrs stands against OrbStack
+
+Host: M1 Max, 10 CPUs, 64 GiB, macOS 27.2.1, OrbStack 2.2.5. These are
+D-lane pilots and none is qualified. Smaller numbers favor ctrs.
+
+- **Wins:** W2 latency, throughput and footprint (rps 0.744, p99 0.611,
+  footprint 0.359). Every W3-v4 timing, though it is not claimed until
+  the flush contracts are shown to be equal. W6 Rust 0.953
+  (non-inferior) and zlib 0.641. W7 wins every cell except the uncached
+  build, which is 0.997 (non-inferior). W14 streaming, reconnect,
+  persistent and idle-resume CPU.
+- **Losses:** W12 full-bind, about 1.25–1.33× (the Mac virtiofs share).
+  W13-overlap had W2 p99 at 1.70× with the old 5-vCPU default. The
+  9-vCPU default (`b663920`) roughly halves that tail against 5 vCPUs,
+  but it has not been compared with OrbStack again. CPU-only losses:
+  W12-watch 1.07×, published-port upload CPU/GiB 1.08×, W14 fresh
+  ~1.02–1.15×.
+- **Tool-limited or inconclusive:** guest→host bulk transfer is now
+  0.72–0.94 (it was 5–7× before the NAT relay and splice work), and
+  W2 CPU/success is 1.03–1.045.
+- **Unscored:** W1, W4, W5, W8, W9, W10 (pilots at most). W11 12-hour
+  reliability was never run. Its admission branch
+  `origin/campaign/w11-bind-completed-cycles` is parked and unmerged.
+
+Ranked detail is in
+[the matrix](native-acceptance-matrix.md#ranked-orbstack-deficits-this-host)
+and [the W12/W13 evidence](evidence/native-w12-w13-2026-11-18.md#ranked-measured-deficits).
+Decisions, including the vCPU default and kernel patch 0017, are in
+[decisions.md](decisions.md).
+
+### Integrated at wind-down
+
+- Kernel patches 0013–0016 (watcher recovery, `f291b04`) and 0017 (a
+  bound on live virtiofs inodes, so a large bind walk can no longer
+  exhaust the Mac's file table) are on main. They are **not yet built
+  into `guest/out`**: rebuild the kernel and run
+  `tests/watch-recovery.sh` and `tests/fuse-inode-bound.sh` before any
+  measurement. 0017's descriptor results come from the session that
+  wrote it and were not run again here.
+- Linux development bootstrap: `scripts/setup-dev`, documented under
+  "Linux development setup" in [development.md](development.md).
+- Abandoned at wind-down: the two-virtiofs-device probe
+  (`exp/fs-devices`, `CTRS_EXP_SHARE_DEVICES`). It got one noisy run at
+  1.2–2.5× files/s and was never repeated in a quiet window. Its one
+  commit is pushed to `origin/exp/fs-devices`.
+- Never ran: queue q7 (`w13-overlap`, `w2-api`, `w6-build`, `w7-buildx`
+  and `w14-idle-resume` cohorts at the 9-vCPU default against OrbStack).
+
+### Resuming
+
+**On a Linux host.** The campaign compares against OrbStack on Apple
+Silicon, so no gate can be measured on Linux. These steps can run there:
+
+1. `./scripts/setup-dev`, then `make test` and `make lint`. Run
+   `ctrs-init`'s Linux-only tests as root:
+   `cargo test -p ctrs-init --target <arch>-unknown-linux-musl`.
+2. Build the guest kernel with 0013–0017 (`CARGO_ENCODED_RUSTFLAGS=""
+   cargo xtask kernel`, which needs Docker). This proves the series
+   applies and builds. Record the new kernel hash.
+3. `tests/linux-host.sh` and `tests/kernel-features.sh` in a privileged
+   container cover the Linux engine.
+4. Offline harness work (`bench/native`, `make test-bench`) runs
+   anywhere. That includes finishing the W11 admission branch above.
+
+**On the Mac.** Rebuild the assets (`cargo xtask all`) and the fixtures
+(`bench/native/runner.py prepare`, `bench/native/fixtures/w12/prepare.py`
+for W12). Run e2e and the two watch tests. Then queue the q7 cohorts
+above through `bench/native/pyramid.py run --name <cell>:cohort` and
+refresh the ranked deficits. After that, the first open item is W12
+full-bind.
+
+## Status at wind-down (history)
 
 **Active 2026-11-18 after new-host migration.** The development host moved to
 a MacBook Pro (Apple M1 Max), 10 cores, 64 GiB (68,719,476,736 bytes), macOS
@@ -86,7 +167,7 @@ See [native-host-refresh-2026-11-18.md](evidence/native-host-refresh-2026-11-18.
   their [build](evidence/native-build-boundaries-2026-11-16.md), [W2](evidence/native-w2-boundaries-2026-11-16.md)
   and [preemption](evidence/native-preemption-2026-11-17.md) records preserve the decisions.
 
-## Exact next action
+## Last active next action (macOS, before the pause)
 
 **Current (2026-11-19, second steering: coherence, then guest→host):**
 live kernel k17 = patches 0001–0011 plus a new 0012 (echo proof and
