@@ -51,7 +51,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   Scenario and full tiers need a named workload and an engine.
 - Components (Rust lines): `ctrs` 24k host API/CLI/daemon, `ctrs-init` 12k Linux agent and runtime,
   `ctrs-image` 3.5k registry and store, `ctrs-proto` 1.5k wire, `ctrs-vmm` 0.8k, `xtask` 0.5k.
-  Python: `bench/native` 24k. Vendored trees: none.
+  Python: `bench/native` 24k. Vendored trees: `bootstrap/` (laputa-systems/buildlib `50d8081`).
 
 ## Hard invariants
 

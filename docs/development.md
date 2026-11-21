@@ -2,6 +2,58 @@
 
 Building ctrs from source, running it, and how it fits together.
 
+## Linux development setup
+
+On Alpine, Ubuntu 24.04, Debian or Ubuntu 26.04, from a fresh clone run:
+
+```sh
+./scripts/setup-dev
+export PATH="$HOME/.local/share/ctrs-dev/bin:$HOME/.cargo/bin:$PATH"
+make test
+make lint
+```
+
+As a non-root user the setup escalates with `sudo` or `doas`. It installs
+the distribution packages below, the pinned Rust nightly
+(`rust-toolchain.toml`) and the locked Cargo dependencies. Then it runs
+`scripts/dev-tools.py` through `bootstrap/buildlib-run`, which is vendored
+from [laputa-systems/buildlib](https://github.com/laputa-systems/buildlib/blob/main/docs/bootstrap.md)
+at `50d8081`. The shim fetches the pinned CPython 3.15 and the
+laputa-buildlib wheel (`bootstrap/python.lock`) and checks each one's size
+and SHA-256 before using it. CPython comes from python-build on macOS,
+Alpine, and glibc hosts with musl 1.2.5 or newer (Debian 13, Ubuntu 26.04).
+With older musl (Ubuntu 24.04) it comes from the pinned uv. `dev-tools.py`
+then uses buildlib to fetch the Node pinned in `sources.lock.json`, and
+links `python3` and `node` into `~/.local/share/ctrs-dev/bin`. Where the
+pinned Node cannot run, it uses the distribution's `node` and says so.
+Both steps are safe to repeat. Run the setup again after clearing
+`~/.cache/laputa-buildlib`, since the linked `python3` lives there. On an
+Apple Silicon Mac, run `sh bootstrap/buildlib-run -- scripts/dev-tools.py`
+on its own.
+
+| Package | Consumer |
+| --- | --- |
+| build-essential / build-base, make | Rust native dependencies and `make test` |
+| ca-certificates, curl, tar, xz | rustup and the verified downloads |
+| git | clone and Git dependencies |
+| musl (Debian, Ubuntu) | loader for the pinned musl Python and Node, where musl is 1.2.5 or newer |
+| nodejs (Debian, Ubuntu; Alpine on ARM64) | JavaScript fixture tests when the pinned Node cannot run or has no build for the host |
+| docker.io / docker (only when `docker` is missing) | guest asset builds (`cargo xtask`) and engine integration tests |
+
+To change the Node version, edit its entries in `sources.lock.json`, in the
+[build repository lock format](https://github.com/laputa-systems/stuff/blob/main/docs/build-repos.md#pinned-inputs).
+To change Python or buildlib, copy `bootstrap/` again from buildlib.
+
+On a Linux host, as opposed to a container, `ctrs-init`'s
+`dns::tests::every_forwarded_query_has_its_own_port_and_its_answer_goes_back`
+binds `127.0.0.2:53`, so it needs root or
+`net.ipv4.ip_unprivileged_port_start` at 53 or lower. Docker containers
+already allow it.
+
+The musl cross-build also needs a Rust musl target; install it with
+`rustup target add` for your architecture. No compiler cache or custom
+linker is required for the default host tests.
+
 ## Build
 
 Needs Rust. The guest kernel and disk template additionally need a Docker

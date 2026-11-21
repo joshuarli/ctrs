@@ -9,6 +9,9 @@ on Linux the agent runs directly on the host kernel.
 
 ## Build
 
+For a fresh Alpine, Ubuntu or Debian development setup, see the
+[Linux development instructions](docs/development.md#linux-development-setup).
+
 Needs Rust (see `rust-toolchain.toml`). The guest kernel and disk template
 also need a Docker engine to build (any engine works); see
 [docs/development.md](docs/development.md).

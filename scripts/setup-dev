@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+
+if [ ! -r /etc/os-release ]; then
+    echo 'setup-dev requires Ubuntu, Debian or Alpine' >&2
+    exit 1
+fi
+. /etc/os-release
+
+if [ "$(id -u)" -eq 0 ]; then
+    as_root=
+elif command -v sudo >/dev/null 2>&1; then
+    as_root=sudo
+elif command -v doas >/dev/null 2>&1; then
+    as_root=doas
+else
+    echo 'setup-dev requires sudo or doas to install system packages' >&2
+    exit 1
+fi
+
+# bootstrap/buildlib-run and the pinned Node are musl builds. On Debian and
+# Ubuntu, musl 1.2.5 or newer (Debian 13, Ubuntu 26.04) lets them run; with
+# older musl the shim installs Python through uv and dev-tools.py uses the
+# distribution's nodejs. Node has no pinned build for ARM64 Linux.
+case " ${ID:-} ${ID_LIKE:-} " in
+    *' ubuntu '*|*' debian '*)
+        $as_root apt-get update
+        $as_root apt-get install -y build-essential ca-certificates curl git make musl nodejs tar xz-utils
+        command -v docker >/dev/null 2>&1 || $as_root apt-get install -y docker.io
+        ;;
+    *' alpine '*)
+        case "$(uname -m)" in aarch64|arm64) node_pkg=cmd:node ;; *) node_pkg= ;; esac
+        $as_root /sbin/apk add --no-cache build-base ca-certificates curl git make tar xz $node_pkg
+        command -v docker >/dev/null 2>&1 || $as_root /sbin/apk add --no-cache docker
+        ;;
+    *)
+        echo 'setup-dev requires Ubuntu, Debian or Alpine' >&2
+        exit 1
+        ;;
+esac
+
+if [ ! -x "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" ] && ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+fi
+PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+export PATH
+cd "$(dirname "$0")/.."
+rustup toolchain install --profile minimal
+cargo fetch --locked
+sh bootstrap/buildlib-run -- scripts/dev-tools.py

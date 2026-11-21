@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "inputs": [
+    {
+      "name": "node-x86_64-unknown-linux-musl",
+      "tool": "node",
+      "version": "26.12.1",
+      "target": "x86_64-unknown-linux-musl",
+      "url": "https://github.com/laputa-systems/node-build/releases/download/release-934b31ca1322638234fee6cfa8ee7ca5944f30cb/node-26.12.1-x86_64-unknown-linux-musl.tar.xz",
+      "sha256": "3e40d12063b2e8904da2cec2a198faafc616241d7df47cc4e2faf125ada0950b",
+      "size": 28388152,
+      "role": "dev-tool",
+      "license": "MIT",
+      "purpose": "JavaScript fixture tests"
+    },
+    {
+      "name": "node-aarch64-apple-darwin",
+      "tool": "node",
+      "version": "26.12.1",
+      "target": "aarch64-apple-darwin",
+      "url": "https://github.com/laputa-systems/node-build/releases/download/release-934b31ca1322638234fee6cfa8ee7ca5944f30cb/node-26.12.1-aarch64-apple-darwin.tar.xz",
+      "sha256": "095a2ba5aaa9436cebe6a893d2cfc9f92577ad7d1553ab14e2ba8f4883124a43",
+      "size": 22133348,
+      "role": "dev-tool",
+      "license": "MIT",
+      "purpose": "JavaScript fixture tests"
+    }
+  ]
+}

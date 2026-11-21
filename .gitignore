@@ -22,3 +22,6 @@ CLAUDE.local.md
 # Python
 __pycache__/
 *.pyc
+
+# Local build and test scratch
+/.work/
