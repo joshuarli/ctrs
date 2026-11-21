@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--job', type=Path, required=True)
     parser.add_argument('--duration', type=float, required=True,
                         help='seconds from launch to the work cutoff, including setup')
-    parser.add_argument('--engine', choices=('ctrs', 'orbstack'), required=True)
+    parser.add_argument('--engine', choices=('ctrs', 'orbstack', 'dockerd'), required=True)
     parser.add_argument('--portfolio-layout', type=Path, required=True)
     parser.add_argument('--worker-layout', type=Path, required=True)
     parser.add_argument('--ctrs-binary', type=Path, required=True)
@@ -39,6 +39,8 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.duration) or args.duration <= 0:
         parser.error('--duration must be finite and positive')
+    if args.engine == 'dockerd':
+        parser.error('mixed diagnostics are unsupported for dockerd; use the Linux lane W2, W6, W7 or W13')
     if args.qualification:
         if args.readiness is None:
             parser.error('qualification requires --readiness')

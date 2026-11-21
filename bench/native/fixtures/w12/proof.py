@@ -13,12 +13,14 @@ import runner
 import workspace
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--engine', choices=('orbstack', 'ctrs'))
+parser.add_argument('--engine', choices=('orbstack', 'ctrs', 'dockerd'))
 condition = parser.add_mutually_exclusive_group()
 condition.add_argument('--layout', choices=('full-bind', 'bind-source-volume-deps', 'all-volume'))
 condition.add_argument('--mount', choices=('bind', 'volume'))
 condition.add_argument('--all', action='store_true')
 args = parser.parse_args()
+if args.engine == 'dockerd':
+    parser.error('W12 is unsupported for dockerd; use the Linux lane W2, W6, W7 or W13')
 if args.all and args.engine or not args.all and (not args.engine or not (args.layout or args.mount)):
     parser.error('use --all or select --engine with --layout or --mount')
 os.environ['TMPDIR'] = str(root / '.work/tmp')

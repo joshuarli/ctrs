@@ -54,7 +54,14 @@ TRANSFER_TIMING = ("goodput_bytes_per_second", "completion_seconds")
 FAVORABLE = ("strict-win", "non-inferior")
 RESOURCE_METRICS = ["peak_total_rss_kb", "peak_phys_footprint_bytes",
                     "cpu_seconds_est"]
+LINUX_RESOURCE_METRICS = ["peak_anon_kernel_bytes", "peak_memory_current_bytes",
+                          "peak_memory_anon_bytes", "peak_memory_file_bytes",
+                          "peak_memory_kernel_bytes", "cpu_seconds_est"]
 IDENTITY_FIELDS = ("run_id", "host_id", "arch", "git_sha", "case", "state")
+
+
+def resource_metrics(record):
+    return LINUX_RESOURCE_METRICS if record.get('lane') == 'linux-amd64' else RESOURCE_METRICS
 
 
 W14_MODE_METRICS = {
@@ -86,6 +93,8 @@ def workload_params(record: dict):
 
 def cohort_identity(record: dict) -> dict:
     identity = {key: record.get(key) for key in IDENTITY_FIELDS}
+    if 'lane' in record:
+        identity['lane'] = record['lane']
     params = workload_params(record)
     # Seed varies between repetitions, but must match within a pair below.
     identity["workload_params"] = ({k: v for k, v in params.items() if k != "seed"}
@@ -152,13 +161,15 @@ def _number(value: object) -> bool:
 
 def _metric(record: dict, name: str):
     resources = record.get("resources", {})
-    if name in ("peak_phys_footprint_bytes", "cpu_seconds_est"):
+    if name in ("peak_phys_footprint_bytes", "cpu_seconds_est", *LINUX_RESOURCE_METRICS):
         if resources.get("ownership_verified") is not True:
             return None, "ownership not verified: " + str(resources.get("resource_errors", "missing resource errors"))
         if resources.get("resource_errors") != []:
             return None, "resource errors or missing error metadata: " + str(resources.get("resource_errors"))
         if name == "peak_phys_footprint_bytes" and resources.get("footprint_field") != "phys_footprint":
             return None, "footprint field is not phys_footprint"
+        if name == 'peak_anon_kernel_bytes' and resources.get('footprint_field') != 'anon+kernel':
+            return None, 'footprint field is not anon+kernel'
         if name == "cpu_seconds_est" and resources.get("cpu_counters_complete") is not True:
             return None, "CPU counters incomplete or missing completeness metadata"
     if name == "cpu_seconds_per_success" and record.get("case") == "W2":
@@ -177,7 +188,7 @@ def _metric(record: dict, name: str):
         if not requests or reads + writes != requests or errors:
             return None, "W2 success counts disagree or failures occurred"
         return cpu / requests, None
-    container = "resources" if name in RESOURCE_METRICS else "metrics"
+    container = "resources" if name in RESOURCE_METRICS + LINUX_RESOURCE_METRICS else "metrics"
     value = record.get(container, {}).get(name)
     return (value, None) if _number(value) and value > 0 else (None, "missing or invalid numeric value")
 
@@ -202,6 +213,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
                     side_of=None,
                     same_engine_required: bool = False) -> dict:
     side_of = side_of or (lambda record: record.get("engine"))
+    if identity.get('lane') == 'linux-amd64' and sides == ('ctrs', 'orbstack'):
+        sides = ('ctrs', 'dockerd')
     params = identity.get('workload_params')
     paired_w8 = (identity['case'] == 'W8' and isinstance(params, dict)
                  and params.get('fixture_version') == W8_PAIRED_FIXTURE)
@@ -291,7 +304,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
     if identity["case"] == "W11":
         result["note"] = "Reliability observations only; no request/window/churn speed verdicts."
         return result
-    metrics = [*case_metrics(identity["case"], params), *RESOURCE_METRICS]
+    metrics = [*case_metrics(identity["case"], params), *resource_metrics(identity)]
     if paired_w8:
         metrics = ["pull_to_health_s", "cpu_seconds_est", "peak_phys_footprint_bytes"]
         if identity["workload_params"].get("under_load"):
@@ -345,7 +358,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             incomplete_cpu = sum((pair[side].get("cpu_accounting") or {}).get("complete") is False for pair in valid)
             if incomplete_cpu and assessment in FAVORABLE + ("inconclusive",):
                 assessment = "incomplete"
-        complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success")
+        complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success", *LINUX_RESOURCE_METRICS)
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
             "missing_pairs": missing, "missing_reasons": missing_reasons, "assessment": assessment,
@@ -419,7 +432,7 @@ def analyze(records: list[dict], input_issues: list[str] | None = None) -> dict:
         if invalid or record.get("case") not in CASE_METRICS:
             result["input_issues"].append(f"record {index}: invalid identity/case ({', '.join(invalid)})")
             continue
-        if record.get("engine") not in ("ctrs", "orbstack"):
+        if record.get("engine") not in (('ctrs', 'dockerd') if record.get('lane') == 'linux-amd64' else ('ctrs', 'orbstack')):
             result["input_issues"].append(f"record {index}: unknown engine")
             continue
         if any(not isinstance(record.get(key, {}), dict) for key in ("metrics", "resources", "correctness")):
@@ -466,7 +479,7 @@ def analyze_noise(records: list[dict], input_issues: list[str] | None = None,
             result["input_issues"].append(
                 f"record {index}: invalid identity/case ({', '.join(invalid)})")
             continue
-        if record.get("engine") not in ("ctrs", "orbstack"):
+        if record.get("engine") not in (('ctrs', 'dockerd') if record.get('lane') == 'linux-amd64' else ('ctrs', 'orbstack')):
             result["input_issues"].append(f"record {index}: unknown engine")
             continue
         if record.get("slot") not in ("a", "b"):
@@ -623,8 +636,11 @@ def _anchor_key(record: dict) -> str:
     if isinstance(params, dict):
         identity["workload_params"] = {k: v for k, v in params.items() if v is not None}
     identity["fixture_version"] = (record.get("metrics") or {}).get("fixture_version")
-    return _canonical({k: identity[k] for k in ("host_id", "arch", "case", "state",
-                                                "workload_params", "builder_driver", "fixture_version")})
+    key = {k: identity[k] for k in ("host_id", "arch", "case", "state",
+                                   "workload_params", "builder_driver", "fixture_version")}
+    if 'lane' in identity:
+        key['lane'] = identity['lane']
+    return _canonical(key)
 
 
 def _admitted(records: list[dict]) -> dict[str, list[dict]]:
@@ -661,10 +677,10 @@ def analyze_anchor(anchor: list[dict], candidate: list[dict]) -> list[dict]:
     for key in sorted(before.keys() & after.keys()):
         case = json.loads(key)["case"]
         wanted = case_metrics(case, json.loads(key)["workload_params"])
-        for engine in ("ctrs", "orbstack"):
+        for engine in (('ctrs', 'dockerd') if before[key][0].get('lane') == 'linux-amd64' else ('ctrs', 'orbstack')):
             a = [r for r in before[key] if r.get("engine") == engine]
             c = [r for r in after[key] if r.get("engine") == engine]
-            for metric in wanted + [m for m in RESOURCE_METRICS if m not in wanted]:
+            for metric in wanted + [m for m in resource_metrics(before[key][0]) if m not in wanted]:
                 va = [v for v in (_metric(r, metric)[0] for r in a) if v is not None]
                 vc = [v for v in (_metric(r, metric)[0] for r in c) if v is not None]
                 if metric in HIGHER_BETTER:

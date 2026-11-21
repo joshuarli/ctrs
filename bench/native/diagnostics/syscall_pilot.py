@@ -349,7 +349,7 @@ def main():
     parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
     args = parser.parse_args()
     engines = args.engines.split(',')
-    if not 1 <= args.operations <= 100000 or len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
+    if not 1 <= args.operations <= 100000 or len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack', 'dockerd') for name in engines):
         parser.error('require 1..100000 operations and distinct supported engines')
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')

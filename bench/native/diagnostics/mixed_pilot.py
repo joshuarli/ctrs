@@ -70,7 +70,7 @@ def main():
         args.cycles = args.cycles or 2
         work_deadline = drain_deadline = cleanup_deadline = None
     engines = args.engines.split(',')
-    if len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack') for name in engines):
+    if len(set(engines)) != len(engines) or any(name not in ('ctrs', 'orbstack', 'dockerd') for name in engines):
         parser.error('require distinct supported engines')
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')

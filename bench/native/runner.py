@@ -24,6 +24,8 @@ import ownership
 import watch_loop
 import workspace
 import collect
+import linux_cgroups
+import linux_lane
 import resource_cells
 import resource_cycles
 import recovery_client
@@ -148,6 +150,8 @@ def ensure_pinned_source(source: dict, dest_dir: Path) -> Path:
     A present file with the wrong checksum is replaced only after the
     download verifies; a corrupt fetch never overwrites a good archive.
     """
+    if linux_lane.enabled():
+        dest_dir = WORK / 'linux-amd64-v1'
     target = dest_dir / source["file"]
     if target.is_file() and sha256_file(target) == source["sha256"]:
         return target
@@ -321,6 +325,8 @@ def pinned_api_image(engine) -> tuple[str, dict]:
     """The portfolio's np-v5/api image on `engine`, verified against its
     pinned config, manifest and layer digests, and the identity two engines'
     trials must share to pair."""
+    if linux_lane.enabled():
+        return linux_lane.image(engine, 'api')
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
     pin_path = FIXTURES / "w8-v5/portfolio.json"
     pin = json.loads(pin_path.read_text())["images"]["np-v5/api"]
@@ -589,8 +595,10 @@ class Engine:
 
     def __init__(self, name: str, run_id: str, fresh_dir: Path | None = None,
                  resource_lane: str = "matched", config_overrides: dict | None = None):
-        if name not in ("ctrs", "orbstack"):
+        if name not in linux_lane.ENGINES:
             raise ValueError(f"unknown engine {name!r}")
+        if name == 'dockerd' and not linux_lane.enabled():
+            raise ValueError('dockerd requires the explicit linux-amd64 lane; supported workloads are W2, W6, W7 and W13')
         if resource_lane not in RESOURCE_LANES:
             raise ValueError(f"unknown resource lane {resource_lane!r}")
         self.resource_lane = resource_lane
@@ -601,7 +609,11 @@ class Engine:
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
         self.recovery_root: Path | None = None
-        if name == "orbstack":
+        self.external = linux_lane.enabled() or name == 'dockerd'
+        if self.external:
+            self.dir = None
+            self.socket = 'unix://' + linux_lane.socket_path(name, fresh_dir, config_overrides)
+        elif name == "orbstack":
             self.dir = None
             self.socket = f"unix://{ORBSTACK_SOCK}"
         else:
@@ -735,6 +747,16 @@ class Engine:
             return None
 
     def ensure_up(self, timeout: float = 300.0) -> None:
+        if self.external:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    self.sh(['version'], timeout=30)
+                    return
+                except RuntimeError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
         if self.name == "orbstack":
             self.sh(["version"], timeout=30)
             return
@@ -778,6 +800,8 @@ class Engine:
             if overrides:
                 raise ValueError(f"installed-default lane forbids {', '.join(overrides)}")
         env.update(self.config_overrides)
+        if sys.platform == 'linux':
+            raise ValueError('Linux ctrs is externally managed; select --lane linux-amd64 and set CTRS_SOCKET')
         if res is not None:
             env.setdefault("CTRS_CPUS", str(res[0]))
             env.setdefault("CTRS_MEMORY_MIB",
@@ -815,6 +839,8 @@ class Engine:
         raise TimeoutError("ctrs daemon did not answer docker version")
 
     def stop(self) -> None:
+        if self.external:
+            raise ValueError('externally managed engine: daemon lifecycle is refused; use the documented Linux launcher')
         if self.proc is not None:
             self.proc.send_signal(signal.SIGTERM)
             try:
@@ -833,7 +859,7 @@ def project_name(run_id: str, engine: str, case: str) -> str:
 def relay_counts(engine) -> dict | None:
     """ctrs's per-path relay connection counts (`GET /ctrs/relays`), or
     None for another engine or a ctrs without the endpoint."""
-    if engine.name != "ctrs":
+    if linux_lane.enabled() or engine.name != "ctrs":
         return None
     reply = ctrs_request(engine, "GET", "/ctrs/relays")
     if reply is None or reply[0] != 200:
@@ -868,7 +894,7 @@ def wake_vm(engine) -> None:
     Ownership names the VM process, so discovery before the boot leaves the
     trial without resource samples; the boot itself stays outside the
     trial's samples."""
-    if engine.name != "ctrs":
+    if linux_lane.enabled() or engine.name != "ctrs":
         return
     reply = ctrs_request(engine, "POST", "/ctrs/wake", timeout=120)
     if reply is None or reply[0] != 204:
@@ -938,6 +964,23 @@ def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=(),
                   sampling=SamplingMode.PERIODIC):
     if not isinstance(sampling, SamplingMode):
         raise ValueError('require a SamplingMode')
+    if linux_lane.enabled():
+        if fixture_processes:
+            raise ValueError('Linux resources require cgroup ownership, not fixture process matching')
+        identity = linux_cgroups.discover(engine.name, Path(engine.socket.removeprefix('unix://')))
+        engine.measurement_identity = identity
+        engine.measurement_trace = None
+        identity_path = trial_dir / 'ownership.json'
+        identity_path.write_text(json.dumps(identity, indent=2) + '\n')
+        if sampling is SamplingMode.BOUNDARIES:
+            return None, None
+        trace, stderr = trial_dir / 'resources.jsonl', trial_dir / 'sampler.stderr'
+        engine.measurement_trace = trace
+        with stderr.open('wb') as errors:
+            process = subprocess.Popen([sys.executable, str(BENCH / 'linux_cgroups.py'),
+                                        '--ownership', str(identity_path), '--interval', '0.2',
+                                        '--out', str(trace)], stderr=errors)
+        return Sampler(process, trace, stderr), trace
     trace = trial_dir / "resources.jsonl"
     identity_path = trial_dir / "ownership.json"
     wake_vm(engine)
@@ -980,8 +1023,11 @@ def foreign_cpu(host_before, host_after, harness_before, harness_after, engine_c
     (itself and its waited-for children). Unlike the load average it does
     not count the engine's vCPU threads, so admitting on it does not
     select on the engine's own behavior."""
-    import macos_counters
-    busy = macos_counters.busy_cores(host_before, host_after, os.cpu_count())
+    if linux_lane.enabled():
+        busy = linux_cgroups.busy_cores(host_before, host_after, os.cpu_count())
+    else:
+        import macos_counters
+        busy = macos_counters.busy_cores(host_before, host_after, os.cpu_count())
     if busy is None or engine_cpu is None or wall <= 0:
         return {"foreign_cpu_cores": None, "host_busy_cores": busy}
     harness = harness_after - harness_before
@@ -991,7 +1037,10 @@ def foreign_cpu(host_before, host_after, harness_before, harness_after, engine_c
 
 @contextmanager
 def resource_phase(engine, rec, name):
-    import macos_counters
+    if linux_lane.enabled():
+        macos_counters = linux_cgroups
+    else:
+        import macos_counters
     identity = engine.measurement_identity
     before = collect.cpu_boundary(identity)
     host_before, harness_before = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
@@ -1002,7 +1051,8 @@ def resource_phase(engine, rec, name):
         ended = time.monotonic()
         host_after, harness_after = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
         after = collect.cpu_boundary(identity)
-        result = collect.cpu_delta(before, after)
+        result = (linux_cgroups.phase_delta(before, after, engine.measurement_trace)
+                  if linux_lane.enabled() else collect.cpu_delta(before, after))
         result.update({"operation_started_monotonic": started,
                        "operation_ended_monotonic": ended,
                        "operation_wall_seconds": ended - started})
@@ -1034,7 +1084,8 @@ def stop_sampler(sampler: Sampler) -> None:
         try:
             receipt = json.loads(collect.stop_receipt_path(sampler.trace).read_text())
             received = receipt.get('stop_requested_monotonic')
-            if (receipt.get('pid') != proc.pid or receipt.get('sampler_version') != collect.SAMPLER_VERSION
+            expected_version = linux_cgroups.VERSION if linux_lane.enabled() else collect.SAMPLER_VERSION
+            if (receipt.get('pid') != proc.pid or receipt.get('sampler_version') != expected_version
                     or type(received) not in (int, float) or not requested <= received <= time.monotonic()):
                 raise ValueError('stop receipt does not acknowledge this request')
         except (OSError, ValueError, AttributeError) as exc:
@@ -1064,6 +1115,8 @@ def summarize_trace(trace: Path) -> dict:
             records.append(json.loads(line))
         except json.JSONDecodeError:
             errors.append(f"malformed sample {number}")
+    if any(r.get('sampler_version') == linux_cgroups.VERSION for r in records):
+        return linux_cgroups.summarize(records + [{'errors': errors}])
     peak_rss = 0
     footprints = []
     cpu = 0.0
@@ -1157,6 +1210,8 @@ W1_FIXTURE_VERSION = "w1-v2-pinned-restart"
 
 
 def prepare_pinned_stack(engine, override, *, layout=None):
+    if linux_lane.enabled():
+        return linux_lane.stack(engine, override)
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
 
     pin_path = FIXTURES / "w8-v5/portfolio.json"
@@ -1918,12 +1973,15 @@ def trial_w7(ctx, engine: Engine, state: str,
         rec["metrics"]["fixture_version"] = fixture_version
         sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
                    for name, spec in W7_APPS.items()}
-        for spec in W7_APPS.values():
-            for image in (spec["builder_image"], spec["runtime_image"]):
-                cp = engine.sh(["image", "inspect", image], timeout=30,
-                               check=False)
-                if cp.returncode != 0:
-                    engine.sh(["pull", image], timeout=900)
+        if linux_lane.enabled():
+            rec['inputs'] = {'linux_build_images': linux_lane.build_images(engine, ('rust', 'debian', 'python'))}
+        else:
+            for spec in W7_APPS.values():
+                for image in (spec["builder_image"], spec["runtime_image"]):
+                    cp = engine.sh(["image", "inspect", image], timeout=30,
+                                   check=False)
+                    if cp.returncode != 0:
+                        engine.sh(["pull", image], timeout=900)
         sampler, trace = start_sampler(engine, trial_dir)
 
         rec["metrics"]["cache_mode"] = "no-cache-base-images-retained"
@@ -1946,7 +2004,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                 flags = ["--no-cache"] if condition == "uncached" else []
                 with resource_phase(engine, rec, f"{cell}_build"):
                     build = engine.sh(build_args(engine, driver, [
-                        *flags, "--progress=rawjson", "--platform", "linux/arm64", "--label", f"{label}={label_value}",
+                        *flags, "--progress=rawjson", "--platform", "linux/amd64" if linux_lane.enabled() else "linux/arm64", "--label", f"{label}={label_value}",
                         "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
                     ]), timeout=1800, check=False)
                 rec["metrics"][f"{cell}_s"] = rec["resources"]["phases"][f"{cell}_build"]["operation_wall_seconds"]
@@ -2054,19 +2112,25 @@ def trial_w6(ctx, engine: Engine, state: str,
     try:
         if build_cache not in ("uncached", "warm"):
             raise ValueError("W6 build cache must be uncached or warm")
-        with (BENCH / "assets.lock").open("rb") as lock:
-            artifact_pins = tomllib.load(lock)["artifacts"]["w6"]
+        if linux_lane.enabled():
+            artifact_pins = linux_lane.read_lock()['artifacts']
+        else:
+            with (BENCH / "assets.lock").open("rb") as lock:
+                artifact_pins = tomllib.load(lock)["artifacts"]["w6"]
         zlib_src = ensure_pinned_source(W6_ZLIB_SOURCE, W6_DIR)
         rust_src = ensure_pinned_source(W6_RUST_SOURCE, W6_DIR)
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
-        for image in (W6_RUST_IMAGE, W6_IMAGE):
-            cp = engine.sh(["image", "inspect", image], timeout=30,
-                           check=False)
-            if cp.returncode != 0:
-                engine.sh(["pull", image], timeout=900)
+        if linux_lane.enabled():
+            rec['inputs'] = {'linux_build_images': linux_lane.build_images(engine, ('rust', 'gcc'))}
+        else:
+            for image in (W6_RUST_IMAGE, W6_IMAGE):
+                cp = engine.sh(["image", "inspect", image], timeout=30,
+                               check=False)
+                if cp.returncode != 0:
+                    engine.sh(["pull", image], timeout=900)
         builds = (
             ("rust", W6_DIR / "rust" / "Dockerfile", rust_src,
              W6_RUST_SOURCE["file"], tag_rust, "/src/target/release/hyperfine"),
@@ -2089,7 +2153,7 @@ def trial_w6(ctx, engine: Engine, state: str,
             ctx_dir, _ = contexts[name]
             flags = [] if cached else ["--no-cache"]
             return engine.sh(build_args(engine, driver, [
-                *flags, "--progress=rawjson", "--platform", "linux/arm64",
+                *flags, "--progress=rawjson", "--platform", "linux/amd64" if linux_lane.enabled() else "linux/arm64",
                 "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
             ]), timeout=1800, check=False)
 
@@ -3326,9 +3390,9 @@ class RunContext:
             "runner_sha256": sha256_file(Path(__file__)),
             "build_outputs": {"ctrs_binary_sha256": sha256_file(CTRS_BIN),
                               **guest_provenance()},
-            "sampler_sha256": sha256_file(COLLECT),
-            "ownership_collector_sha256": sha256_file(BENCH / "ownership.py"),
-            "counter_module_sha256": sha256_file(BENCH / "macos_counters.py"),
+            "sampler_sha256": sha256_file(BENCH / 'linux_cgroups.py') if linux_lane.enabled() else sha256_file(COLLECT),
+            "ownership_collector_sha256": sha256_file(BENCH / ('linux_cgroups.py' if linux_lane.enabled() else 'ownership.py')),
+            "counter_module_sha256": sha256_file(BENCH / ('linux_cgroups.py' if linux_lane.enabled() else 'macos_counters.py')),
             "worktree_dirty": bool(subprocess.run(
                 ["git", "status", "--porcelain", "--untracked-files=normal"],
                 cwd=REPO, capture_output=True, text=True).stdout.strip()),
@@ -3439,6 +3503,14 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
             slot: str | None = None, **kw) -> dict:
+    if linux_lane.enabled():
+        linux_lane.require_case(engine_name, case_id, cold)
+        if case_id == 'W2':
+            kw['pinned_stack'] = True
+        for role in linux_lane.read_lock()['images']:
+            linux_lane.image(Engine(engine_name, ctx.run_id), role)
+    elif engine_name == 'dockerd':
+        raise ValueError('dockerd requires the explicit linux-amd64 lane')
     trials = {"W1": trial_w1, "W2": trial_w2, "W3": trial_w3, "W3-v4": storage_v4.trial_w3_v4,
               "W4": trial_w4, "W5": trial_w5, "W6": trial_w6,
               "W7": trial_w7, "W8": trial_w8, "W9": trial_w9,
@@ -3486,11 +3558,19 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
                             fresh_dir=candidate_dir(overrides) if overrides else None,
                             config_overrides=overrides)
             ctx.engines[key] = engine
-        stop = not keep_warm
+        stop = not keep_warm and not linux_lane.enabled()
     try:
         relays_before = relay_counts(engine) if engine.name == "ctrs" else None
         rec = trial(ctx, engine, state, **kw)
-        if engine.name == "ctrs":
+        if linux_lane.enabled():
+            rec['lane'] = 'linux-amd64'
+            rec['workload_params']['lane'] = 'linux-amd64'
+            rec['provenance']['linux_host'] = linux_cgroups.host_metadata()
+            rec['provenance']['linux_fixture_lock_sha256'] = sha256_file(linux_lane.LOCK)
+            rec['resources']['sampler_version'] = linux_cgroups.VERSION
+            rec['resources']['ownership'] = getattr(engine, 'measurement_identity', None)
+            rec['cpu_accounting'] = {'complete': False, 'reason': 'cgroup samples exclude uncharged host-kernel CPU; exited scopes are lower bounds'}
+        elif engine.name == "ctrs":
             rec["cpu_accounting"] = cpu_accounting(relays_before, relay_counts(engine))
         rec["pair_id"] = pair_id
         rec["order_index"] = order_index
@@ -3762,7 +3842,10 @@ def held() -> list[Path]:
 def idle_host_busy_cores(window: float = 5.0) -> float | None:
     """Cores busy across the host over `window` seconds while no trial runs:
     other work plus the engines at idle."""
-    import macos_counters
+    if linux_lane.enabled():
+        macos_counters = linux_cgroups
+    else:
+        import macos_counters
     before = macos_counters.host_cpu_ticks()
     time.sleep(window)
     return macos_counters.busy_cores(before, macos_counters.host_cpu_ticks(), os.cpu_count())
@@ -3905,7 +3988,8 @@ def cmd_baseline(args) -> int:
                 break
     finally:
         for engine in ctx.engines.values():
-            engine.stop()
+            if not linux_lane.enabled():
+                engine.stop()
     print(f"results: {ctx.jsonl}")
     return 1 if failed else 0
 
@@ -4031,18 +4115,20 @@ def run_component_check(component: str, timeout: int = CHECK_TIMEOUT_SECONDS,
 def main() -> int:
     global DOCKER
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--lane', choices=('macos-arm64', 'linux-amd64'), default='macos-arm64')
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("preflight")
     sub.add_parser("validate-manifest", help="offline contract syntax/hash check; no Docker required")
 
     p = sub.add_parser("prepare")
+    p.add_argument('--linux-archive', type=Path, help='restore the hash-verified frozen Linux image archive')
     p.add_argument("--engines", default="ctrs,orbstack")
     p.add_argument("--only", help="W4,W5: build just those inputs; leaves pulls, the API image and the W8 portfolio alone")
 
     p = sub.add_parser("run")
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
-    p.add_argument("--engine", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--engine", required=True, choices=linux_lane.ENGINES)
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
     p.add_argument("--cold", action="store_true",
@@ -4063,8 +4149,8 @@ def main() -> int:
 
     p = sub.add_parser("baseline")
     p.add_argument("--case", required=True, choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W12-watch", "W13", "W13-overlap", "W14"])
-    p.add_argument("--a", required=True, choices=["ctrs", "orbstack"])
-    p.add_argument("--b", required=True, choices=["ctrs", "orbstack"])
+    p.add_argument("--a", required=True, choices=linux_lane.ENGINES)
+    p.add_argument("--b", required=True, choices=linux_lane.ENGINES)
     p.add_argument("--max-pairs", type=int,
                    help="keep running pairs past --pairs until --pairs of them are admitted "
                         "(correct and uncontended) or this many have run; every pair stays in the record")
@@ -4133,12 +4219,12 @@ def main() -> int:
     p = sub.add_parser("w8-cancel", help="verify interrupted W8 delivery and retry on one engine")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
-    p.add_argument("--engine", choices=("ctrs", "orbstack"), required=True, help="engine for this functional check")
+    p.add_argument("--engine", choices=linux_lane.ENGINES, required=True, help="engine for this functional check")
     p.add_argument("--content", choices=("retained", "derived"), required=True,
                    help="reuse original layers except the interrupted layer, or derive every layer")
 
     p = sub.add_parser("noop")
-    p.add_argument("--engine", default="ctrs", choices=["ctrs", "orbstack"])
+    p.add_argument("--engine", default="ctrs", choices=linux_lane.ENGINES)
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--case", default="W1", choices=["W1", "W2", "W3", "W3-v4", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11"])
     p.add_argument("--pairs", type=int, default=2)
@@ -4242,9 +4328,9 @@ def main() -> int:
         ap.error("--write-ratio must be between 0 and 1")
     if hasattr(args, "engines"):
         engines = [name.strip() for name in args.engines.split(",")]
-        if (not engines or any(name not in ("ctrs", "orbstack") for name in engines)
+        if (not engines or any(name not in linux_lane.ENGINES for name in engines)
                 or len(set(engines)) != len(engines)):
-            ap.error("--engines requires distinct ctrs and/or orbstack entries")
+            ap.error("--engines requires distinct ctrs, orbstack and/or dockerd entries")
         args.engines = ",".join(engines)
     if getattr(args, "cold", False) or getattr(args, "state", "warm") == "cold":
         if (args.cmd != "run" or args.engine != "ctrs" or not args.cold
@@ -4252,13 +4338,27 @@ def main() -> int:
             ap.error("engine-cold is only supported by run --engine ctrs --cold "
                      "(except W8); a shared OrbStack cold comparison is unavailable")
         args.state = "cold"
-    if args.cmd != "preflight" and os.uname().sysname != "Darwin":
+    if args.lane == 'linux-amd64':
+        if sys.platform != 'linux' or os.uname().machine != 'x86_64':
+            ap.error('linux-amd64 requires native x86_64 Linux; no architecture fallback')
+        os.environ['NP_BENCH_LANE'] = args.lane
+        if args.cmd not in ('run', 'baseline', 'prepare'):
+            ap.error('Linux lane supports prepare, run and baseline only')
+        if getattr(args, 'case', None):
+            try:
+                for engine in ([args.a, args.b] if args.cmd == 'baseline' else [args.engine]):
+                    linux_lane.require_case(engine, args.case, getattr(args, 'cold', False))
+            except ValueError as exc:
+                ap.error(str(exc))
+    elif args.cmd != "preflight" and os.uname().sysname != "Darwin":
         ap.error("runtime commands require macOS; use validate-manifest/report offline")
     DOCKER = find_docker()
     RESULTS.mkdir(parents=True, exist_ok=True)
     if args.cmd == "preflight":
         return cmd_preflight(args)
     if args.cmd == "prepare":
+        if linux_lane.enabled():
+            return linux_lane.prepare(Engine, WORK, sys.modules[__name__], args.linux_archive)
         return cmd_prepare(args)
     if args.cmd == "run":
         return cmd_run(args)

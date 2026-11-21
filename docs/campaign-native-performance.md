@@ -1,5 +1,66 @@
 # Campaign: beat OrbStack on macOS
 
+## Linux lane (dockerd)
+
+`linux-amd64` is a separate native-host pilot lane for W2, W6, W7 and W13.
+It never closes macOS gates, and its samples must not pool with macOS samples.
+Both engines use the host CPU and memory without a VM cap; run metadata records
+the host allocation. The harness never starts, stops or reconfigures dockerd.
+Linux ctrs is externally managed and requires `CTRS_SOCKET`; fresh roots,
+configuration candidates and engine-cold trials are refused.
+
+From the Linux-lane worktree, with the development environment loaded:
+
+```sh
+BIN=/home/ubuntu/repos/ctrs/.work/wt/forward/target/linux-x86_64/release/ctrs
+RUN="$PWD/.work/engine"
+bench/native/linux/ctrs-engine.sh start "$BIN" "$RUN"
+export CTRS_SOCKET="$RUN/docker.sock"
+sudo -n env PATH="$PATH" CTRS_SOCKET="$CTRS_SOCKET" \
+  python3 bench/native/runner.py --lane linux-amd64 prepare
+sudo -n env PATH="$PATH" CTRS_SOCKET="$CTRS_SOCKET" \
+  python3 bench/native/runner.py --lane linux-amd64 baseline \
+  --a ctrs --b dockerd --case W2 --operations 1000 --pairs 1
+bench/native/linux/ctrs-engine.sh stop "$BIN" "$RUN"
+```
+
+Preparation is untimed: the same source fixtures build once on dockerd, an
+archive imports identical image bytes into ctrs, and reference builds freeze
+native artifact hashes before any trial. `linux/fixtures.lock.json` is the
+separate versioned Linux/amd64 lock; macOS locks remain unchanged. Preparation
+refuses to replace an existing lock. Preserve the archive under
+`.work/native-perf/linux-amd64-v1/` with its recorded SHA-256. Do not regenerate
+expected hashes from measured output. Another architecture requires a new lane,
+not a fallback or emulation. Use W6, W7 or W13 for the remaining pilots, without
+the W2-only `--operations` flag.
+To restore an already frozen lane instead of creating a new lock, use the same
+prepare command with `--linux-archive .work/native-perf/linux-amd64-v1/images.tar`.
+The archive must match the committed hash; restoration never updates the lock.
+
+Sampler `2-linux-cgroup-v2-memory-stat` reads `cpu.stat usage_usec`,
+`memory.current`, optional `memory.peak` and `memory.stat` every 200 ms. Dockerd
+owns `docker.service`, `containerd.service`, `docker-<id>.scope` containers,
+`system.slice:docker:*` BuildKit siblings and other verified Docker transients.
+Every sample rediscovers task cgroups through docker.service process ancestry
+or verified containerd `moby` shims. Names alone cannot establish ownership;
+new empty Docker scopes require container-ID confirmation through the owned
+engine's read-only API before process movement can establish ancestry.
+Empty BuildKit siblings require matching OCI `cgroupsPath` in executor metadata
+under the owned engine's API-reported `DockerRootDir`, with safe owner/mode and
+no symlink traversal. Previously verified empty groups retain inode continuity.
+Unknown members, overlapping roots and incomplete coverage invalidate samples.
+Ctrs owns its dedicated
+delegated unit, including `ctrs-host` and container descendants. Nested or
+overlapping ownership is refused. `memory.stat` anon, file and kernel charges
+are recorded separately for both engines. The primary footprint analog is the
+peak coincident sum of **anon + kernel** (`peak_anon_kernel_bytes`), not page
+cache-inclusive `memory.current`, which remains a secondary column. This is
+not macOS physical footprint. `memory.peak` is a cgroup-lifetime high-water
+mark, not a reset trial peak. CPU for exited Docker scopes is a sampled lower
+bound, and uncharged host-kernel/interrupt work remains outside engine counters.
+`/proc/stat` supplies host busy/foreign CPU. These limitations prevent resource
+qualification claims from these pilots.
+
 **Paused 2026-11-20 by the owner; no gate has passed.** The standing at the pause and the resume steps (Linux or Mac) are in [the progress file](native-performance-progress.md#wound-down-2026-11-20). This contract still applies when the campaign resumes. Before the pause it read: active 2026-11-17 after owner resume; this is the current execution contract. It supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and

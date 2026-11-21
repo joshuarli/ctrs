@@ -1,0 +1,151 @@
+{
+  "schema": 1,
+  "fixture_version": "linux-amd64-v1",
+  "platform": "linux/amd64",
+  "prepared_utc_epoch": 1795242607.4853396,
+  "archive_sha256": "db2e9595045d4dac8458dc1abdf45cdd11b21a2e13b75ea2ac89b787901c35ae",
+  "seed_sha256": "0eb763cb8d0a9dcd093b6f364a56aa8f1e43e41d4d4d1dad853b4797d550210e",
+  "api_sources": {
+    "Dockerfile": "63f459dfe0272ea8373b3f0b03d060d51ac2e995caed03eb47a420cca1c99e44",
+    "app.py": "d160d030f8598f37d3d1a0706c6d10acf5b1545d33a4ed667a06eaa5d9d7f351",
+    "requirements.txt": "b9775ff8524dc8addc4c8fdafb7a86c5a2940ad5b557c2a47db2ee836c51f1b7"
+  },
+  "images": {
+    "db": {
+      "reference": "postgres:17-alpine",
+      "diff_ids": [
+        "sha256:75f1d9657d880da5f75298e8f40e9928bb6e260c50d26f97af196845307e3064",
+        "sha256:49e89b68f3e96515abbb5a0c6f9dfb7d07d460aeb66332f49cd055981843bf5e",
+        "sha256:3ff9db87daca41e8e9e348632ab512bdf2b4cba49db6e1d36b056d4fd58c2757",
+        "sha256:286cd51193e58cdf34c624d3406595111589ed58083805cda02b0116c274e10b",
+        "sha256:32c03b3f67c306c869729cbcc4a787b6813d1402fce00c4ff41d52c614d58158",
+        "sha256:b36c870d5b584f85abeebd9d24ca834a7665f58028ab87d619923a525e37e319",
+        "sha256:8100beda58affcb5d8e978e651db12ec5b17af5b0077811baf644d25220bdf65",
+        "sha256:1cd791314a258a328da9e9772be0bed9a32a55216a42bd3683ba681477d08aaf",
+        "sha256:15d547b5af36b5ef53d2888da9e2a37a4dbf08f96e50819317ce2c68d09b95ae"
+      ],
+      "ids": {
+        "dockerd": "sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32",
+        "ctrs": "sha256:fa7e2700e906190f900a3c9d47e87f9032cfa38b60d9ac25129a357f85c2da8c"
+      }
+    },
+    "cache": {
+      "reference": "redis:7-alpine",
+      "diff_ids": [
+        "sha256:fdc5834cb53a4bde074c41b5baf85f9d5cece29df379fecafea8c396ba8c29d9",
+        "sha256:b8e109153b2f53c41944da1aec4aab197dc43034ce5cd0b301cd3c6d2b24f02b",
+        "sha256:41e3919d346001d4238c77daae4fb2dcdcb9ca0dc8eeeddfaa53e46234371dfc",
+        "sha256:13fc045c0068bc0d5e18cb1c7d9935e8ae45079e3bde40fb189109ee23aed952",
+        "sha256:75e0551a2133bba6c6c1ab72a93aefb46028cc4ca43056de0e3d7ed35f6c55dd",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:b9a554fbbd68afa59d5177b417a22d4ee161d965f5a1dc6bd500793046f0e2d1"
+      ],
+      "ids": {
+        "dockerd": "sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+        "ctrs": "sha256:bb8953020f6597e47d5d699a9910a25d77a69608dbd58e0f722940598ed85fc0"
+      }
+    },
+    "rust": {
+      "reference": "rust:1.100.0-bookworm",
+      "diff_ids": [
+        "sha256:05f9043663c0a4a3f7a75f1fe7cf08b5a69419f2e31425412598b5443e1887bc",
+        "sha256:74a1cce49db916676932c971e576f97b650bfdb55e355ee56d3b022d4c01ad1f",
+        "sha256:131853779658ab455b50696ca52922ea83febf8922703598ea672657331befbc",
+        "sha256:425acb6907fb99cde300a0ee88d416fd72a6a60315a9b777aaf84d842d88a288",
+        "sha256:fee7fccad48d5aee19d8a4c269ec98c39ee3d9c91b71961bb0afa62bbb5feecc"
+      ],
+      "ids": {
+        "dockerd": "sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea",
+        "ctrs": "sha256:9a1b4f2e690d8ffe0b1dae1a72750318928a9b5d94ebf7539dbb4f4c765104da"
+      }
+    },
+    "gcc": {
+      "reference": "gcc:14.2.0-bookworm",
+      "diff_ids": [
+        "sha256:2f7436e79a0bc6cdec6536da54ae6a5863c8e3b5f145e0f8ac0b96306baddbc9",
+        "sha256:6428cc293366f93395949a2d1efd9b89c898c7a4a124051c3793c1faf7664269",
+        "sha256:e4dc8cd9ecc886f56babec383662506d94a28645c1a31085deaf7870366ec225",
+        "sha256:ce84ba212e49beebef47aad10b1e672eb0532e91d313994f6db7fb16e16c7a78",
+        "sha256:672491602f0be7cc69184ffd406bfe748a59ad03e629ceccbeb5c1071e053b23",
+        "sha256:79dba64e8de8eac0483ce43adf7c4141ee001aa76fad72c9b2e563d62d77de0a",
+        "sha256:a6bdd755f640310c33caa5eb6b7cc1974688f3fdaaf4ddad30310954a18ae51f",
+        "sha256:ff67e8e892306fcbd55ce570cbb647074fd0c658cd86611c9fb028fc1216d6e0"
+      ],
+      "ids": {
+        "dockerd": "sha256:b99b86a28812b1e6453a231a947dc43d76fe192788a12f344a9b568bf9f5d24c",
+        "ctrs": "sha256:b68c134517a27e91bb2568eb4b46073dfb48d9aa740423ec13b0da6442d643fb"
+      }
+    },
+    "python": {
+      "reference": "python:3.13-slim",
+      "diff_ids": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:ba2541ec790ab743d0e3ee06e9eb5b3e8343b1fdc09cb65853c7c90803bbff00",
+        "sha256:963bbe74d7fd1230e35556a68a082c3c38f483207d18f981eb8a966fa9868b2f",
+        "sha256:be42025181029a31b54804a781dadf85528fb4d251f42ad239a3b1219740c2b7"
+      ],
+      "ids": {
+        "dockerd": "sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90",
+        "ctrs": "sha256:c0e8df9380519cf514d5fbb5aeaa7aa5de5f32c50330badcadc05cdabaae5566"
+      }
+    },
+    "debian": {
+      "reference": "debian:bookworm-slim",
+      "diff_ids": [
+        "sha256:1d7b9dd8778ebc4d9bf2f64436dd358640718cb349f5640b33bebaea4ffd62c2"
+      ],
+      "ids": {
+        "dockerd": "sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc",
+        "ctrs": "sha256:43f84a0b210f98845ef003912981774c95efe439eaa4b1cb62cf803fd46fc82a"
+      }
+    },
+    "api": {
+      "reference": "np-linux-v1/api:prepared",
+      "diff_ids": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:ba2541ec790ab743d0e3ee06e9eb5b3e8343b1fdc09cb65853c7c90803bbff00",
+        "sha256:963bbe74d7fd1230e35556a68a082c3c38f483207d18f981eb8a966fa9868b2f",
+        "sha256:be42025181029a31b54804a781dadf85528fb4d251f42ad239a3b1219740c2b7",
+        "sha256:9028bd61e943f279892ea59b4ac90864e2328b4a5d38de6e0876ffdc05e9e630",
+        "sha256:8d3e95bef4816fca196b6c06c2dc7b3a7614dbd07742ebbb9253ad4128d1a673",
+        "sha256:3f23e3c870e2f0687170e04964977dd9345e1213a51f4093f1ccfd06a5871f93",
+        "sha256:c8022444e103631798d65ca512c31f0c7900dfc767589d3d741ecabb349d2f6a"
+      ],
+      "ids": {
+        "dockerd": "sha256:edd3f7624170cb696e92eef1ef90dfa2b9d52230f0a665bcb750098b6b63ba91",
+        "ctrs": "sha256:3fb8052b20e2579a3b736cf314fed240fbd307be970a82e0c5d2e8eedd534910"
+      }
+    }
+  },
+  "artifacts": {
+    "rust": "02e9086c9e2db55b2b692fc635f342c8aaf954df74ca5a3103adb14bdd7d2e0e",
+    "zlib": "196fc7ac9889ad5b0a77c10d9794254e7169e5aa25c5294abdd8d4411554278c"
+  },
+  "inputs": {
+    "rust": {
+      "source_sha256": "f4b71df3c78e4cf752ca6fb6ebc4b025f7ea6a5ca5c48fea75f8a1fdb4c7d721",
+      "dockerfile_sha256": "624c8454df1215228e40bbc1e120bca207bba1e06e0f130856086d4ad349fcc9"
+    },
+    "zlib": {
+      "source_sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+      "dockerfile_sha256": "7b8880b7855f1ed7e2885b2a339aa3db79544a1b88f2b135e45f1b5f109ed887"
+    }
+  },
+  "files": {
+    "fixtures/w6/Dockerfile": "7b8880b7855f1ed7e2885b2a339aa3db79544a1b88f2b135e45f1b5f109ed887",
+    "fixtures/w6/rust/Dockerfile": "624c8454df1215228e40bbc1e120bca207bba1e06e0f130856086d4ad349fcc9",
+    "fixtures/w7/hyperfine/Dockerfile": "a8da5bfa5300b6fb5b5e80045456b3b45cc024f66b2362e77495a4a85881378c",
+    "fixtures/w7/httpie/Dockerfile": "32bfc602b6934c08e535ef3c31fc53a51cbe8f69ee551b02df30ef7a4cc72d44",
+    "fixtures/w1/seed.sql": "0eb763cb8d0a9dcd093b6f364a56aa8f1e43e41d4d4d1dad853b4797d550210e",
+    "fixtures/w1/api/Dockerfile": "63f459dfe0272ea8373b3f0b03d060d51ac2e995caed03eb47a420cca1c99e44",
+    "fixtures/w1/api/app.py": "d160d030f8598f37d3d1a0706c6d10acf5b1545d33a4ed667a06eaa5d9d7f351",
+    "fixtures/w1/api/requirements.txt": "b9775ff8524dc8addc4c8fdafb7a86c5a2940ad5b557c2a47db2ee836c51f1b7"
+  },
+  "host": {
+    "ncpu": 8,
+    "mem_total_bytes": 33655406592,
+    "resource_lane": "native-host-no-vm-cap",
+    "kernel": "6.8.0-1060-aws",
+    "cgroup_version": 2
+  }
+}

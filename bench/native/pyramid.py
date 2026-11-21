@@ -135,7 +135,14 @@ def w9_image_ref() -> str | None:
     return next((line for line in out.split() if line.endswith("/np-v5/marked@" + ci_jobs.IMAGE_DIGEST)), None)
 
 
-def registry() -> list[Workload]:
+def registry(lane='macos-arm64') -> list[Workload]:
+    if lane == 'linux-amd64':
+        return [Workload(name, 'change', 'linux', 'native Linux pilot; never a macOS gate',
+                         120, 2, 'estimated', ('python', 'docker-cli', 'linux-engines'),
+                         argv=(sys.executable, str(RUNNER), '--lane', lane, 'baseline',
+                               '--a', 'ctrs', '--b', 'dockerd', '--pairs', '1', '--case', case))
+                for name, case in (('w2-api', 'W2'), ('w6-build', 'W6'),
+                                   ('w7-buildx', 'W7'), ('w13-transfer', 'W13'))]
     items = [
         Workload("harness-tests", "edit", "harness", "the harness's parsing, pairing, gates and cleanup",
                  34, 1, "observed", ("python",),
@@ -249,6 +256,11 @@ def check_requirement(key: str) -> tuple[str, str]:
     """Return (status, message): status is ok, fail or warn."""
     if key == "python":
         return ("ok", sys.version.split()[0]) if sys.version_info >= (3, 11) else ("fail", "Python 3.11+ required")
+    if key == 'linux-engines':
+        if sys.platform != 'linux' or os.uname().machine != 'x86_64':
+            return 'fail', 'linux-amd64 requires native x86_64 Linux'
+        endpoints = [Path('/var/run/docker.sock'), Path(os.environ.get('CTRS_SOCKET', '/missing-ctrs-socket'))]
+        return ('ok', '') if all(p.is_socket() for p in endpoints) else ('fail', 'start external ctrs and supply CTRS_SOCKET; dockerd must already be running')
     if key == "macos-arm64":
         u = os.uname()
         ok = u.sysname == "Darwin" and u.machine == "arm64"
@@ -456,6 +468,7 @@ def render(summary: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--lane', choices=('macos-arm64', 'linux-amd64'), default='macos-arm64')
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("list", "check", "run"):
         p = sub.add_parser(name)
@@ -467,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["run"].add_argument("--quiet-timeout", type=float, default=7200,
                                     help="seconds a scenario workload waits for a quiet host")
     args = parser.parse_args(argv)
-    items = registry()
+    items = registry(args.lane)
     if args.command == "list":
         chosen = [w for w in items
                   if (args.tier is None or TIERS.index(w.tier) <= TIERS.index(args.tier))

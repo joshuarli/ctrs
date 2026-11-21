@@ -118,7 +118,7 @@ def main():
     parser.add_argument('--engines', default='ctrs,orbstack')
     args = parser.parse_args()
     engines = args.engines.split(',')
-    if len(set(engines)) != len(engines) or any(e not in ('ctrs', 'orbstack') for e in engines):
+    if len(set(engines)) != len(engines) or any(e not in ('ctrs', 'orbstack', 'dockerd') for e in engines):
         parser.error('distinct valid engines required')
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')

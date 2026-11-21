@@ -110,7 +110,7 @@ def main():
     parser.add_argument('--orbstack-storage-file', type=Path, action='append', default=[])
     args = parser.parse_args()
     engines = args.engines.split(',')
-    if (not engines or len(set(engines)) != len(engines) or any(e not in ('ctrs', 'orbstack') for e in engines)
+    if (not engines or len(set(engines)) != len(engines) or any(e not in ('ctrs', 'orbstack', 'dockerd') for e in engines)
             or not 1 <= args.cycles <= 10 or not 1 <= args.operations <= 1000000
             or not 1 <= args.next_use_operations <= 1000000
             or not all(math.isfinite(v) and 0 < v <= 120 for v in (args.idle_seconds, args.reclaim_seconds))):

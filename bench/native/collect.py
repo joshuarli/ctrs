@@ -18,6 +18,7 @@ import subprocess
 import time
 
 from macos_counters import Counters
+import linux_cgroups
 
 FP_PID_RE = re.compile(r"^.*\[(-?\d+)\]:\s+(?:(?:32|64)-bit\s+)?Footprint:")
 FP_PHYS_RE = re.compile(r"^\s*phys_footprint:\s+(\d+)\s*B")
@@ -99,6 +100,8 @@ def validate_processes(required, processes):
 
 
 def cpu_boundary(identity):
+    if identity.get('sampler_version') == linux_cgroups.VERSION:
+        return linux_cgroups.sample(identity)
     required = {p["pid"]: p for p in identity.get("required_processes", [])}
     return native_sample(Counters(), required)
 
@@ -123,6 +126,8 @@ def native_sample(counters, required):
 
 
 def cpu_delta(before, after):
+    if before.get('sampler_version') == linux_cgroups.VERSION:
+        return linux_cgroups.cpu_delta(before, after)
     errors = before["errors"] + after["errors"]
     old = {p["pid"]: p for p in before["procs"]}
     new = {p["pid"]: p for p in after["procs"]}

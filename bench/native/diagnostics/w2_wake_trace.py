@@ -125,7 +125,7 @@ def main() -> int:
     parser.add_argument("--client-location", choices=("host", "guest"), default="host")
     args = parser.parse_args()
     engines = args.engines.split(",")
-    if set(engines) - {"ctrs", "orbstack"} or len(set(engines)) != len(engines):
+    if set(engines) - {"ctrs", "orbstack", "dockerd"} or len(set(engines)) != len(engines):
         parser.error("engines must be distinct ctrs/orbstack names")
     if not 0 < args.window <= 5:
         parser.error("window must be within (0, 5] seconds")
