@@ -1,5 +1,19 @@
 # Campaign: beat OrbStack on macOS
 
+**Paused 2026-11-20 by the owner; no gate has passed.** The standing at the pause and the resume steps (Linux or Mac) are in [the progress file](native-performance-progress.md#wound-down-2026-11-20). This contract still applies when the campaign resumes. Before the pause it read: active 2026-11-17 after owner resume; this is the current execution contract. It supersedes the previous campaign's
+Linux requirements, 30-candidate stop, and monitoring-driven closeout.
+On every resume read `AGENTS.md`, this document, and
+[`native-performance-progress.md`](native-performance-progress.md).
+The progress file is the single work queue and continuation checkpoint;
+`docs/evidence/native-performance.md` is the historical experiment log.
+
+The owner subsequently accepts some background noise for continued experiments.
+After resume, use interleaved W2 work and observer controls with disclosed host
+activity, paired uncertainty and preserved failures. Do not wait for a perfectly
+quiet host before investigating W2. Keep correctness, durability and numerical
+budgets unchanged. Unattributable whole-engine resources remain inconclusive.
+This steering supersedes older blanket exclusivity requirements for diagnostics.
+
 ## Linux lane (dockerd)
 
 `linux-amd64` is a separate native-host pilot lane for W2, W6, W7 and W13.
@@ -10,9 +24,12 @@ Linux ctrs is externally managed and requires `CTRS_SOCKET`; fresh roots,
 configuration candidates and engine-cold trials are refused.
 
 From the Linux-lane worktree, with the development environment loaded:
+On a host running dockerd, the ctrs build must include the Linux forwarding
+coexistence fix (PR #14).
 
 ```sh
-BIN=/home/ubuntu/repos/ctrs/.work/wt/forward/target/linux-x86_64/release/ctrs
+CARGO_ENCODED_RUSTFLAGS="" cargo xtask linux --arch amd64
+BIN=target/linux-x86_64/release/ctrs
 RUN="$PWD/.work/engine"
 bench/native/linux/ctrs-engine.sh start "$BIN" "$RUN"
 export CTRS_SOCKET="$RUN/docker.sock"
@@ -68,20 +85,6 @@ mark, not a reset trial peak. CPU for exited Docker scopes is a sampled lower
 bound, and uncharged host-kernel/interrupt work remains outside engine counters.
 `/proc/stat` supplies host busy/foreign CPU. These limitations prevent resource
 qualification claims from these pilots.
-
-**Paused 2026-11-20 by the owner; no gate has passed.** The standing at the pause and the resume steps (Linux or Mac) are in [the progress file](native-performance-progress.md#wound-down-2026-11-20). This contract still applies when the campaign resumes. Before the pause it read: active 2026-11-17 after owner resume; this is the current execution contract. It supersedes the previous campaign's
-Linux requirements, 30-candidate stop, and monitoring-driven closeout.
-On every resume read `AGENTS.md`, this document, and
-[`native-performance-progress.md`](native-performance-progress.md).
-The progress file is the single work queue and continuation checkpoint;
-`docs/evidence/native-performance.md` is the historical experiment log.
-
-The owner subsequently accepts some background noise for continued experiments.
-After resume, use interleaved W2 work and observer controls with disclosed host
-activity, paired uncertainty and preserved failures. Do not wait for a perfectly
-quiet host before investigating W2. Keep correctness, durability and numerical
-budgets unchanged. Unattributable whole-engine resources remain inconclusive.
-This steering supersedes older blanket exclusivity requirements for diagnostics.
 
 ## Objective and current position
 
