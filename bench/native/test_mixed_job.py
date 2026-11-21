@@ -57,8 +57,8 @@ class MixedJob(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / 'marker'
             code = ('import sys,time; from pathlib import Path; import diagnostic_signals; '
-                    'diagnostic_signals.install_cleanup_signals(); print("ready", flush=True);\n'
-                    'try:\n while True: time.sleep(1)\n'
+                    'diagnostic_signals.install_cleanup_signals()\n'
+                    'try:\n print("ready", flush=True)\n while True: time.sleep(1)\n'
                     'finally:\n Path(sys.argv[1]).write_text("cleaned")\n')
             process = subprocess.Popen([sys.executable, '-c', code, str(marker)], cwd=Path(mixed_job.__file__).parent,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

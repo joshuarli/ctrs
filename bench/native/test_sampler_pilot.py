@@ -1,5 +1,5 @@
 import copy
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 import json
 from pathlib import Path
 import sys
@@ -113,23 +113,24 @@ class ObserverControls(unittest.TestCase):
                     if failure == 'result-save' and path.name == 'result.json':
                         raise OSError('result save failed')
                     save(path, value)
-                with patch.object(pilot.runner, 'RESULTS', results), \
-                     patch.object(pilot.runner, 'CTRS_BIN', pilot.runner.CTRS_BIN), \
-                     patch.object(pilot.runner, 'DOCKER', pilot.runner.DOCKER), \
-                     patch.object(pilot.runner, 'RunContext', Context), \
-                     patch.object(pilot.runner, 'find_docker', return_value='docker'), \
-                     patch.object(pilot.runner, 'trial_w2', side_effect=run_trial), \
-                     patch.object(pilot.registry_portfolio, 'prepare_pinned_portfolio', return_value=portfolio), \
-                     patch.object(pilot.registry_portfolio, 'serve', return_value=server), \
-                     patch.object(pilot.resource_pilot, 'ResourceEngine', Engine), \
-                     patch.object(pilot.resource_pilot, 'verify_images'), \
-                     patch.object(pilot.resource_pilot, 'warmup_api', side_effect=lambda *args: trial_events.append('prime')), \
-                     patch.object(pilot.resource_pilot, 'verify_binary'), \
-                     patch.object(pilot.resource_pilot, 'host_snapshot'), \
-                     patch.object(pilot.resource_pilot, 'save', side_effect=failing_save), \
-                     patch.object(pilot.ownership, 'discover', return_value=identity), \
-                     patch.object(pilot.ownership, 'process_table', return_value={}), \
-                     patch.object(pilot.diagnostic_signals, 'install_cleanup_signals'):
+                with ExitStack() as patches:
+                    patches.enter_context(patch.object(pilot.runner, 'RESULTS', results))
+                    patches.enter_context(patch.object(pilot.runner, 'CTRS_BIN', pilot.runner.CTRS_BIN))
+                    patches.enter_context(patch.object(pilot.runner, 'DOCKER', pilot.runner.DOCKER))
+                    patches.enter_context(patch.object(pilot.runner, 'RunContext', Context))
+                    patches.enter_context(patch.object(pilot.runner, 'find_docker', return_value='docker'))
+                    patches.enter_context(patch.object(pilot.runner, 'trial_w2', side_effect=run_trial))
+                    patches.enter_context(patch.object(pilot.registry_portfolio, 'prepare_pinned_portfolio', return_value=portfolio))
+                    patches.enter_context(patch.object(pilot.registry_portfolio, 'serve', return_value=server))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'ResourceEngine', Engine))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'verify_images'))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'warmup_api', side_effect=lambda *args: trial_events.append('prime')))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'verify_binary'))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'host_snapshot'))
+                    patches.enter_context(patch.object(pilot.resource_pilot, 'save', side_effect=failing_save))
+                    patches.enter_context(patch.object(pilot.ownership, 'discover', return_value=identity))
+                    patches.enter_context(patch.object(pilot.ownership, 'process_table', return_value={}))
+                    patches.enter_context(patch.object(pilot.diagnostic_signals, 'install_cleanup_signals'))
                     with self.assertRaisesRegex(ValueError, 'failed correctness'):
                         pilot.run_calibration(run_id='failed-control', portfolio_layout=results,
                                               ctrs_binary=Path(sys.executable), pairs=1, operations=1000)

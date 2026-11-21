@@ -145,7 +145,9 @@ class RegistryTests(unittest.TestCase):
         popen = subprocess.Popen
 
         def launch(args, **kwargs):
-            script = 'import sys,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=5).read()'
+            # A shell may start this suite with SIGINT ignored, and Python keeps an inherited SIG_IGN.
+            script = ('import signal,sys,urllib.request; signal.signal(signal.SIGINT, signal.default_int_handler); '
+                      'urllib.request.urlopen(sys.argv[1],timeout=5).read()')
             return popen([sys.executable, '-c', script, args[-1]], **kwargs)
 
         with registry.running_registry(portfolio, pause=pause) as server, \
