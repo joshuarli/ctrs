@@ -35,8 +35,9 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   same 399 tests and skips the 15 that need native ARM64 macOS (`durable_job` launches, kqueue, counters).
 - `make lint` (clippy, all targets, `-D warnings`): clean on macOS and the aarch64 musl
   target since `8681103`. 28s warm. CI does not run it.
-- CLI flags and exit codes: none (`docker::tests::delegates_argv_and_env_to_a_stub_docker` covers
-  delegation only). API: `daemon::api` and `daemon::http` unit tests; `conformance/run.sh` and
+- CLI help: `crates/ctrs/tests/help.rs` (offline top-level and per-command help, footer). `ctrs CMD --help`
+  prints ctrs's stub for Docker routes; use `docker CMD --help` for Docker's options. Other flags and exit codes:
+  none (`docker::tests::delegates_argv_and_env_to_a_stub_docker` covers delegation only). API: `daemon::api` and `daemon::http` unit tests; `conformance/run.sh` and
   `tests/e2e.sh` need a running engine (Needs environment; no CI job).
 - `vm.json`: `config::tests::vm_json_round_trip`. Image records, blobs, archives: `ctrs-image`
   store and archive tests. Container records: none.
