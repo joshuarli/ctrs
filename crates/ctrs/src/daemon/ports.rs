@@ -1524,7 +1524,9 @@ mod tests {
             let mut c = std::net::TcpStream::connect(addr).unwrap();
             c.write_all(head).unwrap();
             c.write_all(body).unwrap();
-            c.shutdown(std::net::Shutdown::Write).unwrap();
+            if let Err(error) = c.shutdown(std::net::Shutdown::Write) {
+                assert_eq!(error.kind(), std::io::ErrorKind::NotConnected);
+            }
             let mut back = Vec::new();
             let _ = c.read_to_end(&mut back);
             back
