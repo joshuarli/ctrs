@@ -15,6 +15,7 @@ class OwnershipTests(unittest.TestCase):
     def test_fixture_process_cannot_hide_failed_engine_discovery(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runner, 'wake_vm'), \
                 patch.object(runner.ownership, 'discover', side_effect=ValueError('missing VM')), \
                 patch.object(runner.subprocess, 'Popen') as spawn:
             engine = Mock(name='engine')

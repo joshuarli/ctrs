@@ -105,13 +105,36 @@ class SamplerLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
-            with patch.object(runner.ownership, 'discover', return_value=identity), \
+            with patch.object(runner, 'wake_vm'), patch.object(runner.ownership, 'discover', return_value=identity), \
                     patch.object(runner.subprocess, 'Popen') as spawn:
                 self.assertEqual(runner.start_sampler(engine, root, sampling=runner.SamplingMode.BOUNDARIES), (None, None))
             spawn.assert_not_called()
             self.assertEqual(engine.measurement_identity, identity)
             self.assertEqual(json.loads((root / 'ownership.json').read_text()), identity)
             self.assertFalse((root / 'resources.jsonl').exists())
+
+    def test_sleeping_ctrs_vm_is_woken_before_ownership_discovery(self):
+        calls = []
+        identity = {'required_processes': [{'pid': 101, 'kernel_start_identity': 123}]}
+        def request(engine, method, path, timeout=5.0):
+            calls.append((method, path))
+            return 204, b''
+        def discover(*args):
+            calls.append('discover')
+            return identity
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
+            with patch.object(runner, 'ctrs_request', side_effect=request), \
+                    patch.object(runner.ownership, 'discover', side_effect=discover):
+                runner.start_sampler(engine, root, sampling=runner.SamplingMode.BOUNDARIES)
+        self.assertEqual(calls, [('POST', '/ctrs/wake'), 'discover'])
+
+    def test_ctrs_vm_that_cannot_wake_fails_the_trial(self):
+        engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock')
+        with patch.object(runner, 'ctrs_request', return_value=(500, b'boot failed')):
+            with self.assertRaisesRegex(RuntimeError, 'did not wake'):
+                runner.wake_vm(engine)
 
     def test_invalid_sampling_mode_fails_before_discovery_or_spawn(self):
         with patch.object(runner.ownership, 'discover') as discover, \
@@ -136,7 +159,7 @@ class SamplerLifecycleTests(unittest.TestCase):
                     f'raise SystemExit({code})\n')
                 engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
                 with patch.object(runner, 'COLLECT', collector), \
-                        patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
+                        patch.object(runner, 'wake_vm'), patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
                     sampler, trace = runner.start_sampler(engine, root)
                 self.assertEqual(sampler.process.wait(timeout=5), code)
                 self.assertEqual(runner.summarize_trace(trace)['cpu_seconds_est'], 3)
@@ -183,7 +206,7 @@ class SamplerLifecycleTests(unittest.TestCase):
                 'signal.pause()\n')
             engine = SimpleNamespace(name='ctrs', socket='unix:///owned.sock', dir=root)
             with patch.object(runner, 'COLLECT', collector), \
-                    patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
+                    patch.object(runner, 'wake_vm'), patch.object(runner.ownership, 'discover', return_value={'required_processes': []}):
                 sampler, trace = runner.start_sampler(engine, root)
             try:
                 deadline = time.monotonic() + 5

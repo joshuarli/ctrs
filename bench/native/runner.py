@@ -826,21 +826,44 @@ def relay_counts(engine) -> dict | None:
     None for another engine or a ctrs without the endpoint."""
     if engine.name != "ctrs":
         return None
+    reply = ctrs_request(engine, "GET", "/ctrs/relays")
+    if reply is None or reply[0] != 200:
+        return None
+    try:
+        return json.loads(reply[1])
+    except ValueError:
+        return None
+
+
+def ctrs_request(engine, method: str, path: str, timeout: float = 5.0) -> tuple[int, bytes] | None:
+    """One request on ctrs's socket: (status, body), or None when it fails."""
     import http.client
     class UnixConnection(http.client.HTTPConnection):
         def connect(self):
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.sock.settimeout(5)
+            self.sock.settimeout(timeout)
             self.sock.connect(engine.socket.removeprefix("unix://"))
     conn = UnixConnection("localhost")
     try:
-        conn.request("GET", "/ctrs/relays")
+        conn.request(method, path)
         reply = conn.getresponse()
-        return json.loads(reply.read()) if reply.status == 200 else None
-    except (OSError, ValueError):
+        return reply.status, reply.read()
+    except OSError:
         return None
     finally:
         conn.close()
+
+
+def wake_vm(engine) -> None:
+    """Boots ctrs's VM if its idle timer powered it off between trials.
+    Ownership names the VM process, so discovery before the boot leaves the
+    trial without resource samples; the boot itself stays outside the
+    trial's samples."""
+    if engine.name != "ctrs":
+        return
+    reply = ctrs_request(engine, "POST", "/ctrs/wake", timeout=120)
+    if reply is None or reply[0] != 204:
+        raise RuntimeError(f"ctrs VM did not wake: {reply}")
 
 
 def relay_delta(before: dict | None, after: dict | None, group: str) -> dict | None:
@@ -908,6 +931,7 @@ def start_sampler(engine: Engine, trial_dir: Path, *, fixture_processes=(),
         raise ValueError('require a SamplingMode')
     trace = trial_dir / "resources.jsonl"
     identity_path = trial_dir / "ownership.json"
+    wake_vm(engine)
     try:
         identity = ownership.discover(engine.name,
                                       Path(engine.socket.removeprefix("unix://")), engine.dir)
