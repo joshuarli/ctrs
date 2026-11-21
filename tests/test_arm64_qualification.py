@@ -24,7 +24,7 @@ def run_shell(function, body, *args):
 
 class OciInspectionTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp")
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "blobs/sha256").mkdir(parents=True)
@@ -99,7 +99,7 @@ class BuilderReadinessTests(unittest.TestCase):
         self.assertNotIn("MISS", result.stdout)
 
     def test_starting_builder_is_probed_until_ready(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+        with tempfile.TemporaryDirectory() as temp:
             result = run_shell("wait_builder_ready", '''
 marker=$1/marker
 isoc() {
@@ -139,7 +139,7 @@ wait_builder_ready managed 0
 
 class CompatibilityGuardTests(unittest.TestCase):
     def test_prior_case_failure_does_not_block_compatibility(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+        with tempfile.TemporaryDirectory() as temp:
             binary = Path(temp) / "ctrs"
             binary.touch()
             binary.chmod(0o755)
@@ -156,7 +156,7 @@ case_compatibility
                 self.assertIn("reached-harness", result.stdout)
 
     def test_missing_fixtures_still_block_compatibility(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+        with tempfile.TemporaryDirectory() as temp:
             result = run_shell("case_compatibility", '''
 ROOT=$1
 FAIL=1
