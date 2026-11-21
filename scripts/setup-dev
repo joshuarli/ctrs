@@ -21,7 +21,7 @@ else
     apt_cmd='sudo apt-get'
 fi
 $apt_cmd update
-$apt_cmd install -y build-essential ca-certificates curl git make python3
+$apt_cmd install -y build-essential ca-certificates curl git libffi-dev libssl-dev make nodejs python3 zlib1g-dev
 
 if [ ! -x "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" ] && ! command -v rustup >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
@@ -29,5 +29,12 @@ fi
 PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 export PATH
 cd "$(dirname "$0")/.."
+python_prefix="$HOME/.local/ctrs-dev-python"
+if [ ! -x "$python_prefix/bin/python3.13" ]; then
+    mkdir -p .work/python-build
+    curl --proto '=https' --tlsv1.2 -sSfL https://www.python.org/ftp/python/3.13.17/Python-3.13.17.tgz -o .work/python-build/python.tgz
+    tar -xzf .work/python-build/python.tgz -C .work/python-build
+    (cd .work/python-build/Python-3.13.17 && ./configure --prefix="$python_prefix" && make -j2 && make install)
+fi
 rustup toolchain install --profile minimal
 cargo fetch --locked
