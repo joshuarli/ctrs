@@ -51,6 +51,13 @@ binds `127.0.0.2:53`, so it needs root or
 `net.ipv4.ip_unprivileged_port_start` at 53 or lower. Docker containers
 already allow it.
 
+Measured 2026-11-21 in a pristine `alpine:3.22` x86_64 container on a
+busy 8-core host (cold, as root): setup 65 s, `make test` 225 s, then
+`make lint` and a clean `git status`. The uv path on `ubuntu:24.04` and the
+python-build path on `debian:13` were proven for the shim only. Their
+full gates, and the non-root container runs, were cut short by a registry
+outage and have not been rerun.
+
 The musl cross-build also needs a Rust musl target; install it with
 `rustup target add` for your architecture. No compiler cache or custom
 linker is required for the default host tests.
