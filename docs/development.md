@@ -92,6 +92,7 @@ DOCKER_HOST=unix://$HOME/.local/share/ctrs/run/docker.sock docker run --rm alpin
 docker buildx create --name ctrs-build --driver docker-container \
   --driver-opt default-load=true unix:///absolute/path/to/run/docker.sock   # for docker build
 SOAK=600 CTRS_SOCKET=.work/tmp/smoke.sock tests/e2e.sh    # full suite + 600-run leak soak
+CTRS_SOCKET=/var/run/docker.sock tests/e2e.sh             # Linux Docker baseline; use an idle test daemon
 ```
 
 Docker's commands also work as `ctrs` commands, always against the daemon

@@ -20,8 +20,23 @@ if [ -z "${TMPDIR:-}" ]; then
 fi
 SOCK=${CTRS_SOCKET:?set CTRS_SOCKET to the engine socket}
 export DOCKER_HOST="unix://$SOCK"
-unset DOCKER_CONTEXT
+unset DOCKER_CONTEXT DOCKER_DEFAULT_PLATFORM
 D=docker
+HOST_OS=$(uname -s)
+SERVER=$($D version --format '{{.Server.Platform.Name}}|{{.Server.Os}}|{{.Server.Arch}}|{{.Server.KernelVersion}}') || exit 1
+IFS='|' read -r ENGINE ENGINE_OS ENGINE_ARCH ENGINE_KERNEL <<< "$SERVER"
+CTRS_ENGINE=false
+MAC_VM=false
+if [[ $ENGINE == Ctrs ]]; then
+  CTRS_ENGINE=true
+  if [[ $HOST_OS == Darwin && $ENGINE_KERNEL == *-ctrs ]]; then MAC_VM=true; fi
+fi
+case $ENGINE_ARCH in
+  amd64) ENGINE_UNAME=x86_64; APK_ARCH=x86_64 ;;
+  arm64) ENGINE_UNAME=aarch64; APK_ARCH=aarch64 ;;
+  *) echo "unsupported engine architecture: $ENGINE_ARCH" >&2; exit 1 ;;
+esac
+printf 'Engine: %s (%s/%s)\n' "$ENGINE" "$ENGINE_OS" "$ENGINE_ARCH"
 PASS=0
 FAIL=0
 SKIP=0
@@ -32,9 +47,11 @@ FAILED=()
 t() {
   local name=$1 want=$2
   shift 2
-  local got
-  got=$(perl -e 'alarm 60; exec @ARGV' "$@" 2>&1 | tr -d '\r')
-  if [[ "$got" == *"$want"* ]]; then
+  local got status
+  got=$(perl -e 'alarm 60; exec @ARGV' "$@" 2>&1)
+  status=$?
+  got=${got//$'\r'/}
+  if [[ "$got" == *"$want"* && ( -n "$want" || $status == 0 ) ]]; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
@@ -47,7 +64,8 @@ t() {
 code() {
   local name=$1 want=$2
   shift 2
-  perl -e 'alarm 60; exec @ARGV' "$@" >/dev/null 2>&1
+  local out
+  out=$(perl -e 'alarm 60; exec @ARGV' "$@" 2>&1)
   local got=$?
   if [[ $got == "$want" ]]; then
     PASS=$((PASS + 1))
@@ -55,11 +73,27 @@ code() {
     FAIL=$((FAIL + 1))
     FAILED+=("$name")
     printf '  FAIL %s: exit %s, want %s\n' "$name" "$got" "$want"
+    if [[ -n $out ]]; then printf '    got:  %s\n' "$(printf '%s\n' "$out" | head -5)"; fi
   fi
 }
 
 section() { printf '\n== %s\n' "$1"; }
 skip() { SKIP=$((SKIP + 1)); printf '  SKIP %s (%s)\n' "$1" "$2"; }
+skip_cases() {
+  local reason=$1 name; shift
+  for name in "$@"; do skip "$name" "$reason"; done
+}
+pty() {
+  if [[ $HOST_OS == Darwin ]]; then
+    TERM=xterm script -q /dev/null "$@"
+  else
+    local command
+    printf -v command '%q ' "$@"
+    TERM=xterm SHELL=/bin/bash script -q -e -c "$command" /dev/null
+  fi
+}
+export HOST_OS
+export -f pty
 # Waits up to 10 s for a URL to answer, as you would for any freshly started server.
 ready() { for _ in $(seq 50); do curl -s -m 1 -o /dev/null "$1" && return 0; sleep 0.2; done; return 1; }
 # Waits until the nginx in container $1 serves (it starts a moment after run -d returns).
@@ -97,9 +131,15 @@ cleanup() {
 cleanup
 
 section "engine"
-t version-server "Ctrs" $D version
-t version-api "1.47" $D version --format '{{.Server.APIVersion}}'
-t info-os "Ctrs" $D info --format '{{.OperatingSystem}}'
+if $CTRS_ENGINE; then
+  t version-server "Ctrs" $D version --format '{{.Server.Platform.Name}}'
+  t version-api "1.47" $D version --format '{{.Server.APIVersion}}'
+  t info-os "Ctrs" $D info --format '{{.OperatingSystem}}'
+else
+  t version-server "Docker Engine" $D version --format '{{.Server.Platform.Name}}'
+  code version-api 0 bash -c '[[ $(docker version --format "{{.Server.APIVersion}}") =~ ^[0-9]+\.[0-9]+$ ]]'
+  t info-os "linux" $D info --format '{{.OSType}}'
+fi
 t info-cgroup "2" $D info --format '{{.CgroupVersion}}'
 
 section "images"
@@ -107,7 +147,7 @@ t pull-alpine "alpine:latest" $D pull alpine:latest
 t pull-busybox "busybox" $D pull busybox
 t pull-tag "3.21" $D pull alpine:3.21
 t images-list "alpine" $D images
-t image-inspect-arch "arm64" $D image inspect -f '{{.Architecture}}' alpine
+t image-inspect-arch "$ENGINE_ARCH" $D image inspect -f '{{.Architecture}}' alpine
 t image-inspect-cmd "/bin/sh" $D image inspect -f '{{.Config.Cmd}}' alpine
 code pull-missing 1 $D pull ctrs-does-not-exist/nope:none
 t rmi "Untagged" $D rmi alpine:3.21
@@ -162,11 +202,11 @@ section "stdin and terminals"
 t stdin-pipe "3" bash -c "printf 'a\nb\nc\n' | $D run -i --rm alpine wc -l"
 t stdin-cat "round trip" bash -c "echo 'round trip' | $D run -i --rm alpine cat"
 t stdin-large "1000000" bash -c "head -c 1000000 /dev/zero | $D run -i --rm alpine wc -c"
-t tty-is-pty "/dev/pts/0" bash -c "script -q /dev/null $D run -it --rm alpine tty < /dev/null"
-t tty-term "xterm" bash -c "script -q /dev/null $D run -it --rm alpine sh -c 'echo \$TERM' < /dev/null"
+t tty-is-pty "/dev/pts/0" bash -c "pty $D run -it --rm alpine tty < /dev/null"
+t tty-term "xterm" bash -c "pty $D run -it --rm alpine sh -c 'echo \$TERM' < /dev/null"
 # Type after the shell is up: an interactive shell discards input typed before its first prompt.
-t tty-shell "typed-42" bash -c "(sleep 1; printf 'echo typed-\$((6*7))\nexit\n') | script -q /dev/null $D run -it --rm alpine sh"
-code tty-exit-code 5 bash -c "(sleep 1; printf 'exit 5\n') | script -q /dev/null $D run -it --rm alpine sh"
+t tty-shell "typed-42" bash -c "(sleep 1; printf 'echo typed-\$((6*7))\nexit\n') | pty $D run -it --rm alpine sh"
+code tty-exit-code 5 bash -c "(sleep 1; printf 'exit 5\n') | pty $D run -it --rm alpine sh"
 # The client half-closes right behind its input, and the process must see the end.
 # A Mac can lose that on the daemon's socket, 1 to 5 runs in 100, hence the many
 # runs. The hang is timed here: an alarm does not stop a docker client. Each run
@@ -203,7 +243,7 @@ t exec-env "e-val" $D exec -e E=e-val web sh -c 'echo $E'
 t exec-user "nginx" $D exec -u nginx web id -un
 t exec-workdir "/etc" $D exec -w /etc web pwd
 t exec-stdin "into exec" bash -c "echo 'into exec' | $D exec -i web cat"
-t exec-tty "/dev/pts" bash -c "script -q /dev/null $D exec -it web tty < /dev/null"
+t exec-tty "/dev/pts" bash -c "pty $D exec -it web tty < /dev/null"
 t exec-sees-pid1 "nginx" $D exec web sh -c 'cat /proc/1/comm'
 # Each container and each exec leads a session of its own, as with runc, so a
 # program that signals its whole process group (Apache prefork's stop does)
@@ -239,52 +279,69 @@ code rm-with-restart-refused 125 $D run --rm --restart always alpine true
 # (the file it wrote on the first run is still there on the second):
 # the layer is sent again, not "layer ... is not unpacked". busybox's single
 # layer is the one with bin/busybox and no alpine-release.
-t start-restores-layer "KEPT AGAIN" bash -c "$D rm -f relayer >/dev/null 2>&1; $D run --name relayer busybox:1.36 sh -c '[ -e /kept ] && echo AGAIN >> /kept || echo KEPT > /kept' && $D run --rm --privileged alpine sh -c 'mkdir -p /m && mount -t ext4 /dev/vda /m && for d in /m/layers/*/; do [ -e \$d/bin/busybox ] && [ ! -e \$d/etc/alpine-release ] && find \$d ! -type d -exec unlink {} \\; && find \$d -depth -type d -exec rmdir {} \\; && unlink \${d%/}.done 2>/dev/null || :; done; umount /m' && $D start -a relayer >/dev/null && $D cp relayer:/kept - | tar -xO | tr '\\n' ' '; $D rm -f relayer >/dev/null"
+if $MAC_VM; then
+  t start-restores-layer "KEPT AGAIN" bash -c "$D rm -f relayer >/dev/null 2>&1; $D run --name relayer busybox:1.36 sh -c '[ -e /kept ] && echo AGAIN >> /kept || echo KEPT > /kept' && $D run --rm --privileged alpine sh -c 'mkdir -p /m && mount -t ext4 /dev/vda /m && for d in /m/layers/*/; do [ -e \$d/bin/busybox ] && [ ! -e \$d/etc/alpine-release ] && find \$d ! -type d -exec unlink {} \\; && find \$d -depth -type d -exec rmdir {} \\; && unlink \${d%/}.done 2>/dev/null || :; done; umount /m' && $D start -a relayer >/dev/null && $D cp relayer:/kept - | tar -xO | tr '\\n' ' '; $D rm -f relayer >/dev/null"
+else
+  skip start-restores-layer 'requires the macOS Ctrs VM data disk'
+fi
 
 section "networking"
-t default-ip "172.17." $D run --rm alpine sh -c 'ip -4 addr show eth0'
-t default-route "default via 172.17.0.1" $D run --rm alpine ip route
+BRIDGE_GW=$($D network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
+BRIDGE_SUBNET=$($D network inspect bridge -f '{{(index .IPAM.Config 0).Subnet}}')
+t default-ip "address in bridge subnet" bash -o pipefail -c "$D run --rm alpine ip -o -4 addr show eth0 | python3 -c 'import ipaddress as ip, sys; addr = ip.ip_interface(sys.stdin.read().split()[3]); net = ip.ip_network(sys.argv[1]); assert addr.network == net; print(\"address in bridge subnet\")' \"\$1\"" _ "$BRIDGE_SUBNET"
+t default-route "default via ${BRIDGE_GW:?no default bridge gateway}" $D run --rm alpine ip route
 t lo "127.0.0.1" $D run --rm alpine sh -c 'ip -4 addr show lo'
 t internet-http "Example Domain" $D run --rm alpine wget -qO- http://example.com
-t internet-dns "Address" $D run --rm alpine nslookup example.com
+code internet-dns 0 $D run --rm alpine nslookup example.com
 # The default bridge in the VM names its gateway, not 127.0.0.11: BuildKit
 # drops loopback nameservers from build steps and puts 8.8.8.8 in their place.
-t dns-default-bridge-gateway "nameserver 172.17.0.1" $D run --rm alpine cat /etc/resolv.conf
-code dns-default-bridge-no-loopback 1 $D run --rm alpine grep -q 127.0.0.11 /etc/resolv.conf
+if $MAC_VM; then
+  t dns-default-bridge-gateway "nameserver $BRIDGE_GW" $D run --rm alpine cat /etc/resolv.conf
+  code dns-default-bridge-no-loopback 1 $D run --rm alpine grep -q 127.0.0.11 /etc/resolv.conf
+else
+  skip_cases 'checks the macOS Ctrs default-bridge DNS relay' dns-default-bridge-gateway dns-default-bridge-no-loopback
+fi
 t internet-https "200" $D run --rm curlimages/curl:latest -s -o /dev/null -w '%{http_code}' https://www.google.com
 # Each container gets the last one's address and MAC: its first download
 # broke mid-TLS or stalled while the old one's veth lingered, and one that
 # keeps running lost its gateway whenever the bridge's MAC moved.
-APKIDX=https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+APKIDX=https://dl-cdn.alpinelinux.org/alpine/v3.22/main/$APK_ARCH/APKINDEX.tar.gz
 t first-download-x8 "8" bash -c "n=0; for i in \$(seq 8); do $D run --rm curlimages/curl:latest -s -m 20 -o /dev/null -w '%{exitcode}' $APKIDX | grep -qx 0 && n=\$((n+1)); done; echo \$n"
 $D run -d --name dl curlimages/curl:latest sh -c "while true; do curl -s -m 10 -o /dev/null -w '%{exitcode} ' $APKIDX; done" >/dev/null
 for _ in $(seq 6); do $D run --rm alpine true; sleep 1; done
-code download-while-others-start 1 bash -c "$D logs dl 2>&1 | grep -qE '(^| )[1-9][0-9]* '"
+code download-while-others-start 0 bash -c "out=\$($D logs dl 2>&1) && [[ \$out == *'0 '* && ! \$out =~ (^|[[:space:]])[1-9][0-9]*' ' ]]"
 $D rm -f dl >/dev/null
 t none-net "lo" $D run --rm --network none alpine ip link
 code none-no-internet 1 $D run --rm --network none alpine wget -qO- -T 2 http://example.com
-t host-net "192.168.64." $D run --rm --network host alpine ip -4 addr show eth0
+if $MAC_VM; then
+  t host-net "dev eth0" $D run --rm --network host alpine ip -4 route show default
+else
+  t host-net "$(readlink /proc/self/ns/net)" $D run --rm --network host alpine readlink /proc/self/ns/net
+fi
 t hosts-file "localhost" $D run --rm alpine cat /etc/hosts
 t add-host "1.2.3.4" $D run --rm --add-host foo:1.2.3.4 alpine getent hosts foo
 $D run -d --name peer nginx:alpine >/dev/null
 nginx_up peer
-PEER_IP=$($D inspect -f '{{.NetworkSettings.IPAddress}}' peer)
+PEER_IP=$($D inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' peer)
 t container-to-container "Welcome to nginx" $D run --rm alpine wget -qO- "http://$PEER_IP"
 t default-bridge-no-names "bad address" $D run --rm alpine wget -qO- -T 2 http://peer
 t network-create "" $D network create appnet
 t network-ls "appnet" $D network ls
-# The first free 172.x subnet: 172.18 on an empty engine, later if the user has networks.
-t network-subnet "172." $D network inspect appnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+t network-subnet "IPv4 subnet" bash -o pipefail -c "$D network inspect appnet -f '{{(index .IPAM.Config 0).Subnet}}' | python3 -c 'import ipaddress as ip, sys; ip.IPv4Network(sys.stdin.read().strip()); print(\"IPv4 subnet\")'"
 $D run -d --name db --network appnet --network-alias database redis:7-alpine >/dev/null
 $D run -d --name svc --network appnet nginx:alpine >/dev/null
 sleep 0.5
 t dns-name "PONG" $D run --rm --network appnet redis:7-alpine redis-cli -h db ping
 t dns-alias "PONG" $D run --rm --network appnet redis:7-alpine redis-cli -h database ping
 t dns-other "Welcome to nginx" $D run --rm --network appnet alpine wget -qO- http://svc
-t dns-upstream "Address" $D run --rm --network appnet alpine nslookup example.com
+code dns-upstream 0 $D run --rm --network appnet alpine nslookup example.com
 t dns-resolvconf "nameserver 127.0.0.11" $D run --rm --network appnet alpine cat /etc/resolv.conf
 # What a kind node's pods are given instead: host.docker.internal's address.
-t dns-via-host-addr "Address" $D run --rm --network appnet alpine nslookup svc 198.19.248.254
+if $MAC_VM; then
+  t dns-via-host-addr "Address" $D run --rm --network appnet alpine sh -c 'g=$(getent hosts host.docker.internal | awk "NR == 1 { print \$1 }"); [ -n "$g" ] && nslookup svc "$g"'
+else
+  skip dns-via-host-addr 'requires the macOS Ctrs VM host DNS relay'
+fi
 t network-members "db" $D network inspect appnet -f '{{range .Containers}}{{.Name}} {{end}}'
 code network-rm-in-use 1 $D network rm appnet
 code network-dup 1 $D network create appnet
@@ -320,7 +377,9 @@ t static-prefix "24" $D inspect -f '{{.NetworkSettings.Networks.ipamnet.IPPrefix
 t static-mac "02:42:0a:e7:00:0a" $D exec fixed cat /sys/class/net/eth0/address
 t static-in-use "Address already in use" $D run --rm --network ipamnet --ip 10.231.0.10 alpine true
 t static-outside "no configured subnet" $D run --rm --network ipamnet --ip 10.9.0.10 alpine true
-t static-default-bridge "user defined networks only" $D run --rm --ip 172.17.0.99 alpine true
+DEFAULT_STATIC_ERROR='user-defined networks only'
+if $CTRS_ENGINE; then DEFAULT_STATIC_ERROR='user defined networks only'; fi
+t static-default-bridge "$DEFAULT_STATIC_ERROR" $D run --rm --ip "$BRIDGE_GW" alpine true
 $D network create --subnet 10.233.0.0/24 ipamnet4 >/dev/null
 t static-connect "10.233.0.77" bash -c "$D network connect --ip 10.233.0.77 ipamnet4 fixed && $D exec fixed ip -4 addr show eth1"
 # --network container: (Compose network_mode: service:x).
@@ -336,7 +395,7 @@ t netns-ports "conflicting options: port publishing and the container type netwo
 t netns-hostname-refused "conflicting options: hostname and the network mode" $D run --rm -h x --network container:fixed alpine true
 t netns-missing "No such container" $D run --rm --network container:nope alpine true
 $D stop fixed >/dev/null
-t netns-not-running "cannot join network of a non running container" $D start side
+code netns-not-running 1 $D start side
 $D rm -f side >/dev/null
 $D start fixed >/dev/null
 # DNS settings: the default bridge gets the servers; user networks keep the
@@ -345,7 +404,7 @@ t dns-default-bridge "nameserver 9.9.9.9" $D run --rm --dns 9.9.9.9 --dns-search
 t dns-search "search corp.example" $D run --rm --dns-search corp.example alpine cat /etc/resolv.conf
 t dns-options "options ndots:2" $D run --rm --dns-option ndots:2 alpine cat /etc/resolv.conf
 t dns-user-net "nameserver 127.0.0.11" $D run --rm --network ipamnet --dns 9.9.9.9 alpine cat /etc/resolv.conf
-t dns-user-net-forwards "Address" $D run --rm --network ipamnet --dns 9.9.9.9 alpine nslookup example.com
+code dns-user-net-forwards 0 $D run --rm --network ipamnet --dns 9.9.9.9 alpine nslookup example.com
 t dns-user-net-names "10.231.0.10" $D run --rm --network ipamnet --dns 9.9.9.9 alpine nslookup fixed
 t dns-inspect "[9.9.9.9]" bash -c "$D create --name dnsc --dns 9.9.9.9 alpine true >/dev/null; $D inspect -f '{{.HostConfig.Dns}}' dnsc; $D rm dnsc >/dev/null"
 t domainname "web.example.com" $D run --rm -h web --domainname example.com alpine sh -c 'hostname -f 2>/dev/null || cat /etc/hosts'
@@ -378,7 +437,7 @@ $D network rm v6only >/dev/null
 $D run -d --name v6a --network v6sub --network-alias v6web nginx:alpine >/dev/null
 sleep 0.5
 V6A=$($D inspect -f '{{.NetworkSettings.Networks.v6sub.GlobalIPv6Address}}' v6a)
-t ipv6-address "fd00:db8:7::1" echo "$V6A"
+t ipv6-address "address in IPv6 subnet" python3 -c 'import ipaddress as ip, sys; addr = ip.IPv6Address(sys.argv[1]); assert addr in ip.IPv6Network("fd00:db8:7::/64") and addr != ip.IPv6Address("fd00:db8:7::fe"); print("address in IPv6 subnet")' "$V6A"
 t ipv6-prefix "64" $D inspect -f '{{.NetworkSettings.Networks.v6sub.GlobalIPv6PrefixLen}}' v6a
 t ipv6-gateway "fd00:db8:7::fe" $D inspect -f '{{.NetworkSettings.Networks.v6sub.IPv6Gateway}}' v6a
 t ipv6-ipv4-too "." $D inspect -f '{{.NetworkSettings.Networks.v6sub.IPAddress}}' v6a
@@ -396,7 +455,9 @@ t ipv6-static-in-use "Address already in use" $D run --rm --network v6sub --ip6 
 t ipv6-static-outside "no configured subnet" $D run --rm --network v6sub --ip6 fd00:9::9 alpine true
 # On an automatically allocated subnet too, as with Docker 29 (moby#51569).
 t ipv6-static-pool "ok" bash -c "p=\$($D network inspect v6net -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | grep -o '[0-9a-f:]*::/64' | sed 's|::/64||'); $D run --rm --network v6net --ip6 \${p}::9 alpine ip -6 addr show eth0 | grep -q \${p}::9/64 && echo ok"
-t ipv6-static-v4-net "does not have IPv6 enabled" bash -c "$D network create v4only >/dev/null; $D run --rm --network v4only --ip6 fd00::9 alpine true; $D network rm v4only >/dev/null"
+$D network create v4only >/dev/null
+code ipv6-static-v4-net 125 $D run --rm --network v4only --ip6 fd00::9 alpine true
+$D network rm v4only >/dev/null
 t ipv6-connect "inet6 fd00:db8:7::" bash -c "$D run -d --name v6late alpine sleep 60 >/dev/null && $D network connect v6sub v6late && $D exec v6late ip -6 addr show eth1"
 # Egress: reaches IPv6 sites when the host has IPv6, fails fast otherwise.
 code ipv6-egress-no-hang 0 bash -c "$D run --rm --network v6sub alpine sh -c 'wget -qO- -T 5 http://ipv6.google.com >/dev/null 2>&1; true'"
@@ -425,13 +486,26 @@ $D rm -f pub pub2 puball pub6 >/dev/null
 code port-closed-after-stop 7 curl -s -m 2 http://localhost:18180
 
 section "host.docker.internal"
-python3 -m http.server 18999 --bind 127.0.0.1 >/dev/null 2>&1 &
+HTTP_ADDR=$BRIDGE_GW
+if $MAC_VM; then HTTP_ADDR=127.0.0.1; fi
+HTTP_DIR=$(scratch_dir)
+python3 -m http.server 18999 --bind "$HTTP_ADDR" --directory "$HTTP_DIR" >/dev/null 2>&1 &
 HTTP_PID=$!
-sleep 0.7
+ready "http://$HTTP_ADDR:18999/"
+if $MAC_VM || $CTRS_ENGINE; then
 t host-internal "Directory listing" $D run --rm alpine wget -qO- http://host.docker.internal:18999/
+else
+  skip host-internal 'Docker does not install the host.docker.internal alias'
+fi
 t host-gateway "Directory listing" $D run --rm --add-host mac:host-gateway alpine wget -qO- http://mac:18999/
+if $MAC_VM; then
 t host-internal-hostnet "Directory listing" $D run --rm --network host alpine wget -qO- http://host.docker.internal:18999/
-kill $HTTP_PID
+else
+  skip host-internal-hostnet 'requires the macOS Ctrs VM loopback relay'
+fi
+kill "$HTTP_PID" 2>/dev/null
+scratch_remove "$HTTP_DIR"
+if $MAC_VM; then
 python3 -c '
 import socket
 l = socket.socket(); l.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); l.bind(("127.0.0.1", 18998)); l.listen(1)
@@ -454,6 +528,9 @@ PEER_PID=$!
 sleep 0.5
 t host-internal-peer "peer 127.0.0.1" $D run --rm alpine sh -c 'nc host.docker.internal 18997 </dev/null'
 kill $PEER_PID 2>/dev/null
+else
+  skip_cases 'requires the macOS Ctrs VM loopback relay' host-internal-upload-eof host-internal-peer
+fi
 
 section "volumes and bind mounts"
 BIND=$(scratch_dir); echo "from the mac" > "$BIND/hello.txt"
@@ -461,12 +538,13 @@ t bind-read "from the mac" $D run --rm -v "$BIND:/data" alpine cat /data/hello.t
 t bind-write "from the container" bash -c "$D run --rm -v $BIND:/data alpine sh -c 'echo from the container > /data/out.txt' && cat $BIND/out.txt"
 # A new file without owner read (Node's fs.cpSync creates with 0200) is made
 # and ends with that mode (guest/kernel/patches/0003).
-t bind-create-0200 "200 hi" bash -c "$D run --rm -v $BIND:/data alpine sh -c 'umask 577; echo hi > /data/w0200' && perl -e 'printf q(%o ), (stat shift)[2] & 07777' $BIND/w0200 && chmod u+r $BIND/w0200 && cat $BIND/w0200"
+t bind-create-0200 "200 hi" bash -c "$D run --rm -v $BIND:/data alpine sh -c 'umask 577; echo hi > /data/w0200' && perl -e 'printf q(%o ), (stat shift)[2] & 07777' $BIND/w0200 && $D run --rm -v $BIND:/data alpine sh -c 'chmod u+r /data/w0200 && cat /data/w0200'"
 t bind-ro "Read-only file system" $D run --rm -v "$BIND:/data:ro" alpine sh -c 'echo x > /data/nope'
 t bind-mount-flag "from the mac" $D run --rm --mount "type=bind,source=$BIND,target=/m" alpine cat /m/hello.txt
 code bind-mount-missing 125 $D run --rm --mount type=bind,source=/ctrs/does/not/exist,target=/m alpine true
-t bind-v-creates "made" bash -c "$D run --rm -v $BIND/new/dir:/n alpine true && [ -d $BIND/new/dir ] && echo made"
+t bind-v-creates "made" bash -c "$D run --rm -v $BIND/new/dir:/n alpine true && [ -d $BIND/new/dir ] && $D run --rm -v $BIND:/data alpine rmdir /data/new/dir /data/new && echo made"
 t bind-file "from the mac" $D run --rm -v "$BIND/hello.txt:/etc/greeting" alpine cat /etc/greeting
+if $MAC_VM; then
 # Mac-side edits under a bind mount reach container inotify watchers
 # (docs/design-bind-notify.md): save, atomic replace, create, rename, delete.
 # A watch on a replaced or deleted file gets IN_DELETE_SELF, as on Linux.
@@ -549,9 +627,18 @@ mv "$RS/proj" "$RS/moved"; echo three > "$RS/moved/f"; mv "$RS/moved" "$RS/proj"
 t bind-root-renamed "three" $D exec e2e-rescan sh -c 'for i in $(seq 40); do [ "$(cat /w/f)" = three ] && break; sleep 0.1; done; cat /w/f'
 $D rm -f e2e-rescan >/dev/null; $D volume rm e2e-rescan >/dev/null; scratch_remove "$RS"
 $D rm -f e2e-mix >/dev/null; scratch_remove "$MIX"
+else
+  skip_cases 'requires macOS Ctrs bind-event forwarding' \
+    bind-inotify-save bind-inotify-save-rename bind-inotify-replace bind-inotify-create \
+    bind-inotify-rename bind-inotify-delete bind-inotify-replace-self bind-inotify-delete-self \
+    bind-inotify-content bind-inotify-no-echo bind-negative-create bind-made-here-mac-create \
+    bind-mixed-writer bind-root-churn bind-burst bind-rescan-keeps-mounts bind-root-renamed
+fi
 t vol-persist "kept" bash -c "$D run --rm -v tvol:/v alpine sh -c 'echo kept > /v/f' && $D run --rm -v tvol:/v alpine cat /v/f"
 t vol-ls "tvol" $D volume ls
-t vol-inspect "/var/lib/ctrs/volumes/tvol/_data" $D volume inspect -f '{{.Mountpoint}}' tvol
+VOLUME_ROOT=/var/lib/ctrs
+if ! $CTRS_ENGINE; then VOLUME_ROOT=$($D info -f '{{.DockerRootDir}}'); fi
+t vol-inspect "${VOLUME_ROOT:?no engine root}/volumes/tvol/_data" $D volume inspect -f '{{.Mountpoint}}' tvol
 t vol-copyup "index.html" $D run --rm -v thtml:/usr/share/nginx/html nginx:alpine ls /usr/share/nginx/html
 t vol-nocopy-empty "0" $D run --rm --mount type=volume,source=tempty,target=/usr/share/nginx/html,volume-nocopy nginx:alpine sh -c 'ls /usr/share/nginx/html | wc -l'
 # A new volume takes the image directory's owner, mode and files, as Docker
@@ -701,33 +788,41 @@ t load-stdin "Loaded image" bash -c "$D rmi ctrs-test/alp:v1 >/dev/null; $D load
 code load-garbage 1 bash -c "echo nope | $D load"
 $D rmi ctrs-test/alp:v1 >/dev/null 2>&1; scratch_remove "$IMD"
 
-section "docker build (BuildKit in the VM)"
+section "docker build (BuildKit)"
 BD=$(scratch_dir)
 # BuildKit builder for the engine under test, addressed by its endpoint,
 # never through a docker context. Re-point it every run: a scratch engine
 # gets a fresh socket, and a builder left over from an earlier run would
 # fail every build with no hint why.
-BX=${CTRS_BUILDER:-ctrs-build-e2e}
+BX=${CTRS_BUILDER:-ctrs-build-e2e-$$}
 # `rm -f` removes the config even when its endpoint is dead (it reports
 # failure either way); a fresh builder is then created on the socket.
 docker buildx rm -f "$BX" >/dev/null 2>&1 || true
 docker buildx create --name "$BX" --driver docker-container --driver-opt default-load=true "unix://$SOCK" >/dev/null
 printf 'FROM alpine\nRUN echo built > /built\nARG MSG=default\nRUN echo "$MSG" > /msg\nCOPY data.txt /data.txt\nCMD ["cat","/built","/msg","/data.txt"]\n' > "$BD/Dockerfile"
 echo "from context" > "$BD/data.txt"
-t build "importing to docker" bash -c "cd $BD && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --build-arg MSG=hello -t ctrs-test/built . 2>&1"
+code build 0 env BUILDX_BUILDER="$BX" $D build --build-arg MSG=hello -t ctrs-test/built "$BD"
 t build-runs "from context" $D run --rm ctrs-test/built
 t build-arg "hello" $D run --rm ctrs-test/built
 t build-cached "CACHED" bash -c "cd $BD && BUILDX_BUILDER=$BX $D build --progress plain --build-arg MSG=hello -t ctrs-test/built . 2>&1"
 t build-network "curl" bash -c "cd $BD && printf 'FROM alpine\nRUN apk add --no-cache curl\n' > Dockerfile.net && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build -f Dockerfile.net -t ctrs-test/net . >/dev/null 2>&1 && $D run --rm ctrs-test/net curl --version"
 # Build steps keep Ctrs's resolver (and with it the Mac's): no 8.8.8.8.
-t build-resolvconf "nameserver 172.17.0.1" bash -c "cd $BD && printf 'FROM alpine\nRUN cat /etc/resolv.conf\n' > Dockerfile.dns && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --no-cache --progress plain -f Dockerfile.dns . 2>&1"
-code build-no-public-resolver 1 bash -c "cd $BD && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --no-cache --progress plain -f Dockerfile.dns . 2>&1 | grep -q 'nameserver 8.8.8.8'"
+if $MAC_VM; then
+  printf 'FROM alpine\nRUN cat /etc/resolv.conf\n' > "$BD/Dockerfile.dns"
+  BUILD_DNS=$(BUILDX_BUILDER="$BX" perl -e 'alarm 60; exec @ARGV' $D build --no-cache --progress plain -f "$BD/Dockerfile.dns" "$BD" 2>&1)
+  BUILD_DNS_STATUS=$?
+  t build-resolvconf "nameserver $BRIDGE_GW" printf '%s\n' "$BUILD_DNS"
+  code build-no-public-resolver 0 bash -c '[[ $1 == 0 && $2 != *"nameserver 8.8.8.8"* ]]' _ "$BUILD_DNS_STATUS" "$BUILD_DNS"
+else
+  skip_cases 'checks the macOS Ctrs BuildKit DNS relay' build-resolvconf build-no-public-resolver
+fi
 t build-dns "Address" bash -c "cd $BD && printf 'FROM alpine\nRUN nslookup example.com\n' > Dockerfile.lookup && BUILDX_BUILDER=$BX perl -e 'alarm 300; exec @ARGV' $D build --no-cache --progress plain -f Dockerfile.lookup . 2>&1"
 t build-fails "exit code: 3" bash -c "cd $BD && printf 'FROM alpine\nRUN exit 3\n' > Dockerfile.bad && BUILDX_BUILDER=$BX $D build -f Dockerfile.bad . 2>&1"
 printf 'FROM alpine\nENTRYPOINT ["/bin/echo"]\nCMD ["hello-from-image"]\n' > "$BD/Dockerfile.ep"
-BUILDX_BUILDER=$BX $D build -f "$BD/Dockerfile.ep" -t ctrs-test/ep-cmd "$BD" >/dev/null 2>&1 || echo "  FAIL build-ep-cmd (image did not build)"
+code build-ep-cmd 0 env BUILDX_BUILDER="$BX" $D build -f "$BD/Dockerfile.ep" -t ctrs-test/ep-cmd "$BD"
 t create-empty-cmd "hello-from-image" bash -c "cid=\$(curl -s --unix-socket $SOCK -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"ctrs-test/ep-cmd\",\"Cmd\":[]}' http://x/containers/create | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"Id\"])') && curl -s --unix-socket $SOCK -X POST \"http://x/containers/\$cid/start\" -o /dev/null && sleep 1 && out=\$(curl -s --unix-socket $SOCK \"http://x/containers/\$cid/logs?stdout=true\") && echo \"\$out\" | grep -o hello-from-image; curl -s --unix-socket $SOCK -X DELETE \"http://x/containers/\$cid?force=true\" -o /dev/null"
 $D rmi ctrs-test/built ctrs-test/net ctrs-test/ep-cmd >/dev/null 2>&1; scratch_remove "$BD"
+docker buildx rm -f "$BX" >/dev/null 2>&1
 
 section "registry: login, push, pull"
 REG=$(scratch_dir); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}
@@ -737,18 +832,32 @@ $D run --rm httpd:2.4-alpine htpasswd -Bbn ctrsuser ctrspass > "$REG/htpasswd" 2
 $D run -d --name reg -p 5055:5000 -v "$REG:/auth" -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=ctrs -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd registry:2 >/dev/null
 ready http://localhost:5055/v2/
 R="env DOCKER_CONFIG=$REG/cfg $D"
-t login-wrong "incorrect username or password" bash -c "echo nope | $R login localhost:5055 -u ctrsuser --password-stdin 2>&1"
+LOGIN_ERROR='401 Unauthorized'
+if $CTRS_ENGINE; then LOGIN_ERROR='incorrect username or password'; fi
+t login-wrong "$LOGIN_ERROR" bash -c "echo nope | $R login localhost:5055 -u ctrsuser --password-stdin 2>&1"
 t login "Login Succeeded" bash -c "echo ctrspass | $R login localhost:5055 -u ctrsuser --password-stdin 2>&1"
 t push "digest: sha256:" bash -c "$R tag alpine localhost:5055/team/alp:1 && $R push localhost:5055/team/alp:1 2>&1"
 t push-again "already exists" bash -c "$R push localhost:5055/team/alp:1 2>&1"
 # Deploy tools pin to the RepoDigest after a push: it must be the manifest the
 # registry has, not the image ID or the index alpine was pulled from.
-t push-repo-digest "same" bash -c "d=\$($R push localhost:5055/team/alp:1 2>&1 | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p'); [ -n \"\$d\" ] && [ \"\$($R image inspect localhost:5055/team/alp:1 --format '{{index .RepoDigests 0}}')\" = localhost:5055/team/alp@\$d ] && echo same"
+PUSH_OUTPUT=$($R push localhost:5055/team/alp:1 2>&1)
+PUSH_DIGEST=$(printf '%s\n' "$PUSH_OUTPUT" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p')
+if $CTRS_ENGINE; then
+  t push-repo-digest "localhost:5055/team/alp@${PUSH_DIGEST:-missing}" $R image inspect localhost:5055/team/alp:1 --format '{{range .RepoDigests}}{{println .}}{{end}}'
+else
+  code push-repo-digest 0 $R pull "localhost:5055/team/alp@$PUSH_DIGEST"
+fi
 t pull-auth "3." bash -c "$R rmi localhost:5055/team/alp:1 >/dev/null && $R pull -q localhost:5055/team/alp:1 >/dev/null && $R run --rm localhost:5055/team/alp:1 cat /etc/alpine-release"
 t pull-no-auth "pull access denied" bash -c "$R logout localhost:5055 >/dev/null; $R rmi localhost:5055/team/alp:1 >/dev/null; $R pull localhost:5055/team/alp:1 2>&1"
-t push-no-auth "authentication required" bash -c "$R tag alpine localhost:5055/team/alp:2 && $R push localhost:5055/team/alp:2 2>&1"
+PUSH_AUTH_ERROR='no basic auth credentials'
+if $CTRS_ENGINE; then PUSH_AUTH_ERROR='authentication required'; fi
+t push-no-auth "$PUSH_AUTH_ERROR" bash -c "$R tag alpine localhost:5055/team/alp:2 && $R push localhost:5055/team/alp:2 2>&1"
 # Not pushed, so no RepoDigest: not alpine's from Docker Hub, nor one made up.
-t push-failed-no-digest "[]" $R image inspect localhost:5055/team/alp:2 --format '{{json .RepoDigests}}'
+if $CTRS_ENGINE; then
+  t push-failed-no-digest "[]" $R image inspect localhost:5055/team/alp:2 --format '{{json .RepoDigests}}'
+else
+  t push-failed-no-digest "404" curl -sS -o /dev/null -w '%{http_code}' --user ctrsuser:ctrspass http://localhost:5055/v2/team/alp/manifests/2
+fi
 $D rmi localhost:5055/team/alp:2 >/dev/null 2>&1; $D rm -f reg >/dev/null; scratch_remove "$REG"
 
 section "limits, stats, top, pause, update"
@@ -756,7 +865,11 @@ $D run -d --name lim --memory 128m --cpus 0.5 --pids-limit 50 --cpu-shares 512 n
 t limit-memory "134217728" $D exec lim cat /sys/fs/cgroup/memory.max
 t limit-cpus "50000 100000" $D exec lim cat /sys/fs/cgroup/cpu.max
 t limit-pids "50" $D exec lim cat /sys/fs/cgroup/pids.max
-t limit-shares "20" $D exec lim cat /sys/fs/cgroup/cpu.weight
+if $CTRS_ENGINE; then
+  t limit-shares "20" $D exec lim cat /sys/fs/cgroup/cpu.weight
+else
+  code limit-shares 0 bash -c "low=\$($D exec lim cat /sys/fs/cgroup/cpu.weight) && base=\$($D run --rm --cpu-shares 1024 alpine cat /sys/fs/cgroup/cpu.weight) && [[ \$low =~ ^[0-9]+$ && \$base =~ ^[0-9]+$ ]] && ((low > 0 && low < base))"
+fi
 t limit-inspect "134217728 500000000 50" $D inspect -f '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}}' lim
 t oom-kill "137" bash -c "$D run --rm --memory 32m alpine sh -c 'tail /dev/zero' >/dev/null 2>&1; echo \$?"
 t stats "128MiB" $D stats --no-stream --format '{{.MemUsage}}' lim
@@ -791,7 +904,11 @@ t commit "sha256:" $D commit -c 'CMD ["cat","/added"]' -c 'ENV CTRS=1' ren2 ctrs
 t commit-runs "hi" $D run --rm ctrs-test/committed:1
 t commit-env "CTRS=1" $D run --rm ctrs-test/committed:1 env
 t commit-whiteout "gone" bash -c "$D run --rm ctrs-test/committed:1 sh -c 'test -e /etc/motd || echo gone'"
-t history "docker commit" $D history ctrs-test/committed:1
+if $CTRS_ENGINE; then
+  t history "docker commit" $D history ctrs-test/committed:1
+else
+  code history 0 bash -c "id=\$($D image inspect -f '{{.Id}}' ctrs-test/committed:1) && top=\$($D history -q --no-trunc ctrs-test/committed:1 | head -1) && [[ -n \$id && \$top == \$id ]]"
+fi
 t history-base "<missing>" $D history ctrs-test/committed:1
 t commit-stopped "sha256:" bash -c "$D stop -t 1 ren2 >/dev/null && $D commit ren2 ctrs-test/committed:2"
 $D rm -f ren2 >/dev/null; $D rmi ctrs-test/committed:1 ctrs-test/committed:2 >/dev/null 2>&1
@@ -806,7 +923,7 @@ t connect-inspect "na nb" bash -c "$D inspect -f '{{range \$k, \$v := .NetworkSe
 t connect-members "multi" $D network inspect nb -f '{{range .Containers}}{{.Name}}{{end}}'
 t connect-survives-restart "eth1" bash -c "$D restart -t 1 multi >/dev/null && $D exec multi ip -o link"
 code connect-twice 1 $D network connect nb multi
-t disconnect "no-eth1" bash -c "$D network disconnect nb multi && ($D exec multi ip -o link | grep -q eth1 && echo still || echo no-eth1)"
+code disconnect 0 bash -c "addr=\$($D inspect -f '{{.NetworkSettings.Networks.nb.IPAddress}}' multi) && [[ -n \$addr ]] && before=\$($D exec multi ip -o -4 addr show) && [[ \$before == *\" \$addr/\"* ]] && $D network disconnect nb multi && after=\$($D exec multi ip -o -4 addr show) && [[ \$after != *\" \$addr/\"* ]]"
 t disconnect-dns-gone "bad address" $D run --rm --network nb alpine wget -qO- -T 2 http://web2
 t compose-multi-net "PONG" bash -c "d=\$(scratch_dir); printf 'services:\n  db:\n    image: redis:7-alpine\n    networks: [back]\n  app:\n    image: redis:7-alpine\n    command: sh -c \"sleep 1; redis-cli -h db ping; sleep 30\"\n    networks: [front, back]\nnetworks:\n  front: {}\n  back: {}\n' > \$d/compose.yaml; cd \$d && $D compose -p ctrsnet up -d >/dev/null 2>&1; sleep 3; $D compose -p ctrsnet logs app; $D compose -p ctrsnet down >/dev/null 2>&1; scratch_remove \"\$d\""
 $D rm -f multi >/dev/null; $D network rm na nb >/dev/null
@@ -829,14 +946,32 @@ t system-df-sizes "SIZES-OK" bash -c "$D rm -f e2e-dfc >/dev/null 2>&1; $D volum
 t search "alpine" $D search alpine --limit 3
 t search-official "[OK]" $D search --filter is-official=true alpine --limit 3
 
-section "amd64 images (Rosetta)"
+section "AMD64 and native images"
+if [[ $ENGINE_ARCH == amd64 ]] || $MAC_VM; then
+NATIVE_ALPINE=ctrs-test/native-alpine:$$
+NATIVE_NODE=ctrs-test/native-node:$$
+if $D tag alpine:latest "$NATIVE_ALPINE" && $D tag node:22-alpine "$NATIVE_NODE"; then
 t rosetta-uname "x86_64" $D run --rm --platform linux/amd64 alpine uname -m
 t rosetta-binary "x86-64" bash -c "$D run --rm --platform linux/amd64 alpine sh -c 'apk add -q --no-cache file >/dev/null 2>&1; file /bin/busybox'"
 t rosetta-inspect "linux/amd64" $D image inspect -f '{{.Os}}/{{.Architecture}}' alpine
 t rosetta-amd64-only-repo "x86_64" $D run --rm amd64/alpine:3.22 uname -m
 t rosetta-node "v22" $D run --rm --platform linux/amd64 node:22-alpine node --version
-t native-again "aarch64" bash -c "$D pull -q --platform linux/arm64 alpine >/dev/null && $D pull -q --platform linux/arm64 node:22-alpine >/dev/null && $D run --rm alpine uname -m"
+t native-again "native images restored" bash -c "
+  $D tag '$NATIVE_ALPINE' alpine:latest; a=\$?
+  $D tag '$NATIVE_NODE' node:22-alpine; n=\$?
+  [[ \$a == 0 && \$n == 0 ]] &&
+    [[ \$($D run --rm alpine uname -m) == '$ENGINE_UNAME' ]] &&
+    [[ \$($D image inspect -f '{{.Architecture}}' node:22-alpine) == '$ENGINE_ARCH' ]] &&
+    $D run --rm node:22-alpine node --version && echo 'native images restored'"
 $D rmi amd64/alpine:3.22 >/dev/null 2>&1
+else
+  t native-again "native images restored" echo 'could not snapshot the native image tags'
+fi
+$D rmi "$NATIVE_ALPINE" "$NATIVE_NODE" >/dev/null 2>&1
+else
+  skip_cases 'requires an AMD64 engine or the macOS Ctrs VM' \
+    rosetta-uname rosetta-binary rosetta-inspect rosetta-amd64-only-repo rosetta-node native-again
+fi
 
 section "security: seccomp, capabilities, read-only"
 # Docker's two defaults in a container's own network: any port and ping
@@ -845,14 +980,21 @@ t unpriv-port-start "0" $D run --rm alpine cat /proc/sys/net/ipv4/ip_unprivilege
 t unpriv-ping-range "0	2147483647" $D run --rm alpine cat /proc/sys/net/ipv4/ping_group_range
 t unpriv-listen-80 "listening" $D run --rm -u 1000 alpine sh -c 'nc -lk -p 80 >/dev/null 2>&1 & sleep 0.5; netstat -ltn | grep -q ":80 " && echo listening'
 t unpriv-sysctl-wins "1024" $D run --rm --sysctl net.ipv4.ip_unprivileged_port_start=1024 alpine cat /proc/sys/net/ipv4/ip_unprivileged_port_start
-t unpriv-port-host-net "1024" $D run --rm --network host alpine cat /proc/sys/net/ipv4/ip_unprivileged_port_start
+HOST_PORT_START=1024
+if ! $MAC_VM; then HOST_PORT_START=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start); fi
+t unpriv-port-host-net "${HOST_PORT_START:?no host port sysctl}" $D run --rm --network host alpine cat /proc/sys/net/ipv4/ip_unprivileged_port_start
 t seccomp-on "Seccomp:	2" $D run --rm alpine grep Seccomp: /proc/self/status
 t seccomp-userns "not permitted" $D run --rm alpine unshare -U true
 t seccomp-keyctl "not permitted" bash -c "$D run --rm alpine sh -c 'apk add -q keyutils >/dev/null 2>&1; keyctl show 2>&1'"
 t seccomp-unconfined "userns-ok" $D run --rm --security-opt seccomp=unconfined alpine unshare -U echo userns-ok
-t seccomp-privileged-boundary "Seccomp:	2" $D run --rm --privileged alpine grep Seccomp: /proc/self/status
-t vsock-unconfined "Address family not supported" $D run --rm --security-opt seccomp=unconfined python:3.13-alpine python -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)'
-t vsock-privileged "Address family not supported" $D run --rm --privileged python:3.13-alpine python -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)'
+if $CTRS_ENGINE; then
+  t seccomp-privileged-boundary "Seccomp:	2" $D run --rm --privileged alpine grep Seccomp: /proc/self/status
+  t vsock-unconfined "Address family not supported" $D run --rm --security-opt seccomp=unconfined python:3.13-alpine python -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)'
+  t vsock-privileged "Address family not supported" $D run --rm --privileged python:3.13-alpine python -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)'
+else
+  t seccomp-privileged-boundary "Seccomp:	0" $D run --rm --privileged alpine grep Seccomp: /proc/self/status
+  skip_cases 'checks the Ctrs vsock boundary filter' vsock-unconfined vsock-privileged
+fi
 t seccomp-exec "Seccomp:	2" bash -c "$D run -d --name sec alpine sleep 30 >/dev/null; $D exec sec grep Seccomp: /proc/self/status"
 $D rm -f sec >/dev/null
 t seccomp-threads "threads ok" $D run --rm python:3.13-alpine python -c 'import threading; t=threading.Thread(target=print,args=("threads ok",)); t.start(); t.join()'
@@ -893,14 +1035,23 @@ t stop-signal-inspect "exited (0)" bash -c "$D run -d --name sig2 --stop-signal 
 
 
 section "errors"
-t bad-image-name "invalid" $D run --rm 'UPPER/case' true
+t bad-image-name "invalid" $D run --rm 'docker.io/UPPER/case' true
 code no-such-image-pull 125 $D run --rm ctrs-test/no-such-image:none true
 
 section "ctrs CLI dispatch (engine vs container)"
 # `ctrs stop CONTAINER` must stop the container, not the engine; the engine's
 # own lifecycle lives under `ctrs engine`.
-CTRS=${CTRS_BINARY:-$(cd "$(dirname "$0")/.." && pwd)/target/release/ctrs}
-if [ -x "$CTRS" ]; then
+CTRS_TARGET=target/release
+if [[ $HOST_OS == Linux ]]; then
+  case $ENGINE_ARCH in
+    amd64) CTRS_TARGET=target/linux-x86_64/release ;;
+    arm64) CTRS_TARGET=target/linux/release ;;
+  esac
+fi
+CTRS=${CTRS_BINARY:-$(cd "$(dirname "$0")/.." && pwd)/$CTRS_TARGET/ctrs}
+if ! $CTRS_ENGINE; then
+  skip 'ctrs CLI dispatch' 'requires a Ctrs engine'
+elif [ -x "$CTRS" ]; then
   ki() { CTRS_SOCKET="$SOCK" perl -e 'alarm 120; exec @ARGV' "$CTRS" "$@"; }
   $D run -d --name ci-dispatch-a alpine sleep 120 >/dev/null 2>&1
   $D run -d --name ci-dispatch-b alpine sleep 120 >/dev/null 2>&1
@@ -915,12 +1066,14 @@ if [ -x "$CTRS" ]; then
   t dispatch-engine-status "running" env CTRS_SOCKET="$SOCK" "$CTRS" engine status
   $D rm -f ci-dispatch-a ci-dispatch-b >/dev/null 2>&1
 else
-  skip 'ctrs CLI dispatch' 'target/release/ctrs not built'
+  skip 'ctrs CLI dispatch' "$CTRS not built"
 fi
 
 cleanup
 
-if [ "${SOAK:-0}" -gt 0 ]; then
+if [ "${SOAK:-0}" -gt 0 ] && ! $MAC_VM; then
+  skip soak 'leak counters require the macOS Ctrs VM'
+elif [ "${SOAK:-0}" -gt 0 ]; then
   section "soak: $SOAK containers, checking for leaks"
   DPID=$(pgrep -f 'release/ctrs daemon' | head -1)
   fp() { footprint "$DPID" 2>/dev/null | sed -n 's/.*Footprint: \([0-9.]* [KMG]*B\).*/\1/p' | head -1; }
