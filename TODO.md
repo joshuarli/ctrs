@@ -1,5 +1,5 @@
 Prefix: CTRS
-Next: 16
+Next: 17
 ### CTRS-11 · P2 · Bench: audit and prove the pyramid
 
 - **Area:** bench
@@ -34,4 +34,13 @@ Next: 16
 - **Problem:** The Linux force-warn scan reports the typed firewall policy and transaction API unused by production; its crabtables backend is feature gated and used by its own tests. The live networking path uses netlink.rs.
 - **Recommendation:** Decide whether to wire the optional backend into production or remove the feature and policy together; preserve the existing build feature until that decision.
 - **Fix with:** dead-code-archaeology
+- **Effort:** M
+
+### CTRS-16 · P3 · Pin the guest kernel source and bench inputs in sources.lock.json
+
+- **Area:** build inputs
+- **Where:** guest/kernel/build.sh:19, scripts/ci/kernel-source.sh:15, bench/native/assets.lock (`w6_zlib`, `w7_httpie`), bench/install-ubuntu.sh
+- **Problem:** The guest kernel tarball (`linux-6.18.58.tar.xz`) is downloaded with no checksum by both the kernel build and the release source-archive step, and its version lives only in `build.sh`. Bench source inputs keep their own pins in `assets.lock` and shell `fetch_verified` calls. `sources.lock.json` and laputa-buildlib now pin the development tools only.
+- **Recommendation:** Add the kernel tarball (version, URL, sha256, size, `license: GPL-2.0-only`) to `sources.lock.json`. Fetch it on the host with `buildlib.locks.fetch_input` and mount it into the kernel build container, and read KVER from the lock in `build.sh` and `kernel-source.sh`. Move the bench source pins the same way. Accept: `cargo xtask kernel` and the release workflow's source archive build from the verified tarball, and a corrupted tarball fails with buildlib's size or hash error. The release workflow changes need the owner's go-ahead.
+- **Fix with:** single-source-of-truth
 - **Effort:** M
