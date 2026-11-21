@@ -7,6 +7,10 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
 use super::sys;
 
+#[path = "host_forward.rs"]
+mod host_forward;
+pub use host_forward::reconcile as host_forwarding;
+
 const NLMSG_ERROR: u16 = 2;
 const NLMSG_DONE: u16 = 3;
 const NLM_F_REQUEST: u16 = 0x1;
@@ -905,9 +909,9 @@ const RTN_UNICAST: u8 = 1;
 const RT_TABLE_MAIN: u8 = 254;
 const RT_SCOPE_UNIVERSE: u8 = 0;
 
-fn nl_raw(msg_type: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
+fn nl_raw(protocol: i32, msg_type: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
     // SAFETY: plain socket; owned immediately.
-    let fd = sys::check(unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_ROUTE) } as _, "netlink")?;
+    let fd = sys::check(unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, protocol) } as _, "netlink")?;
     let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::unix::io::RawFd) };
     let mut hdr = Vec::with_capacity(16 + payload.len());
     hdr.extend_from_slice(&((16 + payload.len()) as u32).to_ne_bytes());
@@ -919,10 +923,13 @@ fn nl_raw(msg_type: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
     // SAFETY: sending a buffer we own on a socket we own.
     sys::check(unsafe { libc::send(fd.as_raw_fd(), hdr.as_ptr().cast(), hdr.len(), 0) } as _, "netlink send")?;
     let mut out = Vec::with_capacity(8192);
-    let mut buf = [0u8; 8192];
+    let mut buf = [0u8; 65536];
     loop {
         // SAFETY: receiving into a buffer we own.
-        let n = sys::check(unsafe { libc::recv(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), 0) } as _, "netlink recv")? as usize;
+        let n = sys::check(unsafe { libc::recv(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), libc::MSG_TRUNC) } as _, "netlink recv")? as usize;
+        if n > buf.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated netlink dump"));
+        }
         if n == 0 {
             break;
         }
@@ -934,17 +941,23 @@ fn nl_raw(msg_type: u16, payload: &[u8]) -> io::Result<Vec<u8>> {
             let len = u32::from_ne_bytes(out[off..off + 4].try_into().expect("4")) as usize;
             let ty = u16::from_ne_bytes(out[off + 4..off + 6].try_into().expect("2"));
             if len < 16 || off + len > out.len() {
-                break;
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid netlink dump"));
             }
-            if ty == NLMSG_DONE {
-                done = true;
-            } else if ty == NLMSG_ERROR {
+            let flags = u16::from_ne_bytes(out[off + 6..off + 8].try_into().expect("2"));
+            if flags & 0x10 != 0 {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "netlink dump interrupted"));
+            }
+            if ty == NLMSG_ERROR || (ty == NLMSG_DONE && len >= 20) {
+                if len < 20 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid netlink error"));
+                }
                 let code = i32::from_ne_bytes(out[off + 16..off + 20].try_into().expect("4"));
                 if code != 0 {
                     return Err(io::Error::from_raw_os_error(-code));
                 }
                 done = true;
             }
+            done |= ty == NLMSG_DONE;
             off += (len + 3) & !3;
         }
         if done {
@@ -974,7 +987,7 @@ pub fn default_v4_route() -> io::Result<(i32, [u8; 4])> {
     // struct rtmsg: family, dst_len, src_len, tos, table, protocol, scope, type, flags(4).
     let mut rtm = [0u8; 12];
     rtm[0] = libc::AF_INET as u8;
-    let buf = nl_raw(RTM_GETROUTE, &rtm)?;
+    let buf = nl_raw(libc::NETLINK_ROUTE, RTM_GETROUTE, &rtm)?;
     let mut off = 0;
     while off + 16 <= buf.len() {
         let len = u32::from_ne_bytes(buf[off..off + 4].try_into().expect("4")) as usize;
@@ -1009,7 +1022,7 @@ pub fn primary_v4_addr(index: i32) -> io::Result<[u8; 4]> {
     // struct ifaddrmsg: family, prefixlen, flags, scope, index(4).
     let mut ifa = [0u8; 8];
     ifa[0] = libc::AF_INET as u8;
-    let buf = nl_raw(RTM_GETADDR, &ifa)?;
+    let buf = nl_raw(libc::NETLINK_ROUTE, RTM_GETADDR, &ifa)?;
     let mut off = 0;
     while off + 16 <= buf.len() {
         let len = u32::from_ne_bytes(buf[off..off + 4].try_into().expect("4")) as usize;
@@ -1177,4 +1190,3 @@ mod tests {
         assert_eq!(verdict(&r), libc::NF_DROP as u32);
     }
 }
-

@@ -125,7 +125,8 @@ pub fn host_uplink() -> io::Result<()> {
     // let containers reach the real machine's 127.0.0.1 services. host.docker
     // .internal maps to the bridge gateway instead (write_etc_files).
     let _ = HOST_UPLINK_INDEX.set(index);
-    install_nat(Nat { uplink: index, redirect: false, dnat: Vec::new(), gateway: [0; 4] })
+    install_nat(Nat { uplink: index, redirect: false, dnat: Vec::new(), gateway: [0; 4] })?;
+    netlink::host_forwarding(true)
 }
 
 /// What ctrs's IPv4 table was last built from, so it can be rebuilt when a
@@ -623,6 +624,9 @@ static MADE_BRIDGES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::
 /// those: another engine's may share the network namespace) and ctrs's
 /// nftables table, so nothing of the engine is left in the host's network.
 pub fn remove_host_network() {
+    if let Err(e) = netlink::host_forwarding(false) {
+        eprintln!("ctrs-init: removing host forwarding rules: {e}");
+    }
     let names = std::mem::take(&mut *MADE_BRIDGES.lock().unwrap_or_else(|e| e.into_inner()));
     if let Ok(mut nl) = Netlink::open(libc::NETLINK_ROUTE) {
         for name in names {
