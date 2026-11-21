@@ -30,7 +30,7 @@ case " ${ID:-} ${ID_LIKE:-} " in
         ;;
     *' alpine '*)
         case "$(uname -m)" in aarch64|arm64) node_pkg=cmd:node ;; *) node_pkg= ;; esac
-        $as_root /sbin/apk add --no-cache build-base ca-certificates curl git make tar xz $node_pkg
+        $as_root /sbin/apk add --no-cache bash build-base ca-certificates curl git make tar xz $node_pkg
         command -v docker >/dev/null 2>&1 || $as_root /sbin/apk add --no-cache docker
         ;;
     *)

@@ -36,6 +36,7 @@ on its own.
 | build-essential / build-base, make | Rust native dependencies and `make test` |
 | ca-certificates, curl, tar, xz | rustup and the verified downloads |
 | git | clone and Git dependencies |
+| bash (Alpine) | `conformance/run.sh` and the shell scripts `make test` runs |
 | musl (Debian, Ubuntu) | loader for the pinned musl Python and Node, where musl is 1.2.5 or newer |
 | nodejs (Debian, Ubuntu; Alpine on ARM64) | JavaScript fixture tests when the pinned Node cannot run or has no build for the host |
 | docker.io / docker (only when `docker` is missing) | guest asset builds (`cargo xtask`) and engine integration tests |
