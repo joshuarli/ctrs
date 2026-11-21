@@ -681,6 +681,28 @@ class ExitStatusTests(unittest.TestCase):
             self.assertEqual(runner.cmd_baseline(args), 0)
         self.assertEqual(sorted(set(calls)), [1, 2, 3])
 
+    def test_cohort_stops_after_consecutive_broken_pairs(self):
+        args = argparse.Namespace(a="ctrs", b="orbstack", seed=3, pairs=10, max_pairs=16,
+                                  randomize=False, case="W1", state="warm",
+                                  cold=False, concurrency=8, duration=20,
+                                  write_ratio=0.3)
+        context = Mock(engines={}, jsonl="trials.jsonl")
+        calls = []
+
+        def trial(ctx, engine, case, state, **kw):
+            calls.append(kw["pair_id"])
+            ok = engine != "ctrs" or kw["pair_id"] == 2
+            return {"correctness": {"ok": ok}, "metrics": {}, "engine": engine,
+                    "resources": {"phases": {}}}
+
+        out = io.StringIO()
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "run_one", side_effect=trial), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        self.assertEqual(sorted(set(calls)), [1, 2, 3, 4])
+        self.assertIn("stopped after 2 consecutive pairs", out.getvalue())
+
     def test_noop_command_marks_noise_control(self):
         args = argparse.Namespace(engine="ctrs", pairs=3, case=None,
                                   state=None, cold=False, seed=None,

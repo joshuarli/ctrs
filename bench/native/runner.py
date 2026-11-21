@@ -3737,6 +3737,11 @@ def idle_host_busy_cores(window: float = 5.0) -> float | None:
     return macos_counters.busy_cores(before, macos_counters.host_cpu_ticks(), os.cpu_count())
 
 
+# Consecutive pairs with an incorrect trial before a cohort stops: a
+# broken slot otherwise spends the whole cohort's hour without a verdict.
+BROKEN_PAIR_LIMIT = 2
+
+
 def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, sleep=time.sleep,
                         loadavg=os.getloadavg, busy=idle_host_busy_cores, busy_cores: float = 2.0) -> None:
     """Hold the next pair until no build holds the binaries, the 1-minute
@@ -3795,7 +3800,7 @@ def cmd_baseline(args) -> int:
     try:
         import reporting
         limit = max(args.pairs, getattr(args, "max_pairs", None) or args.pairs)
-        admitted = pair = 0
+        admitted = pair = broken_pairs = 0
         while pair < limit and (admitted < args.pairs if limit > args.pairs else pair < args.pairs):
             pair += 1
             pair_records = []
@@ -3861,6 +3866,12 @@ def cmd_baseline(args) -> int:
             if all(r["correctness"]["ok"] and not r.get("validation_errors")
                    and reporting.host_contended(r) is None for r in pair_records):
                 admitted += 1
+            broken = any(not r["correctness"]["ok"] for r in pair_records)
+            broken_pairs = broken_pairs + 1 if broken else 0
+            if broken_pairs >= BROKEN_PAIR_LIMIT:
+                print(f"stopped after {broken_pairs} consecutive pairs with an incorrect trial: "
+                      "the cohort cannot reach a verdict", flush=True)
+                break
     finally:
         for engine in ctx.engines.values():
             engine.stop()
