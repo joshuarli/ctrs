@@ -49,6 +49,10 @@ def within(child, parent):
     return child == parent or child.startswith(parent + '/')
 
 
+def buildkit_group(name):
+    return re.fullmatch(r'system\.slice/system\.slice:docker:[^/]+', name) is not None
+
+
 def checked(path, root):
     target = root / path
     if target.resolve() != target.absolute() or not target.is_relative_to(root):
@@ -134,7 +138,8 @@ def docker_transients(identity, root, proc):
     candidates = {p['cgroup'] for pid, p in processes.items() if pid in owned
                   and not any(within(p['cgroup'], service) for service in SERVICES)}
     candidates |= {str(p.relative_to(root)) for p in (root / 'system.slice').iterdir()
-                   if re.fullmatch(r'(?:docker-[0-9a-f]{64}\.scope|system\.slice:docker:[a-zA-Z0-9_-]+)', p.name)}
+                   if re.fullmatch(r'docker-[0-9a-f]{64}\.scope', p.name)
+                   or buildkit_group(str(p.relative_to(root)))}
     known = identity.setdefault('verified_transients', {})
     candidates |= {name for name in known if (root / name).exists()}
     candidates = {name for name in candidates
@@ -145,6 +150,11 @@ def docker_transients(identity, root, proc):
             if not name:
                 raise ValueError('Docker process lacks a dedicated transient cgroup')
             inode = checked(name, root).stat().st_ino
+            if buildkit_group(name):
+                known[name] = inode
+                proof[name] = {'inode': inode, 'members': [], 'anchors': [],
+                               'method': 'structural system.slice/system.slice:docker:<id> ownership'}
+                continue
             members = [p for p in processes.values() if within(p['cgroup'], name)]
             for file in checked(name, root).rglob('cgroup.procs'):
                 checked(str(file.parent.relative_to(root)), root)
@@ -160,8 +170,6 @@ def docker_transients(identity, root, proc):
                 scope = re.fullmatch(r'system.slice/docker-([0-9a-f]{64})\.scope', name)
                 if scope and scope[1] in docker_container_ids(identity['endpoint']):
                     method = 'container ID verified through the owned Docker socket during empty scope creation'
-                elif buildkit_metadata_owner(name, identity):
-                    method = 'matching OCI cgroupsPath in the owned DockerRootDir BuildKit executor metadata'
                 else:
                     raise ValueError('unverified Docker transient cgroup: ' + name)
             if any(within(service, name) for service in SERVICES):
@@ -191,26 +199,13 @@ def docker_container_ids(endpoint):
     return {entry['Id'] for entry in docker_get(endpoint, '/containers/json?all=1')}
 
 
-def buildkit_metadata_owner(name, identity):
-    match = re.fullmatch(r'system.slice/(system\.slice:docker:([a-zA-Z0-9_-]+))', name)
-    if not match or not identity.get('docker_root_dir'):
-        return False
-    config = Path(identity['docker_root_dir']) / 'buildkit/executor' / match[2] / 'config.json'
-    try:
-        if config.resolve() != config.absolute():
-            raise ValueError('symlink or escaping Docker executor metadata')
-        stat = config.stat()
-        if stat.st_uid != identity['docker_uid'] or stat.st_mode & 0o022:
-            raise ValueError('Docker executor metadata has unsafe ownership or permissions')
-        return json.loads(config.read_text()).get('linux', {}).get('cgroupsPath') == match[1]
-    except FileNotFoundError:
-        return False
-
-
 def paths(identity, root=ROOT, transients=()):
     own = list(identity['cgroup_roots'])
     if identity['engine'] == 'dockerd':
         own += list(transients)
+    elif any(name in ('', '.', 'system.slice')
+             or buildkit_group('/'.join(Path(name).parts[:2])) for name in own):
+        raise ValueError('ctrs cgroup set overlaps structurally owned Docker BuildKit groups')
     other = identity.get('excluded_cgroups', [])
     if any(within(a, b) or within(b, a) for a in own for b in other):
         raise ValueError('engine cgroup sets overlap')
@@ -266,11 +261,6 @@ def discover(engine, endpoint):
                 'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
                 'shim_verification': shims, 'method': 'socket peer and cgroup-v2 service ownership'}
     identity['root_inodes'] = {p: checked(p, ROOT).stat().st_ino for p in own}
-    if engine == 'dockerd':
-        identity['docker_root_dir'] = docker_get(str(endpoint), '/info')['DockerRootDir']
-        if not Path(identity['docker_root_dir']).is_absolute():
-            raise ValueError('DockerRootDir is not absolute')
-        identity['docker_uid'] = Path(f'/proc/{pid}').stat().st_uid
     paths(identity)
     return identity
 

@@ -126,9 +126,10 @@ class Cgroups(unittest.TestCase):
         self.assertEqual(cg.cpu_delta(before, after)['cpu_seconds'], 2)
 
     def test_transients_cannot_be_claimed_by_name_alone(self):
-        group = 'system.slice/system.slice:docker:unverified'
+        group = 'other.slice/transient-job'
         self.group(group)
         self.process(600, 1, group, b'unrelated\0')
+        self.identity['verified_transients'] = {group: -1}
         sample = self.sample()
         self.assertFalse(sample['ownership_verified'])
         self.assertIsNone(cg.summarize([sample, sample])['cpu_seconds_est'])
@@ -146,8 +147,9 @@ class Cgroups(unittest.TestCase):
             self.assertFalse(self.sample()['ownership_verified'])
 
     def test_new_cgroup_members_missing_from_proc_listing_are_verified_directly(self):
-        group = 'system.slice/system.slice:docker:forked'
+        group = 'other.slice/forked'
         self.group(group)
+        self.identity['verified_transients'] = {group: -1}
         (self.root / group / 'cgroup.procs').write_text('600\n')
         listing = Path.iterdir
 
@@ -159,20 +161,47 @@ class Cgroups(unittest.TestCase):
             with patch.object(Path, 'iterdir', snapshot):
                 self.assertEqual(self.sample()['ownership_verified'], expected)
 
-    def test_empty_buildkit_scope_requires_matching_owned_executor_metadata(self):
-        group = 'system.slice/system.slice:docker:empty-worker'
+    def test_structural_buildkit_ownership_needs_no_live_process_or_metadata(self):
+        before = self.sample()
+        group = 'system.slice/system.slice:docker:retired-worker'
+        self.group(group, usage=5000000)
+        after = self.sample()
+        self.assertTrue(after['ownership_verified'], after['errors'])
+        self.assertIn('structural', after['transient_ownership'][group]['method'])
+        shutil.rmtree(self.root / group)
+        retired = self.sample()
+        summary = cg.summarize([before, after, retired])
+        self.assertEqual(summary['cpu_seconds_est'], 5)
+        self.assertEqual(summary['peak_memory_current_bytes'], 12288)
+        self.assertEqual(summary['peak_anon_kernel_bytes'], 6144)
+
+    def test_structural_buildkit_rule_counts_unrelated_processes_by_design(self):
+        group = 'system.slice/system.slice:docker:claimed-name'
         self.group(group)
-        data = self.root / 'docker-data'
-        config = data / 'buildkit/executor/empty-worker/config.json'
-        config.parent.mkdir(parents=True)
-        config.write_text(json.dumps({'linux': {'cgroupsPath': 'system.slice:docker:empty-worker'}}))
-        self.identity.update(docker_root_dir=str(data), docker_uid=os.getuid())
+        self.process(600, 1, group, b'unrelated\0')
         self.assertTrue(self.sample()['ownership_verified'])
-        self.identity.pop('verified_transients')
-        config.write_text(json.dumps({'linux': {'cgroupsPath': 'unrelated'}}))
-        self.assertFalse(self.sample()['ownership_verified'])
-        config.chmod(0o666)
-        self.assertFalse(self.sample()['ownership_verified'])
+
+    def test_structural_rule_only_matches_direct_system_slice_children(self):
+        for group in ('system.slice/system.slice:docker:', 'other.slice/system.slice:docker:worker',
+                      'system.slice/parent/system.slice:docker:worker',
+                      'system.slice/system.slice:docker:worker/child'):
+            with self.subTest(group=group):
+                self.assertFalse(cg.buildkit_group(group))
+        self.assertTrue(cg.buildkit_group('system.slice/system.slice:docker:worker'))
+
+    def test_ctrs_cannot_own_buildkit_groups_or_their_ancestors_or_descendants(self):
+        group = 'system.slice/system.slice:docker:worker'
+        self.group(group)
+        self.group(group + '/child')
+        for name in ('', '.', 'system.slice', group, group + '/child'):
+            with self.subTest(name=name):
+                result = self.sample({'engine': 'ctrs', 'cgroup_roots': [name]})
+                self.assertFalse(result['ownership_verified'])
+                self.assertIn('structurally owned Docker BuildKit', str(result['errors']))
+        unit = 'system.slice/ctrs-bench.service'
+        self.group(unit)
+        result = self.sample({'engine': 'ctrs', 'cgroup_roots': [unit]})
+        self.assertTrue(result['ownership_verified'])
 
     def test_moby_shim_descendants_outside_service_are_owned(self):
         self.process(600, 1, cg.SERVICES[1], b'/usr/bin/containerd-shim-runc-v2\0-namespace\0moby\0')

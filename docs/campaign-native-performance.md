@@ -42,13 +42,21 @@ Sampler `2-linux-cgroup-v2-memory-stat` reads `cpu.stat usage_usec`,
 owns `docker.service`, `containerd.service`, `docker-<id>.scope` containers,
 `system.slice:docker:*` BuildKit siblings and other verified Docker transients.
 Every sample rediscovers task cgroups through docker.service process ancestry
-or verified containerd `moby` shims. Names alone cannot establish ownership;
+or verified containerd `moby` shims. Except for the structural BuildKit rule below,
+names alone cannot establish ownership;
 new empty Docker scopes require container-ID confirmation through the owned
 engine's read-only API before process movement can establish ancestry.
-Empty BuildKit siblings require matching OCI `cgroupsPath` in executor metadata
-under the owned engine's API-reported `DockerRootDir`, with safe owner/mode and
-no symlink traversal. Previously verified empty groups retain inode continuity.
-Unknown members, overlapping roots and incomplete coverage invalidate samples.
+BuildKit ownership is structural: a cgroup directly under `system.slice` named
+`system.slice:docker:<id>` (nonempty ID) belongs to dockerd, including its
+descendants, even when empty or retired between samples. This is the systemd
+driver name used by dockerd's BuildKit executor; executor/runc metadata is not
+consulted. Limitation: any other process creating that name would be counted
+as dockerd-owned. Ctrs roots may never match, contain or lie within this set;
+the sampler explicitly rejects overlap. Retired groups retain their last sampled
+CPU and memory in trial summaries. Other previously verified empty groups retain
+inode continuity.
+Outside the structural set, unverified members invalidate samples. Overlapping
+roots and incomplete coverage also invalidate samples.
 Ctrs owns its dedicated
 delegated unit, including `ctrs-host` and container descendants. Nested or
 overlapping ownership is refused. `memory.stat` anon, file and kernel charges
