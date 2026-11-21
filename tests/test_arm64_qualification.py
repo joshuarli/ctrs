@@ -92,5 +92,50 @@ class OciInspectionTests(unittest.TestCase):
         self.assertIn("OCI inspection requires jaq on PATH", result.stdout)
 
 
+class BuilderReadinessTests(unittest.TestCase):
+    def test_ready_builder_succeeds(self):
+        result = run_shell("wait_builder_ready", 'isoc() { echo workers; }; wait_builder_ready managed 0')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("MISS", result.stdout)
+
+    def test_starting_builder_is_probed_until_ready(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / ".work/tmp") as temp:
+            result = run_shell("wait_builder_ready", '''
+marker=$1/marker
+isoc() {
+  if [ ! -f "$marker" ]; then
+    touch "$marker"
+    echo socket-not-ready >&2
+    return 1
+  fi
+  echo workers
+}
+wait_builder_ready managed 5
+''', temp)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("MISS", result.stdout)
+
+    def test_timeout_reports_error_state_and_logs(self):
+        result = run_shell("wait_builder_ready", '''
+isoc() {
+  case "$*" in
+    *exec*) echo socket-not-ready >&2; return 1 ;;
+    *inspect*) echo container-state ;;
+    *logs*) echo container-logs ;;
+  esac
+}
+wait_builder_ready managed 0
+''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MISS builder did not answer after docker restart within 0s; last probe: socket-not-ready", result.stdout)
+        self.assertIn("container-state", result.stdout)
+        self.assertIn("container-logs", result.stdout)
+
+    def test_empty_probe_error_is_explicit(self):
+        result = run_shell("wait_builder_ready", 'isoc() { return 1; }; wait_builder_ready managed 0')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("last probe: no output", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -214,6 +214,22 @@ binfmt_isolation_probe() {
   [ "$foreign" = 0 ] && echo isolated || echo shared
 }
 
+wait_builder_ready() {
+  local name=$1 window=$2
+  local deadline=$((SECONDS + window)) probe
+  while :; do
+    if probe=$(isoc "docker exec $name buildctl debug workers" 2>&1); then
+      return 0
+    fi
+    [ "$SECONDS" -lt "$deadline" ] || break
+    sleep 0.2
+  done
+  miss "builder did not answer after docker restart within ${window}s; last probe: ${probe:-no output}"
+  isoc "docker inspect $name --format '{{json .State}}'" 2>&1
+  isoc "docker logs --tail 30 $name" 2>&1
+  return 1
+}
+
 IDENTITY_IMAGE_TAG_PREFIX=ctrsaccel/identity
 
 # The managed identity contract under test (must match daemon/builder.rs;
@@ -349,10 +365,10 @@ case_identity() {
     miss "restart build failed"; idty_rc=1
   fi
   if isoc "docker restart $MANAGED" >/dev/null 2>&1; then
-    if isoc "docker exec $MANAGED buildctl debug workers" >/dev/null 2>&1; then
+    if wait_builder_ready "$MANAGED" 30; then
       ok "docker restart of the managed builder: start through the pin gate clean"
     else
-      miss "builder did not answer after docker restart"; idty_rc=1
+      idty_rc=1
     fi
   else
     miss "docker restart of the managed builder refused"; idty_rc=1
