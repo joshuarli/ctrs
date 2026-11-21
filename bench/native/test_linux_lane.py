@@ -285,12 +285,26 @@ class Engines(unittest.TestCase):
                     lane.read_lock()
 
     def test_frozen_archive_hash_error_does_not_touch_engines(self):
-        with patch.object(lane, 'read_lock', return_value={'archive_sha256': 'frozen'}), \
+        with patch.object(lane.sys, 'platform', 'linux'), \
+                patch.object(lane.os, 'uname', return_value=Mock(machine='x86_64')), \
+                patch.object(lane, 'read_lock', return_value={'archive_sha256': 'frozen'}), \
                 patch.object(runner, 'sha256_file', return_value='wrong'), \
                 patch.object(runner, 'Engine') as factory:
             with self.assertRaisesRegex(ValueError, 'archive hash mismatch'):
                 lane.prepare(factory, Path('/unused'), runner, Path('/archive'))
             factory.assert_not_called()
+
+    def test_fixture_preparation_refuses_non_native_hosts_before_engine_access(self):
+        for platform, machine in [('darwin', 'arm64'), ('linux', 'aarch64')]:
+            with self.subTest(platform=platform, machine=machine), \
+                    patch.object(lane.sys, 'platform', platform), \
+                    patch.object(lane.os, 'uname', return_value=Mock(machine=machine)), \
+                    patch.object(lane, 'read_lock') as read_lock, \
+                    patch.object(runner, 'Engine') as factory:
+                with self.assertRaisesRegex(ValueError, 'native x86_64 Linux host'):
+                    lane.prepare(factory, Path('/unused'), runner, Path('/archive'))
+                read_lock.assert_not_called()
+                factory.assert_not_called()
 
     def test_pyramid_has_only_supported_native_cells(self):
         items = pyramid.registry('linux-amd64')
