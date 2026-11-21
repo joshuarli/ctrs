@@ -194,17 +194,14 @@ fn start() -> io::Result<()> {
             println!("ctrs: running (pid {pid})");
             return Ok(());
         }
-        match child.try_wait()? {
-            Some(status) => {
-                // Lost the bind race to a sibling start: the socket answers
-                // with that engine's identity, so this one succeeded too.
-                if let Some(pid) = socket_pid() {
-                    println!("ctrs: running (pid {pid})");
-                    return Ok(());
-                }
-                return Err(io::Error::other(format!("the daemon exited during startup ({status}); see ~/.local/share/ctrs/logs/daemon.log")));
+        if let Some(status) = child.try_wait()? {
+            // Lost the bind race to a sibling start: the socket answers
+            // with that engine's identity, so this one succeeded too.
+            if let Some(pid) = socket_pid() {
+                println!("ctrs: running (pid {pid})");
+                return Ok(());
             }
-            None => {}
+            return Err(io::Error::other(format!("the daemon exited during startup ({status}); see ~/.local/share/ctrs/logs/daemon.log")));
         }
         if Instant::now() > deadline {
             return Err(io::Error::other("the socket did not answer within 10s (see ~/.local/share/ctrs/logs/daemon.log)"));

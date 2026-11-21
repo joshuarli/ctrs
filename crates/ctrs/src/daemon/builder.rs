@@ -537,11 +537,10 @@ fn verify_config_blob(engine: &Engine, i: &ctrs_image::Image) -> Result<(), Erro
         return Err(Error::Io(io::Error::other(format!("builder image config hashes to {actual}, want {}", &i.config_digest[..19.min(i.config_digest.len())]))));
     }
     let cfg: Value = serde_json::from_slice(&bytes).map_err(|e| Error::Io(io::Error::other(format!("builder image config is not JSON: {e}"))))?;
-    if let Some(n) = cfg["rootfs"]["diff_ids"].as_array().map(|a| a.len()) {
-        if n != i.layers.len() {
+    if let Some(n) = cfg["rootfs"]["diff_ids"].as_array().map(|a| a.len())
+        && n != i.layers.len() {
             return Err(Error::Io(io::Error::other(format!("builder image config names {n} layers, the record has {}", i.layers.len()))));
         }
-    }
     if cfg["os"].as_str() != Some("linux") {
         return Err(Error::Io(io::Error::other(format!("builder image config has os {}, want linux", cfg["os"].as_str().unwrap_or("missing")))));
     }
@@ -788,11 +787,10 @@ pub fn create_for_buildx(engine: &Engine, name: Option<&str>) -> Option<Result<V
         return None;
     }
     // Registry I/O outside [`ENSURE`]; the state is rechecked under it.
-    if matches!(classify(find(engine).as_ref()), Assessment::Fresh | Assessment::StaleStopped) {
-        if let Err(e) = desired_image(engine, &mut |_| {}) {
+    if matches!(classify(find(engine).as_ref()), Assessment::Fresh | Assessment::StaleStopped)
+        && let Err(e) = desired_image(engine, &mut |_| {}) {
             return Some(Err(e));
         }
-    }
     let _g = ENSURE.lock().unwrap_or_else(|e| e.into_inner());
     let now = find(engine);
     let outcome = match classify(now.as_ref()) {
@@ -1439,6 +1437,7 @@ fn send_context(engine: &Engine, id: &str, dir: &str, req: &Request, r: &mut dyn
 
 /// Runs the build: its progress (stderr) to the client as it comes, the
 /// image archive (stdout) into ctrs's store as it comes.
+#[allow(clippy::too_many_arguments)] // each argument is a distinct per-build input shared by callers
 fn buildctl(engine: &Engine, id: &str, dir: &str, o: &Options, env: Vec<String>, out: &mut Out<'_>, probe: &UnixStream, push: Option<&(String, String)>) -> Result<Vec<ctrs_image::Image>, String> {
     let argv = o.argv(dir, push.map(|(_, r)| r.as_str()));
     if !o.build_id.is_empty() {

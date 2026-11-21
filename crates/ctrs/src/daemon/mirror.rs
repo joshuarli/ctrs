@@ -447,13 +447,12 @@ fn query_param(query: &str, key: &str) -> Option<String> {
         let mut out = Vec::with_capacity(bytes.len());
         let mut i = 0;
         while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                if let Ok(b) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
+            if bytes[i] == b'%' && i + 2 < bytes.len()
+                && let Ok(b) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
                     out.push(b);
                     i += 3;
                     continue;
                 }
-            }
             out.push(bytes[i]);
             i += 1;
         }
@@ -464,6 +463,7 @@ fn query_param(query: &str, key: &str) -> Option<String> {
 /// `/v2/<token>/push/…` requests: the OCI distribution push protocol,
 /// writing blobs into the store under their digest and recording
 /// manifests as images the build's caller retags.
+#[allow(clippy::too_many_arguments)] // each argument is a distinct parsed request field
 fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, push: Push, query: &str, len: Option<u64>, chunked: bool, w: &mut &TcpStream) -> io::Result<()> {
     let head = |w: &mut &TcpStream, status: &str, extra: &str, len: u64| write!(w, "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n{extra}\r\n");
     match push {
@@ -475,11 +475,10 @@ fn push_answer(r: &mut BufReader<&TcpStream>, engine: &Engine, method: &str, pus
                 if exists {
                     let size = engine.store.blob_path(&digest).ok().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len()).unwrap_or(0);
                     head(w, "200 OK", &format!("Content-Type: application/octet-stream\r\nDocker-Content-Digest: {digest}\r\n"), size)?;
-                    if method == "GET" {
-                        if let Ok(path) = engine.store.blob_path(&digest) {
+                    if method == "GET"
+                        && let Ok(path) = engine.store.blob_path(&digest) {
                             io::copy(&mut std::fs::File::open(path)?, w)?;
                         }
-                    }
                 } else {
                     head(w, "404 Not Found", "", 0)?;
                 }

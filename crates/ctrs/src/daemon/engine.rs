@@ -319,6 +319,9 @@ impl Spec {
     }
 }
 
+/// A container output subscription: the stream and the chunks written to it.
+type Output = Receiver<(Stream, Vec<u8>)>;
+
 /// A container on a network: (id, name, ip, IPv6 ip).
 pub type Member = (String, String, Option<[u8; 4]>, Option<[u8; 16]>);
 
@@ -1189,11 +1192,10 @@ impl Engine {
                         // Only if nobody stopped or removed it in the meantime.
                         let still_wanted =
                             me.lock().containers.get(&id).is_some_and(|c| c.status == Status::Exited && !c.stopped_by_user);
-                        if still_wanted {
-                            if let Err(e) = me.start_inner(&id, false) {
+                        if still_wanted
+                            && let Err(e) = me.start_inner(&id, false) {
                                 crate::diag::warn!("container did not restart", id = &id[..12], error = format!("{e:?}"));
                             }
-                        }
                     });
                 }
             }
@@ -1262,8 +1264,8 @@ impl Engine {
                             .map(|c| c.id.clone())
                             .collect()
                     };
-                    if !restart.is_empty() {
-                        if let Some(me) = self.me.get().and_then(Weak::upgrade) {
+                    if !restart.is_empty()
+                        && let Some(me) = self.me.get().and_then(Weak::upgrade) {
                             std::thread::spawn(move || {
                                 if me.vm().is_ok() {
                                     for id in restart {
@@ -1274,7 +1276,6 @@ impl Engine {
                                 }
                             });
                         }
-                    }
                 }
             }
         }
@@ -1804,11 +1805,10 @@ impl Engine {
                 return Err(e);
             }
         };
-        if ip != [0; 4] {
-            if let Some(c) = self.lock().containers.get_mut(&id) {
+        if ip != [0; 4]
+            && let Some(c) = self.lock().containers.get_mut(&id) {
                 c.ip = Some(ip);
             }
-        }
         // A restarted container keeps its writable layer, so only --rm deletes it.
         if spec.auto_remove {
             flags |= run_flags::REMOVE;
@@ -1861,9 +1861,8 @@ impl Engine {
         {
             let roots = super::fsevents::Watcher::roots(&spec.mounts);
             let st = self.lock();
-            if st.containers.get(&id).is_some_and(|c| c.status == Status::Running) {
-                if let Some(watcher) = self.fs_events.get() { watcher.add(&id, roots); }
-            }
+            if st.containers.get(&id).is_some_and(|c| c.status == Status::Running)
+                && let Some(watcher) = self.fs_events.get() { watcher.add(&id, roots); }
         }
         match vm.run(&id, &layers, &argv, &spec.env, &spec.cwd, &spec.user, &hostname, flags, net_args, &spec.mounts, &spec.limits.wire(), spec.caps, &host_opts) {
             Ok(pid) => {
@@ -2151,11 +2150,10 @@ impl Engine {
     /// Gives back a stopped container's IPv6 addresses.
     fn release_ip6s(&self, c: &mut Container) {
         let mut nets = self.lock_networks();
-        if let Some(ip) = c.ip6.take() {
-            if let Some(name) = nets.find(&c.spec.network_mode).map(|n| n.name.clone()) {
+        if let Some(ip) = c.ip6.take()
+            && let Some(name) = nets.find(&c.spec.network_mode).map(|n| n.name.clone()) {
                 nets.release6(&name, ip);
             }
-        }
         for (net, ip) in std::mem::take(&mut c.extra_ip6s) {
             nets.release6(&net, ip);
         }
@@ -2222,17 +2220,16 @@ impl Engine {
     pub fn network_remove(&self, key: &str) -> Result<(), String> {
         let n = self.lock_networks().find(key).cloned();
         self.lock_networks().remove(key)?;
-        if let Some(n) = n.filter(|n| !n.bridge.is_empty()) {
-            if let Some(vm) = self.awake() {
+        if let Some(n) = n.filter(|n| !n.bridge.is_empty())
+            && let Some(vm) = self.awake() {
                 let _ = vm.remove_bridge(&n.bridge);
             }
-        }
         Ok(())
     }
 
     /// Subscribes to a container's output from now on. Returns the full id
     /// and whether it runs on a terminal (raw stream, no multiplexing).
-    pub fn attach(&self, key: &str) -> Result<(String, bool, Receiver<(Stream, Vec<u8>)>), Error> {
+    pub fn attach(&self, key: &str) -> Result<(String, bool, Output), Error> {
         let mut st = self.lock();
         let id = resolve(&st, key)?;
         let (tx, rx) = mpsc::channel();
@@ -2276,15 +2273,14 @@ impl Engine {
     pub fn input(&self, id: &str, data: &[u8]) -> io::Result<()> {
         {
             let mut st = self.lock();
-            if let Some(c) = st.containers.get_mut(id) {
-                if !c.live {
+            if let Some(c) = st.containers.get_mut(id)
+                && !c.live {
                     if c.status == Status::Exited {
                         return Err(io::Error::new(io::ErrorKind::BrokenPipe, "container has exited"));
                     }
                     c.early_input.extend_from_slice(data);
                     return Ok(());
                 }
-            }
         }
         self.vm()?.input(id, data)
     }
@@ -2292,12 +2288,11 @@ impl Engine {
     pub fn close_stdin(&self, id: &str) -> io::Result<()> {
         {
             let mut st = self.lock();
-            if let Some(c) = st.containers.get_mut(id) {
-                if !c.live {
+            if let Some(c) = st.containers.get_mut(id)
+                && !c.live {
                     c.early_close = true;
                     return Ok(());
                 }
-            }
         }
         self.vm()?.close_stdin(id)
     }
@@ -2633,7 +2628,7 @@ impl Engine {
             }
             let c = st.containers.get_mut(&id).expect("resolved");
             if c.name == new {
-                return Err(Error::Conflict(format!("Renaming a container with the same name as its current name")));
+                return Err(Error::Conflict("Renaming a container with the same name as its current name".to_string()));
             }
             c.name = new.to_owned();
             id
@@ -2689,16 +2684,14 @@ impl Engine {
 
     /// A frozen process cannot handle a signal; Docker thaws it first.
     fn thaw_for_signal(&self, id: &str) {
-        if self.is_paused(id) {
-            if let Ok(vm) = self.vm() {
-                if vm.freeze(id, false).is_ok() {
+        if self.is_paused(id)
+            && let Ok(vm) = self.vm()
+                && vm.freeze(id, false).is_ok() {
                     if let Some(c) = self.lock().containers.get_mut(id) {
                         c.paused = false;
                     }
                     self.health_resume(id);
                 }
-            }
-        }
     }
 
     pub fn kill(&self, key: &str, signal: u32) -> Result<(), Error> {
@@ -2867,7 +2860,7 @@ impl Engine {
 
     /// `docker exec` step two: start it. Output arrives on the receiver
     /// until the process exits.
-    pub fn exec_start(&self, exec_id: &str) -> Result<(bool, Receiver<(Stream, Vec<u8>)>), Error> {
+    pub fn exec_start(&self, exec_id: &str) -> Result<(bool, Output), Error> {
         let (tx, rx) = mpsc::channel();
         let exec_security;
         let (container_id, config, env) = {
@@ -2914,11 +2907,10 @@ impl Engine {
         flags |= exec_security.0;
         let console = config.console_size;
         let started = self.vm()?.exec(&container_id, exec_id, &config.argv, &env, &config.cwd, &config.user, flags, exec_security.1, &exec_security.2);
-        if let Ok(pid) = started {
-            if let Some(x) = self.lock().execs.get_mut(exec_id).filter(|x| x.exit_code.is_none()) {
+        if let Ok(pid) = started
+            && let Some(x) = self.lock().execs.get_mut(exec_id).filter(|x| x.exit_code.is_none()) {
                 x.pid = pid;
             }
-        }
         if let Err(e) = started {
             let mut st = self.lock();
             if let Some(x) = st.execs.get_mut(exec_id) {
@@ -3530,11 +3522,10 @@ fn vm_console_tail(root: &std::path::Path) -> Option<String> {
     let mut buf = Vec::with_capacity((len - start) as usize);
     file.read_to_end(&mut buf).ok()?;
     let mut s = String::from_utf8_lossy(&buf).into_owned();
-    if start > 0 {
-        if let Some(i) = s.find('\n') {
+    if start > 0
+        && let Some(i) = s.find('\n') {
             s.replace_range(..=i, "");
         }
-    }
     let s = s.trim().to_owned();
     (!s.is_empty()).then_some(s)
 }

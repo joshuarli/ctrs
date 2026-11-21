@@ -335,7 +335,7 @@ fn commit(req: &Request, engine: &Engine) -> Result<Value, Error> {
         let tag = req.query("tag").filter(|t| !t.is_empty()).unwrap_or("latest");
         ctrs_image::Reference::parse(&format!("{repo}:{tag}")).map(|r| r.short()).map_err(|e| Error::BadRequest(format!("invalid reference format: {e}")))?
     };
-    let image = ctrs_image::archive::from_config(name, &config_digest, &cfg, layers).map_err(|e| Error::Io(e))?;
+    let image = ctrs_image::archive::from_config(name, &config_digest, &cfg, layers).map_err(Error::Io)?;
     engine.store.put_image(image)?;
     engine.emit_container("commit", &id, &[]);
     Ok(json!({"Id": config_digest}))

@@ -782,7 +782,7 @@ fn grpc(engine: &Arc<Engine>, early: Vec<u8>, sock: UnixStream, backend: UnixStr
     let _ = t1.join();
     // Anything still pending never saw trailers: drop its mirror
     // records so a retry starts clean.
-    let leftovers: Vec<(u32, (String, Vec<String>, Arc<Engine>))> = pending.lock().unwrap_or_else(|e| e.into_inner()).drain().collect();
+    let leftovers: Vec<_> = pending.lock().unwrap_or_else(|e| e.into_inner()).drain().collect();
     for (_, (repo, _, e)) in leftovers {
         super::builder::discard_pushed(&e, &repo);
     }
@@ -899,14 +899,13 @@ fn relay_c2b_run<R: Read>(
                         let rest = &buf[take..];
                         let mut emit: Vec<u8> = Vec::new();
                         let mut rewrote = None;
-                        if msg.len() >= 5 && msg[0] == 0 {
-                            if let Some((new_msg, repo, tags)) = rewrite_solve(&msg[5..msg.len().min(5 + mlen)], &engine) {
+                        if msg.len() >= 5 && msg[0] == 0
+                            && let Some((new_msg, repo, tags)) = rewrite_solve(&msg[5..msg.len().min(5 + mlen)], &engine) {
                                 emit.push(0);
                                 emit.extend_from_slice(&(new_msg.len() as u32).to_be_bytes());
                                 emit.extend_from_slice(&new_msg);
                                 rewrote = Some((repo, tags));
                             }
-                        }
                         if rewrote.is_none() {
                             emit.extend_from_slice(msg);
                         }
@@ -1018,11 +1017,9 @@ fn relay_b2c_run<R: Read>(
                 // Trailers for a rewritten solve: retag now.
                 if f.ftype == F_HEADERS && end_stream
                     && let Some((repo, tags, e)) = pending.lock().unwrap_or_else(|x| x.into_inner()).remove(&f.sid)
-                {
-                    if let Err(err) = super::builder::retag_pushed_names(&e, &tags, &repo) {
+                    && let Err(err) = super::builder::retag_pushed_names(&e, &tags, &repo) {
                         crate::diag::warn!("builder retag failed", error = err);
                     }
-                }
                 let c = {
                     let s = sids.lock().unwrap_or_else(|e| e.into_inner());
                     match s.c_of(f.sid) {
@@ -1336,12 +1333,11 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                                 }
                                 sh += 7;
                             }
-                        })() {
-                            if j + l <= msg.len() {
+                        })()
+                            && j + l <= msg.len() {
                                 let _ = cli_wr_sock.write_all(&msg[j..j + l]);
                                 let _ = cli_wr_sock.flush();
                             }
-                        }
                     }
                 }
                 if f.flags & FL_END_STREAM != 0 {
@@ -1369,7 +1365,7 @@ fn session(req: &http::Request, early: Vec<u8>, sock: UnixStream, mut be: UnixSt
                     default_win = snap.2,
                     peer_done = peer_done.load(Ordering::Relaxed)
                 );
-                break Err(io_err(&format!("builder reset the session (code {code})")));
+                break Err(io_err(format!("builder reset the session (code {code})")));
             }
             F_GOAWAY => break Err(io_err("builder sent GOAWAY")),
             _ => {}

@@ -930,11 +930,10 @@ fn run_pull(req: &Request, engine: &Engine, reference: &Reference, job: &super::
         Err(e) => {
             crate::diag::warn!("image pull failed", image = reference.short(), error = e);
             let mut message = e.to_string();
-            if let ctrs_image::registry::Error::NoPlatform { available, .. } = &e {
-                if let Some(why) = intel_mac_refusal(&reference.short(), available) {
+            if let ctrs_image::registry::Error::NoPlatform { available, .. } = &e
+                && let Some(why) = intel_mac_refusal(&reference.short(), available) {
                     message = why;
                 }
-            }
             if let Some(why) = pull_hint(&e, &reference.registry, super::proxy::shown().as_deref()) {
                 message = format!("{why} ({message})");
             }
@@ -1007,13 +1006,11 @@ fn port_bindings(body: &Value, engine: &Engine, image: &ctrs_image::Image) -> Re
     if body["HostConfig"]["PublishAllPorts"].as_bool() == Some(true) {
         let mut exposed: Vec<String> = body["ExposedPorts"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
         // The image's own EXPOSE lines live in its config blob.
-        if let Ok(bytes) = engine.store.read_config(&image.config_digest) {
-            if let Ok(cfg) = serde_json::from_slice::<Value>(&bytes) {
-                if let Some(m) = cfg["config"]["ExposedPorts"].as_object() {
+        if let Ok(bytes) = engine.store.read_config(&image.config_digest)
+            && let Ok(cfg) = serde_json::from_slice::<Value>(&bytes)
+                && let Some(m) = cfg["config"]["ExposedPorts"].as_object() {
                     exposed.extend(m.keys().cloned());
                 }
-            }
-        }
         for key in exposed {
             let Ok((container_port, proto)) = parse(&key) else { continue };
             if !out.iter().any(|b| b.container_port == container_port && b.proto == proto) {
@@ -1253,13 +1250,11 @@ fn mounts(body: &Value, engine: &Engine, image: &ctrs_image::Image) -> Result<Mo
     // are in its config. Each becomes an anonymous volume, unless something
     // else is already mounted there.
     let mut anonymous: Vec<String> = body["Volumes"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
-    if let Ok(bytes) = engine.store.read_config(&image.config_digest) {
-        if let Ok(cfg) = serde_json::from_slice::<Value>(&bytes) {
-            if let Some(m) = cfg["config"]["Volumes"].as_object() {
+    if let Ok(bytes) = engine.store.read_config(&image.config_digest)
+        && let Ok(cfg) = serde_json::from_slice::<Value>(&bytes)
+            && let Some(m) = cfg["config"]["Volumes"].as_object() {
                 anonymous.extend(m.keys().cloned());
             }
-        }
-    }
     for dst in anonymous {
         let taken = out.info.iter().any(|i| i["Destination"].as_str().map(|d| d.trim_end_matches('/')) == Some(dst.trim_end_matches('/')));
         if !taken {
@@ -1332,13 +1327,11 @@ fn volumes(req: &Request, engine: &Engine) -> Result<Value, Error> {
 /// The TCP ports an image declares (EXPOSE) plus `--expose`.
 fn exposed_ports(body: &Value, engine: &Engine, image: &ctrs_image::Image) -> Vec<u16> {
     let mut keys: Vec<String> = body["ExposedPorts"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
-    if let Ok(bytes) = engine.store.read_config(&image.config_digest) {
-        if let Ok(cfg) = serde_json::from_slice::<Value>(&bytes) {
-            if let Some(m) = cfg["config"]["ExposedPorts"].as_object() {
+    if let Ok(bytes) = engine.store.read_config(&image.config_digest)
+        && let Ok(cfg) = serde_json::from_slice::<Value>(&bytes)
+            && let Some(m) = cfg["config"]["ExposedPorts"].as_object() {
                 keys.extend(m.keys().cloned());
             }
-        }
-    }
     let mut ports: Vec<u16> = keys.iter().filter(|k| k.ends_with("/tcp") || !k.contains('/')).filter_map(|k| k.split('/').next()?.parse().ok()).collect();
     ports.sort_unstable();
     ports.dedup();
@@ -2737,7 +2730,8 @@ mod tests {
     fn entry_cmd_merge_matches_docker() {
         let image_entry: Vec<String> = vec!["/bin/echo".into()];
         let image_cmd: Vec<String> = vec!["hello-from-image".into()];
-        let cases: &[(Option<&[&str]>, Option<&[&str]>, &[&str], &[&str])] = &[
+        type Case<'a> = (Option<&'a [&'a str]>, Option<&'a [&'a str]>, &'a [&'a str], &'a [&'a str]);
+        let cases: &[Case<'_>] = &[
             (None, None, &["/bin/echo"], &["hello-from-image"]),
             (None, Some(&[]), &["/bin/echo"], &["hello-from-image"]),
             (None, Some(&["x"]), &["/bin/echo"], &["x"]),

@@ -95,6 +95,8 @@ const VSOCK_BUF: libc::c_int = 4 << 20;
 /// A guest port in `NAT_PORTS`, free again when dropped.
 struct NatPort(u16);
 
+type KernelForward = (Arc<VmLink>, String, Vec<TcpListener>, Vec<UdpSocket>);
+
 impl Drop for NatPort {
     fn drop(&mut self) {
         NAT_IN_USE.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
@@ -172,11 +174,10 @@ impl Drop for TcpPermit {
 fn tcp_permit(peer: IpAddr) -> Option<TcpPermit> {
     let peer = peer.to_canonical();
     let mut remote = (!peer.is_loopback()).then(|| REMOTE_SESSIONS.lock().unwrap_or_else(|e| e.into_inner()));
-    if let Some(peers) = &remote {
-        if peers.get(&peer).copied().unwrap_or(0) >= MAX_PEER_SESSIONS || peers.values().sum::<usize>() >= MAX_REMOTE_SESSIONS {
+    if let Some(peers) = &remote
+        && (peers.get(&peer).copied().unwrap_or(0) >= MAX_PEER_SESSIONS || peers.values().sum::<usize>() >= MAX_REMOTE_SESSIONS) {
             return None;
         }
-    }
     let mut current = TCP_SESSIONS.load(Ordering::Relaxed);
     loop {
         if current >= MAX_TCP_SESSIONS {
@@ -210,7 +211,7 @@ pub struct Forwards {
     threads: Vec<JoinHandle<()>>,
     /// Linux host: the kernel forwards these (sockets stay bound so the
     /// ports read as taken); dropping tells the agent to stop.
-    kernel: Option<(Arc<VmLink>, String, Vec<TcpListener>, Vec<UdpSocket>)>,
+    kernel: Option<KernelForward>,
     /// In the VM: the guest ports its kernel forwards for these listeners;
     /// dropping tells the agent to stop, then frees the ports.
     nat: Option<(Arc<VmLink>, String, Vec<NatPort>)>,
@@ -580,13 +581,11 @@ fn udp_loop(sock: &UdpSocket, wake: &OwnedFd, vm: &Arc<VmLink>, ip: [u8; 4], por
             if !sessions.contains_key(&peer) {
                 // Cap sessions so a source-spoofing flood cannot exhaust
                 // threads and guest connections; drop the oldest to make room.
-                if sessions.len() >= 1024 {
-                    if let Some(old) = sessions.iter().min_by_key(|(_, s)| s.last).map(|(p, _)| *p) {
-                        if let Some(s) = sessions.remove(&old) {
+                if sessions.len() >= 1024
+                    && let Some(old) = sessions.iter().min_by_key(|(_, s)| s.last).map(|(p, _)| *p)
+                        && let Some(s) = sessions.remove(&old) {
                             s.close();
                         }
-                    }
-                }
                 match open_udp_session(sock, vm, ip, port, peer) {
                     Ok(s) => {
                         sessions.insert(peer, s);
@@ -599,11 +598,10 @@ fn udp_loop(sock: &UdpSocket, wake: &OwnedFd, vm: &Arc<VmLink>, ip: [u8; 4], por
             let mut frame = Vec::with_capacity(len + 2);
             frame.extend_from_slice(&(len as u16).to_be_bytes());
             frame.extend_from_slice(&buf[..len]);
-            if s.to_guest.write_all(&frame).is_err() {
-                if let Some(s) = sessions.remove(&peer) {
+            if s.to_guest.write_all(&frame).is_err()
+                && let Some(s) = sessions.remove(&peer) {
                     s.close();
                 }
-            }
         }
         let idle: Vec<SocketAddr> = sessions.iter().filter(|(_, s)| s.last.elapsed() >= UDP_IDLE || s.reader.is_finished()).map(|(a, _)| *a).collect();
         for a in idle {

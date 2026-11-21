@@ -53,11 +53,10 @@ static CACHE: Mutex<Option<(Instant, Value, Effective)>> = Mutex::new(None);
 pub fn effective() -> Effective {
     let s = settings();
     let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, from, e)) = c.as_ref() {
-        if at.elapsed() < Duration::from_secs(10) && *from == s {
+    if let Some((at, from, e)) = c.as_ref()
+        && at.elapsed() < Duration::from_secs(10) && *from == s {
             return e.clone();
         }
-    }
     let list = |v: &str| v.split([',', ' ']).map(str::trim).filter(|x| !x.is_empty()).map(str::to_owned).collect::<Vec<_>>();
     let url = |v: &str| (!v.trim().is_empty()).then(|| if v.contains("://") { v.trim().to_owned() } else { format!("http://{}", v.trim()) });
     let e = match s["mode"].as_str() {
@@ -106,7 +105,7 @@ fn parse_scutil(text: &str) -> Effective {
         })
     };
     let proxy = |kind: &str| {
-        (field(&format!("{kind}Enable")).as_deref() == Some("1")).then(|| ())?;
+        (field(&format!("{kind}Enable")).as_deref() == Some("1")).then_some(())?;
         let host = field(&format!("{kind}Proxy"))?;
         let port = field(&format!("{kind}Port")).unwrap_or_else(|| "8080".into());
         Some(format!("http://{host}:{port}"))
@@ -119,11 +118,10 @@ fn parse_scutil(text: &str) -> Effective {
             inside = true;
         } else if inside && l.trim() == "}" {
             inside = false;
-        } else if inside {
-            if let Some((_, v)) = l.split_once(" : ") {
+        } else if inside
+            && let Some((_, v)) = l.split_once(" : ") {
                 no_proxy.push(v.trim().to_owned());
             }
-        }
     }
     Effective { http: proxy("HTTP"), https: proxy("HTTPS"), no_proxy, pac: field("ProxyAutoConfigEnable").as_deref() == Some("1") }
 }

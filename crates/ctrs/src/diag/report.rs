@@ -337,7 +337,7 @@ pub fn assemble(home: &Path, state: &Path, facts: &Facts, redactor: &Redactor) -
     let mut s = String::new();
     let _ = writeln!(s, "Ctrs diagnostics report");
     let _ = writeln!(s, "Created:  {}", time::rfc3339(facts.created));
-    let _ = writeln!(s, "App:      {} {} ({}), made by the {}", "Ctrs", env!("CARGO_PKG_VERSION"), "ctrs", super::part().name());
+    let _ = writeln!(s, "App:      Ctrs {} (ctrs), made by the {}", env!("CARGO_PKG_VERSION"), super::part().name());
     let _ = writeln!(s, "System:   {}", super::system().line());
     let _ = writeln!(s, "Engine:   {}", facts.engine);
 

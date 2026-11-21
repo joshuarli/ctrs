@@ -14,7 +14,9 @@ use std::path::Path;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 
-use ctrs_proto::{HEADER, LayerBegin, LayerFetch, Msg, Stats, Stream};
+#[cfg(target_os = "macos")]
+use ctrs_proto::LayerFetch;
+use ctrs_proto::{HEADER, LayerBegin, Msg, Stats, Stream};
 use ctrs_vmm::Vm;
 
 /// A reply to one request.
@@ -327,6 +329,7 @@ impl VmLink {
 
     /// The same layer, but the guest reads the blob itself from `path` on
     /// the virtiofs share — the store file, no copy and no vsock bytes.
+    #[cfg(target_os = "macos")]
     pub fn send_layer_fetch(&self, digest: &str, media_type: &str, path: &str, size: u64) -> io::Result<()> {
         self.call(|o| Msg::LayerFetch(LayerFetch { path, digest, media_type, size }).encode(o), None).map(drop)
     }
@@ -334,6 +337,7 @@ impl VmLink {
     /// A `LayerFetch` whose reply the caller awaits later, so several
     /// fetches can be in flight while the guest installs them in
     /// parallel. Await with [`VmLink::fetch_reply`].
+    #[cfg(target_os = "macos")]
     pub fn send_layer_fetch_defer(
         &self,
         digest: &str,

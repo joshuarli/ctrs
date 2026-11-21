@@ -503,7 +503,7 @@ pub fn parse_ipam_both(v: &serde_json::Value) -> Result<(Option<Ipam>, Option<Ip
             return Err("ctrs supports one IPv4 subnet per network".into());
         }
         let (net, prefix) = parse_cidr(&subnet, "subnet")?;
-        if prefix > 30 || prefix < 8 {
+        if !(8..=30).contains(&prefix) {
             return Err(format!("invalid subnet {subnet}: ctrs supports prefixes from /8 to /30"));
         }
         let inside = |ip: [u8; 4]| in_subnet(ip, net, prefix);

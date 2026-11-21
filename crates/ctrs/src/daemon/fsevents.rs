@@ -115,9 +115,8 @@ impl Reconcile {
                 Err(e) => { self.warn(&e); continue; },
             };
             if Some(meta.dev()) != self.device { continue; }
-            if meta.ctime() >= self.cutoff {
-                if let Some(p) = path.to_str() { out.push((if meta.is_dir() { FsEventKind::Created } else { FsEventKind::Modified }, p.to_owned())); }
-            }
+            if meta.ctime() >= self.cutoff
+                && let Some(p) = path.to_str() { out.push((if meta.is_dir() { FsEventKind::Created } else { FsEventKind::Modified }, p.to_owned())); }
             if meta.is_dir() {
                 match std::fs::read_dir(path) {
                     Ok(dir) => self.stack.push(dir),
@@ -378,9 +377,8 @@ unsafe extern "C" fn events(_: StreamRef, info: *mut c_void, count: usize, paths
             }
             let mut batch = vec![FsEvent { kind: FsEventKind::Modified, path: "/" }; 10_000];
             batch.extend(events.iter().map(|(kind, path)| FsEvent { kind: *kind, path }));
-            if let Some(engine) = callback.engine.upgrade() {
-                if !engine.send_fs_events(&batch) { state.undelivered.store(true, Ordering::Relaxed); }
-            }
+            if let Some(engine) = callback.engine.upgrade()
+                && !engine.send_fs_events(&batch) { state.undelivered.store(true, Ordering::Relaxed); }
             crate::diag::warn!("test gate delivered guest overflow batch", events = events.len());
         }
     }
@@ -491,7 +489,7 @@ mod tests {
         std::fs::create_dir_all(&denied).unwrap();
         std::fs::write(denied.join("hidden"), b"x").unwrap();
         std::fs::write(base.join("visible"), b"x").unwrap();
-        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o0)).unwrap();
         let mut walk = Reconcile::new(vec![Root { path: base.clone(), file: false }], UNIX_EPOCH);
         let mut out = Vec::new();
         while !walk.turn(1, &mut out) {}

@@ -259,7 +259,7 @@ fn expand_data_disk(path: &std::path::Path, minimum_bytes: u64) -> io::Result<()
         }
         // SAFETY: fstatvfs returned success.
         let space = unsafe { space.assume_init() };
-        let available = (space.f_bavail as u64).checked_mul(space.f_frsize as u64)
+        let available = (space.f_bavail as u64).checked_mul(space.f_frsize)
             .filter(|_| space.f_frsize > 0)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "host free space is unavailable"))?;
         if available < 1 << 30 {
