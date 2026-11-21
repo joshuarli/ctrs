@@ -105,7 +105,6 @@ case_environment() {
     command -v "$v" >/dev/null 2>&1 && ok "tool $v" || miss "tool $v"
   done
 
-  # Toolchain: the pin from rust-toolchain.toml, built through kache.
   if command -v cargo >/dev/null 2>&1; then
     local cv want
     cv=$(cargo --version 2>&1)
