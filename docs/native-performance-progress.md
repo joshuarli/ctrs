@@ -41,7 +41,7 @@ co-resident user load and a dirty worktree at launch; a quiet-window
 confirmation batch from a clean tree is required before promotion use. The
 earlier "missing provenance" note was a reporter defect (it ignored
 `provenance.build_outputs`), fixed 2026-11-18; the trials carry all binary
-and guest-asset hashes. The installed-default ctrs lane was 2 vCPUs until `148136f`; it is now half the Mac's cores. No campaign-owned measured job is active.
+and guest-asset hashes. The installed-default ctrs lane was 2 vCPUs until `148136f`; it was half the Mac's cores until 2026-11-20 and is now all but one (9 here). No campaign-owned measured job is active.
 
 Later 2026-11-18 ([W2 IPI evidence](evidence/native-w2-ipi-2026-11-18.md)):
 the quiet-window matched confirmation `base-20261118T081857-9b61` keeps all

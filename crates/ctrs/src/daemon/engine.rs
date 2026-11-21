@@ -56,14 +56,14 @@ pub fn memory_ceiling() -> u64 {
     (physical_memory() / 2).clamp(2 << 30, 8 << 30)
 }
 
-/// The VM's CPUs: `CTRS_CPUS`, else `vm.json`, else half the Mac's.
+/// The VM's CPUs: `CTRS_CPUS`, else `vm.json`, else all but one of the Mac's.
 pub fn vm_cpus() -> usize {
     let max = max_cpus();
     std::env::var("CTRS_CPUS").ok().and_then(|v| v.parse().ok()).or_else(|| crate::config::Resources::load().cpus.map(|c| c as usize)).unwrap_or_else(|| default_cpus(max)).clamp(1, max)
 }
 
 fn default_cpus(max: usize) -> usize {
-    (max / 2).max(2)
+    max.saturating_sub(1).max(2)
 }
 
 /// The Mac's CPUs, the most the VM can have.
@@ -3542,9 +3542,9 @@ fn vm_console_tail(root: &std::path::Path) -> Option<String> {
 #[cfg(test)]
 mod cpu_default_tests {
     #[test]
-    fn default_is_half_the_mac_with_a_floor_of_two() {
-        assert_eq!(super::default_cpus(10), 5);
-        assert_eq!(super::default_cpus(16), 8);
+    fn default_leaves_one_mac_cpu_with_a_floor_of_two() {
+        assert_eq!(super::default_cpus(10), 9);
+        assert_eq!(super::default_cpus(16), 15);
         assert_eq!(super::default_cpus(3), 2);
         assert_eq!(super::default_cpus(1), 2);
     }
