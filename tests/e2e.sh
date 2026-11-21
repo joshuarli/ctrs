@@ -42,13 +42,21 @@ FAIL=0
 SKIP=0
 FAILED=()
 
+run_check() {
+  if [[ $HOST_OS == Linux ]]; then
+    timeout -k 5 60 "$@"
+  else
+    perl -e 'alarm 60; exec @ARGV' "$@"
+  fi
+}
+
 # t NAME EXPECTED COMMAND... : passes when the command's output (stdout+stderr,
 # trimmed) contains EXPECTED.
 t() {
   local name=$1 want=$2
   shift 2
   local got status
-  got=$(perl -e 'alarm 60; exec @ARGV' "$@" 2>&1)
+  got=$(run_check "$@" 2>&1)
   status=$?
   got=${got//$'\r'/}
   if [[ "$got" == *"$want"* && ( -n "$want" || $status == 0 ) ]]; then
@@ -65,7 +73,7 @@ code() {
   local name=$1 want=$2
   shift 2
   local out
-  out=$(perl -e 'alarm 60; exec @ARGV' "$@" 2>&1)
+  out=$(run_check "$@" 2>&1)
   local got=$?
   if [[ $got == "$want" ]]; then
     PASS=$((PASS + 1))
