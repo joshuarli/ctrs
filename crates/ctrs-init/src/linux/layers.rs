@@ -338,8 +338,10 @@ mod tests {
         let mut h = tar::Header::new_gnu();
         h.set_size(size);
         h.set_mode(mode);
-        h.set_uid(0);
-        h.set_gid(0);
+        // SAFETY: these getters have no preconditions.
+        let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+        h.set_uid(u64::from(uid));
+        h.set_gid(u64::from(gid));
         h.set_mtime(0);
         h.set_cksum();
         h
