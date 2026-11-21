@@ -2,6 +2,34 @@
 
 Building ctrs from source, running it, and how it fits together.
 
+## Linux development setup
+
+On Ubuntu 24.04 or Debian, from a fresh clone run:
+
+```sh
+./scripts/setup-dev
+. "$HOME/.cargo/env"
+make test
+make lint
+```
+
+The setup uses `sudo` when run as a non-root user, installs the pinned Rust
+nightly and fetches locked Cargo dependencies. It needs network access to the
+Ubuntu or Debian package mirrors, rustup and crates.io. Run it again safely to
+refresh the installed packages and dependencies.
+
+| Package | Consumer |
+| --- | --- |
+| build-essential, make | Rust native dependencies and verification targets |
+| ca-certificates, curl | rustup and HTTPS downloads |
+| git | clone and Git dependencies |
+| python3 | offline benchmark harness tests |
+
+Docker is optional for guest assets and engine integration tests; install it
+from your distribution or Docker's instructions. The musl cross-build also needs
+a Rust musl target; install it with `rustup target add` for your architecture.
+No compiler cache or custom linker is required for the default host tests.
+
 ## Build
 
 Needs Rust. The guest kernel and disk template additionally need a Docker
