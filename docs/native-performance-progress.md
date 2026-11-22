@@ -1340,6 +1340,31 @@ count, stable file identities and complete attribute coverage. The
 growth gate uses the declared active-backing, footprint and descriptor
 budgets. The 12-hour qualification remains open.
 
+#### W11 short ctrs growth result
+
+`w11-mixed-20261122T121618-26c7` ran `dc198a9` on signed release `99db1aa`.
+All 12 cycles passed exact state checks for 60,000 total API operations with
+the same API, DB and cache processes. All 12 post-cleanup intervals lasted
+at least 32 seconds. The driver reported zero cleanup errors.
+
+| Resource | Post-warmup increase | Final change from first observation | Budget |
+| --- | ---: | ---: | --- |
+| Sampled physical footprint | 25,042,944 bytes | 55,443,456 bytes | Failed 16 MiB |
+| Owned active backing allocation | 86,786,048 bytes | 105,103,360 bytes | Failed 16 MiB |
+| Owned descriptors | 0 | 0 | Passed 16 descriptors |
+
+The same ctrs backing file returned private allocation in all 12 observations.
+Its private bytes grew by 105,103,360 from first to last, matching the total
+allocation change. Inspect guest live data and free extents on this private
+disk after cleanup, then test whether guest trim reclaims the host bytes.
+The OrbStack growth leg follows separately.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `trials.jsonl` | `a2df9e0330b4296060cf02e10cc1fcca1dcaea03a602fd9243d3570282ed6676` |
+| `plan.json` | `0a51db19315e20977eadb3e600724f5d1a47850a499998885991727a3098ba0f` |
+| `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+
 The 12-hour check now requires the API, DB and cache container IDs, guest
 PIDs, start times and restart counters to match from setup through every
 completed cycle, including its post-cleanup observation. A restart that
