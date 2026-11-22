@@ -268,6 +268,8 @@ class Engines(unittest.TestCase):
             runner.Engine('orbstack', 'offline')
 
     def test_workloads_and_cold_refusals(self):
+        self.assertIn('W1', lane.CASES)
+        self.assertIn('W3', lane.CASES)
         for case in lane.CASES:
             lane.require_case('dockerd', case)
         for engine, case, cold in [('orbstack', 'W2', False), ('ctrs', 'W8', False), ('dockerd', 'W6', True)]:

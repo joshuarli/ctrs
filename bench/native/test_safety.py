@@ -150,6 +150,14 @@ class BuilderIsolationTests(unittest.TestCase):
 
 
 class WorkloadSafetyTests(unittest.TestCase):
+    def test_w3_linux_uses_the_frozen_native_database_pin(self):
+        pin = json.loads((runner.FIXTURES / "w8-v6/portfolio.json").read_text())["images"]["np-v6/postgres"]
+        with patch.object(runner.linux_lane, "enabled", return_value=True), \
+                patch.object(runner.linux_lane, "image", return_value=(pin["manifest"], {"image_diff_ids": pin["diff_ids"]})) as image:
+            self.test_w3_reports_complete_commits_and_rejects_corrupt_persisted_payload()
+        self.assertEqual(image.call_count, 4)
+        self.assertTrue(all(call.args[1] == "db" for call in image.call_args_list))
+
     def test_w3_reports_complete_commits_and_rejects_corrupt_persisted_payload(self):
         timings = "SET\nTiming is on.\n" + "".join(
             f"BEGIN\nINSERT 0 1\nUPDATE 1\nCOMMIT\nTime: {i}.125 ms\n"

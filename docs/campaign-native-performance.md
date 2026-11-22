@@ -16,7 +16,7 @@ This steering supersedes older blanket exclusivity requirements for diagnostics.
 
 ## Linux lane (dockerd)
 
-`linux-amd64` is a separate native-host pilot lane for W2, W6, W7 and W13.
+`linux-amd64` is a separate native-host pilot lane for W1, W2, W3, W6, W7 and W13.
 It never closes macOS gates, and its samples must not pool with macOS samples.
 Both engines use the host CPU and memory without a VM cap; run metadata records
 the host allocation. The harness never starts, stops or reconfigures dockerd.
@@ -53,6 +53,11 @@ the W2-only `--operations` flag.
 To restore an already frozen lane instead of creating a new lock, use the same
 prepare command with `--linux-archive .work/native-perf/linux-amd64-v1/images.tar`.
 The archive must match the committed hash; restoration never updates the lock.
+W1 verifies acknowledged writes and DB/cache recovery on the same database
+container and volume. W3 uses the frozen native database from that same lock
+for 300 synchronous transactions, CHECKPOINT, restart and exact persisted-row
+verification. They retain the existing workload versions and SQL; Linux W3
+records ordered DiffIDs rather than the macOS portfolio's ARM64 manifest.
 
 Sampler `2-linux-cgroup-v2-memory-stat` reads `cpu.stat usage_usec`,
 `memory.current`, optional `memory.peak` and `memory.stat` every 200 ms. Dockerd

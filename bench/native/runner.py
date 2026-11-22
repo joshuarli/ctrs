@@ -597,7 +597,7 @@ class Engine:
         if name not in linux_lane.ENGINES:
             raise ValueError(f"unknown engine {name!r}")
         if name == 'dockerd' and not linux_lane.enabled():
-            raise ValueError('dockerd requires the explicit linux-amd64 lane; supported workloads are W2, W6, W7 and W13')
+            raise ValueError('dockerd requires the explicit linux-amd64 lane; supported workloads are ' + ', '.join(linux_lane.CASES))
         if resource_lane not in RESOURCE_LANES:
             raise ValueError(f"unknown resource lane {resource_lane!r}")
         self.resource_lane = resource_lane
@@ -2603,14 +2603,20 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
     try:
         if fixture_version != W3_FIXTURE_VERSION:
             raise ValueError("W3 fixture version mismatch")
-        pin_path = FIXTURES / "w8-v6/portfolio.json"
-        contract = json.loads(pin_path.read_text())
-        pin = contract["images"]["np-v6/postgres"]
-        image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
-        inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
-        rec["inputs"] = {"images": require_baseline_images(engine.name, {"db": pin}, inspected),
-                         "portfolio_sha256": sha256_file(pin_path)}
+        if linux_lane.enabled():
+            image, identity = linux_lane.image(engine, 'db')
+            rec["inputs"] = {**identity, "portfolio_sha256": sha256_file(linux_lane.LOCK)}
+            image_pin = {"postgres_diff_ids": identity["image_diff_ids"]}
+        else:
+            pin_path = FIXTURES / "w8-v6/portfolio.json"
+            contract = json.loads(pin_path.read_text())
+            pin = contract["images"]["np-v6/postgres"]
+            image = baseline_image_reference(engine.name, pin)[1]
+            inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
+            rec["inputs"] = {"images": require_baseline_images(engine.name, {"db": pin}, inspected),
+                             "portfolio_sha256": sha256_file(pin_path)}
+            image_pin = {"postgres_manifest": pin["manifest"]}
         engine.sh(["volume", "create", "--label", owner_label, vol], timeout=30)
         volume_created = True
         require_volume_owner()
@@ -2636,7 +2642,7 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
         tx.write_text("SET synchronous_commit = on;\n\\timing on\n"
                       + "".join(_w3_tx_sql(i) for i in range(W3_TXS)))
         rec["paired_inputs"] = {"portfolio_sha256": rec["inputs"]["portfolio_sha256"],
-                                "postgres_manifest": pin["manifest"],
+                                **image_pin,
                                 "migration_sha256": sha256_file(mig),
                                 "transactions_sha256": sha256_file(tx)}
         for f in (mig, tx):

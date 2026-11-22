@@ -10,7 +10,7 @@ import linux_cgroups
 
 VERSION = 'linux-amd64-v1'
 ENGINES = ('ctrs', 'orbstack', 'dockerd')
-CASES = ('W2', 'W6', 'W7', 'W13')
+CASES = ('W1', 'W2', 'W3', 'W6', 'W7', 'W13')
 HERE = Path(__file__).resolve().parent
 LOCK = HERE / 'linux' / 'fixtures.lock.json'
 
@@ -23,7 +23,7 @@ def require_case(engine, case, cold=False):
     if engine not in ('ctrs', 'dockerd'):
         raise ValueError('Linux lane supports ctrs and dockerd only')
     if case not in CASES:
-        raise ValueError('Linux lane supports only W2, W6, W7 and W13')
+        raise ValueError('Linux lane supports only ' + ', '.join(CASES))
     if cold:
         raise ValueError('Linux engines are externally managed; cold/fresh_dir lifecycle is refused')
 
