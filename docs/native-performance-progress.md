@@ -238,9 +238,38 @@ The native admission smoke `base-20261122T080710-ebbc` tested the
 reported both exact ceilings and targets. Both uncached Rust and zlib
 builds passed, and each artifact hash matched across slots. Both slots
 recorded zero guest OOM kills, complete footprint samples and NAT usage.
-One pair verifies the configuration and build outputs. The ten-pair
-screen remains open. `trials.jsonl` SHA-256
+One pair verifies the configuration and build outputs.
+`trials.jsonl` SHA-256
 `fc7c6e865a0f66cb4cab7a6558fadfe7e00237e57506eaadaf0c2faee44de515`.
+
+The ten-pair screen `base-20261122T083610-c7a4` used clean source
+`7eb4859`, the same signed binary and guest assets as the installed-default
+W6 cohort, and fixed 9 vCPUs. All 20 builds verified the same Rust and zlib
+artifact hashes. Every leg reported its requested ceiling and zero guest
+OOM kills. All pairs passed admission with complete footprint samples.
+
+| Metric | 6,144 / 8,192 MiB paired median | 95% CI | Screen |
+| --- | ---: | ---: | --- |
+| Sampled peak physical footprint | 0.7545 | 0.7511–0.9729 | Missed 0.95 upper bound |
+| Rust build time | 0.9981 | 0.9897–1.0032 | Met 1.03 upper bound |
+| zlib build time | 1.0216 | 0.9903–1.0272 | Met 1.03 upper bound |
+| Measured engine CPU | 0.9989 | 0.9915–1.0170 | Incomplete |
+
+Both slots used host NAT throughout. The first three pairs reached similar
+footprints in both slots as resident usage rose between trials. The
+6,144 MiB slot plateaued near 6.49 GB by pair four, while the default slot
+continued up to 8.64 GB by pair six. The full ordered cohort missed the
+predeclared footprint requirement. The smaller cap did not advance.
+A future sustained-residency test needs its warmup declared before sampling.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w6-build:memory6144
+python3 bench/native/reporting.py --candidate --match base-20261122T083610-c7a4
+```
+
+`trials.jsonl` SHA-256
+`e392a7879a158e4ba970a086d87de8984e2b65d581bdd84ac2120ef4a3d7d195`.
 
 ### Installed-default W7 cohort
 
