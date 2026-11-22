@@ -43,3 +43,18 @@ python3 bench/native/diagnostics/syscall_pilot.py \
 
 The admission `plan.json` SHA-256 was
 `fcb5ac3561b2c8be3551cbe226ff7003c82157cbc8155360d1b416d293c81da3`.
+
+For overhead confirmation, run ten blocks with those workload settings.
+Odd blocks use `--mode-order off,on --engines ctrs,orbstack`. Even blocks
+use `--mode-order on,off --engines orbstack,ctrs`. Put each attempted
+block's receipt directory in the shell array `block_dirs` in run order.
+
+```sh
+python3 bench/native/diagnostics/w2_observer_report.py "${block_dirs[@]}"
+```
+
+The report checks fixed inputs, verified work, sample coverage and both
+host gates per leg. It applies the 5% budget to the paired median interval
+with CPU counter quantization included. Exit zero means all four numerical
+checks passed. Review the saved process, power and thermal snapshots before
+accepting the observer for attribution.
