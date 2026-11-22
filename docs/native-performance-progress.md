@@ -115,6 +115,49 @@ above through `bench/native/pyramid.py run --name <cell>:cohort` and
 refresh the ranked deficits. After that, the first open item is W12
 full-bind.
 
+## macOS resume setup — 2026-11-22
+
+The Mac is the campaign host (M1 Max, 10 CPUs, 64 GiB, macOS 27.2.1,
+OrbStack 2.2.5; Docker CLI 29.8.2, Compose v5.5.0, buildx 0.37.2). The tree
+was clean at main `5cac40d`; two harness fixes landed at `e98575a` (e2e:
+macOS VM kernel detection and a keychain-free scratch credential helper) and
+`51267cd` (watch: wait for the overflow-batch flush before asserting).
+
+Fresh assets built from that source, including kernel patches 0001–0017:
+`guest/out/initramfs.cpio` SHA-256 `fbed2ff9c71d46718d9e55993e54cfab0ee72b349dcd9cfc6f735a310ab6954d`
+(4,400,252 bytes), `guest/out/Image` SHA-256 `19657ca4cc150ae8d04d003ac494676bcc5845dd3a3a21cd6bfb17df605d4e6f`
+(18,802,696 bytes), signed `target/release/ctrs` SHA-256
+`d59eff1a7f5576a7d49e6e5edf0d5d64740fdc0f49c8e4729ce344d08c534796`
+(6,738,544 bytes, `codesign --verify --strict --verbose=2` clean). The sparse
+1 TiB `data.img` was retained from the earlier host reconstruction.
+
+Boot/runtime gates on those assets: `conformance/smoke.sh` 21/21;
+`tests/watch-recovery.sh` exit 0 (host-loss, guest-overflow, capacity and
+oneshot cases); `tests/fuse-inode-bound.sh` exit 0 (150,000-file walk, peak
+65,575 descriptors under the 73,728 limit, recovery to 57); `tests/e2e.sh`
+507 pass / 2 fail, where both failures are Docker Hub 429 rate limits on the
+optional Rosetta pulls (`amd64/alpine:3.22`, `node:22-alpine`), not engine
+results. No measured cohort has run on this build.
+
+`bench/native/runner.py prepare` succeeded on both engines. W12's
+`fixtures/w12/prepare.py` fails closed: the source archive and lock match
+their pins and the first five diff IDs match, but the rebuilt
+`np-w12-kutt:proof` has different final layers and image ID from
+`workload.json`. The unmatched image was removed; W12 needs a reviewed repin
+or a new fixture version before its cohorts can run. `pyramid.py` preflight
+passes for `w13-overlap:cpus9`, `w2-api:cpus9`, `w14-idle-resume:cpus9`,
+`w6-build:cpus9`, `w6-build:cohort` and `w7-buildx:cohort` (320 GB free, no
+foreign daemon); W12 cells fail on the missing `w12-image.tar`.
+
+Next action: queue `python3 bench/native/pyramid.py run --name w13-overlap:cpus9`
+(37 min estimate) as the first vCPU-default decision test, then `w2-api:cpus9`
+and `w14-idle-resume:cpus9`, then `w6-build:cpus9` (W12 stays blocked), then
+`w6-build:cohort` and `w7-buildx:cohort`. Report each with
+`reporting.py --candidate --match <run>` or `reporting.py --match <run>`.
+For hand-run watch tests, use a gate path with no extension so the daemon
+derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
+stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.
+
 ## Linux lane pilot (amd64) — 2026-11-21
 
 **Separate native Linux pilot; closes no macOS gate.** Do not pool these
