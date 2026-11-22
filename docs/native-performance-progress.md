@@ -1813,6 +1813,40 @@ pinned W12 assets and a signed ctrs build. The diagnostic samples appear
 under `setup_phases`. Use the regular paired cohort for acceptance,
 since the extra counter reads add work to setup.
 
+#### Installed-default W12 named-volume watch cohort
+
+`base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
+`99db1aa` release with the same kernel and initramfs as the bind cohort.
+Both engines used 9 vCPUs. Guest memory was 8.41 GB on ctrs and 63.16 GB on
+OrbStack. The `w12-watch-volume-v2` fixture edited a named volume through
+`docker exec` and used TypeScript's `UseFsEventsOnParentDirectory`.
+All ten alternating pairs verified 2,400 exact outputs with zero misses,
+stale results, or watcher changes. All phases recorded outside CPU, and
+that counter stayed below 0.29 cores during edits. Every ctrs leg recorded
+zero host NAT connections.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired median and 95% CI |
+| --- | ---: | ---: | --- |
+| Edit-to-result p50 | 0.585 s | 0.806 s | 0.7250 [0.7045, 0.7669] |
+| Edit-to-result p95 | 1.208 s | 1.619 s | 0.7628 [0.7164, 0.8047] |
+| Sampled peak physical footprint | 3.56 GB | 12.30 GB | 0.2865 [0.2811, 0.3247] |
+| Whole-trial engine CPU | 91.40 CPU-s | 106.65 CPU-s | 0.8594 [0.8427, 0.8766] |
+
+All four intervals cleared the descriptive strict-win threshold. Edit
+latency includes the `docker exec` edit transport and output polling.
+The bind cohort uses host filesystem edits, so each cohort supports an
+engine comparison within its own mount condition.
+
+```sh
+python3 bench/native/runner.py baseline --case W12-watch --watch-mount volume \
+  --watch-edits 60 --a ctrs --b orbstack --resource-lane installed-default \
+  --pairs 10 --pair-quiet-load 4 --max-pairs 16
+python3 bench/native/reporting.py --match base-20261122T135713-1c0c
+```
+
+Raw trials SHA-256
+`e627ea87c50ecd7ddadf98bb4be725a9b1cd47b38b8e6579b8d442ec65465261`.
+
 ### Independent Gitea holdout
 
 `holdout-v3-exact-content` verifies the seeded repository and issue fields in
