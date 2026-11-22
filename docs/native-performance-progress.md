@@ -1359,6 +1359,16 @@ allocation change. Inspect guest live data and free extents on this private
 disk after cleanup, then test whether guest trim reclaims the host bytes.
 The OrbStack growth leg follows separately.
 
+Use a stopped APFS clone of that private store for trim. Mount a new probe
+volume and verify its ext4 mount resolves to the guest data disk `/dev/vda`.
+Use `storage_trim_guest.py` to fsync a sentinel, sample guest usage and issue
+`FITRIM`. Record two pre-trim backing snapshots across a quiet interval and
+compare with the post-trim snapshot. Verify the sentinel and pinned image
+again after a daemon restart. The submitted discard length is a guest
+receipt. APFS shares the source extents until their last reference is removed,
+so the clone's `st_blocks` delta measures the change in backing references.
+[Linux FITRIM interface](https://github.com/torvalds/linux/blob/master/include/uapi/linux/fs.h)
+
 | Receipt | SHA-256 |
 | --- | --- |
 | `trials.jsonl` | `a2df9e0330b4296060cf02e10cc1fcca1dcaea03a602fd9243d3570282ed6676` |
