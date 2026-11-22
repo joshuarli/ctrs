@@ -986,6 +986,30 @@ python3 bench/native/reporting.py --match base-20261122T104521-90d4
 `trials.jsonl` SHA-256
 `d8002cc4f1717f89df692e27ecbf5340d8b3893fc670ea8bb1a40a8e0b7772f3`.
 
+The archived `attempts.jsonl` records narrow the readiness gap. In all
+ten ctrs trials, a readiness probe connected to the published port within
+1.95 ms of the start command returning. Before the first exact response,
+98 readiness probes opened a connection and received no HTTP response,
+87 of them with a connection reset. OrbStack had 113 connected probes
+close without a response and 10 connection refusals. These are client-side
+observations of the published port.
+
+Use the earliest exact read started after the command returns from either
+the load workers or the dedicated readiness probe. From command start,
+that read completed in 534–541 ms on ctrs and 405–460 ms on OrbStack.
+This diagnostic endpoint retains the gap even though the dedicated probe's
+observed scheduling interval varied. The ctrs refusal cache is a specific
+hypothesis because the timing clusters near two 250 ms cache lifetimes.
+Check the actual cache insertion, first-hit and expiry events before
+attributing the gap or changing the timeout.
+
+Run a separate ctrs-only diagnostic on the same binary and pinned stack
+using `CTRS_LOG=debug` and the original client count, seed, outage and load
+duration. Preserve the daemon's raw event interval and use the readiness
+attempt's wall-clock receipt to align the first exact response with the
+cache events for the owned API target. Keep the diagnostic separate from
+the scored pair observations.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
