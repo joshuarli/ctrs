@@ -2394,13 +2394,18 @@ def trial_w4(ctx, engine: Engine, state: str,
     timed = fixture_version == W4_LATENCY_VERSION
     if queue_interruption is not None and (not timed or len(workers) != 1):
         raise ValueError("queue interruption requires one timed W4 worker condition")
+    if queue_interruption is not None:
+        rec["workload_params"]["pinned_recovery_inputs"] = True
     image = image_ref or (W4_LATENCY_IMAGE if timed else "np-w4-events:v2")
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
     try:
         engine.ensure_up()
-        if pinned_pipeline_inputs:
+        if queue_interruption is not None and engine.sh(
+                ["image", "inspect", redis_ref], timeout=30, check=False).returncode:
+            engine.sh(["pull", redis_ref], timeout=180)
+        if pinned_pipeline_inputs or queue_interruption is not None:
             image, redis_ref, rec['paired_inputs'] = pipeline_image_inputs(engine, image, redis_ref)
             rec['inputs'] = {'worker_image_id': image, 'redis_image_id': redis_ref}
         else:
@@ -2912,6 +2917,7 @@ def trial_w10(ctx, engine: Engine, state: str,
     override = trial_dir / "pinned-compose.json"
     checks = rec["correctness"]["checks"]
     rec["metrics"].update(fixture_version=fixture_version, interrupt_service=interrupt_service)
+    rec["workload_params"]["pinned_recovery_inputs"] = True
     sampler = trace = None
     stop = threading.Event()
     attempts, probes, timeline = [], [], {}
@@ -2965,6 +2971,7 @@ def trial_w10(ctx, engine: Engine, state: str,
             raise ValueError("initial recovery daemon was not launched by this run")
         layout = WORK / "inputs/w8-portfolio-v6/layout" if crash_engine else None
         _, rec["inputs"] = prepare_pinned_stack(engine, override, layout=layout)
+        rec["paired_inputs"] = {key: rec["inputs"][key] for key in ("portfolio_sha256", "seed_sha256")}
         stack_owned = True
         if not crash_engine:
             sampler, trace = start_sampler(engine, trial_dir)

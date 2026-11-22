@@ -39,7 +39,7 @@ class FixtureContext:
 
     def new_record(self, *_):
         return {"trial_id": self.run_id, "metrics": {}, "correctness": {"ok": True, "checks": {}},
-                "resources": {}, "validation_errors": [], "notes": []}
+                "resources": {}, "workload_params": {}, "validation_errors": [], "notes": []}
 
 
 def fake_engine(name="orbstack"):
