@@ -16,8 +16,10 @@ for leg in first second; do
 done
 ```
 
-The two archives must match before selecting a new profiler hash. Verify
-the bundle inside the pinned API image on both engines before using it for
-observer comparisons. Keep the original observer archive hash until
-that proof passes. The package versions and executable version travel with
-each candidate archive.
+On the campaign Mac, two uncached builds produced the same
+`native-tools.tar.gz` with SHA-256
+`990b13e40dcd7726198911b133c2ac59a7df8576f7c914b88b5f4b6527340ae4`.
+Both exported identical package lists and reported `perf version 6.12.117`.
+The leaf-only diagnostic accepts this hash for its native admission run.
+Guest validation and the interleaved observer budget remain open. The
+existing stack and syscall diagnostics still require their original archive.

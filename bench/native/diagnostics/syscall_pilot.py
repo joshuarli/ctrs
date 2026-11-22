@@ -26,6 +26,7 @@ from w2_scheduler_app import parse_api_cpus
 
 PIN = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
 TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
+LEAF_TOOLS_SHA = '990b13e40dcd7726198911b133c2ac59a7df8576f7c914b88b5f4b6527340ae4'
 GUEST_CLIENT_SUFFIX = '-guest-client-v2'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
 BOOTSTRAP = Path(__file__).with_name('w2_scheduler_app.py')
@@ -375,7 +376,8 @@ def main():
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')
     archive = args.tools_archive.resolve()
-    if runner.sha256_file(archive) != TOOLS_SHA or runner.sha256_file(runner.LOAD_PY) != PIN['w2_load_sha256']:
+    tools_sha = LEAF_TOOLS_SHA if args.profile_kind == 'cpu-leaf' else TOOLS_SHA
+    if runner.sha256_file(archive) != tools_sha or runner.sha256_file(runner.LOAD_PY) != PIN['w2_load_sha256']:
         parser.error('profiler/workload input differs from pin')
     supplied = json.loads(args.image_refs.read_text())
     refs = {name: supplied[name] for name in ('api', 'postgres', 'redis')}
@@ -406,7 +408,7 @@ def main():
         'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind in CPU_PROFILES else None,
         'mode_order': args.mode_order.split(','), 'engine_order': engines,
         'operations': args.operations, 'concurrency': args.concurrency, 'seed': args.seed,
-        'refs': refs, 'tools_sha256': TOOLS_SHA, 'source_sha256': hashes,
+        'refs': refs, 'tools_sha256': tools_sha, 'source_sha256': hashes,
         'qualification_eligible': False, 'reason': 'functional counter pilot; foreign host load and unfrozen candidate',
         'comparison_label': 'functional capacity-disclosed diagnostic; allocation equality not asserted',
         'ctrs_requested_cpus': os.environ.get('CTRS_CPUS'), 'ctrs_requested_memory_mib': os.environ.get('CTRS_MEMORY_MIB'),
