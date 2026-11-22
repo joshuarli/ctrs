@@ -117,6 +117,15 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
      ("--case", "W13", "--transfer-path", "container-to-mac", "--direction", "download"), 22, ("pinned-portfolio",)),
     ("w13-c2c-up", "transfer", "container-to-container goodput",
      ("--case", "W13", "--transfer-path", "container-to-container", "--direction", "upload"), 17, ("pinned-portfolio",)),
+    *((f"w13-{short}-{suffix}" + ("-s4" if streams == 4 else ""), "transfer",
+       f"{path} {direction} goodput with {streams} streams",
+       ("--case", "W13", "--transfer-path", path, "--direction", direction, "--streams", str(streams)),
+       None, ("pinned-portfolio",))
+      for short, path in (("pp", "published-port"), ("c2m", "container-to-mac"),
+                          ("c2c", "container-to-container"))
+      for suffix, direction in (("up", "upload"), ("down", "download"))
+      for streams in (1, 4)
+      if streams == 4 or (short, direction) == ("c2c", "download")),
     ("w13-overlap", "transfer", "API latency while a transfer runs",
      ("--case", "W13-overlap"), 110, ("pinned-portfolio",)),
     *((f"w14-{mode}", "connections", f"published-port connection lifecycle: {mode}",
@@ -215,11 +224,15 @@ def registry(lane='macos-arm64') -> list[Workload]:
                  argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "orbstack",
                        "--pairs", "10", "--resource-lane", "matched", "--case", "W12",
                        "--workspace-layout", "full-bind", "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS))),
-        Workload("w8-pull:cohort", "scenario", "pull", "pinned portfolio pull and deploy from a local registry",
-                 UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
-                 argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",
-                       str(WORK / "native-perf/inputs/w8-portfolio-v6/layout"),
-                       "--ctrs-binary", str(CTRS_BIN), "--pairs", "10")),
+        *(Workload(name, "scenario", "pull", purpose,
+                   UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
+                   argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",
+                         str(WORK / "native-perf/inputs/w8-portfolio-v6/layout"),
+                         "--ctrs-binary", str(CTRS_BIN), "--pairs", "10", *flags))
+          for name, purpose, flags in (
+              ("w8-pull:cohort", "pinned portfolio pull and deploy from a local registry", ()),
+              ("w8-pull-under-load:cohort", "pinned portfolio pull and deploy with concurrent API work",
+               ("--under-load",)))),
         Workload("holdout", "full", "holdout", "Gitea + Postgres app never tuned against",
                  600, 2, "estimated", ENGINES,
                  argv=(sys.executable, str(RUNNER), "holdout", "--engines", "ctrs,orbstack"), report=False),

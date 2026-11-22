@@ -296,6 +296,9 @@ An observed NAT relay or missing accounting keeps favorable CPU results
 from qualifying. This control uses matched resources and keeps the
 engines resident.
 
+Run the no-load and concurrent API controls as `w8-pull:cohort` and
+`w8-pull-under-load:cohort`.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild

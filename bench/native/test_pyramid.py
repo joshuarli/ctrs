@@ -111,6 +111,31 @@ class Selection(unittest.TestCase):
         self.assertIn("w8-layout", owned.requires)
         self.assertFalse(owned.report)
 
+    def test_w13_cohorts_cover_each_supported_path_direction_and_stream_count(self):
+        actual = []
+        for entry in self.select("scenario", area=["transfer"]):
+            argv = entry.argv
+            if entry.tier != "scenario" or argv[argv.index("--case") + 1] != "W13":
+                continue
+            path = argv[argv.index("--transfer-path") + 1]
+            direction = argv[argv.index("--direction") + 1]
+            streams = argv[argv.index("--streams") + 1] if "--streams" in argv else "1"
+            self.assertEqual(argv[argv.index("--pairs") + 1], "10")
+            actual.append((path, direction, streams))
+        self.assertCountEqual(actual, [
+            (path, direction, streams)
+            for path in ("published-port", "container-to-mac", "container-to-container")
+            for direction in ("upload", "download")
+            for streams in ("1", "4")
+        ])
+
+    def test_w8_load_cohort_preserves_the_paired_inputs(self):
+        idle, under_load = self.select("scenario", area=["pull"])
+        self.assertEqual(idle.name, "w8-pull:cohort")
+        self.assertEqual(under_load.name, "w8-pull-under-load:cohort")
+        self.assertEqual(under_load.argv, (*idle.argv, "--under-load"))
+        self.assertEqual(under_load.requires, idle.requires)
+
 
 class Entrypoint(unittest.TestCase):
     def main(self, *argv):
