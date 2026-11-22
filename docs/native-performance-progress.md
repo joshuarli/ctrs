@@ -163,6 +163,15 @@ kernel and initramfs. Verify the ad-hoc signature and virtualization
 entitlement. Record the build source revision and the kernel build identity
 when using a previously built `Image`.
 
+Request XML explicitly before parsing the entitlement on the campaign Mac.
+The default `codesign` display produces a human-readable representation.
+
+```sh
+codesign --verify --strict "$CTRS_BINARY"
+codesign --display --xml --entitlements - "$CTRS_BINARY" > "$entitlements_plist"
+/usr/libexec/PlistBuddy -c 'Print :com.apple.security.virtualization' "$entitlements_plist"
+```
+
 Run `make test` from the confirmation checkout. Set `CTRS_BINARY` to the
 absolute path of the verified artifact and `CTRS_GUEST_DIR` to the matching
 guest directory when running `conformance/smoke.sh`. The smoke script checks
