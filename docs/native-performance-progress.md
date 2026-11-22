@@ -373,6 +373,49 @@ python3 bench/native/runner.py baseline --case W4 --a ctrs --b orbstack \
   --resource-lane installed-default --pairs 10 --pair-quiet-load 4 --max-pairs 16
 ```
 
+### Installed-default W5 cohort
+
+`base-20261122T123236-7047` used harness `a6de621` and signed release
+`99db1aa`. All 10 alternating pairs passed with 60 edits per mount and leg,
+for 2,400 exact Marked CLI results. Every leg verified the mounted source,
+tool image and dependency lock, retained the same watcher, and removed its
+owned resources. Both engines reported 9 vCPUs. Guest memory was 8.41 GB for
+ctrs and 63.16 GB for OrbStack. The reporter admitted all pairs by its
+host-load fallback, with a maximum endpoint one-minute load of 2.24 on 10
+host CPUs. The W5 receipts lacked a combined outside-CPU measure.
+
+Ratios are paired ctrs/OrbStack medians with 95% bootstrap intervals.
+
+| Metric | Bind | Named volume |
+| --- | --- | --- |
+| Edit-to-result p50 | 0.9698 [0.9656, 0.9721], non-inferior | 0.9719 [0.9691, 0.9757], non-inferior |
+| Edit-to-result p95 | 0.9488 [0.9376, 0.9539], non-inferior | 0.9852 [0.9814, 0.9913], non-inferior |
+| Watcher setup | 0.4932 [0.4826, 0.5015], strict win | 0.2770 [0.2737, 0.2798], strict win |
+| Engine CPU per edit | 0.9614 [0.9535, 0.9843], non-inferior | 0.8606 [0.8517, 0.8664], strict win |
+| Sampled physical footprint | 0.1919 [0.1832, 0.1951], strict win | 0.1937 [0.1845, 0.1980], strict win |
+
+Median trial p95 was 155.6 ms versus 164.1 ms on bind and 149.3 ms versus
+151.7 ms on volume. The timer ends when the host receives verified CLI
+output. The edit command occupied less than 1% of median bind latency on
+either engine and 21% on ctrs versus 49% on OrbStack for volume. The
+remaining interval includes watch detection, rebuild, CLI execution, and
+delivery of the verified result. Their individual costs were not measured.
+
+Build the pinned image once and load the same archive on both engines using
+`watch_loop.prepare_shared_image`. The exported archive SHA-256 was
+`e55ae7dec6d034b93c0bf88d6e22d1980f289ac200b4aa2557872e35105980af`.
+Run the installed-default cohort with the signed release and pinned guest.
+
+```sh
+python3 bench/native/runner.py baseline --case W5 --watch-edits 60 \
+  --a ctrs --b orbstack --resource-lane installed-default \
+  --pairs 10 --pair-quiet-load 4 --max-pairs 16
+```
+
+Raw trials SHA-256
+`ddee9ccc1dc87d0b8dd4592e078198521db754449258035f2fed56aeb575efe3`.
+Frozen confirmation remains open.
+
 ### Installed-default W6 cohort
 
 Run `base-20261122T063709-0627` used harness source `2910f31` and the signed
@@ -1390,8 +1433,11 @@ shared extents. The clone's private allocation rose by 69,632 bytes.
 The sentinel checksum and the fixture image's config and layer identities
 matched after restarting the clone's daemon. Receipt SHA-256:
 `875731cffbc6e855682642a737e82cec08c295f273c9b727d7787bd2eb887367`.
-Physical reclaim needs a follow-up on a fresh unshared backing file with
-the same workload.
+For physical reclaim, run the same 420-second W11 diagnostic with a new
+`--ctrs-root`, 9 vCPUs, 8,192 MiB and 32-second observations. Require exact
+workload and cleanup receipts, then restart that owned store in place.
+Repeat the idle control, trim and restart checks on the same device and
+inode. Compare both allocated and private bytes before and after trim.
 
 #### W11 short OrbStack growth result
 
