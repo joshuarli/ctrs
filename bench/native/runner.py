@@ -3391,7 +3391,8 @@ def _holdout_api(base: str, method: str, path: str, body: dict | None = None,
 def _holdout_images(engine: Engine, compose) -> dict:
     services = json.loads(compose(["config", "--format", "json"]).stdout)["services"]
     refs = {service: spec["image"] for service, spec in services.items()}
-    if set(refs) != {"gitea", "db"} or any(
+    pins = tomllib.loads((BENCH / "assets.lock").read_text())["artifacts"]["holdout"]
+    if set(refs) != set(pins) or any(
             not re.fullmatch(r".+@sha256:[0-9a-f]{64}", ref) for ref in refs.values()):
         raise ValueError("holdout requires pinned Gitea and PostgreSQL images")
     compose(["pull", "--policy", "missing"], timeout=600)
@@ -3399,11 +3400,15 @@ def _holdout_images(engine: Engine, compose) -> dict:
     for service, ref in refs.items():
         image, = json.loads(engine.sh(["image", "inspect", ref], timeout=30).stdout)
         digest = ref.rsplit("@", 1)[1]
+        pin = pins[service]
+        layers = (image.get("RootFS") or {}).get("Layers")
         if (image.get("Os") != "linux" or image.get("Architecture") != "arm64"
-                or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(image.get("Id")))
+                or image.get("Id") not in (pin["config"], digest)
+                or not isinstance(layers, list)
+                or hashlib.sha256(json.dumps(layers, separators=(",", ":")).encode()).hexdigest() != pin["diff_ids_sha256"]
                 or not any(value.endswith("@" + digest) for value in image.get("RepoDigests") or ())):
             raise ValueError(f"holdout image identity differs for {service}")
-        images[service] = {"ref": ref, "id": image["Id"]}
+        images[service] = {"ref": ref, "id": image["Id"], "config": pin["config"], "diff_ids": layers}
     return images
 
 
@@ -3607,7 +3612,10 @@ def trial_holdout(ctx, engine: Engine, state: str,
                 continue
             clone_hashes.append(hashlib.sha256(readme.stdout).hexdigest())
         checks["clones_exact"] = len(clone_hashes) == clones
-        rec['paired_inputs'] = rec['inputs'] | {'cloned_readme_sha256': clone_hashes}
+        shared_images = {service: {key: image[key] for key in ('ref', 'config', 'diff_ids')}
+                         for service, image in images.items()}
+        rec['paired_inputs'] = {'images': shared_images, 'compose_sha256': rec['inputs']['compose_sha256'],
+                                'cloned_readme_sha256': clone_hashes}
 
         checks["all"] = all(
             v for k, v in checks.items() if k != "all")

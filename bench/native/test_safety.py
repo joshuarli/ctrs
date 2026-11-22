@@ -925,24 +925,35 @@ class ExitStatusTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_holdout(args), 1)
 
-    def test_holdout_preparation_checks_native_manifest_before_admission(self):
+    def test_holdout_preparation_checks_native_manifest_and_config_before_admission(self):
         refs = {name: f"fixture/{name}@sha256:{digit * 64}"
                 for name, digit in (("gitea", "1"), ("db", "2"))}
         config = {"services": {name: {"image": ref} for name, ref in refs.items()}}
         compose = Mock(side_effect=[completed(json.dumps(config)), completed()])
         engine = Mock()
-        image = {"Os": "linux", "Architecture": "arm64", "Id": "sha256:" + "3" * 64}
-        engine.sh.side_effect = [completed(json.dumps([image | {"RepoDigests": [ref]}]))
-                                 for ref in refs.values()]
-        self.assertEqual(runner._holdout_images(engine, compose),
-                         {name: {"ref": ref, "id": image["Id"]} for name, ref in refs.items()})
-        compose.assert_called_with(["pull", "--policy", "missing"], timeout=600)
+        layers = ["sha256:" + "4" * 64]
+        image = {"Os": "linux", "Architecture": "arm64", "RootFS": {"Layers": layers}}
+        pin = {"config": "sha256:" + "3" * 64,
+               "diff_ids_sha256": runner.hashlib.sha256(json.dumps(layers).encode()).hexdigest()}
+        lock = {"artifacts": {"holdout": dict.fromkeys(refs, pin)}}
+        with patch.object(runner.tomllib, "loads", return_value=lock):
+            engine.sh.side_effect = [
+                completed(json.dumps([image | {"Id": image_id, "RepoDigests": [ref]}]))
+                for image_id, ref in zip((pin["config"], refs["db"].split("@")[1]), refs.values(), strict=True)]
+            observed = runner._holdout_images(engine, compose)
+            self.assertEqual(observed["gitea"]["id"], pin["config"])
+            self.assertEqual(observed["db"]["id"], refs["db"].split("@")[1])
+            self.assertTrue(all(row["config"] == pin["config"] and row["diff_ids"] == layers
+                                for row in observed.values()))
+            compose.assert_called_with(["pull", "--policy", "missing"], timeout=600)
 
-        for invalid in ({"Architecture": "amd64"}, {"RepoDigests": ["fixture/gitea:latest"]}):
-            compose.side_effect = [completed(json.dumps(config)), completed()]
-            engine.sh.side_effect = [completed(json.dumps([image | {"RepoDigests": [refs["gitea"]]} | invalid]))]
-            with self.assertRaisesRegex(ValueError, "holdout image identity differs for gitea"):
-                runner._holdout_images(engine, compose)
+            native = image | {"Id": pin["config"], "RepoDigests": [refs["gitea"]]}
+            for invalid in ({"Architecture": "amd64"}, {"RepoDigests": ["fixture/gitea:latest"]},
+                            {"RootFS": {"Layers": []}}, {"Id": "sha256:" + "5" * 64}):
+                compose.side_effect = [completed(json.dumps(config)), completed()]
+                engine.sh.side_effect = [completed(json.dumps([native | invalid]))]
+                with self.assertRaisesRegex(ValueError, "holdout image identity differs for gitea"):
+                    runner._holdout_images(engine, compose)
         config["services"]["db"]["image"] = "postgres:17-alpine"
         compose.reset_mock(side_effect=True)
         compose.return_value = completed(json.dumps(config))
@@ -974,7 +985,8 @@ class ExitStatusTests(unittest.TestCase):
         request.assert_not_called()
 
     def test_holdout_rejects_successful_responses_with_wrong_seed_or_clone(self):
-        image = {'ref': 'pinned', 'id': 'sha256:' + '1' * 64}
+        image = {'ref': 'pinned', 'id': 'sha256:' + '1' * 64,
+                 'config': 'sha256:' + '2' * 64, 'diff_ids': ['sha256:' + '3' * 64]}
         repo = {'name': 'repo-00', 'description': 'holdout repo 0',
                 'default_branch': 'main', 'private': False}
         issue = {'number': 1, 'title': 'issue-0', 'body': 'seeded 0'}
@@ -1013,6 +1025,8 @@ class ExitStatusTests(unittest.TestCase):
             good = run_trial(root / 'good')
             self.assertTrue(good['correctness']['ok'], good['validation_errors'])
             self.assertEqual(len(good['paired_inputs']['cloned_readme_sha256']), 1)
+            self.assertEqual(good['paired_inputs']['images']['gitea'],
+                             {'ref': image['ref'], 'config': image['config'], 'diff_ids': image['diff_ids']})
             bad = run_trial(root / 'bad-read', bad_read=True)
             self.assertFalse(bad['correctness']['ok'])
             self.assertIn('status 200, seeded content match False', bad['validation_errors'][0])

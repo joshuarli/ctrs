@@ -66,3 +66,11 @@ runtime = "debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a
 [artifacts.w6]
 rust = "fcfbf31a7d309a79dba362d75310ead3eafc35d984248a197f5cfbd2dce09c3f"
 zlib = "6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b"
+
+[artifacts.holdout.gitea]
+config = "sha256:6f1bd5427a5ae831a07683b1b841a569daca10133916260ead4c310c50e35243"
+diff_ids_sha256 = "4cb1c7dce0b903dd7383123dbaa7b931104a88baeac1c1c1b1e5cda1cdea37cc"
+
+[artifacts.holdout.db]
+config = "sha256:97106b46c3da2dcd9bcdb89cfb4b9dec61ff62a6f17e77bee6c5487145696e46"
+diff_ids_sha256 = "c356b42d907d9295baa0416066e8f4c33789e9e083bbf0e915e7c83c9ee6cc3e"

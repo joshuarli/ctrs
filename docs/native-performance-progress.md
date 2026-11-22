@@ -1735,9 +1735,13 @@ done
 `holdout-v3-exact-content` verifies the seeded repository and issue fields in
 REST write and read responses. It checks the `main` branch and verifies the
 README from each smart-HTTP clone against the pinned Gitea template after
-the clone timer stops. A two-engine run fails on differing loaded image IDs,
-Compose hashes or cloned README hashes. The image pins and holdout inputs
-are ready for verification on the frozen candidate and OrbStack.
+the clone timer stops. Both registry manifests and their configs were
+verified by SHA-256 and resolve to Linux ARM64. The holdout checks config
+and ordered layer pins and compares those identities across engines. It
+also verifies that each running container uses the image ID reported by
+its own engine. A two-engine run fails on differing pinned image inputs,
+Compose hashes or cloned README hashes. The workload still needs a frozen
+candidate and OrbStack run.
 [Gitea 1.24.7 API](https://docs.gitea.com/api/1.24/)
 [Pinned README template](https://raw.githubusercontent.com/go-gitea/gitea/v1.24.7/options/readme/Default)
 
