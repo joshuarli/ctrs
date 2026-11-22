@@ -954,6 +954,25 @@ volume before temporarily stopping its legacy campaign registry.
 Restore its original running state after the diagnostic. Any unrelated
 running container still prevents allocation admission.
 
+Run the scored installed-default cohorts on the same signed release after
+the retained and derived cancellation checks. Each of the four combinations
+gets ten alternating pairs and its own result directory. Check OrbStack's
+running container inventory before and after each measurement. Temporarily
+stop only the verified legacy campaign registry and restore its original
+running state after the cohorts. Preserve complete timing and correctness
+receipts, and report the backing-allocation diagnostic separately.
+
+```sh
+for content in retained derived; do
+  python3 bench/native/runner.py w8-baseline --layout "$v6_layout" \
+    --ctrs-binary "$signed_binary" --resource-lane installed-default \
+    --content "$content" --pairs 10
+  python3 bench/native/runner.py w8-baseline --layout "$v6_layout" \
+    --ctrs-binary "$signed_binary" --resource-lane installed-default \
+    --content "$content" --pairs 10 --under-load
+done
+```
+
 #### Mac release check after the shared layer-install change
 
 Source `83e9c15` changes the gzip decoder compiled into the Linux guest
