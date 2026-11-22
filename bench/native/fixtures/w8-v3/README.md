@@ -94,13 +94,13 @@ exact request start. The sampler covers baseline setup, pulls, verification and
 cleanup. Waited-child CPU remains diagnostic and does not cover all client work.
 This fixture is not a qualification or all-client footprint claim.
 Add `--under-load` to the command above to select it. The pinned common images
-must already be installed on both engines; prepare them with the W8 v2 common
-registry pilot before generating the unseen variant. Warmup uses the same
+must already be installed on both engines. Follow the [W8 v6 portfolio
+instructions](../w8-v6/README.md) before generating the variant. Warmup uses the same
 store-specific pinned API ID. An isolated ctrs root with only the common API
 manifest installed and no legacy tag passes warmup; this does not qualify the
 remaining fresh-host matrix.
 
-The canonical paired pilot starts from the original pinned v2 layout:
+The paired pilot starts from the original pinned v6 layout:
 
 ```sh
 python3.14 bench/native/runner.py w8-baseline \

@@ -141,12 +141,12 @@ python3 bench/native/runner.py holdout                       # independent real-
 python3 bench/native/runner.py report --match '<exact-run-id>'
 ```
 
-Run these on the Mac after NP-01's isolation/provenance checks. Three
-pairs are a pilot. The current harness uses resource-matched ctrs VM
-settings; a separately implemented default-settings lane remains required
-by the campaign. Preflight is an initial check, not full G0 qualification.
+Run these on the Mac after NP-01's isolation and provenance checks. Three
+pairs are a pilot. Use `--resource-lane installed-default` for the installed
+defaults or `--resource-lane matched` for matched VM allocations. Preflight
+checks launch requirements. G0 qualification has separate evidence requirements.
 
-W2 baselines require the [common pinned ARM64 stack](fixtures/w8-v2/README.md)
+W2 baselines require the [common pinned ARM64 stack](fixtures/w8-v6/README.md)
 preinstalled on both endpoints. Before each trial the runner verifies the
 image IDs, layer identities, seed and API files and primes the VM. The
 paired report requires matching input receipts from both endpoints.
@@ -292,7 +292,7 @@ pinned common W8 image. Supply --image-ref for run/baseline/noop; see
 [the fixture contract](fixtures/w9-v2/README.md). Old timed-loop W9 records are not
 pooled with the new metrics. W11's remaining timed churn is still a diagnostic.
 
-Canonical W8 paired pilots use `w8-baseline --layout <original-v2-layout>
+Canonical W8 paired pilots use `w8-baseline --layout <original-v6-layout>
 --ctrs-binary <signed-ctrs>`. See [the W8 fixture guide](fixtures/w8-v3/README.md)
 for prerequisites, measurement boundaries and diagnostic mode. The generic W8
 proxy commands are retired from scoring.

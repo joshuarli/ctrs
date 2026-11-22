@@ -7,16 +7,16 @@ There are no timed work loops. jobs.json owns the count, concurrency and goldens
 W8's common portfolio owns the immutable image/artifact/tool pins, and W5 owns
 the source lock. The image must already exist; job containers have no network.
 
-After preparing the common W8 portfolio, select its Marked digest reference from
-the printed result directory and pass it explicitly:
+Prepare and install the [W8 v6 portfolio](../w8-v6/README.md) on both engines.
+The cohort finds the installed Marked digest reference on OrbStack:
 
 ```sh
-python3.14 bench/native/runner.py run --case W9 --engine ctrs \
-  --image-ref '127.0.0.1:PORT/np-v2/marked@sha256:0d507a8e7c2f89ffd80ddb8dd625bb482643d8da44d30a35391e1c1c87f875b7'
+python3 bench/native/pyramid.py run --name w9-jobs:cohort
 ```
 
-run, baseline and noop require the pinned reference; tags and other digests are
-rejected before engine access. New metrics fixed16_at_1_s/4_s/8_s/16_s measure
+For a direct `runner.py run`, `baseline` or `noop` invocation, pass
+`--image-ref` with the installed `np-v6/marked` manifest digest reference.
+The `fixed16_at_1_s/4_s/8_s/16_s` metrics measure
 whole job batches, including create/start/build/test/rm. Warmup excludes VM boot.
 Setup and cleanup have separate native boundaries. All per-job outputs and
 failures are retained; a failed condition is not retried or omitted. Cleanup
