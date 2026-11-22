@@ -3,10 +3,12 @@ import copy
 import json
 from pathlib import Path
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
 import reporting
+import transfer
 
 
 def pair(pair_id=1, ratio=0.8, run_id="run-a", case="W1", metric="wall_seconds"):
@@ -379,6 +381,52 @@ class ReportingTests(unittest.TestCase):
         result = metric_result(report, "goodput_bytes_per_second")
         self.assertEqual(result["tool_limited_trials"], {"ctrs": 0, "orbstack": 10})
         self.assertEqual(result["assessment"], "tool-limited")
+
+    def test_w13_v3_checks_transfer_and_capacity_receipts(self):
+        digest = "a" * 64
+        params = dict(path="published-port", direction="download", streams=4,
+                      size_bytes=128, repeats=1)
+
+        def receipt(seconds):
+            return {"seconds": seconds, "ok": True, "errors": [], "verified_bytes": 128,
+                    "goodput_bytes_per_second": 128 / seconds,
+                    "receivers": [{"id": str(i), "bytes": 32, "sha256": digest, "error": None}
+                                  for i in range(4)]}
+
+        records = [r for i in range(1, 11) for r in pair(pair_id=i, case="W13")]
+        for record in records:
+            seconds = .75 if record["engine"] == "ctrs" else 2.
+            limited = record["engine"] == "ctrs"
+            record["workload_params"].update(params)
+            record["paired_inputs"] = {"sha256_per_stream": digest}
+            record["metrics"].update(
+                **params, fixture_version=transfer.FIXTURE_VERSION,
+                capacity_controls={"host": receipt(.5), "container": receipt(.5)},
+                attempts=[receipt(seconds) | {"tool_limited": limited}], tool_limited=limited,
+                goodput_bytes_per_second=128 / seconds, completion_seconds=seconds)
+        report = reporting.analyze(records)
+        self.assertEqual(report["cohorts"][0]["valid_pairs"], 10)
+        self.assertEqual(metric_result(report, "goodput_bytes_per_second")["assessment"], "tool-limited")
+
+        def hide_limit(metrics):
+            metrics["tool_limited"] = metrics["attempts"][0]["tool_limited"] = False
+
+        for mutation in (lambda m: m["capacity_controls"].pop("container"),
+                         lambda m: m["attempts"][0]["receivers"][0].update(sha256="b" * 64),
+                         lambda m: m.update(completion_seconds=0.01),
+                         hide_limit):
+            with self.subTest(mutation=mutation):
+                damaged = copy.deepcopy(records)
+                mutation(damaged[0]["metrics"])
+                self.assertEqual(reporting.analyze(damaged)["cohorts"][0]["rejections"],
+                                 [{"pair_id": 1, "reason": "invalid W13 transfer or capacity receipts"}])
+
+    def test_w13_manifest_uses_transfer_fixture_version(self):
+        manifest = Path(transfer.__file__).with_name("cases.toml")
+        with manifest.open("rb") as source:
+            cases = tomllib.load(source)["case"]
+        w13, = [case for case in cases if case["id"] == "W13"]
+        self.assertEqual(w13["fixture_version"], transfer.FIXTURE_VERSION)
 
     def test_pairs_measured_on_a_contended_host_are_rejected(self):
         records = [r for i in range(1, 4) for r in pair(pair_id=i, case="W13", metric="goodput_bytes_per_second", ratio=2)]

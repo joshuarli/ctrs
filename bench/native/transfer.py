@@ -9,6 +9,7 @@ import uuid
 
 TOOL = Path(__file__).parent / 'fixtures/w13/transfer_tool.py'
 SOURCE = TOOL.read_text()
+FIXTURE_VERSION = 'w13-v3'
 DEFAULT_SIZE = 1024 ** 3
 
 
@@ -56,11 +57,12 @@ def trial_w13(ctx, engine, state, path='published-port', direction='upload', str
         raise ValueError('invalid transfer parameters')
     directory = ctx.trial_dir(engine.name, 'W13', state)
     rec = ctx.new_record(engine, 'W13', state, directory)
+    rec['workload_params']['fixture_version'] = FIXTURE_VERSION
     token = 'w13-' + uuid.uuid4().hex[:12]
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
     resources = []
     sampler = trace = None
-    rec['metrics'].update(fixture_version='w13-v3', path=path, direction=direction,
+    rec['metrics'].update(fixture_version=FIXTURE_VERSION, path=path, direction=direction,
                           streams=streams, size_bytes=size_bytes, repeats=repeats,
                           controlled_egress='unsupported: no owned external endpoint', attempts=[])
     try:

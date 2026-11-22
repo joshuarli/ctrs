@@ -15,6 +15,7 @@ from pathlib import Path
 
 import ci_jobs
 from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
+from transfer import FIXTURE_VERSION as W13_CAPACITY_VERSION, tool_limited
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
 from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS, edit_plan, watch_latency_metrics, watch_source_paths
 
@@ -470,6 +471,48 @@ def _w12_watch_receipt(record, mount, edit_count):
     return shared | {'edits': results}
 
 
+def _w13_capacity_receipt(record):
+    metrics = record['metrics']
+    params = workload_params(record)
+    if (not isinstance(params, dict) or metrics.get('fixture_version') != W13_CAPACITY_VERSION
+            or params.get('fixture_version', W13_CAPACITY_VERSION) != W13_CAPACITY_VERSION):
+        return False
+    path, direction, streams, size, repeats = (
+        params.get(key) for key in ('path', 'direction', 'streams', 'size_bytes', 'repeats'))
+    if (path not in ('published-port', 'container-to-container', 'container-to-mac')
+            or direction not in ('upload', 'download') or type(streams) is not int or streams not in (1, 4)
+            or type(size) is not int or size <= 0 or size % streams
+            or type(repeats) is not int or repeats <= 0
+            or any(metrics.get(key) != params[key] for key in ('path', 'direction', 'streams', 'size_bytes', 'repeats'))):
+        return False
+    inputs = record.get('paired_inputs')
+    digest = inputs.get('sha256_per_stream') if isinstance(inputs, dict) else None
+    if not isinstance(digest, str) or re.fullmatch(r'[a-f0-9]{64}', digest) is None:
+        return False
+    controls, attempts = metrics.get('capacity_controls'), metrics.get('attempts')
+    if (not isinstance(controls, dict) or set(controls) != {'host', 'container'}
+            or not isinstance(attempts, list) or len(attempts) != repeats):
+        return False
+    for receipt in [*controls.values(), *attempts]:
+        if (not isinstance(receipt, dict) or receipt.get('ok') is not True or receipt.get('errors') != []
+                or receipt.get('verified_bytes') != size or not _number(seconds := receipt.get('seconds'))
+                or seconds <= 0 or receipt.get('goodput_bytes_per_second') != size / seconds):
+            return False
+        receivers = receipt.get('receivers')
+        if (not isinstance(receivers, list) or len(receivers) != streams
+                or any(not isinstance(row, dict) or row.get('error') is not None
+                       or row.get('bytes') != size // streams or row.get('sha256') != digest for row in receivers)
+                or {row.get('id') for row in receivers if isinstance(row.get('id'), str)} != {str(i) for i in range(streams)}):
+            return False
+    goodput = [attempt['goodput_bytes_per_second'] for attempt in attempts]
+    limited = [tool_limited(value, controls['host']['goodput_bytes_per_second'],
+                            controls['container']['goodput_bytes_per_second'], path) for value in goodput]
+    return (all(attempt.get('tool_limited') is flag for attempt, flag in zip(attempts, limited))
+            and metrics.get('tool_limited') is any(limited)
+            and metrics.get('goodput_bytes_per_second') == statistics.median(goodput)
+            and metrics.get('completion_seconds') == statistics.median(attempt['seconds'] for attempt in attempts))
+
+
 def _analyze_cohort(identity: dict, records: list[dict],
                     sides: tuple[str, str] = ("ctrs", "orbstack"),
                     side_of=None,
@@ -492,6 +535,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
     paired_httpie = (identity['case'] == 'W7' and isinstance(params, dict)
                      and params.get('fixture_version') == HTTPIE_FIRST_USE)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
+    verified_w13_capacity = identity['case'] == 'W13' and (
+        isinstance(params, dict) and params.get('fixture_version') == W13_CAPACITY_VERSION
+        or any(r['metrics'].get('fixture_version') == W13_CAPACITY_VERSION for r in records))
     pinned_stack = (identity['case'] in ('W1', 'W2') and isinstance(params, dict)
                     and params.get('pinned_stack') is True)
     pinned_pipeline = (identity['case'] == 'W4' and isinstance(params, dict)
@@ -584,6 +630,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
                 not (receipt := _w12_watch_receipt(a[0], params.get('mount'), params.get('edits')))
                 or receipt != _w12_watch_receipt(b[0], params.get('mount'), params.get('edits'))):
             reason = 'paired workspace watch inputs or outputs differ or are missing'
+        elif verified_w13_capacity and not all(_w13_capacity_receipt(row) for row in (a[0], b[0])):
+            reason = 'invalid W13 transfer or capacity receipts'
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
         if not reason:
@@ -653,7 +701,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
         if identity["case"] == "W13" and metric in TRANSFER_TIMING:
             limited = {side: sum(bool(pair[i + 1]["metrics"].get("tool_limited")) for pair in valid)
                        for i, side in enumerate(sides)}
-            if (assessment in FAVORABLE and limited[sides[1]]) or (assessment == "loss" and limited[sides[0]]):
+            if verified_w13_capacity:
+                if any(limited.values()) and assessment in (*FAVORABLE, "loss", "inconclusive"):
+                    assessment = "tool-limited"
+            elif (assessment in FAVORABLE and limited[sides[1]]) or (assessment == "loss" and limited[sides[0]]):
                 assessment = "tool-limited"
             if "ctrs" in sides:
                 side = sides.index("ctrs") + 1

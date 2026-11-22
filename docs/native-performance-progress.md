@@ -1164,8 +1164,10 @@ python3 bench/native/runner.py baseline --case W13 --transfer-path "$transport" 
 
 For a ten-pair comparison, require every measured transfer in the
 admission pair to be at or below half the slower loopback capacity at
-the endpoints the path uses. Retain failed or contended trials and
-tool-limited results with their path and controls. The queue uses
+the endpoints the path uses. The v3 reporter rechecks the receiver
+hashes and byte counts, derives goodput from each receipt, and verifies
+the recorded twofold headroom flag for both engines. Retain failed or
+contended trials and tool-limited results with their path and controls. The queue uses
 separate cohort invocations with `--pairs 10 --max-pairs 16` after admission.
 
 ### Installed-default W14 idle-resume cohort
