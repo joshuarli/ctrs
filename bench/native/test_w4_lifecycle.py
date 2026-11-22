@@ -150,8 +150,10 @@ class W4References(unittest.TestCase):
             self.assertTrue(result['correctness']['ok'], result)
             self.assertEqual(result['metrics']['queue_p95_ms_at_4'], 190)
             self.assertEqual(result['metrics']['queue_p99_ms_at_4'], 198)
+            self.assertEqual(result['metrics']['jobs_at_4'], 200)
             self.assertFalse(missing['correctness']['ok'])
             self.assertNotIn('queue_p95_ms_at_4', missing['metrics'])
+            self.assertNotIn('jobs_at_4', missing['metrics'])
 
     def test_explicit_images_are_used_for_queue_and_workers(self):
         with tempfile.TemporaryDirectory(dir=Path(runner.REPO) / '.work/tmp') as directory:

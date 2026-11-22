@@ -70,6 +70,25 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(result["valid_pairs"], 0)
             self.assertEqual(result["rejections"][0]["reason"], "paired inputs differ or are missing")
 
+    def test_w4_resource_metrics_use_the_verified_worker_condition(self):
+        records = pair(case="W4", metric="workers_4_s")
+        for record, cpu, footprint in zip(records, (8, 10), (125, 100), strict=True):
+            record["metrics"].update(jobs=200, jobs_at_4=200)
+            record["correctness"]["checks"]["workers_4"] = True
+            record["resources"]["phase_receipts"] = {
+                "workers_4": {"status": "ok", "errors": [], "cpu_seconds": cpu,
+                              "peak_phys_footprint_bytes": footprint},
+                "workers_16": {"status": "ok", "errors": [], "cpu_seconds": 1000,
+                               "peak_phys_footprint_bytes": 1000},
+            }
+        report = reporting.analyze(records)
+        self.assertAlmostEqual(metric_result(report, "workers_4_cpu_seconds_per_job")["ratio_median"], .8)
+        self.assertEqual(metric_result(report, "workers_4_peak_phys_footprint_bytes")["ratio_median"], 1.25)
+        self.assertIsNone(metric_result(report, "workers_16_cpu_seconds_per_job")["ratio_median"])
+        records[0]["metrics"]["jobs_at_4"] -= 1
+        report = reporting.analyze(records)
+        self.assertIsNone(metric_result(report, "workers_4_cpu_seconds_per_job")["ratio_median"])
+
     def test_w5_receipts_require_equal_observed_inputs_for_pairing(self):
         records = pair(case='W5', metric='bind_edit_to_result_median_s')
         for record in records:

@@ -2449,6 +2449,8 @@ def trial_w4(ctx, engine: Engine, state: str,
                 for percentile in (95, 99):
                     rank = math.ceil(percentile * len(latencies) / 100)
                     rec["metrics"][f"queue_p{percentile}_ms_at_{condition}"] = latencies[rank - 1] / 1_000_000
+                if case_id == "W4":
+                    rec["metrics"][f"jobs_at_{condition}"] = len(latencies)
             checks[f"workers_{condition}"] = verified and (timed or verify.stdout.strip() == f"verified {w4_fixture.JOBS}")
             if queue_interruption is not None and not checks[f"workers_{condition}"]:
                 raise ValueError(f"W10 {condition} queue work failed verification")
@@ -2469,6 +2471,13 @@ def trial_w4(ctx, engine: Engine, state: str,
             rec["resources"].update(summarize_trace(trace) if trace else {})
             if trace:
                 rec["resources"]["trace"] = _trace_ref(trace)
+                if case_id == "W4" and timed:
+                    samples = [json.loads(line) for line in trace.read_text().splitlines()]
+                    phases = rec["resources"].get("phases", {})
+                    rec["resources"]["phase_receipts"] = {
+                        name: resource_cycles.phase_summary(engine.measurement_identity, phase, samples)
+                        for name, phase in phases.items() if name.startswith("workers_")
+                    }
         except Exception as exc:
             rec["validation_errors"].append(f"sampler shutdown or receipt: {exc}")
             rec["correctness"]["ok"] = False
