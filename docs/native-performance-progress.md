@@ -1110,6 +1110,23 @@ Run fresh `w12-full-bind:cohort`, `w12-mixed:cohort`,
 `w12-watch-volume:cohort` pairs. The independently registered
 `w6-build-warm:cohort` covers W6's primed build-cache condition.
 
+Use the same signed release, verified archive hashes and runner revision
+`fa72716` for the three build layouts so each records the split install and
+verification timings. The mixed layout leaves source on the bind mount and
+puts dependencies and generated outputs on named volumes. The all-volume
+control keeps the whole workspace in the guest. Each uses a cold dependency
+directory and the existing offline package cache. Keep separate paired
+cohorts and preserve the full workflow time, the two install intervals and
+the exact output receipts for each layout.
+
+```sh
+for layout in full-bind bind-source-volume-deps all-volume; do
+  python3 bench/native/runner.py baseline --case W12 --workspace-layout "$layout" \
+    --a ctrs --b orbstack --resource-lane installed-default \
+    --pairs 10 --pair-quiet-load 4 --max-pairs 16
+done
+```
+
 The next W12-watch cohorts use `w12-watch-v4` for bind and
 `w12-watch-volume-v2` for named volumes. Each verifies all 60 edit sequences,
 their exact output paths, and the same guest watcher PID and process start
