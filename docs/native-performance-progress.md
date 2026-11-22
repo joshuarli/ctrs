@@ -526,6 +526,19 @@ receipt. This check can catch runtime drift. A frozen comparison also needs
 reproducible build-time dependencies. Keep the earlier W7 results separate
 and admit one native pair before the new ten-pair cohort.
 
+All 20 uncached HTTPie legs in `base-20261122T065539-5b0c` downloaded the
+same 15 wheel filenames. `bench/native/fixtures/w7/httpie/wheels-arm64.json`
+records those files and their SHA-256 digests from the exact PyPI releases.
+Restore and verify them with
+`python3 bench/native/fixtures/w7/httpie/prepare_wheels.py`. The resulting
+wheelhouse is for Linux ARM64 and CPython 3.13. A clean restore verified all
+15 wheel hashes. The lock SHA-256 is
+`321ffcf392383c35e0c3101516233a0e26c684a1a5749a967bbeea4e379d52ec`.
+Setuptools 84.2.1 is the
+recorded runtime version and the candidate build backend. A clean offline
+build and runtime admission are still required before timing this variant.
+[PyPI JSON API](https://docs.pypi.org/api/json/)
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
