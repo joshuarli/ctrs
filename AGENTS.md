@@ -1,5 +1,7 @@
 # AGENTS.md
 
+`make clean` removes the checkout's ordinary `./target` directory and refuses files or symlinks at that path.
+
 Router for ctrs development. ctrs is a headless, Docker Engine API
 compatible container engine for macOS (Virtualization.framework guest) and
 Linux (namespaces/cgroups directly). Keep this file short; detail lives in
