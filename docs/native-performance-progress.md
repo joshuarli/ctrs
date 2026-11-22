@@ -883,6 +883,30 @@ python3 bench/native/reporting.py --match base-20261122T091635-df7a
 `trials.jsonl` SHA-256
 `2ddff2311be62f118080899d69f8c798d90babb77a849000101e0abd3b744899`.
 
+#### W2 API cgroup CPU split
+
+Both fixed-work cohorts saved API cgroup `cpu.stat` at the workload
+boundaries. For each admitted pair, subtract the before snapshot from
+the after snapshot, then subtract OrbStack's delta from ctrs's delta.
+The user and system fields reconcile to total CPU usage in all 40
+legs within 2 microseconds. Each leg verified 50,000 requests.
+
+| Paired CPU difference | Published port, median [range] | Guest-direct, median [range] |
+| --- | ---: | ---: |
+| Measured engine CPU | +9.74 s [8.92, 10.58] | +4.51 s [4.11, 5.58] |
+| API cgroup total | +5.64 s [5.30, 5.83] | +4.13 s [3.65, 4.57] |
+| API cgroup user | +1.49 s [1.27, 2.19] | +1.00 s [0.64, 1.50] |
+| API cgroup system | +4.09 s [3.48, 4.38] | +3.14 s [2.84, 3.53] |
+
+The API system CPU delta exceeded the user CPU delta in every pair,
+including the guest-direct path with zero host NAT connections. The
+cgroup interval includes the counter-reader exec and uses separate
+boundaries from the host process interval. Use the guest-direct observer
+confirmation before attributing system CPU to specific kernel functions.
+
+The derived `pairs.jsonl` SHA-256 is
+`043c3e8d4cf5095cd3d5c6844a42bad9eb9d23e43e86ee893b35c8a50e94bc91`.
+
 ### Installed-default W2 published-port fixed offered rate
 
 Run `base-20261122T093101-7063` used the same clean source and artifacts
