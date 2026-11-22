@@ -24,6 +24,8 @@ from diagnostics.registry_pilot import deploy, save
 from diagnostics import w8_under_pull
 from diagnostics.resource_pilot import host_snapshot
 
+ALLOCATION_IDLE_SECONDS = 10
+
 
 def require_missing_image(cp):
     if cp.returncode == 0:
@@ -177,22 +179,32 @@ def prepare_warm_engine(engine, run, *, api_image):
 
 
 def allocation_receipt(snapshots):
-    stages = ('before_pull', 'before_app_cleanup', 'after_app_cleanup')
+    stages = ('before_pull_idle', 'before_pull', 'before_app_cleanup',
+              'after_app_cleanup', 'after_cleanup_idle')
     receipt = {'status': 'unknown', 'snapshots': snapshots,
                'deployment_delta_bytes': None, 'after_app_cleanup_delta_bytes': None,
-               'exclusive_deployment_delta_bytes': None, 'exclusive_after_app_cleanup_delta_bytes': None}
+               'exclusive_deployment_delta_bytes': None, 'exclusive_after_app_cleanup_delta_bytes': None,
+               'idle_deltas': None}
     if any(snapshots.get(stage, {}).get('status') != 'ok' for stage in stages):
         receipt['error'] = 'missing or invalid owned allocation snapshot'
         return receipt
-    before, deployed, cleaned = (snapshots[stage] for stage in stages)
+    early, before, deployed, cleaned, settled = (snapshots[stage] for stage in stages)
     identities = [[(entry['path'], entry['device'], entry['inode']) for entry in snapshot['files']]
-                  for snapshot in (before, deployed, cleaned)]
-    if not identities[0] or identities[0] != identities[1] or identities[0] != identities[2]:
+                  for snapshot in (early, before, deployed, cleaned, settled)]
+    if not identities[0] or any(identity != identities[0] for identity in identities[1:]):
         receipt['error'] = 'owned backing file identity changed between snapshots'
         return receipt
+    idle = {}
+    for name, start, end in (('before_pull', early, before), ('after_app_cleanup', cleaned, settled)):
+        private = None
+        if start.get('exclusive_allocation_status') == end.get('exclusive_allocation_status') == 'ok':
+            private = end['exclusive_allocated_bytes'] - start['exclusive_allocated_bytes']
+        idle[name] = {'allocated_bytes': end['allocated_bytes'] - start['allocated_bytes'],
+                      'exclusive_allocated_bytes': private}
     receipt.update(status='ok',
                    deployment_delta_bytes=deployed['allocated_bytes'] - before['allocated_bytes'],
-                   after_app_cleanup_delta_bytes=cleaned['allocated_bytes'] - before['allocated_bytes'])
+                   after_app_cleanup_delta_bytes=cleaned['allocated_bytes'] - before['allocated_bytes'],
+                   idle_deltas=idle)
     if all(s.get('exclusive_allocation_status') == 'ok' for s in (before, deployed, cleaned)):
         baseline = before['exclusive_allocated_bytes']
         receipt.update(exclusive_deployment_delta_bytes=deployed['exclusive_allocated_bytes'] - baseline,
@@ -235,6 +247,13 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 except Exception as exc:
                     snapshots[stage] = {'status': 'unknown', 'errors': [str(exc)]}
 
+            def snapshot_idle(stage, inventory_file):
+                inventory = engine.sh(['ps', '--no-trunc', '--format', '{{json .}}']).stdout
+                (directory / inventory_file).write_text(inventory)
+                if inventory.strip():
+                    raise ValueError(f'running containers present at W8 allocation boundary {stage}')
+                snapshot(stage)
+
             @contextmanager
             def deployment_phase(phase_name):
                 with phase(phase_name):
@@ -257,11 +276,9 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 save(directory / 'retained-before.json', retained_before)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_before)
                 if orbstack_storage_files:
-                    inventory = engine.sh(['ps', '--no-trunc', '--format', '{{json .}}']).stdout
-                    (directory / 'containers-before.jsonl').write_text(inventory)
-                    if inventory.strip():
-                        raise ValueError('running containers present before the W8 allocation interval')
-                    snapshot('before_pull')
+                    snapshot_idle('before_pull_idle', 'containers-before-idle.jsonl')
+                    time.sleep(ALLOCATION_IDLE_SECONDS)
+                    snapshot_idle('before_pull', 'containers-before.jsonl')
             context = w8_under_pull.baseline(engine, directory, run, contract, phase) if under_load else nullcontext(None)
             with context as load:
                 for repository, digest in portfolio.manifests.items():
@@ -316,11 +333,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 result['under_pull_intervals'] = load['intervals']
             with phase('retained_identity'):
                 if orbstack_storage_files:
-                    inventory = engine.sh(['ps', '--no-trunc', '--format', '{{json .}}']).stdout
-                    (directory / 'containers-after.jsonl').write_text(inventory)
-                    if inventory.strip():
-                        raise ValueError('running containers present after W8 application cleanup')
-                    snapshot('after_app_cleanup')
+                    snapshot_idle('after_app_cleanup', 'containers-after.jsonl')
                 retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-after.json', retained_after)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_after)
@@ -328,6 +341,9 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
         if engine.name == 'ctrs':
             result['cpu_accounting'] = runner.cpu_accounting(
                 relays_before, runner.relay_counts(engine) if relays_before is not None else None)
+        if orbstack_storage_files:
+            time.sleep(ALLOCATION_IDLE_SECONDS)
+            snapshot_idle('after_cleanup_idle', 'containers-after-idle.jsonl')
     except BaseException as exc:
         result['errors'].append(traceback.format_exc())
         if not isinstance(exc, Exception):

@@ -1132,6 +1132,12 @@ volume before temporarily stopping its legacy campaign registry.
 Restore its original running state after the diagnostic. Any unrelated
 running container still prevents allocation admission.
 
+The allocation diagnostic records ten seconds of idle allocation change
+before the pull and ten seconds of delayed allocation change after
+application cleanup. Read both ordinary and private deltas on the same
+backing identities. Preserve the idle deltas alongside the deployment
+and cleanup deltas for review.
+
 Run the scored installed-default cohorts on the same signed release after
 the retained and derived cancellation checks. Each of the four combinations
 gets ten alternating pairs and its own result directory. Check OrbStack's

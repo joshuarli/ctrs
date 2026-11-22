@@ -36,12 +36,15 @@ the reclamation window. `st_blocks * 512` includes shared clone extents. The W8
 allocation diagnostic also samples macOS per-file private bytes with
 `getattrlist` and `ATTR_CMNEXT_PRIVATESIZE`. The same metadata call verifies
 device, inode, node type and link count without opening the file for reading.
-These are the bytes an individual file would release
+Private bytes are the bytes an individual file would release
 on deletion, excluding bytes held by a clone or snapshot. Missing private
 attributes leave that observation unknown. Isolated build-cache size remains
 unknown. The scope is the explicit active backing files. Do not compare
 an aged shared OrbStack disk with a fresh ctrs disk as a storage win. Repeated-cycle
 deltas are descriptive until background allocation and workload histories are controlled.
+W8 records separate ten-second idle windows before the pull and after
+application cleanup. Each idle boundary verifies an empty running-container
+inventory and the same backing-file identities.
 [Apple `getattrlist` manual](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2)
 
 Next use is a fresh stack setup/readiness plus a declared smaller fixed workload,
