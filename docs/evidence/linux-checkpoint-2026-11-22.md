@@ -140,6 +140,8 @@ The ctrs/agent binaries are the preserved H3 releases from
 `current/`. Runtime crate/Cargo/e2e inputs were unchanged through the measured
 base and subsequent integration. Incoming runner changes affect W5/W12 CLI
 options, not W1/W3 execution; `rebase-input-diff.txt` records them.
+The final incoming W14 fixture changes also leave those execution paths and
+all engine runtime inputs unchanged; see `final-main-input-diff.txt`.
 
 Copy the evidence and baseline off-host, verify manifests before replay, then
 restore the source bundle/patch and adjust only controller absolute paths:
@@ -164,6 +166,7 @@ kernel; the Mac VM boundary is different. Linux results close no Mac gate.
 
 `make test-bench`: **499 tests, OK (skipped=15)**; after integrating incoming
 W5/W12 harness changes: **501 tests in 23.915s, OK (skipped=15)**.
+After final W14 fixture integration: **502 tests in 23.812s, OK (skipped=15)**.
 The new Linux W3 test retains normal, corrupt-row, incomplete-commit and
 wrong-owner assertions; existing Mac selection tests remain unchanged.
 No runtime source changed, so no new Rust/full-e2e run is claimed.
