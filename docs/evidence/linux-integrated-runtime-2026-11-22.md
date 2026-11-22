@@ -11,6 +11,11 @@ Current-main source/build: **`65b7bbd6ed5ca7bc803145e13983011eebe8321b`**,
 including Linux forwarding coexistence and the Linux-aware e2e harness.
 There were no product or harness edits in this runtime slice. One
 coordinator serialized all builds, suites and restoration on this host.
+Before landing, the documentation was rebased onto main
+`123f29cadd0f4afcd3a85b3f6c307cc1255de66e`. Incoming changes were macOS
+benchmark preflight/reporting/tests and documentation, not Rust runtime,
+the Linux preparation implementation or `tests/e2e.sh`; the tested Linux
+runtime remains the same. `rebase-changed-paths.txt` records that audit.
 
 | Item | Identity |
 | --- | --- |
@@ -313,8 +318,10 @@ cache was not empty, so it is not an entirely empty Docker-cache proof.
 No lock regeneration, new timed trials or historical-record edits occurred.
 Future sudo provenance works; old `unknown` values remain unchanged.
 
-Checkpoint code checks remain `make test-bench`: **459 tests, OK, 15
-skipped**. This slice changes documentation/evidence only; its relevant
+Checkpoint code checks were `make test-bench`: **459 tests, OK, 15
+skipped**. After the final rebase, `make test-bench` ran **463 tests in
+27.036s, OK (skipped=15)**; full output is `test-bench-after-rebase.log`.
+This slice changes documentation/evidence only; its relevant
 live checks are the current-main build, both complete e2e suites, focused
 classification controls, active firewall proof, independent restore and
 post-cleanup host verification above. They do not close a performance gate.
