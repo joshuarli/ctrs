@@ -217,13 +217,13 @@ id = "W12-watch"
 family = "shared-workspace"
 title = "tsc --watch (fs.watch backend) on the Kutt workspace: save, atomic replace, create+import, rename, delete, five-file bursts"
 fixture = "fixtures/w12"
-fixture_version = "w12-watch-v3"
+fixture_version = "w12-watch-v4"
 status = "implemented"
 metrics = ["missed", "stale", "correct", "results", "edit_to_result_p50_s", "edit_to_result_p95_s"]
 states = ["warm"]
 params = { mount = "bind", edits = 60, deadline_seconds = 10 }
-correctness = ["emitted JavaScript equals transpileModule of the exact edit", "zero-error watch cycle", "bursts written within 50 ms"]
-note = "Bind edits are Mac filesystem operations with UseFsEvents. Volume edits use docker exec with UseFsEventsOnParentDirectory (w12-watch-volume-v1). Both use fs.watch and the same edit plan. Removed sources are scored through their importer because tsc keeps emitted output of deleted inputs. Latency includes host exec polling round trips and is diagnostic."
+correctness = ["emitted JavaScript equals transpileModule of every planned edit", "zero-error watch cycle", "bursts written within 50 ms", "watcher PID and process start ticks match before and after edits"]
+note = "Bind edits are Mac filesystem operations with UseFsEvents. Volume edits use docker exec with UseFsEventsOnParentDirectory (w12-watch-volume-v2). Both use fs.watch and the same edit plan. Removed sources are scored through their importer because tsc keeps emitted output of deleted inputs. Latency includes host exec polling round trips and is diagnostic."
 
 [[case]]
 id = "W13"

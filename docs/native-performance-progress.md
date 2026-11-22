@@ -885,6 +885,20 @@ Run fresh `w12-full-bind:cohort`, `w12-mixed:cohort`,
 `w12-watch-volume:cohort` pairs. The independently registered
 `w6-build-warm:cohort` covers W6's primed build-cache condition.
 
+The next W12-watch cohorts use `w12-watch-v4` for bind and
+`w12-watch-volume-v2` for named volumes. Each verifies all 60 edit sequences,
+their exact output paths, and the same guest watcher PID and process start
+ticks across the edit phase. Use the signed Mac release and verified v2
+fixture archives for both mount conditions.
+
+```sh
+for mount in bind volume; do
+  python3 bench/native/runner.py baseline --case W12-watch --watch-mount "$mount" \
+    --watch-edits 60 --a ctrs --b orbstack --resource-lane installed-default \
+    --pairs 10 --pair-quiet-load 4 --max-pairs 16
+done
+```
+
 ## Linux lane pilot (amd64) — 2026-11-21
 
 **Separate native Linux pilot; closes no macOS gate.** Do not pool these

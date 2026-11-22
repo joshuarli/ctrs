@@ -55,7 +55,8 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(workspace.observed_stale('expected', 'expected', 'old', True))
 
     def test_watch_admission_needs_every_result_correct(self):
-        good = {'results': 120, 'correct': 120, 'missed': 0, 'stale': 0, 'edits': [0] * 120}
+        good = {'results': 120, 'correct': 120, 'missed': 0, 'stale': 0,
+                'edits': [{'sequence': sequence} for sequence in range(60) for _ in range(2)]}
         checks, error = workspace.watch_admission(good, 60)
         self.assertEqual(checks, {'watch_run_completed': True, 'every_result_correct': True})
         self.assertIsNone(error)
@@ -63,6 +64,19 @@ class WorkspaceTests(unittest.TestCase):
             checks, error = workspace.watch_admission({**good, **bad}, 60)
             self.assertFalse(checks['every_result_correct'])
             self.assertIn('W12-watch', error)
+        bad = {**good, 'edits': [{'sequence': i % 59} for i in range(120)]}
+        self.assertFalse(workspace.watch_admission(bad, 60)[0]['watch_run_completed'])
+
+    def test_watcher_identity_uses_linux_process_start_ticks(self):
+        fields = ['S'] + ['0'] * 18 + ['891'] + ['0'] * 4
+        stat = '42 (node name) with parens) ' + ' '.join(fields)
+        self.assertEqual(workspace.watcher_identity(stat), {'pid': 42, 'start_ticks': 891})
+        fields[19] = '892'
+        self.assertNotEqual(workspace.watcher_identity('42 (node) ' + ' '.join(fields)),
+                            workspace.watcher_identity(stat))
+        fields[0] = 'Z'
+        with self.assertRaisesRegex(ValueError, 'identity unavailable'):
+            workspace.watcher_identity('42 (node) ' + ' '.join(fields))
 
     def test_phase_metrics_cover_scored_workflow(self):
         phases = {name: {'operation_wall_seconds': float(i + 1)}

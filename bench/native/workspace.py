@@ -46,10 +46,26 @@ def watch_admission(metrics, edits):
     every result reached the expected output (application)."""
     every = (metrics['results'] > 0 and metrics['correct'] == metrics['results']
              and metrics['missed'] == 0 and metrics['stale'] == 0)
-    checks = {'watch_run_completed': len(metrics['edits']) >= edits, 'every_result_correct': every}
-    error = None if every else (f"W12-watch: {metrics['correct']} of {metrics['results']} results correct, "
-                                f"{metrics['missed']} missed, {metrics['stale']} stale")
+    checks = {'watch_run_completed': {result['sequence'] for result in metrics['edits']} == set(range(edits)),
+              'every_result_correct': every}
+    error = None
+    if not every:
+        error = (f"W12-watch: {metrics['correct']} of {metrics['results']} results correct, "
+                 f"{metrics['missed']} missed, {metrics['stale']} stale")
+    elif not checks['watch_run_completed']:
+        error = 'W12-watch: result sequences differ from the edit plan'
     return checks, error
+
+
+def watcher_identity(stat):
+    process, closing, fields = stat.rpartition(') ')
+    pid, opening, _ = process.partition(' (')
+    fields = fields.split()
+    if (not opening or not closing or not pid.isdecimal() or int(pid) <= 1
+            or len(fields) <= 19 or not fields[19].isdecimal() or int(fields[19]) <= 0
+            or fields[0] in ('Z', 'X', 'x')):
+        raise ValueError('W12 watcher process identity unavailable')
+    return {'pid': int(pid), 'start_ticks': int(fields[19])}
 
 
 def observed_stale(actual, expected, previous, diagnostic_ok):
@@ -315,7 +331,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
     if mount not in ('bind', 'volume'):
         raise ValueError('unknown W12 watch mount')
     watch_file = 'UseFsEvents' if mount == 'bind' else 'UseFsEventsOnParentDirectory'
-    version = 'w12-watch-v3' if mount == 'bind' else 'w12-watch-volume-v1'
+    version = 'w12-watch-v4' if mount == 'bind' else 'w12-watch-volume-v2'
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
     rec['metrics'].update(fixture_version=version, mount=mount, backend='fs.watch', watch_file=watch_file,
@@ -367,7 +383,14 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
 
     def evaluate(items):
         script = (FIXTURE / 'watch-eval.js').read_text()
-        return json.loads(run(['node', '-e', script, json.dumps(items)], timeout=30).stdout)
+        results = json.loads(run(['node', '-e', script, json.dumps(items)], timeout=30).stdout)
+        if [result['path'] for result in results] != [item['path'] for item in items]:
+            raise ValueError('W12 watcher output paths differ from the edit plan')
+        return results
+
+    def read_watcher_identity():
+        script = 'pid=$(cat /tmp/w12/watch.pid); case "$pid" in ""|*[!0-9]*) exit 1;; esac; cat "/proc/$pid/stat"'
+        return watcher_identity(run(['sh', '-ec', script], timeout=15).stdout)
 
     def source_value(path, token):
         original = base_sources[path]
@@ -425,7 +448,8 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
             if any(item['actual'] != item['expected'] for item in initial):
                 raise ValueError('watch output oracle disagrees with initial TypeScript compilation')
             engine.sh(['exec', '-d', '-e', f'TSC_WATCHFILE={watch_file}', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
-                       'sh', '-ec', './node_modules/.bin/tsc --watch -p tsconfig.json --pretty false --preserveWatchOutput > /tmp/w12/watch.log 2>&1'])
+                       'sh', '-ec', 'echo "$$" > /tmp/w12/watch.pid; exec ./node_modules/.bin/tsc --watch '
+                       '-p tsconfig.json --pretty false --preserveWatchOutput > /tmp/w12/watch.log 2>&1'])
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 log = run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout
@@ -434,6 +458,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                 time.sleep(.2)
             else:
                 raise TimeoutError('W12 watcher did not become ready')
+            rec['inputs']['watcher_before'] = read_watcher_identity()
         with phase('edits'):
             for event in plan:
                 kind, marker = event['kind'], event['token']
@@ -509,9 +534,14 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                               edit_to_result_p95_s=latencies[int(.95 * (len(latencies) - 1))] if latencies else None)
         checks, error = watch_admission(rec['metrics'], edits)
         rec['correctness']['checks'].update(checks)
-        rec['correctness']['ok'] = all(checks.values())
+        rec['correctness']['checks']['same_watcher_process'] = False
         if error:
             rec['validation_errors'].append(error)
+        rec['inputs']['watcher_after'] = read_watcher_identity()
+        if rec['inputs']['watcher_after'] != rec['inputs']['watcher_before']:
+            raise ValueError('W12 watcher process changed during edits')
+        rec['correctness']['checks']['same_watcher_process'] = True
+        rec['correctness']['ok'] = all(rec['correctness']['checks'].values())
     except Exception as exc:
         rec['correctness']['ok'] = False
         rec['validation_errors'].append(str(exc))

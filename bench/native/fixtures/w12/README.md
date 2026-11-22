@@ -34,13 +34,15 @@ resource sampling. Setup is recorded separately and is not scored.
 
 W12-watch uses Kutt's TypeScript compiler in watch mode with
 `TSC_WATCHDIRECTORY=UseFsEvents`. The bind case uses
-`TSC_WATCHFILE=UseFsEvents`. The named-volume case (`w12-watch-volume-v1`)
+`TSC_WATCHFILE=UseFsEvents` (`w12-watch-v4`). The named-volume case (`w12-watch-volume-v2`)
 uses `UseFsEventsOnParentDirectory`. File watches on a native volume miss
 later in-place writes to atomically replaced files. The parent-directory
 strategy still uses `fs.watch` and runs the same edit plan.
 It verifies emitted JavaScript against
 TypeScript's `transpileModule` for the exact edited content and waits for a
-zero-error watch cycle. Bind edits use host filesystem operations. Volume
+zero-error watch cycle. Every planned edit must produce a result for every
+expected output path. The watcher's guest PID and process start ticks must
+match before and after the edits. Bind edits use host filesystem operations. Volume
 edits use `docker exec`. Each burst writes five files within 50 ms. Missed and
 stale results are recorded separately. No polling fallback is enabled.
 
