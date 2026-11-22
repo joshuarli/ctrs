@@ -103,8 +103,10 @@ The diagnostic duration is limited to fifteen minutes.
 
 For qualification, `mixed_job.py --qualification --readiness <reviewed-json>`
 validates the frozen readiness declaration and `assets.lock` before launching
-one engine. Set `CTRS_GUEST_DIR` to the frozen boot directory and provide a
-duration covering setup plus twelve hours of work. The OrbStack leg also
+one engine. Include input receipts for the W6 Rust and zlib Dockerfiles,
+the W7 Hyperfine and HTTPie Dockerfiles for both build modes, and the W7
+HTTPie ARM64 wheel lock. Set `CTRS_GUEST_DIR` to the frozen boot directory
+and provide a duration covering setup plus twelve hours of work. The OrbStack leg also
 requires explicit `--orbstack-storage-file` arguments for the owned backing
 files used for allocation accounting. The [campaign admission
 requirements](../../../../docs/campaign-native-performance.md#finite-reliability-jobs-and-continuation)

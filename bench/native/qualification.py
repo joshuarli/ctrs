@@ -285,6 +285,11 @@ def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_
                 runner.FIXTURES / 'w8-v6/portfolio.json',
                 ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
                 runner.BENCH / 'schema.json', W11_CELLS_FILE, W1_W10_CELLS_FILE]
+    required += [runner.W6_DIR / 'Dockerfile', runner.W6_DIR / 'rust/Dockerfile']
+    for app in runner.W7_APPS.values():
+        dockerfile = app['dockerfile']
+        required += [dockerfile, dockerfile.with_name('Dockerfile.offline')]
+    required += [runner.W7_DIR / 'httpie/wheels-arm64.json']
     required += [file for file in runner.BENCH.rglob('*.py')
                  if not file.name.startswith('test_') and '__pycache__' not in file.parts]
     for layout in (portfolio_layout, worker_layout):

@@ -358,6 +358,14 @@ class ManualAdmission(unittest.TestCase):
             self.assertIn(gate.runner.FIXTURES / 'w2/v3.py', required)
             self.assertIn(gate.runner.FIXTURES / 'w13/transfer_tool.py', required)
             self.assertIn(gate.runner.FIXTURES / 'w14/lifecycle_tool.py', required)
+            for recipe in ('w6/Dockerfile', 'w6/rust/Dockerfile',
+                           'w7/hyperfine/Dockerfile', 'w7/hyperfine/Dockerfile.offline',
+                           'w7/httpie/Dockerfile', 'w7/httpie/Dockerfile.offline',
+                           'w7/httpie/wheels-arm64.json'):
+                with self.subTest(recipe=recipe):
+                    path = gate.runner.FIXTURES / recipe
+                    self.assertTrue(path.is_file())
+                    self.assertIn(path, required)
 
     def test_fixture_inventory_rejects_empty_missing_and_duplicate_workloads(self):
         with tempfile.TemporaryDirectory() as tmp:
