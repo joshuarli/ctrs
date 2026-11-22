@@ -18,9 +18,10 @@ class W1Tests(unittest.TestCase):
         commands = []
         persisted = {}
         project = None
+        elapsed = 0.0
 
         def sh(args, **kwargs):
-            nonlocal project
+            nonlocal project, elapsed
             commands.append(args)
             body = ""
             if args[:2] == ["image", "inspect"]:
@@ -36,6 +37,7 @@ class W1Tests(unittest.TestCase):
                 if "down" in args and fault == "cleanup failed":
                     raise RuntimeError("cannot remove project")
             elif args[0] == "inspect":
+                elapsed += 4
                 service = args[-1].removesuffix("-id")
                 labels = {"com.docker.compose.project": project, "com.docker.compose.service": service}
                 if service == "db" and fault == "wrong owner":
@@ -47,17 +49,22 @@ class W1Tests(unittest.TestCase):
                                 "Destination": "/var/lib/postgresql/data", "RW": True}]}])
             elif args[0] == "restart":
                 restarted.append(args[-1])
+                elapsed += 2
             else:
                 self.fail(f"unexpected command {args}")
             return SimpleNamespace(stdout=body)
 
         def write(url, obj):
+            nonlocal elapsed
+            elapsed += 0.5
             persisted[obj["key"]] = obj["value"]
             if fault == "HTTP rejection":
                 return 503, b"database \xff unavailable"
             return (200, {"stored": "wrong"}) if fault == "wrong acknowledgment" else (200, {"stored": obj["key"]})
 
         def read(url, timeout):
+            nonlocal elapsed
+            elapsed += 0.25
             key = url.rsplit("/", 1)[-1]
             if key == "roundtrip":
                 payload = "wrong" if fault == "wrong seed" else hashlib.md5(b"1").hexdigest()
@@ -66,11 +73,17 @@ class W1Tests(unittest.TestCase):
             response_key = "wrong" if fault == "wrong read key" else key
             return 200, {"key": response_key, "value": persisted[key], "cache_match": True}
 
+        def wait_health(*args):
+            nonlocal elapsed
+            elapsed += 1
+            return elapsed, {"ok": True}
+
         engine = SimpleNamespace(name="ctrs", ensure_up=lambda: None, sh=sh)
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(runner, "RESULTS", Path(directory)), \
                 patch.object(runner, "start_sampler", return_value=(None, None)), \
-                patch.object(runner, "wait_health", return_value=(1.0, {"ok": True})), \
+                patch.object(runner.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(runner, "wait_health", side_effect=wait_health), \
                 patch.object(runner, "http_json", side_effect=read), \
                 patch.object(runner, "http_json_write", side_effect=write):
             record = runner.trial_w1(runner.RunContext("w1-test"), engine, "warm")
@@ -80,6 +93,7 @@ class W1Tests(unittest.TestCase):
         record, commands, restarted = self.execute()
         self.assertTrue(record["correctness"]["ok"], record["validation_errors"])
         self.assertEqual(restarted, ["db-id"])
+        self.assertEqual(record["metrics"]["db_restart_to_verified_s"], 4)
         self.assertEqual(len([command for command in commands if "down" in command]), 1)
         for name in ("write_before_restart", "persist_after_db_restart", "write_after_restart", "read_after_restart"):
             self.assertTrue(record["correctness"]["checks"][name])
@@ -101,6 +115,8 @@ class W1Tests(unittest.TestCase):
                 self.assertIn(reason, record["validation_errors"][0])
                 self.assertEqual(restarted, expected_restarts)
                 self.assertEqual(any("down" in command for command in commands), fault != "wrong image")
+                if fault != "cleanup failed":
+                    self.assertNotIn("db_restart_to_verified_s", record["metrics"])
                 json.dumps(record)
 
 

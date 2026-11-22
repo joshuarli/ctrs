@@ -36,7 +36,7 @@ W5_MODE_RESOURCES = ("cpu_seconds_per_edit", "peak_phys_footprint_bytes")
 W5_RESOURCE_METRICS = tuple(f"{mode}_{metric}" for mode in ("bind", "volume")
                             for metric in W5_MODE_RESOURCES)
 CASE_METRICS = {
-    "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
+    "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s", "db_restart_to_verified_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
     "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
            "restart_s", "pgdata_allocated_bytes", "engine_cpu_per_success"],
@@ -247,6 +247,9 @@ def _watch_resource(record: dict, mode: str, metric: str):
 
 def _metric(record: dict, name: str):
     resources = record.get("resources", {})
+    if name == "db_restart_to_verified_s" and record.get("case") == "W1":
+        value = record.get("metrics", {}).get(name)
+        return (value, None) if _number(value) and value > 0 else (None, "missing verified W1 restart time")
     if name == "engine_cpu_per_success" and record.get("case") == "W10":
         return _recovery_cpu_per_success(record)
     if name == "engine_cpu_per_success" and record.get("case") == "W3":
@@ -394,9 +397,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
     paired_w3 = identity['case'] == 'W3' and any('paired_inputs' in record for record in records)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
-    paired_w2 = verified_transfer or (identity['case'] == 'W13-overlap' or
-                 (identity['case'] == 'W2' and isinstance(params, dict)
-                  and params.get('pinned_stack') is True))
+    pinned_stack = (identity['case'] in ('W1', 'W2') and isinstance(params, dict)
+                    and params.get('pinned_stack') is True)
+    require_paired_inputs = (paired_w3 or paired_w5 or paired_w8 or pinned_stack
+                             or verified_transfer or identity['case'] == 'W13-overlap')
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
               "metrics": [], "metadata_gaps": []}
@@ -466,7 +470,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "missing or duplicated trial order"
         elif workload_params(a[0]) != workload_params(b[0]):
             reason = "executed parameters or seeds differ"
-        elif (paired_w2 or paired_w3 or paired_w5 or paired_w8) and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
+        elif require_paired_inputs and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"

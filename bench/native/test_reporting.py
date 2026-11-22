@@ -78,6 +78,16 @@ class ReportingTests(unittest.TestCase):
         cohort = reporting.analyze(records)["cohorts"][0]
         self.assertIsNone(cohort["fixed_rate_lateness"][1]["counts"])
 
+    def test_w1_recovery_requires_matching_pinned_stack(self):
+        metric = "db_restart_to_verified_s"
+        records = pair(case="W1", metric=metric)
+        for record in records:
+            record["workload_params"]["pinned_stack"] = True
+            record["paired_inputs"] = {"portfolio_sha256": "same", "seed_sha256": "same"}
+        self.assertEqual(metric_result(reporting.analyze(records), metric)["ratio_median"], .8)
+        records[1]["paired_inputs"]["seed_sha256"] = "different"
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 0)
+
     def test_pinned_w2_requires_matching_input_receipts(self):
         records = pair(case="W2")
         for record in records:
