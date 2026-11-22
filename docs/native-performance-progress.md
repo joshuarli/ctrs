@@ -2658,3 +2658,29 @@ macOS coverage, parity, leadership, reliability and reproducibility gates remain
    durability, resource or tail cell. No new workload/framework is handed off.
 
 Linux work does not wait for this list and cannot satisfy it by proxy.
+
+### 2026-11-22: native Linux W1–W13 admissibility survey
+
+[Survey evidence and all timing/resource tables](evidence/linux-survey-2026-11-22.md)
+add narrow native amd64 support for the remaining movable W4/W5/W8/W9,
+API/DB/queue W10, finite W11, full-bind/all-volume W12 and W12-watch cells.
+Three alternating pairs per cell are pilots, not qualification: **72/72
+correct, 71/72 host-admitted, 64/72 strict resource-valid**, with 35 admitted
+timing pairs and 28 complete admitted resource pairs. All invalids remain raw;
+watch-volume has no paired resource estimate. Linux CPU remains incomplete.
+
+The old bind per-file watch strategy fails identically on both engines
+(97/120 correct, the exact same 23 missed outputs). The separately versioned
+native parent-directory fs.watch strategy uses the existing campaign volume
+configuration, no polling or relaxed oracle; every new trial passes 120/120.
+Old failures and the stopped original schedule are explicitly preserved.
+Four-stream W13 controls also remain tool-limited under the unchanged 2x
+headroom rule; there is no scored W13 throughput verdict. Durable images,
+source bundle, inputs, raw records/traces, schedules and analysis live under
+`/home/ubuntu/ctrs-evidence/linux-survey-20261122/` with the committed manifest.
+
+The next bounded profile loops are **W5 bind** (paired C/D 1.352) and **W12**
+(full-bind install 1.338, workflow 1.042; all-volume typecheck 1.140, plus all
+other point-estimate losing phases). No survey result is an engine change.
+Mac-only FD/APFS/VM-disk/12h qualification remains on the Mac handoff. Linux
+shares the host kernel; no Linux result closes a macOS/OrbStack gate.
