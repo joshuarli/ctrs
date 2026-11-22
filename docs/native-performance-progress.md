@@ -197,8 +197,23 @@ stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.
 300-transaction mix, checkpoint and PostgreSQL restart with the v6 image
 pin. The pair verifies identical migration and transaction SQL. CPU per
 transaction uses the transaction phase and the count verified against
-committed state after restart. The native cohort and equivalent host
-storage durability remain open.
+committed state after restart.
+
+Native admission run `base-20261122T093602-8149` at `e95ffa2` delivered
+one valid installed-default pair. Each engine verified all 300
+transactions after restart, matched the PostgreSQL manifest and both SQL
+hashes, and returned a transaction CPU phase without errors. Both engines
+observed 9 vCPUs. The 10-pair cohort and equivalent host storage durability
+remain open.
+
+```sh
+python3 bench/native/runner.py baseline --case W3 --a ctrs --b orbstack \
+  --resource-lane installed-default --pairs 1 --pair-quiet-load 4
+python3 bench/native/reporting.py --match base-20261122T093602-8149
+```
+
+`trials.jsonl` SHA-256
+`15658c72db794c6420bde922dfb8cce4bfaf9550a8112f7b64f827666ddde045`.
 
 ### Installed-default W6 cohort
 
