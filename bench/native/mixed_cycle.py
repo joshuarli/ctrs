@@ -123,6 +123,26 @@ def cleanup_cycle_items(engine, db, writes, directory):
         raise ValueError('explicit item cleanup changed seed rows or retained transient data')
 
 
+def service_lifecycle(engine, ids):
+    containers = json.loads(engine.sh(['container', 'inspect', *ids.values()], timeout=30).stdout)
+    by_id = {container['Id']: container for container in containers}
+    if len(containers) != len(ids) or set(by_id) != set(ids.values()):
+        raise ValueError('persistent service inspection differs from the owned stack')
+    receipt = {}
+    for service, container_id in ids.items():
+        container = by_id[container_id]
+        state = container['State']
+        pid, started = state.get('Pid'), state.get('StartedAt')
+        restarts = container.get('RestartCount')
+        if (state.get('Running') is not True or any(state.get(key) is not False
+                for key in ('Paused', 'Restarting', 'OOMKilled', 'Dead'))
+                or type(pid) is not int or pid <= 0 or not isinstance(started, str) or not started
+                or type(restarts) is not int or restarts != 0):
+            raise ValueError(f'persistent {service} service is unhealthy or has restarted')
+        receipt[service] = {'id': container_id, 'pid': pid, 'started_at': started, 'restarts': restarts}
+    return receipt
+
+
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
         cleanup_deadline=None, expected_boot_assets=None, observation=None, expected_resources=None):
     validate_refs(refs)
@@ -217,6 +237,8 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ('api', 'db', 'cache')}
             if any(not value or '\n' in value for value in ids.values()):
                 raise ValueError('ambiguous persistent service identities')
+            initial_services = service_lifecycle(engine, ids)
+            rec['initial_service_lifecycle'] = initial_services
             app_hashes = json.loads(engine.sh(['exec', ids['api'], 'python', '-c',
                 "import json,hashlib,pathlib;print(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in ['/app/app.py','/app/requirements.txt']}))"]).stdout)
             if app_hashes != PIN['api_files_sha256']:
@@ -304,9 +326,6 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     raise ValueError('committed DB/cache witness changed after item cleanup')
                 if json.loads(engine.sh(['volume', 'inspect', volume]).stdout) != volume_before:
                     raise ValueError('persistent named-volume identity changed after item cleanup')
-            current_ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ('api', 'db', 'cache')}
-            if current_ids != ids:
-                raise ValueError('persistent service identities changed')
             if observation_plan is not None:
                 try:
                     with runner.resource_phase(engine, rec, f'cycle_{cycle}_observation'):
@@ -319,19 +338,28 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     save(cycle_dir / 'resource-observation.json', observed)
                 except OSError as exc:
                     observed['interval'] = {'status': 'unknown', 'errors': ['observation write: ' + repr(exc)]}
+            current_ids = {service: compose(['ps', '-q', service]).stdout.strip() for service in ids}
+            if current_ids != ids:
+                raise ValueError('persistent service identities changed')
+            services = service_lifecycle(engine, ids)
+            save(cycle_dir / 'service-lifecycle.json', services)
+            if services != initial_services:
+                raise ValueError('persistent service process changed during mixed cycles')
             total_writes += len(api_writes)
             queue_metrics = queue_result['metrics']
             rec['cycles'].append({'cycle': cycle, 'successful_operations': OPERATIONS,
                 'acknowledged_writes': len(api_writes), 'cumulative_writes': total_writes,
                 'explicitly_deleted_writes': len(api_writes), 'retained_seed_rows': 500,
                 'queue_jobs': queue_metrics['jobs'], 'queue_events': queue_metrics['events'],
-                'artifacts': queue_metrics['artifacts'], 'build_jobs': len(jobs), 'exact_state': True, 'service_ids': current_ids})
+                'artifacts': queue_metrics['artifacts'], 'build_jobs': len(jobs), 'exact_state': True,
+                'service_ids': current_ids, 'service_lifecycle': services})
             cycle += 1
         rec['work_loop_ended_monotonic'] = time.monotonic()
         if not rec['cycles']:
             raise RuntimeError('work deadline expired before a complete cycle')
         rec['correctness']['checks'].update(
             exact_state_every_cycle=all(row['exact_state'] for row in rec['cycles']),
+            same_service_processes=all(row['service_lifecycle'] == initial_services for row in rec['cycles']),
             bounded_retained_items=all(row['explicitly_deleted_writes'] == row['acknowledged_writes']
                                       and row['retained_seed_rows'] == 500 for row in rec['cycles']))
         rec['correctness']['ok'] = True

@@ -948,6 +948,16 @@ growth results alongside owned cleanup and exact-state checks. The
 diagnostic will leave the 12-hour qualification and exclusive APFS
 allocation open.
 
+The 12-hour check now requires the API, DB and cache container IDs, guest
+PIDs, start times and restart counters to match from setup through every
+completed cycle, including its post-cleanup observation. A restart that
+reuses the container ID fails the trial. Run the pinned short pilot with
+`--cycles 1 --resource-observation-seconds 32` on both engines to verify
+the new `initial_service_lifecycle` and per-cycle `service-lifecycle.json`
+receipts before the long run. Freeze the candidate and resolve the
+[host durability evidence](#w3-migration-and-committed-state-cohort) before
+requesting qualification admission.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild

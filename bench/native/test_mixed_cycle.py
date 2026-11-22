@@ -82,9 +82,16 @@ class DurationAdmission(unittest.TestCase):
             engine = SimpleNamespace(name='ctrs', socket='unix:///socket', dir=root, ensure_up=lambda: None)
             ids = {'api': 'api-id', 'db': 'db-id', 'cache': 'cache-id'}
             cumulative = []
+            restart_api = False
             def sh(args, **kwargs):
                 if args[:1] == ['compose'] and 'ps' in args:
                     out = ids[args[-1]]
+                elif args[:2] == ['container', 'inspect']:
+                    out = json.dumps([{'Id': container_id, 'RestartCount': 0, 'State': {
+                        'Running': True, 'Paused': False, 'Restarting': False, 'OOMKilled': False, 'Dead': False,
+                        'Pid': index + 20, 'StartedAt': ('restarted' if container_id == ids['api'] and restart_api
+                                                       and clock[0] else 'initial')}}
+                        for index, container_id in enumerate(args[2:])])
                 elif args[:2] == ['image', 'inspect']:
                     name = next(k for k, v in refs.items() if v == args[-1])
                     pin = mixed_cycle.WORKER['worker'] if name == 'worker' else mixed_cycle.PIN['images']['np-v6/' + name]
@@ -183,7 +190,16 @@ class DurationAdmission(unittest.TestCase):
                      self.assertRaisesRegex(ValueError, 'resource envelope differs'):
                     mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10,
                                     expected_resources={'ncpu': 2, 'mem_total_bytes': 8 << 30})
-                self.assertEqual(cleanup.call_count, 6)
+                clock[0] = 0
+                restart_api = True
+                restart_root = root / 'same-id-restart'; restart_root.mkdir()
+                ctx.results_dir = restart_root
+                with self.assertRaisesRegex(ValueError, 'persistent service process changed'):
+                    mixed_cycle.run(engine, ctx, refs, work_deadline=2, drain_deadline=10)
+                stopped = json.loads((restart_root / 'orbstack/result.json').read_text())
+                self.assertFalse(stopped['correctness']['ok'])
+                self.assertEqual(stopped['cycles'], [])
+                self.assertEqual(cleanup.call_count, 7)
             self.assertEqual([c['cumulative_writes'] for c in result['cycles']], [1, 2])
             self.assertEqual([c['explicitly_deleted_writes'] for c in result['cycles']], [1, 1])
             for cycle in result['cycles']:
@@ -198,6 +214,7 @@ class DurationAdmission(unittest.TestCase):
             self.assertEqual([c['service_ids'] for c in result['cycles']], [ids, ids])
             self.assertEqual(len(result['cycles']), 2)
             self.assertTrue(reporting._correct(result))
+            self.assertTrue(result['correctness']['checks']['same_service_processes'])
 
 
 class CycleRetention(unittest.TestCase):

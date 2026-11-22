@@ -224,10 +224,13 @@ class CompletedLeg(unittest.TestCase):
         deadline = 10 + gate.MINIMUM_WORK_SECONDS
         cycles = []
         phases = {}
+        services = {name: {'id': f'{name}-id', 'pid': idx + 20, 'started_at': 'initial', 'restarts': 0}
+                    for idx, name in enumerate(('api', 'db', 'cache'))}
         for index, row in enumerate(fixture.rows):
             start = 10. + index * 7200
             cycles.append({'cycle': row['cycle'], 'successful_operations': 5000, 'exact_state': True,
-                           'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': 16})
+                           'queue_jobs': 200, 'queue_events': 12800, 'artifacts': 400, 'build_jobs': 16,
+                           'service_lifecycle': copy.deepcopy(services)})
             phases[f'cycle_{index}_mixed_work'] = {
                 'operation_started_monotonic': start, 'operation_ended_monotonic': start + 7150,
             }
@@ -236,13 +239,22 @@ class CompletedLeg(unittest.TestCase):
             }
         return {'fixture_version': gate.mixed_resources.VERSION, 'validation_errors': [], 'engine': 'ctrs',
             'running_identity': manifest, 'cycles': cycles, 'work_loop_ended_monotonic': deadline,
-            'correctness': {'ok': True, 'checks': {'exact_state_every_cycle': True, 'bounded_retained_items': True}},
+            'initial_service_lifecycle': services,
+            'correctness': {'ok': True, 'checks': {'exact_state_every_cycle': True, 'bounded_retained_items': True,
+                                                  'same_service_processes': True}},
             'resources': {'ownership_verified': True, 'cpu_counters_complete': True,
                 'resource_errors': [], 'footprint_field': 'phys_footprint', 'peak_phys_footprint_bytes': 100,
                 'cpu_seconds_est': 20.,
                 'sampler_version': gate.mixed_resources.collect.SAMPLER_VERSION,
                 'phases': phases,
                 'cycle_growth': gate.mixed_resources.summarize(fixture.plan, fixture.rows)}}
+
+    def test_qualification_checks_runtime_lifecycle_receipts(self):
+        record = self.record()
+        deadline = 10 + gate.MINIMUM_WORK_SECONDS
+        record['cycles'][2]['service_lifecycle']['api']['started_at'] = 'restarted'
+        issues = gate.leg_issues(record, work_deadline=deadline, completed_monotonic=deadline + 1)
+        self.assertIn('persistent service lifecycle evidence missing or changed between cycles', issues)
 
     def test_short_incomplete_or_over_budget_leg_never_passes(self):
         record = self.record()

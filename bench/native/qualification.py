@@ -372,8 +372,14 @@ def leg_issues(record, *, work_deadline, completed_monotonic):
             or growth.get('plan', {}).get('manifest') != identity):
         issues.append('incomplete or inconsistent running process identity')
     observations = growth.get('observations')
+    services = record.get('initial_service_lifecycle')
+    cycles = record.get('cycles')
+    if (not isinstance(services, dict) or set(services) != {'api', 'db', 'cache'}
+            or not isinstance(cycles, list) or not cycles
+            or any(not isinstance(cycle, dict) or cycle.get('service_lifecycle') != services for cycle in cycles)):
+        issues.append('persistent service lifecycle evidence missing or changed between cycles')
     try:
-        cycle_window = _completed_cycle_window(record.get('cycles'), observations, resources.get('phases'))
+        cycle_window = _completed_cycle_window(cycles, observations, resources.get('phases'))
     except ValueError as exc:
         issues.append(str(exc))
         cycle_window = None
