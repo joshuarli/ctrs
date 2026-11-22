@@ -600,6 +600,30 @@ python3 bench/native/reporting.py --candidate --match base-20261122T110954-3f61
 `trials.jsonl` SHA-256
 `683de0e7768b343959d550c97a674acfae6f8d5a2bf263babbc0166be50b3333`.
 
+#### W6 balloon reclaim diagnostic
+
+The ceiling screens bound peak footprint and leave the retention mechanism
+unresolved. Test whether the balloon grace period accounts for retained
+footprint after an uncached build. Use the signed `99db1aa` release and its
+pinned guest assets, the existing private W6 store, and 9 vCPUs at an 8,192
+MiB ceiling. Disable auto-sleep in both legs with `CTRS_IDLE_SECS=0` so the
+VM helper stays resident. Restart only the campaign daemon between legs.
+Run the 120-second grace first and zero-second grace second using
+`CTRS_BALLOON_QUIET_SECS`.
+
+Run the pinned uncached W6 Rust and zlib builds in each leg. Check both
+compile receipts and artifact hashes. Read `/proc/meminfo` in a short
+network-disabled container from the local W6 GCC image before and after
+a 150-second quiet interval. Record available, cache, reclaimable slab,
+anonymous and balloon pages. During the interval, sample the identified
+VM helper's physical footprint and the daemon's target, used, stall and
+OOM fields every five seconds. Send `X-Ctrs-Background: 1` with `GET /info`
+so the observations preserve daemon quiet time. Repeat the two uncached
+builds at the end and verify the same artifacts. The diagnostic tests
+whether the target and footprint move together while guest cache and
+balloon pages change. Its fixed order and reused build store limit timing
+inference. A timing claim requires a separate paired confirmation.
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
