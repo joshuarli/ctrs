@@ -427,6 +427,41 @@ python3 bench/native/runner.py baseline --case W4 --a ctrs --b orbstack \
   --resource-lane installed-default --pairs 10 --pair-quiet-load 4 --max-pairs 16
 ```
 
+#### Installed-default W4 cohort
+
+Admission `base-20261122T143601-2aea` and cohort
+`base-20261122T143625-9f92` used clean harness `9284033` and the signed
+`99db1aa` release. The shared ARM64 worker archive SHA-256 was
+`de1778215fc772400d03eb365fbdde325a04a676d03a03fc04eeab700872fd1b`.
+Both engines used 9 vCPUs and their installed memory defaults, 8.41 GB on
+ctrs and 63.16 GB on OrbStack. Every pair matched the worker and Redis
+layer and launch-configuration receipts. In ten alternating pairs, every
+leg verified 200 jobs and 400 output artifacts per worker condition. The
+cohort covered 12,000 jobs and 24,000 artifacts with no failures or
+rejections. No ctrs leg recorded host NAT connections. The maximum measured
+outside-engine load during a worker phase was 0.98 cores.
+
+| Metric | 1 worker | 4 workers | 16 workers |
+| --- | ---: | ---: | ---: |
+| Worker phase time | 0.6251 [0.6088, 0.6300] | 0.4524 [0.4480, 0.4608] | 0.2786 [0.2670, 0.2860] |
+| Queue p95 | 0.6721 [0.6598, 0.6836] | 0.5479 [0.5324, 0.5565] | 0.2874 [0.2713, 0.3175] |
+| Queue p99 | 0.6718 [0.6600, 0.6840] | 0.5521 [0.5358, 0.5597] | 0.2888 [0.2729, 0.3180] |
+| Engine CPU per verified job | 0.7028 [0.6755, 0.7181] | 0.6688 [0.6581, 0.6730] | 0.6119 [0.5970, 0.6181] |
+| Sampled peak physical footprint during workers | 0.1454 [0.1416, 0.1472] | 0.1437 [0.1405, 0.1454] | 0.1405 [0.1380, 0.1413] |
+
+Ratios are paired medians of ctrs / OrbStack with 95% CIs. All reported
+intervals cleared the descriptive strict-win threshold. The worker phase
+includes worker container starts and completion. Median worker-phase time
+at 16 workers was 0.729 s on ctrs and 2.632 s on OrbStack. The results
+cover the finite queue fixture with a fresh batch at each concurrency.
+
+```sh
+python3 bench/native/reporting.py --match base-20261122T143625-9f92
+```
+
+`trials.jsonl` SHA-256
+`5e8c8f8308ab99e585d114fa3346b50dfb799d0921fcf5246a707d8326b9b98a`.
+
 ### Installed-default W5 cohort
 
 `base-20261122T123236-7047` used harness `a6de621` and signed release
