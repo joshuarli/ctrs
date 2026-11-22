@@ -399,6 +399,7 @@ class WorkloadSafetyTests(unittest.TestCase):
             corrupt_warm = False
             miscached = False
             lost_ownership = False
+            runtime_changed = False
 
             def respond(args, **kw):
                 if args[:2] == ["buildx", "build"]:
@@ -426,6 +427,11 @@ class WorkloadSafetyTests(unittest.TestCase):
                     _, note = loaded[tag]
                     if "--version" in args:
                         return completed("hyperfine 2.0.0\n" if "hyperfine" in tag else "3.2.4\n")
+                    if args[4] == 'sha256sum':
+                        return completed('a' * 64 + '  /usr/local/bin/hyperfine\n')
+                    if args[4:6] == ['python', '-c']:
+                        digest = 'b' if runtime_changed and tag.endswith('-incr') else 'c'
+                        return completed(json.dumps({'httpie': {'version': '3.2.4', 'runtime_sha256': digest * 64}}))
                     if corrupt_warm and "hyperfine" in tag and tag.endswith("-warm"):
                         note = "wrong incremental-0\n"
                     return completed(note)
@@ -456,6 +462,14 @@ class WorkloadSafetyTests(unittest.TestCase):
                 self.assertEqual(notes, [f"incremental-{i}:{stamp}\n" for i in (0, 0, 1)] * 2)
                 commands = [call.args[0] for call in engine.sh.call_args_list]
                 self.assertEqual(loaded, {})
+                self.assertTrue(rec['correctness']['checks']['runtime_same_across_cache_states'])
+                self.assertEqual(rec['paired_inputs']['hyperfine']['executable_sha256'], 'a' * 64)
+                runtime_changed = True
+                changed = runner.trial_w7(FixtureContext(tmp), engine, "warm")
+                self.assertFalse(changed['correctness']['ok'])
+                self.assertIn('httpie runtime differs', changed['validation_errors'][0])
+                self.assertEqual(loaded, {})
+                runtime_changed = False
                 miscached = True
                 bad_cache = runner.trial_w7(FixtureContext(tmp), engine, "warm")
                 self.assertFalse(bad_cache["correctness"]["ok"])
@@ -482,11 +496,14 @@ class WorkloadSafetyTests(unittest.TestCase):
                     self.assertEqual(rec["metrics"][f"{app}_{state}_first_use_s"], .5)
             builds_and_runs = [command for command in commands
                                if command[:2] == ["buildx", "build"] or command[0] == "run"]
-            self.assertEqual(len(builds_and_runs), 18)
-            for index in range(0, len(builds_and_runs), 3):
+            self.assertEqual(len(builds_and_runs), 24)
+            for index in range(0, 18, 3):
                 build, version, note = builds_and_runs[index:index + 3]
                 tag = build[build.index("-t") + 1]
                 self.assertEqual((version[3], note[3]), (tag, tag))
+            receipts = builds_and_runs[18:]
+            self.assertEqual([command[4] for command in receipts], ['sha256sum'] * 3 + ['python'] * 3)
+            self.assertEqual([command[3] for command in receipts], [build[build.index('-t') + 1] for build in builds])
 
     def test_w8_keeps_shared_content_and_labels_it_warm(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1979,6 +1979,20 @@ W7_APPS = {
 }
 
 
+def w7_runtime_receipt(engine, app, tag):
+    run = ['run', '--rm', '--pull=never', tag]
+    if app == 'hyperfine':
+        fields = engine.sh([*run, 'sha256sum', '/usr/local/bin/hyperfine'], timeout=60).stdout.split()
+        if len(fields) != 2 or not re.fullmatch(r'[a-f0-9]{64}', fields[0]) or fields[1] != '/usr/local/bin/hyperfine':
+            raise ValueError('W7 loaded Hyperfine executable hash is unavailable')
+        return {'executable_sha256': fields[0]}
+    script = (FIXTURES / 'w7/httpie/receipt.py').read_text()
+    packages = json.loads(engine.sh([*run, 'python', '-c', script], timeout=60).stdout)
+    if packages.get('httpie', {}).get('version') != W7_APPS['httpie']['expect']:
+        raise ValueError('W7 runtime package receipt lacks the expected HTTPie version')
+    return packages
+
+
 def trial_w7(ctx, engine: Engine, state: str,
              driver: str = "default", fixture_version: str = W7_FIXTURE_VERSION) -> dict:
     """W7: default buildx -> loaded runnable images for two real apps
@@ -1995,6 +2009,7 @@ def trial_w7(ctx, engine: Engine, state: str,
     label = "dev.ctrs.campaign.w7"
     label_value = hashlib.sha256(ctx.workload_id.encode()).hexdigest()
     tags = []
+    verified_tags = {app: [] for app in W7_APPS}
     try:
         if fixture_version != W7_FIXTURE_VERSION:
             raise ValueError("W7 fixture version mismatch")
@@ -2008,6 +2023,7 @@ def trial_w7(ctx, engine: Engine, state: str,
         if linux_lane.enabled():
             rec['inputs'] = {'linux_build_images': linux_lane.build_images(engine, ('rust', 'debian', 'python'))}
         else:
+            rec['workload_params']['exact_runtime_receipts'] = True
             for spec in W7_APPS.values():
                 for image in (spec["builder_image"], spec["runtime_image"]):
                     cp = engine.sh(["image", "inspect", image], timeout=30,
@@ -2070,9 +2086,22 @@ def trial_w7(ctx, engine: Engine, state: str,
                 }, indent=2) + "\n")
                 if checks[f"{cell}_version"] and checks[f"{cell}_note"]:
                     rec["metrics"][f"{cell}_first_use_s"] = rec["resources"]["phases"][f"{cell}_first_use"]["operation_wall_seconds"]
+                    verified_tags[name].append(tag)
                 else:
                     rec["validation_errors"].append(f"{cell} loaded image failed version or note verification")
                     break
+        if rec['workload_params'].get('exact_runtime_receipts') and all(checks.values()):
+            if sampler is not None:
+                finished_sampler, sampler = sampler, None
+                stop_sampler(finished_sampler)
+            receipts = {app: [w7_runtime_receipt(engine, app, tag) for tag in app_tags]
+                        for app, app_tags in verified_tags.items()}
+            (trial_dir / 'runtime-receipts.json').write_text(json.dumps(receipts, indent=2) + '\n')
+            for app, states in receipts.items():
+                if len(states) != 3 or any(state != states[0] for state in states[1:]):
+                    raise ValueError(f'W7 {app} runtime differs across build cache states')
+            rec['paired_inputs'] = {app: states[0] for app, states in receipts.items()}
+            checks['runtime_same_across_cache_states'] = True
         rec["correctness"]["ok"] = all(checks.values())
         return rec
     except Exception as exc:

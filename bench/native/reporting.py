@@ -429,10 +429,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
                     and params.get('pinned_stack') is True)
     pinned_pipeline = (identity['case'] == 'W4' and isinstance(params, dict)
                        and params.get('pinned_pipeline_inputs') is True)
+    verified_build = (identity['case'] == 'W7' and isinstance(params, dict)
+                      and params.get('exact_runtime_receipts') is True)
     paired_recovery = (identity['case'] == 'W10' and isinstance(params, dict)
                        and params.get('pinned_recovery_inputs') is True)
     require_paired_inputs = (paired_w3 or paired_w5 or paired_w8 or paired_httpie or pinned_stack
-                             or pinned_pipeline or paired_recovery or verified_transfer
+                             or pinned_pipeline or verified_build or paired_recovery or verified_transfer
                              or identity['case'] == 'W13-overlap')
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],

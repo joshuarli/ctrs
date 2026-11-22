@@ -516,6 +516,16 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
 
+The next Mac build comparison also verifies runtime contents. After the
+timed work and sampling finish, it hashes each loaded Hyperfine executable
+and records the versions and file-content hashes of the installed HTTPie
+runtime distributions. It compares these receipts across uncached, warm and
+incremental builds within each trial and across each engine pair. Generated
+Python bytecode and wheel installation metadata are outside the runtime file
+receipt. This check can catch runtime drift. A frozen comparison also needs
+reproducible build-time dependencies. Keep the earlier W7 results separate
+and admit one native pair before the new ten-pair cohort.
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,

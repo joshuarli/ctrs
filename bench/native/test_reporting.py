@@ -273,6 +273,15 @@ class ReportingTests(unittest.TestCase):
         records[1]['paired_inputs']['images']['worker']['diff_ids'] = ['different']
         self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
 
+    def test_w7_rejects_different_runtime_content_even_with_the_same_version(self):
+        records = pair(case='W7', metric='httpie_uncached_s')
+        for record in records:
+            record['workload_params']['exact_runtime_receipts'] = True
+            record['paired_inputs'] = {'httpie': {'urllib3': {'version': '2.3.0', 'runtime_sha256': 'same'}}}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+        records[1]['paired_inputs']['httpie']['urllib3']['runtime_sha256'] = 'changed'
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
+
     def test_overlap_metric_directions_and_paired_inputs(self):
         records = pair(case="W13-overlap", metric="w2_latency_p99_ms", ratio=.5)
         for record in records:
