@@ -1394,6 +1394,16 @@ phase cache states, installed file and byte counts, package count, initial
 build output and discovered tests. Each engine verifies its own mount and
 image identity during the trial.
 
+Test inode-pruning cost in two alternating pairs of private ctrs guests at
+`/proc/ctrs/fuse_inodes` bounds of 65,536 and 98,304. Use the signed
+`99db1aa` release and W12 timing revision 2 full-bind fixture. Read the
+default bound before setting the test value. Record live inodes and host
+file-table headroom after setup, install, the verification walk, discovery
+and branch restore. Take each extra sample outside its timed phase. Require
+the existing exact W12 receipts for both variants. This diagnostic tests
+whether the inode cap contributes to the gap and whether a larger ceiling
+merits the full descriptor, watcher and comparative gates.
+
 ```sh
 for layout in full-bind bind-source-volume-deps all-volume; do
   python3 bench/native/runner.py baseline --case W12 --workspace-layout "$layout" \
