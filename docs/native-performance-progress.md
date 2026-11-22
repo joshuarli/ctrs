@@ -508,6 +508,40 @@ python3 bench/native/reporting.py --match base-20261122T093306-1b10
 `trials.jsonl` SHA-256
 `231f577b8eeb6bdaf972c8479bb0e3b95813d49569ce4cacde4eca62289982a1`.
 
+### W2 leaf observer overhead on the guest-direct workload
+
+The 49 Hz confirmation at `44e542f` ran all ten alternating blocks.
+Each of the 40 legs completed 50,000 exact requests at concurrency eight.
+Each profiled leg covered all nine API threads with zero recorded loss.
+Block 2 failed the ctrs profiler-off post-workload gate. PID 74836,
+identified as hot by that gate, matches the owned VM PID and kernel
+start identity in the receipt. The original rule leaves nine valid blocks
+and the observer unqualified.
+
+| Engine and interval | Median on/off ratio | Descriptive 95% CI |
+| --- | ---: | ---: |
+| ctrs API CPU | 1.0157 | 0.9878–1.0455 |
+| ctrs workload wall time | 1.0103 | 1.0014–1.0222 |
+| OrbStack API CPU | 1.0426 | 1.0154–1.0698 |
+| OrbStack workload wall time | 1.0276 | 1.0163–1.0499 |
+
+API CPU intervals include counter quantization. The OrbStack CPU interval
+extends beyond the 5% budget even among the admitted blocks. The smallest
+per-thread profile had 26 samples, motivating a separate lower-frequency
+candidate with the same coverage requirement.
+
+Pass the following run directories, in order, to
+`bench/native/diagnostics/w2_observer_report.py`. All names have the prefix
+`w2-guest-client-cpu-leaf-20261122T`.
+
+```text
+094448-a9cb  094748-52c1  095046-b953  095344-bba3  095645-0670
+095943-5c54  100240-186f  100536-3e9c  100833-6b1c  101131-a496
+```
+
+Batch log SHA-256
+`f620b515afc922f5e6c6b96c32f05d44a58a25fe1076e55f0025519436187f04`.
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
