@@ -1670,10 +1670,21 @@ SHA-256: `65cd55f1287288a29c4c4fc5231a962feab581e0edaed0d98bb58ce86f196ae2`.
 The 12-hour check now requires the API, DB and cache container IDs, guest
 PIDs, start times and restart counters to match from setup through every
 completed cycle, including its post-cleanup observation. A restart that
-reuses the container ID fails the trial. Run the pinned short pilot with
-`--cycles 1 --resource-observation-seconds 32` on both engines to verify
-the new `initial_service_lifecycle` and per-cycle `service-lifecycle.json`
-receipts before the long run. Freeze the candidate and resolve the
+reuses the container ID fails the trial.
+
+The native lifecycle check ran `ae96711` with the signed `99db1aa` release,
+the v5 worker and the v6 portfolio. Each engine ran one cycle with
+`--cycles 1 --resource-observation-seconds 32`. Both verified 5,000 API
+operations, 200 queue jobs and 400 artifacts, and both retained the exact
+initial API, DB and cache process identities through observation. Both
+drivers finished with no cleanup errors.
+
+| Engine | Run | Engine result SHA-256 |
+| --- | --- | --- |
+| ctrs | `w11-mixed-20261122T143417-ed26` | `622ad3e3f8be76e4b01d85e17a0be1147b58d38b05bdc7fe52955c9a02183eef` |
+| OrbStack | `w11-mixed-20261122T143505-a93c` | `0bbb33278250bad38adf0f89464fbbc9dab8ee8bf452335c366512c3d4187b0a` |
+
+These runs verify the lifecycle receipts. Freeze the candidate and resolve the
 [host durability evidence](#w3-migration-and-committed-state-cohort) before
 requesting qualification admission.
 
