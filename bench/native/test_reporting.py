@@ -132,6 +132,24 @@ class ReportingTests(unittest.TestCase):
         self.assertIsNone(metric_result(report, "bind_peak_phys_footprint_bytes")["ratio_median"])
         self.assertEqual(metric_result(report, "volume_cpu_seconds_per_edit")["ratio_median"], 2)
 
+    def test_w9_resources_require_the_exact_count_and_condition_receipt(self):
+        records = pair(case="W9", metric="fixed16_at_4_s")
+        for record, cpu, footprint in zip(records, (8, 16), (125, 100), strict=True):
+            record["metrics"].update(jobs_at_4=16)
+            record["correctness"]["checks"]["exact_jobs_at_4"] = True
+            record["resources"]["phase_receipts"] = {
+                "jobs_at_4": {"status": "ok", "errors": [], "cpu_seconds": cpu,
+                              "peak_phys_footprint_bytes": footprint},
+                "jobs_at_16": {"status": "ok", "errors": [], "cpu_seconds": 1000,
+                               "peak_phys_footprint_bytes": 1000},
+            }
+        report = reporting.analyze(records)
+        self.assertEqual(metric_result(report, "jobs_at_4_cpu_seconds_per_job")["ratio_median"], .5)
+        self.assertEqual(metric_result(report, "jobs_at_4_peak_phys_footprint_bytes")["ratio_median"], 1.25)
+        self.assertIsNone(metric_result(report, "jobs_at_16_cpu_seconds_per_job")["ratio_median"])
+        records[0]["metrics"]["jobs_at_4"] = 15
+        self.assertIsNone(metric_result(reporting.analyze(records), "jobs_at_4_cpu_seconds_per_job")["ratio_median"])
+
     def test_w9_throughput_and_completion_latency_use_opposite_ratio_directions(self):
         duration = "job_completion_p95_ms_at_4"
         rate = "successful_jobs_per_minute_at_4"

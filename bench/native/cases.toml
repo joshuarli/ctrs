@@ -153,7 +153,11 @@ metrics = ["fixed16_at_1_s", "fixed16_at_4_s", "fixed16_at_8_s", "fixed16_at_16_
            "successful_jobs_per_minute_at_1", "successful_jobs_per_minute_at_4",
            "successful_jobs_per_minute_at_8", "successful_jobs_per_minute_at_16",
            "job_completion_p95_ms_at_1", "job_completion_p95_ms_at_4",
-           "job_completion_p95_ms_at_8", "job_completion_p95_ms_at_16"]
+           "job_completion_p95_ms_at_8", "job_completion_p95_ms_at_16",
+           "jobs_at_1_cpu_seconds_per_job", "jobs_at_4_cpu_seconds_per_job",
+           "jobs_at_8_cpu_seconds_per_job", "jobs_at_16_cpu_seconds_per_job",
+           "jobs_at_1_peak_phys_footprint_bytes", "jobs_at_4_peak_phys_footprint_bytes",
+           "jobs_at_8_peak_phys_footprint_bytes", "jobs_at_16_peak_phys_footprint_bytes"]
 states = ["warm"]
 params = {}
 correctness = ["16 complete jobs per declared concurrency", "exact tools/source lock", "identical pinned bundle hash", "all CLI goldens exact", "owned cleanup"]

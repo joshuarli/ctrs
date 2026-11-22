@@ -2216,6 +2216,12 @@ def trial_w6(ctx, engine: Engine, state: str,
             rec["resources"]["trace"] = _trace_ref(trace)
 
 
+def _job_phase_receipts(identity, phases, trace, *, prefix):
+    samples = [json.loads(line) for line in trace.read_text().splitlines()]
+    return {name: resource_cycles.phase_summary(identity, phase, samples)
+            for name, phase in phases.items() if name.startswith(prefix)}
+
+
 def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
              concurrency_levels: tuple = tuple(ci_jobs.SPEC['concurrency']),
              fixture_version: str = ci_jobs.SPEC['fixture_version']) -> dict:
@@ -2265,6 +2271,7 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
             rec['metrics'][f'fixed16_at_{concurrency}_s'] = wall
             rec['metrics'][f'successful_jobs_per_minute_at_{concurrency}'] = 60 * len(results) / wall
             rec['metrics'][f'job_completion_p95_ms_at_{concurrency}'] = 1000 * latencies[math.ceil(.95 * len(latencies)) - 1]
+            rec['metrics'][f'jobs_at_{concurrency}'] = len(results)
             rec['correctness']['checks'][f'exact_jobs_at_{concurrency}'] = True
         rec['correctness']['ok'] = all(rec['correctness']['checks'].values())
         return rec
@@ -2297,6 +2304,11 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
         rec['resources'].update(summarize_trace(trace) if trace else {})
         if trace:
             rec['resources']['trace'] = _trace_ref(trace)
+            try:
+                rec['resources']['phase_receipts'] = _job_phase_receipts(
+                    engine.measurement_identity, rec['resources'].get('phases', {}), trace, prefix='jobs_at_')
+            except (OSError, ValueError, KeyError) as exc:
+                rec['resources']['phase_receipt_error'] = str(exc)
 
 
 @dataclass(frozen=True)
@@ -2472,12 +2484,8 @@ def trial_w4(ctx, engine: Engine, state: str,
             if trace:
                 rec["resources"]["trace"] = _trace_ref(trace)
                 if case_id == "W4" and timed:
-                    samples = [json.loads(line) for line in trace.read_text().splitlines()]
-                    phases = rec["resources"].get("phases", {})
-                    rec["resources"]["phase_receipts"] = {
-                        name: resource_cycles.phase_summary(engine.measurement_identity, phase, samples)
-                        for name, phase in phases.items() if name.startswith("workers_")
-                    }
+                    rec["resources"]["phase_receipts"] = _job_phase_receipts(
+                        engine.measurement_identity, rec["resources"].get("phases", {}), trace, prefix="workers_")
         except Exception as exc:
             rec["validation_errors"].append(f"sampler shutdown or receipt: {exc}")
             rec["correctness"]["ok"] = False
