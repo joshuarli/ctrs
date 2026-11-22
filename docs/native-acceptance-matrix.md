@@ -1,7 +1,8 @@
 # macOS campaign acceptance matrix
 
-Single status table for [the campaign](campaign-native-performance.md), which is paused (2026-11-20). Every raw result was deleted at the pause; the statuses below are what was recorded. The
-work queue and next action live in
+Status table for the [macOS campaign](campaign-native-performance.md), resumed
+on 2026-11-22. The November 20 pause left historical summaries for the deleted
+raw results. The resumed cohorts have new receipts and commands in
 [native-performance-progress.md](native-performance-progress.md). Host: M1 Max,
 10 CPUs, 64 GiB, macOS 27.2.1, OrbStack 2.2.5 (from 2026-11-18). Every
 measurement before 2026-11-18 is **historical to the previous host** and
@@ -43,10 +44,12 @@ OrbStack's). Never pool lanes.
 
 ## Filesystem and networking coverage (2026-11-18 steering)
 
-W12 v2 and the current bind and volume watch fixtures passed functional
-checks on both engines on 2026-11-22. Fresh comparison cohorts remain
-open. The W12 timing history below uses the previous fixture.
-[Evidence and reproduction](native-performance-progress.md#rebuilt-w12-workspace-fixture)
+W12 v2 full-bind completed ten installed-default pairs on 2026-11-22.
+The workflow ratio was 1.2999 [1.2883, 1.3223], with measured CPU at
+1.1630 [1.1593, 1.1725] and sampled physical footprint at 0.3606
+[0.3455, 0.3871]. The v2 mixed, all-volume and watch comparisons remain
+open. The table below retains W12 timing history from the previous fixture.
+[Current cohort](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 
 | ID | Workflow | Spec | Impl | Functional | Compared | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -100,8 +103,9 @@ States are kept apart: a **loss**, **inconclusive**, **tool-limited**
 (a metric that omits part of the engine's cost, such as host-kernel NAT
 networking) and **qualified** (none yet).
 
-1. W12 full-bind ~1.25–1.33× loss (Mac virtiofs share). Bind source +
-   volume deps is a separate layout (1.027 inconclusive), not a fix.
+1. W12 v2 full-bind workflow 1.300× and measured CPU 1.163×. The Mac
+   share's offline install and verification walk account for about 71%
+   of the workflow gap. [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 2. W13-overlap CPU loss 1.097× at the 9-vCPU default. W2 p99 and request
    rate are inconclusive in the current cohort.
    [Evidence](native-performance-progress.md#installed-default-w13-overlap-cohort)
@@ -114,7 +118,9 @@ networking) and **qualified** (none yet).
    installed-default cohort. The VZ helper retained the allocation
    across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
 6. W7 sampled peak physical footprint inconclusive and CPU incomplete.
-   Comparative cohorts remain open for W4, W5, W8 and W10.
+   The offline W7 fixtures and the W4, W5 and W8 cohorts still need native
+   evidence. W10 has API, database and queue pairs, with whole-engine parity
+   pending on an isolated OrbStack target.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.

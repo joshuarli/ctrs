@@ -1394,6 +1394,38 @@ phase cache states, installed file and byte counts, package count, initial
 build output and discovered tests. Each engine verifies its own mount and
 image identity during the trial.
 
+#### Installed-default W12 full-bind cohort
+
+`base-20261122T113705-c0df` admitted ten alternating pairs at `fa72716`
+using the signed `99db1aa` ctrs release. Both engines observed 9 vCPUs at
+their installed memory defaults. Each leg verified 2,830 packages, 92,306
+files and 532,136,968 bytes after install, along with matching build and
+test-discovery receipts. All ctrs legs recorded zero host NAT connections.
+
+| Metric | ctrs median | OrbStack median | Paired ratio and 95% CI |
+| --- | ---: | ---: | --- |
+| Workflow | 116.48 s | 89.76 s | 1.2999 [1.2883, 1.3223] |
+| Offline `npm ci` | 26.57 s | 12.58 s | 2.1055 [2.0701, 2.1621] |
+| Verification walk | 6.83 s | 1.65 s | 4.1610 [4.0605, 4.5087] |
+| Jest discovery | 2.79 s | 1.12 s | 2.5178 [2.4545, 3.2113] |
+| Measured engine CPU | 256.23 s | 220.18 s | 1.1630 [1.1593, 1.1725] |
+| Sampled peak physical footprint | 3.32 GB | 9.16 GB | 0.3606 [0.3455, 0.3871] |
+
+The install command and verification walk together explain a median 71.0%
+of the per-pair workflow gap. The offline install command itself has the
+largest absolute phase gap. Typecheck was non-inferior. Build, warm rebuild,
+multi-file change and branch restore also trailed OrbStack. The mixed and
+all-volume layouts will test how much of the gap follows the bind mount.
+
+```sh
+python3 bench/native/reporting.py --match base-20261122T113705-c0df
+```
+
+`trials.jsonl` SHA-256
+`f13b187c281dc2838597476765e0a9744c43f2c788f1c5020db95ca34e0aa2b7`.
+
+#### W12 inode-pruning probe
+
 Test inode-pruning cost in two alternating pairs of private ctrs guests at
 `/proc/ctrs/fuse_inodes` bounds of 65,536 and 98,304. Use the signed
 `99db1aa` release and W12 timing revision 2 full-bind fixture. Read the
