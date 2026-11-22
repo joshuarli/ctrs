@@ -465,7 +465,7 @@ python3 bench/native/reporting.py --candidate --match base-20261122T083610-c7a4
 `trials.jsonl` SHA-256
 `e392a7879a158e4ba970a086d87de8984e2b65d581bdd84ac2120ef4a3d7d195`.
 
-The next candidate is a 5,120 MiB ceiling. The 6,144 MiB slot's peak
+The next screen used a 5,120 MiB ceiling. The 6,144 MiB slot's peak
 plateau was about 47 MB above its ceiling, and its endpoint guest used
 counter stayed below 0.59 GB. These readings motivate a lower ceiling
 and leave transient cache pressure during a build unresolved. The screen
@@ -473,10 +473,30 @@ includes all startup pairs, uses the same footprint and build-time
 bounds as the 6,144 MiB screen, and requires a zero-OOM receipt from
 each engine slot.
 
+Run `base-20261122T110954-3f61` used clean source `34141a3` and admitted all
+ten paired uncached builds. All legs reported their assigned memory ceilings
+at 9 vCPUs and zero guest OOM kills. The Rust and zlib artifact hashes each
+matched across all 20 legs. Complete footprint samples were available.
+
+| Metric | 5,120 / 8,192 MiB paired median | 95% CI | Screen |
+| --- | ---: | ---: | --- |
+| Sampled peak physical footprint | 0.6269 | 0.6268–0.8020 | Met 0.95 upper bound |
+| Rust build time | 1.0075 | 0.9984–1.0292 | Met 1.03 upper bound |
+| zlib build time | 1.0171 | 0.9959–1.0301 | Missed 1.03 upper bound |
+| Measured engine CPU | 1.0149 | 1.0061–1.0469 | Incomplete |
+
+The 5,120 MiB slot reached about 5.42 GB of host footprint in pair two.
+The installed default reached about 8.64 GB in pair five. The zlib upper
+bound narrowly missed the predeclared limit, so the cap remains a candidate.
+Host NAT use leaves CPU accounting incomplete.
+
 ```sh
 python3 bench/native/pyramid.py run --name w6-build:memory5120
-python3 bench/native/reporting.py --candidate --match "$run_id"
+python3 bench/native/reporting.py --candidate --match base-20261122T110954-3f61
 ```
+
+`trials.jsonl` SHA-256
+`683de0e7768b343959d550c97a674acfae6f8d5a2bf263babbc0166be50b3333`.
 
 ### Installed-default W7 cohort
 
