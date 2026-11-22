@@ -386,6 +386,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
     watch_file, version = watch_config(mount)
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
+    rec['workload_params']['fixture_version'] = version
     rec['metrics'].update(fixture_version=version, mount=mount, backend='fs.watch', watch_file=watch_file,
                           edit_transport='host filesystem' if mount == 'bind' else 'docker exec',
                           missed=0, stale=0, edits=[])

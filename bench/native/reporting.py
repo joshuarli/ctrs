@@ -427,9 +427,13 @@ def _w12_inputs(record, extra_fields=()):
 def _w12_watch_receipt(record, mount, edit_count):
     shared = _w12_inputs(record)
     metrics = record['metrics']
-    if (not shared or not isinstance(mount, str) or mount not in WATCH_FIXTURE_VERSIONS
-            or metrics.get('fixture_version') != WATCH_FIXTURE_VERSIONS[mount] or metrics.get('mount') != mount
+    params = workload_params(record)
+    if (not shared or not isinstance(params, dict) or not isinstance(mount, str)
+            or mount not in WATCH_FIXTURE_VERSIONS or metrics.get('mount') != mount
             or type(edit_count) is not int or edit_count < 60):
+        return None
+    version = WATCH_FIXTURE_VERSIONS[mount]
+    if metrics.get('fixture_version') != version or params.get('fixture_version', version) != version:
         return None
     watcher = record['inputs'].get('watcher_before')
     if (not isinstance(watcher, dict) or watcher != record['inputs'].get('watcher_after')
@@ -482,8 +486,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
     verified_workspace = (identity['case'] == 'W12' and isinstance(params, dict)
                           and params.get('timing_revision') == INSTALL_TIMING_REVISION)
     verified_workspace_watch = (identity['case'] == 'W12-watch' and isinstance(params, dict)
-                                and any(r['metrics'].get('fixture_version') in WATCH_FIXTURE_VERSIONS.values()
-                                        for r in records))
+                                and (params.get('fixture_version') in WATCH_FIXTURE_VERSIONS.values()
+                                     or any(r['metrics'].get('fixture_version') in WATCH_FIXTURE_VERSIONS.values()
+                                            for r in records)))
     paired_httpie = (identity['case'] == 'W7' and isinstance(params, dict)
                      and params.get('fixture_version') == HTTPIE_FIRST_USE)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)

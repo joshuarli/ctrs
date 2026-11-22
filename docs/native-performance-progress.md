@@ -1729,6 +1729,8 @@ checks each edited path against the runner's edit plan. It requires every
 output from each multi-file edit, with matching compiled hashes and
 ordered receipts across engines. It verifies that the recorded timestamps
 are in order and that recomputed p50 and p95 match the reported values.
+New trials declare the fixture version in the workload parameters and
+verify that it matches the mount and result receipts.
 
 Bind admission `base-20261122T130910-762c` on `b7c59e1` with signed
 `99db1aa` verified 120 results from 60 edit sequences on each engine,

@@ -132,7 +132,7 @@ class ReportingTests(unittest.TestCase):
         for mount, version in reporting.WATCH_FIXTURE_VERSIONS.items():
             records = pair(case='W12-watch', metric='edit_to_result_p50_s')
             for pid, record in enumerate(records, 2):
-                record['workload_params'].update(mount=mount, edits=60)
+                record['workload_params'].update(mount=mount, edits=60, fixture_version=version)
                 record['metrics'].update(fixture_version=version, mount=mount,
                                          dependency_count=3, files=34, bytes=56818,
                                          results=len(edits), missed=0, stale=0,
@@ -164,8 +164,11 @@ class ReportingTests(unittest.TestCase):
             changed_summary[1]['metrics']['edit_to_result_p95_s'] = .1
             invalid_clock = copy.deepcopy(records)
             invalid_clock[0]['metrics']['edits'][0]['observed_monotonic'] = 100.05
+            missing_result_versions = copy.deepcopy(records)
+            for record in missing_result_versions:
+                del record['metrics']['fixture_version']
             for invalid in (changed_watcher, changed_output, stale_output, missing_sequence,
-                            missing_burst_output, changed_summary, invalid_clock):
+                            missing_burst_output, changed_summary, invalid_clock, missing_result_versions):
                 cohort = reporting.analyze(invalid)['cohorts'][0]
                 self.assertEqual(cohort['valid_pairs'], 0)
                 self.assertEqual(cohort['rejections'][0]['reason'],
