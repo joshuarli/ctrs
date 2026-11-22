@@ -102,10 +102,13 @@ git -C .work/restored-source cat-file -e 192d83e62b05fce6a6ac89fe0808b92d9cd3ff9
 ```
 
 Tested the existing archive restoration path using the **restored historical
-executables**, an empty dedicated ctrs store, and a dedicated Docker daemon
+executables**, an empty dedicated ctrs store, and a separate Docker API daemon
 (`ctrs-restore-docker.service`, empty data/exec roots, separate Unix socket,
-bridge none, iptables/ip6tables/ip-forward/ip-masq false). The host dockerd
-was not restarted/reconfigured or loaded. Because the supported harness
+bridge none, iptables/ip6tables/ip-forward/ip-masq false). **This was not
+complete Docker isolation:** the secondary daemon connected to the host's
+`/run/containerd/containerd.sock` in namespace `moby`, as its journal shows.
+Separate Docker data/exec roots alone did not isolate that dependency.
+The host dockerd was not restarted/reconfigured. Because the supported harness
 endpoint is fixed, a private mount namespace bind-mounted the owned Docker
 socket over `/var/run/docker.sock` **only inside the restore process**.
 The preserved script records all absolute paths. Equivalent command inside
@@ -130,4 +133,33 @@ FROZEN_LOCK_UNCHANGED
 
 The before/after lock hash matches the committed manifest. Both disposable
 engines were stopped after verification; the host daemon remained active.
-This proves local retrieval and load, not an off-host disaster-recovery test.
+This proves local retrieval and archive loading, not an independent empty
+Docker/containerd restoration or an off-host disaster-recovery test.
+
+## Runtime blocker discovered immediately afterward
+
+The next current-main build failed before compilation:
+
+```text
+docker: Error response from daemon: failed to set up container networking: failed to create endpoint boring_buck on network bridge: adding interface veth86dc897 to bridge docker0 failed: Device does not exist
+LINUX_BUILD_EXIT=1
+```
+
+`docker0` was present before restoration but absent afterward. The host Docker
+network metadata still describes bridge `docker0`, subnet `172.17.0.0/16`,
+gateway `172.17.0.1`, and no attached containers. PID 599 and the original
+service start timestamp remain unchanged. The exact deleting operation was
+not traced; the secondary daemon's shared host networking/containerd is a
+setup-isolation suspect, **not a confirmed cause**. The ctrs restore journal
+shows image loads only, no agent/container startup, which weighs against
+ctrs agent bridge cleanup executing in this restore.
+
+No shared-host bridge repair or daemon restart was attempted without approval.
+The integrated e2e/firewall pass has **not run**. Before resuming, authorize
+repair of the existing Docker network and verify its normal operation. Use
+a separate network namespace **and** private containerd/socket/namespaces for
+the disposable e2e daemon, not merely separate Docker roots.
+Incident receipts and the failed build log are retained under
+`/home/ubuntu/ctrs-evidence/linux-integrated-20261122/` (`restore-dockerd.log`,
+`host-links-after.json`, `host-bridge-metadata.json`, `host-docker-state.txt`,
+`build.log`). The frozen baseline artifacts and manifest remain unchanged.
