@@ -4,11 +4,35 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import Mock, call
 
 from diagnostics import storage_space_guest, storage_space_pilot
 
 
 class StorageSpace(unittest.TestCase):
+    def test_portfolio_uses_verified_config_ids_to_install_compose_aliases(self):
+        pilot = storage_space_pilot
+        names = ('api', 'postgres', 'redis')
+        pins = {f'np-v6/{name}': {'config': f'{name}-config', 'diff_ids': [f'{name}-layer']} for name in names}
+        images = [{'Id': pin['config'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}
+                  for pin in pins.values()]
+        engine = Mock()
+        engine.sh.side_effect = [None, Mock(stdout=json.dumps(images)), None, None, None]
+        pilot.prepare_portfolio(engine, Path('portfolio.tar'), {'images': pins})
+        self.assertEqual(engine.sh.call_args_list, [
+            call(['load', '-i', 'portfolio.tar'], timeout=180),
+            call(['image', 'inspect', 'api-config', 'postgres-config', 'redis-config']),
+            call(['image', 'tag', 'api-config', 'np-fixture-api:' + pilot.runner.API_TAG]),
+            call(['image', 'tag', 'postgres-config', 'postgres:17-alpine']),
+            call(['image', 'tag', 'redis-config', 'redis:7-alpine']),
+        ])
+        images[0]['RootFS'] = {'Layers': ['different layer']}
+        engine.reset_mock()
+        engine.sh.side_effect = [None, Mock(stdout=json.dumps(images))]
+        with self.assertRaisesRegex(ValueError, 'baseline image differs from pin'):
+            pilot.prepare_portfolio(engine, Path('portfolio.tar'), {'images': pins})
+        self.assertEqual(engine.sh.call_count, 2)
+
     def test_relation_enospc_accepts_authoritative_errors_and_rejects_temp_spill(self):
         relation = 'ERROR: 53100: could not extend file "base/16384/16405": No space left on device'
         temporary = 'ERROR: 53100: could not write to file "base/pgsql_tmp/pgsql_tmp65.0": No space left on device'

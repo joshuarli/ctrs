@@ -16,6 +16,7 @@ import ownership
 import resource_cells
 import runner
 from diagnostics import storage_space_guest as guest
+from diagnostics.w8_under_pull import require_baseline_images
 
 def relation_enospc(returncode, stderr):
     return (returncode != 0 and ('no space left on device' in stderr.lower() or '53100' in stderr)
@@ -52,6 +53,17 @@ def finish_cleanup(result, snapshot, stop, close, persist):
     if result['cleanup_errors']:
         result['correctness'] = False
     persist(result)
+
+
+def prepare_portfolio(engine, archive, contract):
+    engine.sh(['load', '-i', str(archive)], timeout=180)
+    refs = {'api': 'np-fixture-api:' + runner.API_TAG, 'postgres': 'postgres:17-alpine',
+            'redis': 'redis:7-alpine'}
+    pins = {name: contract['images']['np-v6/' + name] for name in refs}
+    images = json.loads(engine.sh(['image', 'inspect', *(pin['config'] for pin in pins.values())]).stdout)
+    require_baseline_images('ctrs', pins, images)
+    for name, ref in refs.items():
+        engine.sh(['image', 'tag', pins[name]['config'], ref])
 
 
 def main():
@@ -136,11 +148,7 @@ def main():
                 return saved
         try:
             engine.ensure_up()
-            engine.sh(['load', '-i', str(archive)], timeout=180)
-            for name, reference in (('api', 'np-fixture-api:' + runner.API_TAG), ('postgres', 'postgres:17-alpine'), ('redis', 'redis:7-alpine')):
-                installed = json.loads(engine.sh(['image', 'inspect', reference]).stdout)[0]
-                if not (installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v6/' + name]['diff_ids']):
-                    raise ValueError("diagnostic validation failed: installed['Architecture'] == 'arm64' and installed['RootFS']['Layers'] == spec['images']['np-v6/' + name]['diff_ids']")
+            prepare_portfolio(engine, archive, spec)
             compose(['up', '-d', '--no-build', '--pull', 'never'])
             if not (runner.wait_health(base, 60)[0]):
                 raise ValueError('diagnostic validation failed: runner.wait_health(base, 60)[0]')

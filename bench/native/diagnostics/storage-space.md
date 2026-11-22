@@ -16,6 +16,8 @@ TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/storage_space_pilot.py
 Require FIEMAP unwritten extents, exact database contents and at most 8MiB of
 active backing-file allocation growth. Run the relation test with the same
 command and `--stage enospc`. Both stages require 2GiB host free space.
+Setup verifies the loaded portfolio by config ID and ordered DiffIDs before
+tagging the three images with the Compose references in the private store.
 
 The helper reserves guest space until non-root available capacity reaches 8MiB.
 It recomputes available capacity to account for extent metadata. After each
