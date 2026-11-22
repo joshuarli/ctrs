@@ -6,7 +6,7 @@
     "state": "warm-persistent",
     "load": "mixed-c4",
     "unit": "cycles",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.retained-state-persistence": {
     "workload": "W11",
@@ -15,7 +15,7 @@
     "state": "warm-persistent",
     "load": "mixed-c4",
     "unit": "failures",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.acknowledged-write-durability": {
     "workload": "W11",
@@ -24,7 +24,7 @@
     "state": "declared-failure-model",
     "load": "mixed-c4",
     "unit": "writes",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.physical-footprint-growth": {
     "workload": "W11",
@@ -33,7 +33,7 @@
     "state": "post-cleanup",
     "load": "mixed-c4",
     "unit": "bytes",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.file-descriptor-growth": {
     "workload": "W11",
@@ -42,7 +42,7 @@
     "state": "post-cleanup",
     "load": "mixed-c4",
     "unit": "descriptors",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.active-disk-allocation-growth": {
     "workload": "W11",
@@ -51,7 +51,7 @@
     "state": "post-cleanup",
     "load": "mixed-c4",
     "unit": "bytes",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   },
   "w11.mixed-work-reliability": {
     "workload": "W11",
@@ -60,6 +60,6 @@
     "state": "warm-persistent",
     "load": "mixed-c4-12h",
     "unit": "failures",
-    "fixture_version": "w11-v4-post-cleanup-resources"
+    "fixture_version": "w11-v5-restored-worker"
   }
 }

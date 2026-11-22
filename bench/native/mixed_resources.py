@@ -15,7 +15,7 @@ import resource_cells as cells
 import resource_cycles
 from macos_counters import Counters
 
-VERSION = 'w11-v4-post-cleanup-resources'
+VERSION = 'w11-v5-restored-worker'
 BUDGETS = {'warmup_cycles': 1, 'minimum_post_warmup_cycles': 5,
            'minimum_observation_seconds': 30, 'physical_footprint_bytes': 16 * 1024 * 1024,
            'file_descriptors': 16, 'active_disk_allocation_bytes': 16 * 1024 * 1024}

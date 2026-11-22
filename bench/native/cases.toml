@@ -176,7 +176,7 @@ note = "API and database recovery uses the common pinned stack and ends on the f
 
 [[case]]
 id = "W11"
-fixture_version = "w11-v4-post-cleanup-resources"
+fixture_version = "w11-v5-restored-worker"
 family = "soak"
 title = "pilot sustained load windows + container churn; correctness gates, resource-growth qualification pending"
 fixture = "fixtures/w1 + fixtures/w2/load.py + inline churn"

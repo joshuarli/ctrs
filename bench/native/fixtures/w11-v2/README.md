@@ -1,9 +1,9 @@
 # Run short mixed application cycles
 
-Use the pinned W8 multilayer portfolio and worker OCI layout. The worker archive
-is a read-only export of the verified W4 image. `worker-pin.json` records its
-manifest, config, diff IDs and application hash. Preparation preserves both
-engines' existing images and shared daemons.
+Use the pinned W8 multilayer portfolio and worker OCI layout. The v5
+worker was rebuilt from the pinned W4 Dockerfile and unchanged application
+source. `worker-pin.json` records its manifest, config, DiffIDs and source
+hashes. The historical W11 v4 runs used the previous worker image.
 
 If scratch was deleted, restore from the original OCI archive or export
 the pinned `source_image_id` from OrbStack while the benchmark host is idle:
@@ -17,15 +17,31 @@ python3 bench/native/fixtures/w11-v2/restore.py .work/tmp/w11-worker.tar
 ```
 
 The restore command extracts only regular files referenced by the pinned
-manifest, checks their digests and publishes a fresh `w11-worker-v1/layout`.
+manifest, checks their digests and publishes a fresh `w11-worker-v5/layout`.
 It refuses an existing destination. An export missing the pinned blobs requires
-the original archive or a new worker fixture version and baselines.
+the canonical archive or a rebuild. Use a new owned tag for each rebuild.
+The following commands reproduce the image with OrbStack's default Docker
+builder and select the exact pinned content from its OCI export.
+
+```sh
+orb="unix://$HOME/.orbstack/run/docker.sock"
+scratch=$(mktemp -d "$PWD/.work/tmp/w11-worker.XXXXXX")
+worker="np-w11-worker-rebuild-${scratch##*.}:v2"
+docker -H "$orb" buildx build --builder default --no-cache \
+  --platform linux/arm64 --provenance=false --sbom=false \
+  --build-arg SOURCE_DATE_EPOCH=0 \
+  --output "type=docker,dest=$scratch/build.tar,name=$worker,rewrite-timestamp=true" \
+  --file bench/native/fixtures/w4/Dockerfile bench/native/fixtures/w4
+docker -H "$orb" image load --input "$scratch/build.tar"
+docker -H "$orb" image save --platform linux/arm64 -o "$scratch/worker.tar" "$worker"
+python3 bench/native/fixtures/w11-v2/restore.py "$scratch/worker.tar"
+```
 
 ```sh
 TMPDIR=$PWD/.work/tmp CTRS_CPUS=2 CTRS_MEMORY_MIB=4096 \
 python3.14 bench/native/diagnostics/mixed_pilot.py \
   --portfolio-layout .work/native-perf/inputs/w8-portfolio-v6/layout \
-  --worker-layout .work/native-perf/inputs/w11-worker-v1/layout \
+  --worker-layout .work/native-perf/inputs/w11-worker-v5/layout \
   --ctrs-binary .work/tmp/disk-expand-target/release/ctrs --cycles 2
 ```
 

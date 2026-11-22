@@ -1,23 +1,26 @@
 {
-  "fixture_version": "w11-v2-mixed",
+  "fixture_version": "w11-worker-v5",
   "worker": {
-    "layout_reference": "v2",
     "repository": "np-w11/events",
-    "manifest": "sha256:f880c4ff02a430800376da4b2ea01f66035ecccf19cfd592a848716f7748aabd",
-    "config": "sha256:8f7e834dbb52eaa7ff57b8bc09128c5f9fcb3150862cbfde2c5f4c5d1a483525",
+    "layout_reference": "v2",
+    "manifest": "sha256:7868ed4b3e536e47a732f69112bc72c556dbe6005e0acaaa2c570670175f82a5",
+    "config": "sha256:91cd77c62796345ffcede4b78aed25d5d038f2fa49f8c8ae2dea7c167d767ff5",
     "diff_ids": [
       "sha256:04e61ff9ed2c84e88795bf7562d69d0980188e2bb6d6152d6fe721383e10db9e",
       "sha256:c8c33587c60cc1dd8d7b2cdba9a74e29190fdf1bae201ef39a7a4847d618d602",
       "sha256:d16ce3ec0751594884f0f0576157ae498426695d87797ebaede9e2197faa282d",
       "sha256:ca8a921086fad0ab07ba836693c942565d4837aaeab719b659cd1e4db9dae57c",
-      "sha256:6bb7ef1b8a11e8f58d6eebd0742bd61b5169fc16633e0a846bc7aaee33815f1e",
-      "sha256:af0f512fc7e7eaf50b48757640301bb64ce41ba0268995498324229a44e8c757"
+      "sha256:8b6da3bd28008659e694315022ffb9c31aa31b5840b77e8f6197872538b9473a",
+      "sha256:bc5ab06da950b59d4aff9b72295d06fc2af4bc071f2d385b501dd3ae2bc0d942"
     ],
     "app_sha256": "b4bd15673c035a6d010ae8a3a982ba8b1929903c082d5593e95a79b219fa386a"
   },
-  "archive_sha256": "a6f9cd32079b7980c268d3ad504174fa8af01654d7442026ae726f8a182809f7",
-  "archive_bytes": 43371520,
-  "source_image_id": "sha256:e281cf32b7fae8bebd781b8e0d49884719e464db739297b44ad3e0c8ed2789fe",
-  "producer_sha256": "9d313ba9b55afe32ba415443c7052ed435df65521640c263227afa85c2f7a9d8",
-  "source": "read-only export; original image/tags/shared daemon preserved"
+  "archive_sha256": "b775e9bdf8c029026d4e2e53c0ebab2e0e0920c223d28df37380ba42c79b0dd7",
+  "archive_bytes": 43366400,
+  "source_image_id": "sha256:7868ed4b3e536e47a732f69112bc72c556dbe6005e0acaaa2c570670175f82a5",
+  "dockerfile_sha256": "f8e3560a44b69550069ad9fc2c8d5c004608d4d9e4a7886e2a56cea7face8be1",
+  "builder_versions": {
+    "buildx_version": "github.com/docker/buildx v0.37.2 2d379c0c3f22da0d2759d132a0ec81ca949098f0",
+    "engine_version": "29.8.2"
+  }
 }

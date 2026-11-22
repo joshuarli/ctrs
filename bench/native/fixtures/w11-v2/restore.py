@@ -17,7 +17,7 @@ sys.path.insert(0, str(BENCH))
 import registry_portfolio
 
 
-OUTPUT = BENCH.parents[1] / '.work/native-perf/inputs/w11-worker-v1'
+OUTPUT = BENCH.parents[1] / '.work/native-perf/inputs/w11-worker-v5'
 
 
 def copy_blob(archive, destination, digest, expected_size=None):
