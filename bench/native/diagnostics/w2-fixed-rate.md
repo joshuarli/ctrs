@@ -62,6 +62,11 @@ at 500 per second with four clients. The fixed-work and saturation cohorts
 each cover 1, 4, 8 and 16 clients on each path. `w2-api:cohort` is the
 published-port, eight-client fixed-work condition.
 
+The CPU report divides workload-phase CPU seconds by each engine's verified
+request count. Fixed-work and fixed-rate pairs require the same completion
+counts and read/write mix. Saturation pairs share the duration, seed and
+requested mix, with each engine completing as many verified requests as it can.
+
 `runner.py check w2` covers actual local HTTP counts and exact writes, a
 deliberately delayed server's visible backlog, and controlled-clock pacing that
 verifies later slots retain their absolute deadlines. A Darwin timer check

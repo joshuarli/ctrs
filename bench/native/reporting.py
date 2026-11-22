@@ -376,6 +376,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
             metrics += ["under_pull_p95_ms", "under_pull_p99_ms"]
     if identity["case"] == "W2":
         metrics.remove("cpu_seconds_est")
+    w2_saturation = (identity["case"] == "W2" and isinstance(params, dict)
+                     and "operations" in params and params["operations"] is None
+                     and params.get("request_rate") is None
+                     and _number(params.get("duration")) and params["duration"] > 0)
     if identity["case"] == "W7" and any("build_empty_s" in r.get("metrics", {}) for r in records):
         metrics.append("build_empty_s")
     hard_failure = any(info["failed"] for info in result["engines"].values())
@@ -384,7 +388,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
         for pair_id, a, b in valid:
             left, left_reason = _metric(a, metric)
             right, right_reason = _metric(b, metric)
-            if metric == "cpu_seconds_per_success" and left is not None and right is not None:
+            if (metric == "cpu_seconds_per_success" and not w2_saturation
+                    and left is not None and right is not None):
                 keys = ("requests_ok", "reads_ok", "writes_ok")
                 if any(a["metrics"][key] != b["metrics"][key] for key in keys):
                     left_reason = "W2 useful work counts differ within pair"

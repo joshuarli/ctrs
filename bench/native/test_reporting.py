@@ -571,6 +571,24 @@ if __name__ == "__main__":
 
 
 class NormalizedW2Tests(unittest.TestCase):
+    def test_saturation_normalizes_each_engines_verified_completion_count(self):
+        rows = pair(case="W2", metric="cpu_seconds_per_success")
+        for row, cpu, requests in zip(rows, (8, 6), (100, 60), strict=True):
+            row["workload_params"].update(operations=None, request_rate=None, duration=20)
+            row["resources"]["phases"] = {"workload": {"cpu_seconds": cpu, "errors": []}}
+            writes = requests * 3 // 10
+            row["metrics"].update(requests_ok=requests, reads_ok=requests - writes,
+                                  writes_ok=writes, errors=0)
+        result = metric_result(reporting.analyze(rows), "cpu_seconds_per_success")
+        self.assertAlmostEqual(result["ratio_median"], 0.8)
+        self.assertEqual(result["missing_reasons"], [])
+
+        for row in rows:
+            row["workload_params"].update(operations=100, request_rate=500)
+        result = metric_result(reporting.analyze(rows), "cpu_seconds_per_success")
+        self.assertIsNone(result["ratio_median"])
+        self.assertIn("useful work counts differ", result["missing_reasons"][0]["reason"])
+
     def test_efficiency_uses_raw_normalized_metric_and_omits_total_cpu(self):
         rows = pair(case="W2", metric="cpu_seconds_per_success", ratio=0.001)
         for row, cpu in zip(rows, (12, 10)):
