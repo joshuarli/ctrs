@@ -1062,6 +1062,31 @@ for both `--content retained` and `--content derived`, using the same
 binary, v6 layout and private store. Record the binary and boot asset
 hashes with the pull, cancellation and retry receipts.
 
+The signed `99db1aa` release passed this check on 2026-11-22. The first host
+test build stalled in the installed `kache 1.0.0` wrapper. Restarting the
+same checkout with `RUSTC_WRAPPER=""` for the host build passed all three
+`daemon::vmlink::tests` and completed `cargo xtask all`. The ad-hoc signature
+verified and the XML entitlement was `true`.
+[Cargo environment variables](https://doc.rust-lang.org/cargo/reference/environment-variables.html)
+
+| Release artifact | SHA-256 |
+| --- | --- |
+| Signed `ctrs` | `10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17` |
+| Reused `Image` | `19657ca4cc150ae8d04d003ac494676bcc5845dd3a3a21cd6bfb17df605d4e6f` |
+| Rebuilt `initramfs.cpio` | `fb0f832b79eca9463d3aafb0bebdff8a5e620e2ff1779c896727fc91d3e32c87` |
+
+The v6 portfolio booted all four pinned services. Both cancellation controls
+exited with signal status 130, recorded an incomplete 65,536-byte write to
+the selected layer and verified a clean retry of the same digest. The retained
+and derived retries transferred 58,602,018 and 58,602,021 bytes for those
+layers. These are single-engine correctness checks. Both receipts have
+`measurement_valid=false`.
+
+| Run | `result.json` SHA-256 |
+| --- | --- |
+| Retained `w8-cancel-1db513a1d825` | `36772a317f274fcfe3bde97710bf0482616740916f2c6b298ff25a2e6551398c` |
+| Derived `w8-cancel-27f60aa4547b` | `186aed73d961d6afabae440581a04d729a66fc17aa04b8efc96cf893d99ce1bd` |
+
 ### Installed-default W10 API recovery cohort
 
 Run `base-20261122T104521-90d4` at `ca24add` admitted all ten alternating
