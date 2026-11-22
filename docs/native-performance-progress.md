@@ -1712,7 +1712,8 @@ fixture archives for both mount conditions.
 The reporter verifies that each watcher kept its PID and start ticks, and
 checks each edited path against the runner's edit plan. It requires every
 output from each multi-file edit, with matching compiled hashes and
-ordered receipts across engines.
+ordered receipts across engines. It verifies that the recorded timestamps
+are in order and that recomputed p50 and p95 match the reported values.
 
 Bind admission `base-20261122T130910-762c` on `b7c59e1` with signed
 `99db1aa` verified 120 results from 60 edit sequences on each engine,

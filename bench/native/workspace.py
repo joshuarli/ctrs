@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -67,6 +68,24 @@ def watch_admission(metrics, edits):
     elif not checks['watch_run_completed']:
         error = 'W12-watch: result sequences differ from the edit plan'
     return checks, error
+
+
+def watch_latency_metrics(edits):
+    latencies = []
+    for edit in edits:
+        if edit['status'] != 'correct':
+            continue
+        start, applied, observed = (edit.get(key) for key in (
+            'host_started_monotonic', 'host_applied_monotonic', 'observed_monotonic'))
+        if (any(type(value) not in (int, float) or not math.isfinite(value)
+                for value in (start, applied, observed)) or not 0 <= start <= applied <= observed):
+            raise ValueError('invalid W12 watch timing boundaries')
+        latencies.append(observed - start)
+    latencies.sort()
+    count = len(latencies)
+    return {'correct': count,
+            'edit_to_result_p50_s': latencies[count // 2] if count else None,
+            'edit_to_result_p95_s': latencies[int(.95 * (count - 1))] if count else None}
 
 
 def watcher_identity(stat):
@@ -561,13 +580,10 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                         'write_span_seconds': write_span,
                         'write_start_offsets_seconds': [value - write_starts[0] for value in write_starts],
                         'status': status, 'output': item})
-        latencies = sorted(item['observed_monotonic'] - item['host_started_monotonic']
-                           for item in rec['metrics']['edits'] if item['status'] == 'correct')
-        rec['metrics'].update(results=len(rec['metrics']['edits']), correct=len(latencies),
+        rec['metrics'].update(results=len(rec['metrics']['edits']),
                               deadline_seconds=WATCH_DEADLINE_SECONDS,
                               observation='host docker exec poll every 0.1 s; latency includes exec round trips',
-                              edit_to_result_p50_s=latencies[len(latencies) // 2] if latencies else None,
-                              edit_to_result_p95_s=latencies[int(.95 * (len(latencies) - 1))] if latencies else None)
+                              **watch_latency_metrics(rec['metrics']['edits']))
         checks, error = watch_admission(rec['metrics'], edits)
         rec['correctness']['checks'].update(checks)
         rec['correctness']['checks']['same_watcher_process'] = False

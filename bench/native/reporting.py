@@ -16,7 +16,7 @@ from pathlib import Path
 import ci_jobs
 from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
-from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS, edit_plan, watch_source_paths
+from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS, edit_plan, watch_latency_metrics, watch_source_paths
 
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
@@ -456,6 +456,12 @@ def _w12_watch_receipt(record, mount, edit_count):
     expected_paths = [(event['sequence'], event['kind'], path)
                       for event in edit_plan(watch_source_paths(), edit_count) for path in event['paths']]
     if [item[:3] for item in results] != expected_paths:
+        return None
+    try:
+        timing = watch_latency_metrics(edits)
+    except (ValueError, OverflowError):
+        return None
+    if any(metrics.get(key) != value for key, value in timing.items()):
         return None
     return shared | {'edits': results}
 
