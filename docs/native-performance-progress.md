@@ -337,6 +337,15 @@ digest and the raw W3-v4 results for every leg. Each run must check all
 PostgreSQL durability settings. This measures the cost under group commit.
 Equivalent host durability across engines remains a separate gate.
 
+Run the instrumented W3-v4 trial with `RunContext.design` set to
+`storage-sync-diagnostic`. Both legs pin `wal_sync_method=fdatasync` and turn
+on `track_wal_io_timing`. Read `pg_stat_wal` immediately before and after the
+write pgbench command, before copying logs or starting the read-only phase.
+Require a stable statistics reset marker and positive count and time deltas.
+The counters are PostgreSQL cluster totals over that interval. They can include
+background WAL activity and pgbench preparation work.
+[PostgreSQL WAL statistics](https://www.postgresql.org/docs/17/monitoring-stats.html#MONITORING-PG-STAT-WAL-VIEW)
+
 ### W4 pipeline comparison with common images
 
 Prepare one Linux ARM64 v4 worker image from the pinned W4 latency

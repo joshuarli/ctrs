@@ -9,6 +9,12 @@ from diagnostics.w8_under_pull import baseline_image_reference, require_baseline
 
 VERSION = "w3-v4-pgbench"
 DURABILITY = ("fsync", "synchronous_commit", "full_page_writes")
+WAL_STATS = """
+SELECT json_build_object('syncs', wal_sync, 'sync_ms', wal_sync_time, 'reset', stats_reset,
+                         'method', current_setting('wal_sync_method'),
+                         'timing', current_setting('track_wal_io_timing'))
+FROM pg_stat_wal
+"""
 
 
 def latency_metrics(logs, expected, prefix):
@@ -49,12 +55,30 @@ def durability_ok(settings):
     return all(settings.get(name) == "on" for name in DURABILITY)
 
 
+def wal_sync_delta(before, after):
+    for snapshot in (before, after):
+        if (snapshot['method'] != 'fdatasync' or snapshot['timing'] != 'on'
+                or type(snapshot['syncs']) is not int or snapshot['syncs'] < 0
+                or type(snapshot['sync_ms']) not in (int, float)
+                or not math.isfinite(snapshot['sync_ms']) or snapshot['sync_ms'] < 0):
+            raise ValueError('invalid WAL sync timing snapshot')
+    syncs = after['syncs'] - before['syncs']
+    elapsed = after['sync_ms'] - before['sync_ms']
+    if before['reset'] != after['reset'] or syncs <= 0 or elapsed <= 0:
+        raise ValueError('WAL sync timings did not advance on a consistent statistics interval')
+    return {'rw_wal_syncs': syncs, 'rw_wal_sync_ms': elapsed, 'rw_mean_wal_sync_ms': elapsed / syncs}
+
+
 def trial_w3_v4(ctx, engine, state):
     import runner
     params = next(c for c in runner.load_cases()["case"] if c["id"] == "W3-v4")["params"]
     scale, buffers = params["scale"], params["shared_buffers"]
     clients, threads, transactions, seed = (params[k] for k in ("clients", "threads", "transactions_per_client", "random_seed"))
     ctx.workload_params.update(params, fixture_version=VERSION, durability={k: "on" for k in DURABILITY})
+    wal_timed = getattr(ctx, 'design', None) == 'storage-sync-diagnostic'
+    wal_args = ['-c', 'track_wal_io_timing=on', '-c', 'wal_sync_method=fdatasync'] if wal_timed else []
+    if wal_timed:
+        ctx.workload_params.update(track_wal_io_timing='on', wal_sync_method='fdatasync')
     trial_dir = ctx.trial_dir(engine.name, "W3-v4", state)
     rec = ctx.new_record(engine, "W3-v4", state, trial_dir)
     checks = rec["correctness"]["checks"]
@@ -127,7 +151,8 @@ def trial_w3_v4(ctx, engine, state):
         attempted = True
         run(["run", "-d", "--pull=never", "--name", name, "--label", owner_label,
              "-e", f"POSTGRES_PASSWORD={runner.W3_PASSWORD}", "-v", f"{volume}:/var/lib/postgresql/data", image,
-             "postgres", "-c", f"shared_buffers={buffers}", "-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on"], "start", 120)
+             "postgres", "-c", f"shared_buffers={buffers}", "-c", "fsync=on", "-c", "synchronous_commit=on",
+             "-c", "full_page_writes=on", *wal_args], "start", 120)
         ready(True)
         checks["ready"] = True
         sampler, trace = runner.start_sampler(engine, trial_dir)
@@ -140,8 +165,15 @@ def trial_w3_v4(ctx, engine, state):
             args = ["exec", "-u", "postgres", name, "pgbench", "-U", "postgres", "-c", str(clients), "-j", str(threads), "-t", str(transactions), "--random-seed", str(seed), "-l", "--log-prefix", f"/tmp/w3v4-logs/{phase}"]
             if phase == "ro":
                 args += ["-S", "-n"]
+            trace_wal = wal_timed and phase == 'rw'
+            if trace_wal:
+                wal_before = json.loads(sql(WAL_STATS, 'rw-wal-before'))
             try:
                 output = run([*args, "postgres"], phase, 3600)
+                if trace_wal:
+                    wal_after = json.loads(sql(WAL_STATS, 'rw-wal-after'))
+                    rec['metrics'].update(wal_sync_delta(wal_before, wal_after))
+                    checks['rw_wal_stats'] = True
             finally:
                 run(["cp", f"{name}:/tmp/w3v4-logs/.", str(trial_dir)], f"{phase}-copy", 120)
             logs = sorted(trial_dir.glob(f"{phase}.*"))

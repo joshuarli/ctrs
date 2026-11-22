@@ -50,6 +50,10 @@ class FakeEngine:
                 out = "1\n"
             elif query.startswith("SHOW "):
                 out = "off\n" if self.bad_setting else "on\n"
+            elif 'FROM pg_stat_wal' in query:
+                after = self.phase == 'rw'
+                out = json.dumps({'syncs': 10 if after else 8, 'sync_ms': 11.5 if after else 10,
+                                  'reset': None, 'method': 'fdatasync', 'timing': 'on'})
             elif "json_build_object" in query:
                 out = json.dumps({"accounts": 100000, "account_balance": 5, "history_delta": 5, "history": 2})
             elif "pg_database_size" in query:
@@ -103,7 +107,7 @@ class StorageTests(unittest.TestCase):
             altered[key] += 1
             self.assertFalse(storage.verify_data(altered, 2, 4, 4))
 
-    def run_trial(self, bad_setting=False, bad_owner=False):
+    def run_trial(self, bad_setting=False, bad_owner=False, *, design=None):
         params = {"scale": 1, "shared_buffers": "128MB", "clients": 1, "threads": 1,
                   "transactions_per_client": 2, "random_seed": 42}
         directory = tempfile.TemporaryDirectory()
@@ -111,6 +115,7 @@ class StorageTests(unittest.TestCase):
         path = Path(directory.name)
         engine = FakeEngine(path, bad_setting, bad_owner)
         ctx = FakeContext(path)
+        ctx.design = design
         with patch.object(runner, "load_cases", return_value={"case": [{"id": "W3-v4", "params": params}]}), \
              patch.object(storage, "baseline_image_reference", return_value=("digest", "image")), \
              patch.object(storage, "require_baseline_images", return_value={"db": "pinned"}), \
@@ -119,6 +124,27 @@ class StorageTests(unittest.TestCase):
              patch.object(storage.time, "monotonic", side_effect=range(1000)):
             record = storage.trial_w3_v4(ctx, engine, "warm")
         return record, engine, path
+
+    def test_sync_diagnostic_brackets_only_the_write_workload(self):
+        rec, engine, path = self.run_trial(design='storage-sync-diagnostic')
+        self.assertTrue(rec['correctness']['checks']['rw_wal_stats'], rec['validation_errors'])
+        start = next(call for call in engine.calls if call[0] == 'run')
+        self.assertIn('wal_sync_method=fdatasync', start)
+        self.assertIn('track_wal_io_timing=on', start)
+        self.assertEqual(rec['metrics']['rw_wal_syncs'], 2)
+        self.assertEqual(rec['metrics']['rw_mean_wal_sync_ms'], .75)
+        self.assertEqual(json.loads((path / 'rw-wal-before.stdout').read_text())['syncs'], 8)
+        self.assertEqual(json.loads((path / 'rw-wal-after.stdout').read_text())['syncs'], 10)
+        run = [i for i, args in enumerate(engine.calls) if 'pgbench' in args and '-i' not in args]
+        stats = [i for i, args in enumerate(engine.calls) if 'FROM pg_stat_wal' in args[-1]]
+        self.assertTrue(stats[0] < run[0] < stats[1] < run[1])
+
+    def test_sync_delta_rejects_resets_and_disabled_timing(self):
+        before = {'syncs': 8, 'sync_ms': 10, 'reset': None, 'method': 'fdatasync', 'timing': 'on'}
+        after = before | {'syncs': 10, 'sync_ms': 11.5}
+        for bad in ({'reset': 'new'}, {'timing': 'off'}, {'syncs': 8}, {'sync_ms': float('nan')}):
+            with self.assertRaises(ValueError):
+                storage.wal_sync_delta(before, after | bad)
 
     def test_metrics_receipts_and_owned_cleanup(self):
         rec, engine, path = self.run_trial()
@@ -136,6 +162,7 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(all("dev.ctrs.campaign.run=run1" in a for a in creates))
         self.assertTrue(any(a[:2] == ["volume", "rm"] for a in engine.calls))
         self.assertTrue(any(a[:2] == ["rm", "-f"] for a in engine.calls))
+        self.assertFalse(any('FROM pg_stat_wal' in args[-1] for args in engine.calls))
         runs = [a for a in engine.calls if "pgbench" in a and "-i" not in a]
         self.assertEqual(["-n" in a for a in runs], [False, True])
 
