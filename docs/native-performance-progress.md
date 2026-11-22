@@ -1154,6 +1154,16 @@ attempt's wall-clock receipt to align the first exact response with the
 cache events for the owned API target. Keep the diagnostic separate from
 the scored pair observations.
 
+Inspect the Compose `api` container immediately after `up` and before
+`down`. `recovery_trace.api_backend` verifies the project and service labels,
+loopback port binding and guest IPv4 endpoint. Require both inspections to
+agree before calling `recovery_trace.refusal_recovery_trace` with
+`timeline.json`, the `attempts.jsonl` rows, the daemon log lines and the API
+endpoint. The receipt reports only cache events for that endpoint during
+the interruption through the first exact post-restart read. It reports the
+observed wall-to-monotonic clock offset range and includes the daemon log's
+millisecond resolution in event time bounds.
+
 ### Installed-default W10 database recovery cohort
 
 Run `base-20261122T105526-a8d2` admitted all ten alternating pairs at

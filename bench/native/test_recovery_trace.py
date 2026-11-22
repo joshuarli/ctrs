@@ -90,6 +90,36 @@ class RecoveryTraceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             trace.clock_bracket([dict(host_begin_ns=10, host_end_ns=9, guest_ns=2)])
 
+    def test_refusal_trace_filters_owned_target_and_anchors_the_first_exact_read(self):
+        backend = trace.api_backend({
+            'Id': 'api', 'Config': {'Labels': {'com.docker.compose.project': 'owned',
+                                             'com.docker.compose.service': 'api'}},
+            'NetworkSettings': {'Networks': {'owned_appnet': {'IPAddress': '172.20.0.4'}},
+                                'Ports': {'8000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '58264'}]}},
+        }, 'owned')
+        timeline = {'kill_command_begin_ns': 100_000_000, 'start_command_begin_ns': 200_000_000,
+                    'start_command_returned_ns': 220_000_000, 'first_success_ns': 420_000_000}
+
+        def attempt(start_ms, end_ms, ok, scope, offset=0):
+            return {'kind': 'read', 'ok': ok, 'started_ns': start_ms * 1_000_000,
+                    'ended_ns': end_ms * 1_000_000, 'scope': scope,
+                    'wall_ns': 1795373100000000000 + end_ms * 1_000_000 + offset}
+
+        requests = [attempt(199, 235, True, 'load'), attempt(240, 250, False, 'readiness', 10),
+                    attempt(370, 388, True, 'load'), attempt(400, 420, True, 'readiness')]
+        result = trace.refusal_recovery_trace(timeline, requests, [
+            '2026-11-22T18:45:00.099Z DEBUG guest refusal cached ip=172.20.0.4 port=8000',
+            '2026-11-22T18:45:00.134Z DEBUG guest refusal cached ip=172.20.0.4 port=8000',
+            '2026-11-22T18:45:00.201Z DEBUG guest refusal cache first hit ip=172.20.0.5 port=8000',
+            '2026-11-22T18:45:00.384Z DEBUG guest refusal cache expired ip=172.20.0.4 port=8000 hits=12 age_ms=250',
+            '2026-11-22T18:45:00.450Z DEBUG guest refusal cached ip=172.20.0.4 port=8000',
+        ], backend)
+        self.assertEqual(result['first_exact_read_scope'], 'load')
+        self.assertEqual(result['first_exact_read_end_ms'], 188)
+        self.assertEqual([event['event'] for event in result['events']], ['cached', 'cache expired'])
+        self.assertEqual(result['events'][1]['hits'], 12)
+        self.assertEqual(result['events'][1]['since_restart_start_ms_bounds'], [183.99999, 184.999999])
+
 
 if __name__ == '__main__':
     unittest.main()

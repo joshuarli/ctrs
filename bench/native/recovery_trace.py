@@ -2,7 +2,10 @@
 import errno
 import hashlib
 import math
+import re
 import urllib.error
+from datetime import datetime, timedelta, timezone
+from ipaddress import IPv4Address
 
 
 def transport_error(exc):
@@ -82,6 +85,64 @@ def recovery_intervals(events):
             'command_and_ready_s': (max(success, returned) - begin) / 1e9,
             'after_command_to_first_success_s': max(0, success - returned) / 1e9,
             'success_preceded_command_return': success < returned}
+
+
+REFUSAL_EVENT = re.compile(
+    r'(\S+) DEBUG\s+guest refusal (cached|cache first hit|cache expired) ip=([\d.]+) port=(\d+)'
+    r'(?: hits=(\d+) age_ms=(\d+))?(?: op=\S+)?\s*'
+)
+
+
+def api_backend(container, project):
+    labels = container['Config']['Labels']
+    if (labels.get('com.docker.compose.project') != project
+            or labels.get('com.docker.compose.service') != 'api'):
+        raise ValueError('W10 refusal trace requires the owned API container')
+    settings = container['NetworkSettings']
+    network, = settings['Networks'].values()
+    binding, = settings['Ports']['8000/tcp']
+    if binding['HostIp'] != '127.0.0.1' or not int(binding['HostPort']):
+        raise ValueError('W10 refusal trace requires the published loopback API port')
+    return {'container': container['Id'], 'ip': str(IPv4Address(network['IPAddress'])), 'port': 8000}
+
+
+def refusal_recovery_trace(timeline, attempts, lines, backend):
+    interrupted = timeline['kill_command_begin_ns']
+    begin, returned = timeline['start_command_begin_ns'], timeline['start_command_returned_ns']
+    if not interrupted <= begin <= returned <= timeline['first_success_ns']:
+        raise ValueError('W10 refusal trace has inconsistent recovery markers')
+    exact_reads = [attempt for attempt in attempts if attempt['kind'] == 'read' and attempt['ok'] is True
+                   and returned <= attempt['started_ns'] <= attempt['ended_ns']]
+    if not exact_reads:
+        raise ValueError('W10 refusal trace has no exact post-restart read')
+    first = min(exact_reads, key=lambda attempt: attempt['ended_ns'])
+    offsets = [attempt['wall_ns'] - attempt['ended_ns'] for attempt in attempts
+               if begin <= attempt['ended_ns'] <= first['ended_ns']]
+    low, high = min(offsets), max(offsets)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    events = []
+    for line in lines:
+        match = REFUSAL_EVENT.fullmatch(line)
+        if not match:
+            continue
+        timestamp, kind, ip, port, hits, age = match.groups()
+        if (ip, int(port)) != (backend['ip'], backend['port']):
+            continue
+        elapsed = datetime.fromisoformat(timestamp) - epoch
+        wall_ns = (elapsed // timedelta(microseconds=1)) * 1000
+        earliest, latest = wall_ns - high, wall_ns + 999_999 - low
+        if latest < interrupted or earliest > first['ended_ns']:
+            continue
+        event = {'event': kind, 'wall_time': timestamp,
+                 'since_restart_start_ms_bounds': [(value - begin) / 1e6 for value in (earliest, latest)]}
+        if hits is not None:
+            event.update(hits=int(hits), age_ms=int(age))
+        events.append(event)
+    return {'backend': backend, 'clock_offset_observed_range_ns': [low, high],
+            'first_exact_read_scope': first['scope'],
+            'first_exact_read_start_ms': (first['started_ns'] - begin) / 1e6,
+            'first_exact_read_end_ms': (first['ended_ns'] - begin) / 1e6,
+            'start_command_return_ms': (returned - begin) / 1e6, 'events': events}
 
 
 def owned_ctrs_processes(manifest, socket_path, child_pid, binary_sha256):
