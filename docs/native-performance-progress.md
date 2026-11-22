@@ -22,9 +22,10 @@ D-lane pilots and none is qualified. Smaller numbers favor ctrs.
   build, which is 0.997 (non-inferior). W14 streaming, reconnect,
   persistent and idle-resume CPU.
 - **Losses:** W12 full-bind, about 1.25–1.33× (the Mac virtiofs share).
-  W13-overlap had W2 p99 at 1.70× with the old 5-vCPU default. The
-  9-vCPU default (`b663920`) roughly halves that tail against 5 vCPUs,
-  but it has not been compared with OrbStack again. CPU-only losses:
+  The current 9-vCPU W13-overlap cohort still has a CPU loss (1.097×).
+  Its W2 p99 and throughput are inconclusive. The old 5-vCPU cohort
+  recorded a 1.70× p99 loss. See the [current overlap evidence](#installed-default-w13-overlap-cohort).
+  Other CPU-only losses:
   W12-watch 1.07×, published-port upload CPU/GiB 1.08×, W14 fresh
   ~1.02–1.15×.
 - **Tool-limited or inconclusive:** guest→host bulk transfer is now
@@ -171,10 +172,9 @@ were lost with scratch. Recover their exact private-built images from an
 archived artifact if available. A rebuild that changes an image pin
 requires a new fixture version and fresh results for its consumers.
 
-W6 and W7 completed independently of the common portfolio.
-The replacement v6 portfolio passed its functional proof below. Run
-`w13-overlap:cohort`,
-`w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
+W6 and W7 completed independently of the common portfolio. The replacement
+v6 portfolio passed its functional proof and the W13 overlap cohort.
+Run `w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
 `reporting.py --match <run>`. Use Python 3.11 or later. On this host
 the supported interpreter is `/opt/homebrew/bin/python3`.
 For hand-run watch tests, use a gate path with no extension so the daemon
@@ -268,6 +268,45 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
+
+### Installed-default W13 overlap cohort
+
+Run `base-20261122T073402-7351` used harness source `6278898`, the W6
+signed binary and guest assets, and the v6 API, PostgreSQL and Redis
+pins. Both engines used 9 vCPUs. Guest MemTotal was 8,407,957,504 bytes
+on ctrs and 63,157,620,736 on OrbStack 2.2.5 (Docker 29.8.2).
+All ten alternating pairs passed with zero rejections or missing resource
+samples. Each trial verified the application work and a single
+published-port upload of a 1 GiB artifact repeated 96 times. The
+receiver reported 103,079,215,104 bytes with the expected hash, and
+receiver timing covered the entire 20,000-request API window in every
+trial. Maximum outside-engine CPU during that window was 1.24 cores.
+
+| Metric | Paired median ratio | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Measured engine CPU | 1.0967 | 1.0513–1.1577 | Loss |
+| Sampled peak physical footprint | 0.7484 | 0.6529–0.7816 | Strict win |
+| API p50 | 0.9747 | 0.9329–1.0031 | Non-inferior |
+| API p99 | 0.8775 | 0.8239–1.0431 | Inconclusive |
+| API request rate | 0.9928 | 0.9409–1.0437 | Inconclusive |
+| Transfer goodput | 1.0360 | 0.9633–1.0680 | Inconclusive |
+
+Ratios below 1 favor ctrs. Request rate and goodput use OrbStack / ctrs.
+All ten ctrs trials used host NAT (97 connections total). Its kernel CPU
+is outside the measured engine counters, so charging it would increase the
+CPU deficit. The earlier p99 loss used a 5-vCPU default and different image
+pins. The new fixture and CPU allocation prevent attributing the difference
+to the vCPU change alone. Independent confirmation and the matched-resource
+comparison remain open.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w13-overlap:cohort
+python3 bench/native/reporting.py --match base-20261122T073402-7351
+```
+
+`trials.jsonl` SHA-256
+`08090558a7c1bd1643ad60040574aab8bdea9a5ee10bd2782d32776e40b539b0`.
 
 ### Rebuilt W8 common portfolio
 
