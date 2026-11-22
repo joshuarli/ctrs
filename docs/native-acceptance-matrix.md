@@ -31,7 +31,7 @@ OrbStack's). Never pool lanes.
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
 | W4 | Queue workers 1/4/16 | yes | yes | yes (one-pair pilot `base-20261120T061132-4479`, inputs from `prepare --only W4`) | no | unmeasured |
 | W5 | Marked esbuild watch (bind, volume) | yes | yes | yes (one-pair pilot `base-20261120T061159-14e4`) | no | unmeasured; 5 edits per trial cannot support tails |
-| W6 | Default-builder Rust+C CI build | yes | yes | yes | D: `base-20261120T143829-8345` (10/10 pairs, source `0536435`) | D: Rust build 0.953× [0.942, 0.989] non-inferior; zlib build 0.641× [0.626, 0.740] strict win. Peak RSS 0.261× but only 8 pairs sampled, so resources stay **incomplete**. Was broken by buildx 0.37 `prefer-image-digest` until `d692709` |
+| W6 | Default-builder Rust+C CI build | yes | yes | yes | D: `base-20261122T063709-0627` (10/10 pairs, source `2910f31`, both engines 9 vCPUs) | **Physical footprint loss** 1.364× [1.182, 1.485], with complete samples. Rust build 0.944× [0.932, 0.951] non-inferior and zlib build 0.524× [0.513, 0.643] strict win. CPU incomplete due to host NAT accounting. Warm-build cohort open. [Evidence and reproduction](native-performance-progress.md#installed-default-w6-cohort) |
 | W7 | Default buildx → loaded images | yes | yes | yes | D: `base-20261120T150445-1408` (10/10 pairs, source `0536435`) | D: hyperfine uncached build 0.997× [0.957, 1.02] non-inferior; every other cell a strict win: hyperfine warm 0.476×, incremental 0.304×, first use 0.07–0.15×; httpie uncached 0.726×, first use 0.511×. Resources **incomplete** (8 sampled pairs) |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
 | W9 | Parallel fixed build/test jobs | yes | yes | yes (one-pair pilot `base-20261120T061332-4abb`, pinned Marked digest) | no | unmeasured |
@@ -101,8 +101,10 @@ networking) and **qualified** (none yet).
 4. Guest→host bulk transfer: the 5–7× losses are closed to the tool's
    ceiling (0.72–0.94, tool-limited); container→Mac download 1.06
    inconclusive.
-5. Unscored: W1, W4, W5, W8, W9, W10 (pilots at most); W6/W7 cohorts
-   pending.
+5. W6 sampled peak physical footprint 1.36× loss in the resumed
+   installed-default cohort. The VZ helper retained the allocation
+   across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
+6. Unscored: W1, W4, W5, W8, W9, W10 (pilots at most). W7 rerun pending.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.
