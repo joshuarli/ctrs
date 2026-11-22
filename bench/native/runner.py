@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import sys
 
+if sys.version_info < (3, 11):
+    sys.exit("runner.py requires Python 3.11+")
+
 if __name__ == "__main__":
     sys.modules.setdefault("runner", sys.modules[__name__])
 
@@ -67,10 +70,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    sys.exit("runner.py requires Python >= 3.11 (tomllib); e.g. python3.14")
+import tomllib
 
 BENCH = Path(__file__).resolve().parent
 REPO = BENCH.parent.parent
@@ -3896,6 +3896,50 @@ def clone_warm_engine(target: Path, source: Path | None = None) -> None:
     subprocess.run(["cp", "-c", "-R", str(source / "data"), str(target / "data")], check=True)
 
 
+def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
+                         candidate_cpus: int | None) -> None:
+    if linux_lane.enabled():
+        return
+    repositories = {
+        "W1": ("api", "postgres", "redis"),
+        "W2": ("api", "postgres", "redis"),
+        "W3": ("postgres",),
+        "W3-v4": ("postgres",),
+        "W13": ("api",),
+        "W13-overlap": ("api", "postgres", "redis"),
+        "W14": ("api",),
+    }.get(case, ())
+    if not repositories and candidate_cpus is None:
+        return
+    from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
+
+    pins = {}
+    if repositories:
+        contract = json.loads((FIXTURES / "w8-v5/portfolio.json").read_text())
+        pins = {name: contract["images"][f"np-v5/{name}"] for name in repositories}
+    for name in dict.fromkeys(engines):
+        engine = Engine(name, ctx.run_id, resource_lane=ctx.resource_lane)
+        try:
+            engine.ensure_up()
+            if candidate_cpus is not None:
+                info = safe_engine_info(engine)
+                if info is None:
+                    raise ValueError("cannot observe installed-default vCPUs")
+                if candidate_cpus == info["ncpu"]:
+                    raise ValueError(f"installed-default already uses {candidate_cpus} vCPUs; "
+                                     "use the installed-default cohort against OrbStack")
+            if pins:
+                try:
+                    refs = [baseline_image_reference(name, pin)[1] for pin in pins.values()]
+                    inspected = json.loads(engine.sh(["image", "inspect", *refs], timeout=30).stdout)
+                    require_baseline_images(name, pins, inspected)
+                except (RuntimeError, ValueError) as exc:
+                    raise ValueError(f"{case} pinned portfolio on {name}: {exc}. "
+                                     "Restore the frozen images using bench/native/fixtures/w8-v5/README.md.") from exc
+        finally:
+            engine.stop()
+
+
 def cmd_baseline(args) -> int:
     ctx = RunContext(f"base-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
@@ -3903,11 +3947,18 @@ def cmd_baseline(args) -> int:
                   else "paired")
     ctx.resource_lane = getattr(args, "resource_lane", "matched")
     a, b = args.a, args.b
-    if getattr(args, "candidate_cpus", None) is not None:
+    candidate_cpus = getattr(args, "candidate_cpus", None)
+    if candidate_cpus is not None:
         if (a, b) != ("ctrs", "ctrs") or ctx.resource_lane != "installed-default":
             raise SystemExit("--candidate-cpus needs --a ctrs --b ctrs --resource-lane installed-default")
         ctx.design = "candidate"
-        ctx.slot_overrides = {"b": {"CTRS_CPUS": str(args.candidate_cpus)}}
+        ctx.slot_overrides = {"b": {"CTRS_CPUS": str(candidate_cpus)}}
+    try:
+        check_baseline_setup(ctx, args.case, (a, b), candidate_cpus)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    if ctx.design == "candidate":
         clone_warm_engine(candidate_dir(ctx.slot_overrides["b"]))
     rng = random.Random(args.seed)
     failed = False
@@ -3977,8 +4028,15 @@ def cmd_baseline(args) -> int:
                 wall = rec["metrics"].get("wall_seconds")
                 print(f"pair {pair} {eng} {'OK' if ok else 'FAIL'} "
                       f"wall={wall}", flush=True)
-            if all(r["correctness"]["ok"] and not r.get("validation_errors")
-                   and reporting.host_contended(r) is None for r in pair_records):
+            correct = all(r["correctness"]["ok"] and not r.get("validation_errors")
+                          for r in pair_records)
+            if correct and candidate_cpus is not None:
+                current, candidate = sorted(pair_records, key=lambda rec: rec["slot"])
+                if reporting.cpu_candidate_mismatch(current, candidate):
+                    print("CPU candidate did not apply a different vCPU count at fixed memory", flush=True)
+                    failed = True
+                    break
+            if correct and all(reporting.host_contended(r) is None for r in pair_records):
                 admitted += 1
             broken = any(not r["correctness"]["ok"] for r in pair_records)
             broken_pairs = broken_pairs + 1 if broken else 0
@@ -4320,7 +4378,7 @@ def main() -> int:
             ap.error('--image-ref: ' + str(exc))
     elif getattr(args, 'image_ref', None):
         ap.error('--image-ref applies only to W9')
-    for name in ("duration", "pairs", "concurrency", "ops", "repos", "issues", "clones"):
+    for name in ("duration", "pairs", "concurrency", "ops", "repos", "issues", "clones", "candidate_cpus"):
         value = getattr(args, name, None)
         if value is not None and value <= 0:
             ap.error(f"--{name} must be positive")

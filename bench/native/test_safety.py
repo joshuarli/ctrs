@@ -584,6 +584,46 @@ class W6SourceTests(unittest.TestCase):
 
 
 class ExitStatusTests(unittest.TestCase):
+    def test_candidate_already_at_default_stops_before_clone(self):
+        args = argparse.Namespace(a="ctrs", b="ctrs", case="W6",
+                                  candidate_cpus=9, resource_lane="installed-default")
+        engine = Mock()
+        err = io.StringIO()
+        with patch.object(runner, "RunContext", return_value=Mock()), \
+                patch.object(runner, "Engine", return_value=engine), \
+                patch.object(runner, "safe_engine_info", return_value={"ncpu": 9}), \
+                patch.object(runner, "clone_warm_engine") as clone, \
+                patch.object(runner, "run_one") as trial, contextlib.redirect_stderr(err):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        engine.stop.assert_called_once()
+        clone.assert_not_called()
+        trial.assert_not_called()
+        self.assertIn("installed-default already uses 9 vCPUs", err.getvalue())
+
+    def test_missing_candidate_portfolio_stops_before_clone_and_trials(self):
+        args = argparse.Namespace(a="ctrs", b="ctrs", case="W13-overlap",
+                                  candidate_cpus=9, resource_lane="installed-default")
+        context = Mock(run_id="test")
+        engine = Mock()
+        engine.sh.side_effect = RuntimeError("No such image")
+        contract = json.loads((runner.FIXTURES / "w8-v5/portfolio.json").read_text())
+        references = [contract["images"][f"np-v5/{name}"]["config"]
+                      for name in ("api", "postgres", "redis")]
+        err = io.StringIO()
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "Engine", return_value=engine) as start_engine, \
+                patch.object(runner, "safe_engine_info", return_value={"ncpu": 5}), \
+                patch.object(runner, "clone_warm_engine") as clone, \
+                patch.object(runner, "run_one") as trial, contextlib.redirect_stderr(err):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        start_engine.assert_called_once_with("ctrs", "test", resource_lane="installed-default")
+        engine.sh.assert_called_once_with(["image", "inspect", *references], timeout=30)
+        engine.stop.assert_called_once()
+        clone.assert_not_called()
+        trial.assert_not_called()
+        self.assertIn("W13-overlap pinned portfolio on ctrs", err.getvalue())
+        self.assertIn("w8-v5/README.md", err.getvalue())
+
     def test_w2_baseline_serializes_sampling_mode_and_requires_pins(self):
         engine = fake_engine()
         engine.system_df.return_value = None
@@ -632,6 +672,7 @@ class ExitStatusTests(unittest.TestCase):
             return {"correctness": {"ok": len(calls) != 1}, "metrics": {}}
 
         with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "check_baseline_setup"), \
                 patch.object(runner, "run_one", side_effect=trial), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_baseline(args), 1)
@@ -652,6 +693,7 @@ class ExitStatusTests(unittest.TestCase):
             return {"correctness": {"ok": True}, "metrics": {}}
 
         with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "check_baseline_setup"), \
                 patch.object(runner, "run_one", side_effect=trial), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_baseline(args), 0)
@@ -676,6 +718,7 @@ class ExitStatusTests(unittest.TestCase):
                                                      "operation_wall_seconds": 5.0}}}}
 
         with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "check_baseline_setup"), \
                 patch.object(runner, "run_one", side_effect=trial), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_baseline(args), 0)
@@ -697,6 +740,7 @@ class ExitStatusTests(unittest.TestCase):
 
         out = io.StringIO()
         with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "check_baseline_setup"), \
                 patch.object(runner, "run_one", side_effect=trial), \
                 contextlib.redirect_stdout(out):
             self.assertEqual(runner.cmd_baseline(args), 1)

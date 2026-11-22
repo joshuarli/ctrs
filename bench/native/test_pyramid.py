@@ -71,6 +71,14 @@ class Entrypoint(unittest.TestCase):
             code = pyramid.main(list(argv))
         return code, out.getvalue()
 
+    def test_old_python_fails_before_runtime_preflight(self):
+        error = io.StringIO()
+        with patch.object(pyramid.sys, "version_info", (3, 9)), \
+                patch.object(pyramid, "preflight", side_effect=AssertionError("ran")), \
+                contextlib.redirect_stderr(error), self.assertRaises(SystemExit):
+            self.main("check", "--name", "w13-overlap:cpus9")
+        self.assertIn("native benchmarks require Python 3.11+", error.getvalue())
+
     def test_unmet_requirement_stops_the_run_before_anything_starts(self):
         def check(key):
             return ("fail", "OrbStack socket missing; start OrbStack") if key == "orbstack" else ("ok", "")
@@ -107,6 +115,7 @@ class Entrypoint(unittest.TestCase):
                 self.returncode = code
         calls = iter([Done(0), Done(3)])
         with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pyramid, "WORK", Path(tmp)), \
                 patch.object(pyramid, "OUT", Path(tmp) / "runs"), \
                 patch.object(pyramid, "check_requirement", return_value=("ok", "")), \
                 patch.object(pyramid, "_git", return_value={"head": "0" * 40, "dirty": False}), \

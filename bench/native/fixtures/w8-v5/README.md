@@ -38,3 +38,15 @@ retrievable, or a further fixture-version bump. Do not silently substitute
 images. Do not prune shared OrbStack/ctrs content to manufacture absence.
 The derived content-unique variant flow is documented in
 `../w8-v3/README.md` and now consumes this fixture.
+
+To install the exact common images from a retained layout and verify the
+application and Marked outputs on both engines, run from the repository root:
+
+```sh
+TMPDIR="$PWD/.work/tmp" python3 bench/native/diagnostics/registry_pilot.py \
+  --layout .work/native-perf/inputs/w8-portfolio-v5/layout \
+  --ctrs-binary target/release/ctrs
+```
+
+Plain `runner.py prepare` installs the legacy pilot images. Pinned baseline
+cases check that their required immutable images are installed before pairing.

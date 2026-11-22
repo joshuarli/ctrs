@@ -301,7 +301,7 @@ def check_requirement(key: str) -> tuple[str, str]:
         return ("ok", f"{gb:.0f} GB free") if gb >= 20 else ("fail", f"{gb:.0f} GB free under .work; need 20")
     if key == "pinned-portfolio":
         pin = HERE / "fixtures/w8-v5/portfolio.json"
-        return ("ok", "image identities are verified per trial") if pin.is_file() \
+        return ("ok", "pin contract present; runner checks installed images before pairing") if pin.is_file() \
             else ("fail", f"{pin} missing")
     if key == "w12-inputs":
         missing = [p.name for p in (WORK / "tmp/kutt.tar.gz", WORK / "tmp/w12-image.tar") if not p.is_file()]
@@ -480,6 +480,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["run"].add_argument("--quiet-timeout", type=float, default=7200,
                                     help="seconds a scenario workload waits for a quiet host")
     args = parser.parse_args(argv)
+    if sys.version_info < (3, 11):
+        parser.error("native benchmarks require Python 3.11+")
     items = registry(args.lane)
     if args.command == "list":
         chosen = [w for w in items
