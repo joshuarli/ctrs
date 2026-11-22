@@ -4352,10 +4352,13 @@ def main() -> int:
     p.add_argument("--orbstack-storage-file", type=Path, action="append", default=[],
                    help="diagnostic only: explicit backing file open by OrbStack; repeat for multiple files")
 
-    p = sub.add_parser("w8-cancel", help="verify interrupted W8 delivery and retry on one engine")
+    p = sub.add_parser("w8-cancel", description="Verify interrupted W8 delivery and retry on one engine.",
+                       epilog="Example: runner.py w8-cancel --engine ctrs --content retained --resource-lane installed-default --layout /path/to/w8-portfolio-v6/layout --ctrs-binary /path/to/signed/ctrs")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v6 OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
     p.add_argument("--engine", choices=linux_lane.ENGINES, required=True, help="engine for this functional check")
+    p.add_argument("--resource-lane", choices=RESOURCE_LANES, default="matched",
+                   help="engine allocations for the functional check (default: matched)")
     p.add_argument("--content", choices=("retained", "derived"), required=True,
                    help="reuse original layers except the interrupted layer, or derive every layer")
 
@@ -4433,7 +4436,7 @@ def main() -> int:
             ap.error("--pairs must be between 1 and 100")
         if args.cmd == "w8-baseline" and args.orbstack_storage_file and not args.diagnostic:
             ap.error("--orbstack-storage-file requires --diagnostic")
-        if args.cmd == "w8-baseline" and args.resource_lane == "installed-default" and "CTRS_IDLE_SECS" in os.environ:
+        if args.resource_lane == "installed-default" and "CTRS_IDLE_SECS" in os.environ:
             ap.error("--resource-lane installed-default requires the default CTRS_IDLE_SECS environment")
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
             ap.error(f"{args.cmd} requires native ARM64 macOS")

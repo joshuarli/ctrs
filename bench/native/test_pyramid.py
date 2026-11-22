@@ -38,6 +38,20 @@ class Selection(unittest.TestCase):
         self.assertEqual(names(self.select("full", name=["holdout"])), ["holdout"])
         self.assertEqual(names(self.select(name=["holdout"])), ["holdout"])
 
+    def test_w8_cancellation_is_explicit_and_uses_each_engines_defaults(self):
+        entries = [entry for entry in self.items if entry.name.startswith("w8-cancel-")]
+        actual = []
+        for entry in entries:
+            argv = entry.argv
+            actual.append((argv[argv.index("--engine") + 1], argv[argv.index("--content") + 1]))
+            self.assertEqual(entry.tier, "full")
+            self.assertIn("w8-layout", entry.requires)
+            self.assertIn("quiet-host", entry.requires)
+            self.assertIn("installed-default", argv)
+            self.assertFalse(entry.report)
+        self.assertCountEqual(actual, [(engine, content) for engine in ("ctrs", "orbstack")
+                                       for content in ("retained", "derived")])
+
     def test_names_and_areas_are_distinct_selectors(self):
         self.assertEqual(names(self.select(name=["w14-fresh"])), ["w14-fresh"])
         by_area = self.select("change", area=["connections"])

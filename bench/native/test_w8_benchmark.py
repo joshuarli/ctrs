@@ -12,6 +12,7 @@ from unittest import mock
 
 import reporting
 import w8_benchmark as w8
+import w8_cancel
 
 
 def digest(value):
@@ -56,6 +57,59 @@ def prepare_fake(source, contract, dest, seed):
 
 
 class PairedBatch(unittest.TestCase):
+    def test_cancellation_receipt_verifies_the_launched_daemon(self):
+        layer = {'digest': digest('layer'), 'size': 100}
+        receipt = {'images': {w8_cancel.REPOSITORY: {
+            'layers': [layer], 'reference': 'v6', 'manifest': digest('manifest')}},
+            'layers': [layer]}
+        identity = {'required_processes': [
+            {'role': 'daemon', 'pid': 123, 'executable': {'sha256': 'requested'}},
+            {'role': 'vm', 'boot_assets': [{'path': '/guest/Image', 'sha256': 'kernel'},
+                                           {'path': '/guest/initramfs.cpio', 'sha256': 'initrd'}]}]}
+        engine = mock.Mock(name='engine')
+        engine.name, engine.socket, engine.dir = 'ctrs', 'unix:///dummy', Path('/dummy')
+        engine.proc.pid = 123
+        engine.server_version.return_value = 'server'
+        portfolio = SimpleNamespace(transfers=[])
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            mock.patch.object(w8_cancel.runner, 'RunContext') as context,
+            mock.patch.object(w8_cancel.runner, 'Engine', return_value=engine) as factory,
+            mock.patch.object(w8_cancel.registry_variant, 'prepare_variant', return_value=receipt),
+            mock.patch.object(w8_cancel.registry_portfolio, 'prepare_layout', return_value=portfolio),
+            mock.patch.object(w8_cancel.registry_portfolio, 'running_registry',
+                              side_effect=lambda *_args, **_kw: contextlib.nullcontext(SimpleNamespace(server_port=80))),
+            mock.patch.object(w8_cancel, 'retained'),
+            mock.patch.object(w8_cancel, 'cancel_pull', return_value={'exit': 1}),
+            mock.patch.object(w8_cancel, 'verify_retry'),
+            mock.patch.object(w8_cancel, 'remove_owned_image'),
+            mock.patch.object(w8_cancel.pilot, 'require_missing_image'),
+            mock.patch.object(w8_cancel.pilot, 'require_variant_absent'),
+            mock.patch.object(w8_cancel.pilot, 'require_layers_transferred'),
+            mock.patch.object(w8_cancel.ownership, 'discover', return_value=identity),
+        ):
+            root = Path(temp)
+            provenance = {'build_outputs': {'ctrs_binary_sha256': 'requested',
+                                             'guest_kernel_sha256': 'kernel',
+                                             'guest_initramfs_sha256': 'initrd'}}
+            context.return_value = SimpleNamespace(results_dir=root, git_sha='revision', provenance=provenance)
+            args = SimpleNamespace(engine='ctrs', resource_lane='installed-default', content='retained', layout=root)
+            self.assertEqual(w8_cancel.run_cancel(args), 0)
+            result = json.loads((root / 'result.json').read_text())
+            self.assertEqual((result['git_sha'], result['provenance']), ('revision', provenance))
+            self.assertEqual((result['ownership'], result['engine_server_version']), (identity, 'server'))
+            self.assertFalse(result['measurement_valid'])
+            self.assertEqual(factory.call_args.kwargs, {'resource_lane': 'installed-default'})
+            identity['required_processes'][0]['executable']['sha256'] = 'different'
+            self.assertEqual(w8_cancel.run_cancel(args), 1)
+            result = json.loads((root / 'result.json').read_text())
+            self.assertIn('cancellation daemon differs', result['errors'][0])
+            identity['required_processes'][0]['executable']['sha256'] = 'requested'
+            identity['required_processes'][1]['boot_assets'][0]['sha256'] = 'different'
+            self.assertEqual(w8_cancel.run_cancel(args), 1)
+            result = json.loads((root / 'result.json').read_text())
+            self.assertIn('boot assets differ', result['errors'][0])
+
     def test_receipt_identity_mutations_and_shared_layers(self):
         shared = digest('shared')
         contract = {'fixture_version': 'source', 'images': {

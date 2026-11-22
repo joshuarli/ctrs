@@ -76,6 +76,12 @@ and marker contents, then removes the generated reference without pruning.
 Its `result.json` tracks cancellation and retry transfers and marks all
 measurements invalid for scoring.
 
+The current v6 replay uses the explicit `pyramid.py run --name`
+targets `w8-cancel-ctrs-retained`, `w8-cancel-ctrs-derived`,
+`w8-cancel-orbstack-retained`, and `w8-cancel-orbstack-derived`. They
+select installed engine defaults and record server versions, run input
+hashes, and the verified running engine identity in each `result.json`.
+
 The W8 component suite passed 74 tests with zero skips. It includes a real
 loopback transfer interrupted through an owned process and a completed retry.
 

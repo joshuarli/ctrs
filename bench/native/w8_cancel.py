@@ -7,6 +7,7 @@ import subprocess
 import time
 
 import ci_jobs
+import ownership
 from diagnostics import registry_variant_pilot as pilot, w8_under_pull
 import registry_portfolio
 import registry_variant
@@ -100,13 +101,17 @@ def run_cancel(args):
     cancellation = registry_portfolio.prepare_layout(layout, {REPOSITORY: image['reference']})
     retry = registry_portfolio.prepare_layout(layout, {REPOSITORY: image['reference']})
     pause = registry_portfolio.TransferPause(REPOSITORY, layer['digest'])
-    engine = runner.Engine(args.engine, run)
+    engine = runner.Engine(args.engine, run, resource_lane=args.resource_lane)
     result = {'fixture_version': FIXTURE_VERSION, 'state': args.content, 'engine': args.engine, 'target_layer': layer,
+              'resource_lane': args.resource_lane, 'git_sha': ctx.git_sha, 'provenance': ctx.provenance,
               'measurement_valid': False, 'correctness': False, 'errors': []}
     refs = []
     print(f'results: {directory}', flush=True)
     try:
         engine.ensure_up()
+        if engine.name == 'ctrs' and engine.proc is None:
+            raise ValueError('W8 cancellation requires an owned ctrs daemon')
+        result['engine_server_version'] = engine.server_version()
         retained(engine, contract['images'], directory / 'retained-before.json')
         pilot.require_variant_absent(engine, image, directory / 'candidate-before.json')
         with registry_portfolio.running_registry(cancellation, pause=pause) as cancel_server, \
@@ -124,6 +129,19 @@ def run_cancel(args):
             engine.sh(['pull', retry_ref], timeout=240)
             pilot.require_layers_transferred([layer], retry.transfers)
             verify_retry(engine, retry_ref, image, receipt, run)
+        identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
+        result['ownership'] = identity
+        if engine.name == 'ctrs':
+            expected = ctx.provenance['build_outputs']
+            daemons = [proc for proc in identity['required_processes'] if proc['role'] == 'daemon']
+            if [(proc['pid'], proc['executable']['sha256']) for proc in daemons] != [
+                    (engine.proc.pid, expected['ctrs_binary_sha256'])]:
+                raise ValueError('cancellation daemon differs from the requested binary or process')
+            boot = {Path(asset['path']).name: asset['sha256'] for proc in identity['required_processes']
+                    if proc['role'] == 'vm' for asset in proc['boot_assets']}
+            if boot != {'Image': expected['guest_kernel_sha256'],
+                        'initramfs.cpio': expected['guest_initramfs_sha256']}:
+                raise ValueError('cancellation boot assets differ from the requested hashes')
         result['correctness'] = True
     except Exception as exc:
         result['errors'].append(str(exc))
