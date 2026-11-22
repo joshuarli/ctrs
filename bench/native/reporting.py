@@ -20,6 +20,9 @@ MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
 W9_CONCURRENCIES = ci_jobs.SPEC['concurrency']
 W9_THROUGHPUT = "successful_jobs_per_minute_at_"
+W5_MODE_RESOURCES = ("cpu_seconds_per_edit", "peak_phys_footprint_bytes")
+W5_RESOURCE_METRICS = tuple(f"{mode}_{metric}" for mode in ("bind", "volume")
+                            for metric in W5_MODE_RESOURCES)
 CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
@@ -80,6 +83,8 @@ def case_metrics(case: str, params) -> list[str]:
     mode = params.get("mode") if isinstance(params, dict) else None
     if case == "W14" and mode in W14_MODE_METRICS:
         return [*W14_MODE_METRICS[mode], "cleanup_latency_ms", "successes"]
+    if case == "W5" and isinstance(params, dict) and params.get("fixture_version") == W5_RECEIPT_VERSION:
+        return [*CASE_METRICS["W5"], "bind_setup_s", "volume_setup_s", *W5_RESOURCE_METRICS]
     return CASE_METRICS.get(case, [])
 
 
@@ -183,10 +188,38 @@ def _recovery_cpu_per_success(record: dict):
     return sum(cpu) / count, None
 
 
+def _watch_resource(record: dict, mode: str, metric: str):
+    params = workload_params(record) or {}
+    count = params.get("iters")
+    edits = record.get("metrics", {}).get(f"{mode}_edits_s")
+    checks = record.get("correctness", {}).get("checks", {})
+    if (checks.get(f"{mode}_persistent_exact_results") is not True
+            or type(count) is not int or count <= 0 or not isinstance(edits, list)
+            or len(edits) != count or any(not _number(value) or value <= 0 for value in edits)):
+        return None, f"missing verified W5 {mode} edits"
+    names = [f"edit-{i}" for i in range(count)]
+    if metric == "peak_phys_footprint_bytes":
+        names.extend(("setup", "verify-inputs", "cleanup"))
+    receipts = record.get("resources", {}).get("phase_receipts", {})
+    field = "cpu_seconds" if metric == "cpu_seconds_per_edit" else metric
+    values = []
+    for name in names:
+        phase = receipts.get(f"{mode}-{name}", {})
+        value = phase.get(field)
+        if phase.get("status") != "ok" or phase.get("errors") != [] or not _number(value) or value < 0:
+            return None, f"missing or invalid W5 {mode}-{name} receipt"
+        values.append(value)
+    value = sum(values) / count if metric == "cpu_seconds_per_edit" else max(values)
+    return (value, None) if value > 0 else (None, f"invalid W5 {mode} {field}")
+
+
 def _metric(record: dict, name: str):
     resources = record.get("resources", {})
     if name == "engine_cpu_per_success" and record.get("case") == "W10":
         return _recovery_cpu_per_success(record)
+    if name in W5_RESOURCE_METRICS and record.get("case") == "W5":
+        mode, _, metric = name.partition("_")
+        return _watch_resource(record, mode, metric)
     if name in ("peak_phys_footprint_bytes", "cpu_seconds_est", *LINUX_RESOURCE_METRICS):
         if resources.get("ownership_verified") is not True:
             return None, "ownership not verified: " + str(resources.get("resource_errors", "missing resource errors"))
@@ -374,6 +407,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
         metrics = ["pull_to_health_s", "cpu_seconds_est", "peak_phys_footprint_bytes"]
         if identity["workload_params"].get("under_load"):
             metrics += ["under_pull_p95_ms", "under_pull_p99_ms"]
+    if paired_w5:
+        metrics = case_metrics("W5", params)
     if identity["case"] == "W2":
         metrics.remove("cpu_seconds_est")
     w2_saturation = (identity["case"] == "W2" and isinstance(params, dict)
@@ -437,7 +472,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
                 assessment = "incomplete"
         complete_resource = not missing or metric not in (
             "peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success",
-            "engine_cpu_per_success", *LINUX_RESOURCE_METRICS)
+            "engine_cpu_per_success", *LINUX_RESOURCE_METRICS, *W5_RESOURCE_METRICS)
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
             "missing_pairs": missing, "missing_reasons": missing_reasons, "assessment": assessment,

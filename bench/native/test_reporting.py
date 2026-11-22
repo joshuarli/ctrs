@@ -82,6 +82,37 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result['valid_pairs'], 0)
         self.assertEqual(result['rejections'][0]['reason'], 'paired inputs differ or are missing')
 
+    def test_w5_scopes_resource_costs_to_each_mount_and_verified_edits(self):
+        records = pair(case="W5", metric="bind_edit_to_result_median_s")
+        for record, scale in zip(records, (2, 1), strict=True):
+            record["workload_params"].update(fixture_version=reporting.W5_RECEIPT_VERSION, iters=2)
+            record["paired_inputs"] = {"source_sha256": "shared"}
+            receipts = {}
+            for mode, base in (("bind", 10), ("volume", 20)):
+                record["correctness"]["checks"][f"{mode}_persistent_exact_results"] = True
+                record["metrics"].update({f"{mode}_edits_s": [.2, .3], f"{mode}_setup_s": scale})
+                for phase, cpu in (("setup", 40), ("edit-0", 1), ("edit-1", 2),
+                                   ("verify-inputs", 10), ("cleanup", 10)):
+                    receipts[f"{mode}-{phase}"] = {
+                        "status": "ok", "errors": [], "cpu_seconds": cpu * scale,
+                        "peak_phys_footprint_bytes": (cpu + base) * scale,
+                    }
+            record["resources"]["phase_receipts"] = receipts
+
+        self.assertEqual(reporting._metric(records[0], "bind_cpu_seconds_per_edit"), (3, None))
+        self.assertEqual(reporting._metric(records[0], "volume_peak_phys_footprint_bytes"), (120, None))
+        report = reporting.analyze(records)
+        for metric in ("bind_cpu_seconds_per_edit", "volume_cpu_seconds_per_edit",
+                       "bind_peak_phys_footprint_bytes", "volume_peak_phys_footprint_bytes",
+                       "bind_setup_s", "volume_setup_s"):
+            self.assertEqual(metric_result(report, metric)["ratio_median"], 2)
+
+        records[0]["resources"]["phase_receipts"]["bind-edit-0"]["status"] = "unknown"
+        report = reporting.analyze(records)
+        self.assertIsNone(metric_result(report, "bind_cpu_seconds_per_edit")["ratio_median"])
+        self.assertIsNone(metric_result(report, "bind_peak_phys_footprint_bytes")["ratio_median"])
+        self.assertEqual(metric_result(report, "volume_cpu_seconds_per_edit")["ratio_median"], 2)
+
     def test_w9_throughput_and_completion_latency_use_opposite_ratio_directions(self):
         duration = "job_completion_p95_ms_at_4"
         rate = "successful_jobs_per_minute_at_4"

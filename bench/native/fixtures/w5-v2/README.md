@@ -31,6 +31,9 @@ retain command completion and event receipt separately. Setup includes source
 extraction or volume population and the initial build and test. Input
 verification, each edit, and cleanup have separate resource boundaries.
 Incomplete ownership or counter coverage invalidates the measurements.
+For each mount, the paired report uses CPU charged during the exact verified
+edits divided by their count. Sampled footprint is the maximum across that
+mount's setup, input verification, edits and cleanup.
 
 From the repository root, prepare and run the selected engine:
 
