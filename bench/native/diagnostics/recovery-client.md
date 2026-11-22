@@ -143,7 +143,7 @@ and all 800 artifacts. These runs are correctness evidence.
 
 ## Owned-engine recovery
 
-The `engine` target is a standalone ctrs diagnostic. The runner creates its
+The `engine` target is a standalone ctrs diagnostic at installed defaults. The runner creates its
 own data root and socket and seeds its private store from the validated
 OCI layout at `.work/native-perf/inputs/w8-portfolio-v6/layout`. It then
 warms the stack before the interruption.

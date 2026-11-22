@@ -627,13 +627,13 @@ class Engine:
         self.buildx_config = WORK / "buildx" / f"{self.name}-{endpoint_hash}"
 
     @classmethod
-    def for_recovery(cls, run_id: str):
+    def for_recovery(cls, run_id: str, *, resource_lane: str):
         parent = WORK / "engines"
         parent.mkdir(parents=True, exist_ok=True)
         root = Path(tempfile.mkdtemp(prefix="w10-", dir=parent))
         if len(os.fsencode(root / "run/docker.sock")) >= 104:
             raise ValueError("W10 recovery Unix socket path is too long")
-        engine = cls("ctrs", run_id, fresh_dir=root)
+        engine = cls("ctrs", run_id, fresh_dir=root, resource_lane=resource_lane)
         engine.recovery_root = root
         return engine
 
@@ -3783,7 +3783,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     if case_id == "W10" and kw.get("interrupt_service") == "engine":
         if engine_name != "ctrs" or cold or keep_warm:
             raise ValueError("engine interruption requires a standalone ctrs recovery run")
-        engine = Engine.for_recovery(ctx.run_id)
+        engine = Engine.for_recovery(ctx.run_id, resource_lane=ctx.resource_lane)
         stop = True
     elif cold:
         # Socket paths must stay under SUN_LEN (~104): keep cold engine
@@ -4049,7 +4049,8 @@ def prepare_engines(args, w5_image_archive: Path) -> int:
 def cmd_run(args) -> int:
     ctx = RunContext(f"run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
-    if args.case == "W1" and args.cold:
+    if ((args.case == "W1" and args.cold)
+            or (args.case == "W10" and getattr(args, "interrupt_service", None) == "engine")):
         ctx.resource_lane = "installed-default"
     kw = {}
     if args.case in ("W2", "W8", "W10", "W11"):
@@ -4609,6 +4610,13 @@ def main() -> int:
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
     args = ap.parse_args()
+    if getattr(args, "case", None) == "W1" and args.cmd in ("run", "baseline", "noop"):
+        cold = getattr(args, "cold", False)
+        if args.state == "cold" and not cold:
+            ap.error("W1 cold state requires --cold to start a private engine")
+        engines = (args.a, args.b) if args.cmd == "baseline" else (args.engine,)
+        if cold and any(engine != "ctrs" for engine in engines):
+            ap.error("W1 cold start requires an owned native ctrs daemon; the shared OrbStack endpoint cannot be used")
     if getattr(args, "client_location", None) is not None and args.case != "W2":
         ap.error("--client-location requires W2")
     if getattr(args, "build_cache", None) is not None and args.case != "W6":

@@ -276,6 +276,14 @@ Use the signed release, installed defaults and the frozen local v6 layout.
 This is a standalone ctrs diagnostic. Equivalent engine-cold measurements on
 an isolated OrbStack target remain open.
 
+OrbStack's installed `create --isolated` option isolates a Linux machine's
+host integration. The built-in Docker engine and those machines still share
+one OrbStack VM. W1 cold and W10 whole-engine comparison need a dedicated
+native OrbStack installation whose process and guest disk belong to the
+campaign. Reproduce both engine legs on that host. The runner rejects a
+W1 cold request against the shared socket before engine setup.
+[OrbStack architecture](https://docs.orbstack.dev/architecture)
+
 ### W3 migration and committed-state cohort
 
 `pyramid.py run --name w3-migration:cohort` runs the declared migration,

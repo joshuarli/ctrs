@@ -664,6 +664,38 @@ class W6SourceTests(unittest.TestCase):
 
 
 class ExitStatusTests(unittest.TestCase):
+    def test_w1_rejects_unowned_or_unrequested_cold_setup_at_cli_boundary(self):
+        for argv, reason in ((['run', '--case', 'W1', '--engine', 'ctrs', '--state', 'cold'],
+                              'cold state requires --cold'),
+                             (['baseline', '--case', 'W1', '--a', 'ctrs', '--b', 'orbstack', '--cold'],
+                              'shared OrbStack endpoint cannot be used')):
+            with (patch.object(runner.sys, 'argv', ['runner.py', *argv]),
+                  patch.object(runner, 'validate_manifest') as validate,
+                  contextlib.redirect_stderr(io.StringIO()) as errors,
+                  self.assertRaises(SystemExit) as failure):
+                runner.main()
+            self.assertEqual(failure.exception.code, 2)
+            self.assertIn(reason, errors.getvalue())
+            validate.assert_not_called()
+
+    def test_w10_engine_run_requests_installed_defaults_in_private_root(self):
+        args = argparse.Namespace(case='W10', cold=False, interrupt_service='engine', engine='ctrs',
+                                  state='warm', concurrency=8, duration=90, write_ratio=.3, seed=1)
+        context = Mock(resource_lane='matched')
+        record = {'trial_id': 'run', 'correctness': {'ok': True}, 'metrics': {}, 'validation_errors': []}
+        with (patch.object(runner, 'RunContext', return_value=context),
+              patch.object(runner, 'run_one', return_value=record) as run,
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertEqual(runner.cmd_run(args), 0)
+        self.assertEqual(context.resource_lane, 'installed-default')
+        run.assert_called_once_with(context, 'ctrs', 'W10', 'warm', cold=False,
+                                    concurrency=8, duration=90, write_ratio=.3, seed=1, interrupt_service='engine')
+        with tempfile.TemporaryDirectory() as temporary, patch.object(runner, 'WORK', Path(temporary)):
+            engine = runner.Engine.for_recovery('run', resource_lane=context.resource_lane)
+            self.assertEqual(engine.resource_lane, 'installed-default')
+            self.assertEqual(engine.dir, engine.recovery_root)
+            self.assertEqual(engine.recovery_root.parent, Path(temporary) / 'engines')
+
     def test_equal_memory_ceiling_stops_before_clone(self):
         args = argparse.Namespace(a="ctrs", b="ctrs", case="W6",
                                   candidate_memory_mib=6144, resource_lane="installed-default")
