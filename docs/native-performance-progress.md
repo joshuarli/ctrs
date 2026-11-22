@@ -326,8 +326,46 @@ python3 bench/native/reporting.py --match base-20261122T063709-0627
 
 `trials.jsonl` SHA-256
 `d1fe8a523db792ebf118804489839db138f0af704d8be8858d9700a71aa9203e`.
-This covers uncached builds under installed defaults. Warm builds,
-complete CPU accounting and fresh confirmation remain open.
+This covers uncached builds under installed defaults. Complete CPU accounting
+and fresh confirmation remain open.
+
+### Installed-default W6 primed-cache cohort
+
+Run `base-20261122T102417-474d` at `50c827d` used the same signed binary,
+guest assets and default engines as the uncached W6 run. Each trial primed
+both applications with a unique pair stamp and verified a completed uncached
+compile-and-test vertex. It then timed buildx and image load with the same
+context. All 40 measured build vertices were cache hits. Both artifact hashes
+matched on every trial. All ten alternating pairs were admitted, with zero
+correctness failures and complete footprint samples. Both engines reported
+9 vCPUs. Guest MemTotal remained 8,407,957,504 bytes on ctrs and
+63,157,620,736 bytes on OrbStack. Maximum one-minute host load was 3.003.
+
+| Metric | ctrs median | OrbStack median | Paired ratio and 95% CI | Descriptive result |
+| --- | ---: | ---: | --- | --- |
+| Hyperfine cached build and load | 264 ms | 567.5 ms | 0.4755 [0.4481, 0.4825] | Strict win |
+| zlib cached build and load | 266.5 ms | 597.5 ms | 0.4479 [0.4461, 0.4606] | Strict win |
+| Sampled peak physical footprint | 8.640 GB | 7.124 GB | 1.1522 [0.9487, 1.2879] | Inconclusive |
+| Summed peak RSS | 14,663,416 KiB | 10,054,536 KiB | 1.4173 [1.0804, 1.5276] | Loss |
+| Measured engine CPU | 1.47 CPU-s | 2.83 CPU-s | 0.5182 [0.4912, 0.5548] | Incomplete host NAT accounting |
+
+The measured path reused the compile-and-test results. It timed the full
+cached solve and image import, without attributing the difference to either
+step. Pair 9 retained a 911 ms ctrs Hyperfine result with a verified cache hit
+and matching artifact. Sampling began after both uncached primes. The sampled
+peak includes memory retained from priming and later verification. It rose
+from 3.03 GB to 8.64 GB on ctrs and stayed near 8.64 GB from pair five onward.
+Each ctrs trial recorded 118–120 NAT connections across priming and measured
+work. The cohort leaves complete CPU accounting, resource parity and fresh
+confirmation open.
+
+```sh
+python3 bench/native/pyramid.py run --name w6-build-warm:cohort
+python3 bench/native/reporting.py --match base-20261122T102417-474d
+```
+
+`trials.jsonl` SHA-256
+`92c0b7333a03a249c23de1a654182d8d64f8ca92686eb561635bb3b310da4b4c`.
 
 Screen a 6144 MiB ceiling against the installed default with
 `pyramid.py run --name w6-build:memory6144`. The VZ helper supplied
