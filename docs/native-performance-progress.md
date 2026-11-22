@@ -462,6 +462,25 @@ Run the no-load and concurrent API controls as `w8-pull:cohort` and
 `w8-pull-under-load-installed-default:cohort`. Add `-retained` before
 `:cohort` to select the corresponding retained-layer condition.
 
+Both one-pair installed-default deployment checks passed on `5c67876`.
+Each engine verified the transfers, exact deployment output, retained
+pins, owned cleanup and sampled footprint. Both observed 9 vCPUs. ctrs
+used host NAT in both trials, leaving CPU accounting incomplete. The
+earlier retained and derived attempts were refused at admission because
+the coordinator was still flagged as hot after compressing the fixture.
+The successful checks waited for a separate compression process to exit
+before taking the host gate snapshot.
+
+| Content | Valid pairs | Run | `trials.jsonl` SHA-256 |
+| --- | ---: | --- | --- |
+| Retained | 1 | `w8-paired-cf3c016e3ac2` | `179294d1b8bb0fae179c4ceea5e7ae2d44c5553de26975c6303fe87035da7395` |
+| Derived | 1 | `w8-paired-9075cc26943d` | `e0abe0cbc6eb6d993c81bd010501bed602c4171b0ef78ec80fc96ee0a50cdeb7` |
+
+To reproduce a check, use `runner.py w8-baseline --pairs 1 --resource-lane
+installed-default --content retained` with the v6 layout and signed
+binary. Use `--content derived` for the other condition. The ten-pair
+timing cohorts and comparable backing-allocation measurements remain open.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
@@ -1105,12 +1124,10 @@ next-action paragraphs from that historical revision.
 
 ## Ready queue
 
-Note (2026-11-18): queue items below were written against the old host.
-None of their timing/reliability evidence transfers; every cell in the
-qualification matrix must be re-measured against w8-v5 before item 6 can
-close. The 2026-11-18 W2 matched-resource baseline batch is the first
-current-host baseline. Fixture commands now reference w8-v5
-(`.work/native-perf/inputs/w8-portfolio-v5/layout`).
+The queue below began against the old host and portfolio. For current
+Mac runs, use the v6 portfolio in `.work/native-perf/inputs/w8-portfolio-v6/layout`
+and the rebuilt W11 worker where required. Historical results remain
+with their original image and worker pins.
 
 1. Resolve W2 observer overhead using the exact next action above. Separate fixed work/offered load, saturation, on-CPU samples
    and off-CPU/wake latency. Commands and observer budgets:
