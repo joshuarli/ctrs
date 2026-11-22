@@ -174,6 +174,15 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(ctrs["verdict"], "regressed")
         self.assertEqual(rows[("orbstack", "goodput_bytes_per_second")]["verdict"], "no regression")
 
+    def test_anchor_never_matches_different_common_portfolios(self):
+        anchor = pair(run_id="old")
+        candidate = pair(run_id="new")
+        for record in anchor:
+            record["inputs"] = {"portfolio_sha256": "a" * 64}
+        for record in candidate:
+            record["inputs"] = {"portfolio_sha256": "b" * 64}
+        self.assertEqual(reporting.analyze_anchor(anchor, candidate), [])
+
     def test_w14_scores_only_the_metrics_its_mode_produces(self):
         records = [r for i in range(1, 3) for r in pair(pair_id=i, case="W14", metric="completion_seconds")]
         for r in records:

@@ -263,7 +263,9 @@ class Portfolio:
         return Handler
 
 
-COMMON_PORTFOLIO_VERSIONS = frozenset({'w8-v2-common-portfolio', 'w8-v5-common-portfolio'})
+COMMON_PORTFOLIO_VERSIONS = frozenset({
+    'w8-v2-common-portfolio', 'w8-v5-common-portfolio', 'w8-v6-common-portfolio',
+})
 
 
 def prepare_pinned_portfolio(layout, contract):

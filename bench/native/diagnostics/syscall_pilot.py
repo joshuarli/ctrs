@@ -24,7 +24,7 @@ import sched_trace
 from resource_pilot import host_snapshot
 from w2_scheduler_app import parse_api_cpus
 
-PIN = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+PIN = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
 TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
 GUEST_CLIENT_SUFFIX = '-guest-client-v2'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
@@ -154,7 +154,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             if info['Config']['Image'] != refs[image]:
                 raise ValueError('service image differs from pinned ref')
             installed = json.loads(engine.sh(['image', 'inspect', refs[image]]).stdout)[0]
-            pin = PIN['images']['np-v5/' + image]
+            pin = PIN['images']['np-v6/' + image]
             save(directory / (service + '-image.json'), installed)
             if installed['Architecture'] != 'arm64' or refs[image] not in installed['RepoDigests'] or installed['RootFS']['Layers'] != pin['diff_ids']:
                 raise ValueError('installed service content identity differs from pin')
@@ -359,7 +359,7 @@ def main():
     supplied = json.loads(args.image_refs.read_text())
     refs = {name: supplied[name] for name in ('api', 'postgres', 'redis')}
     for name, ref in refs.items():
-        if '@' not in ref or ref.rsplit('@', 1)[-1] != PIN['images']['np-v5/' + name]['manifest']:
+        if '@' not in ref or ref.rsplit('@', 1)[-1] != PIN['images']['np-v6/' + name]['manifest']:
             parser.error('service reference differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
@@ -370,7 +370,7 @@ def main():
     root = runner.RESULTS / run; root.mkdir()
     sources = root / 'source'; sources.mkdir()
     hashes = {}
-    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(w2_peer.__file__), Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v5/portfolio.json'):
+    for path in (Path(__file__), HELPER, BOOTSTRAP, runner.LOAD_PY, Path(w2_peer.__file__), Path(ci_jobs.__file__), Path(perf_counts.__file__), Path(cpu_profile.__file__), Path(counter_specs.__file__), Path(sched_trace.__file__), runner.FIXTURES / 'w8-v6/portfolio.json'):
         (sources / path.name).write_bytes(path.read_bytes()); hashes[path.name] = runner.sha256_file(path)
     guest_suffix = GUEST_CLIENT_SUFFIX if args.client_location == 'guest' else ''
     save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': (cpu_profile.VERSION if args.profile_kind == 'cpu' else counter_specs.VERSION) + ('-api-affinity-v1' if args.api_cpus is not None else '') + guest_suffix,

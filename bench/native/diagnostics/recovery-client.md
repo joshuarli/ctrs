@@ -135,7 +135,7 @@ and all 800 artifacts. These runs are correctness evidence.
 
 The `engine` target is a standalone ctrs diagnostic. The runner creates its
 own data root and socket and seeds its private store from the validated
-OCI layout at `.work/native-perf/inputs/w8-portfolio-v5/layout`. It then
+OCI layout at `.work/native-perf/inputs/w8-portfolio-v6/layout`. It then
 warms the stack before the interruption.
 It proves the socket belongs to the launched daemon and the VM holds the
 private guest disk. It sends SIGKILL only to its own daemon child and waits

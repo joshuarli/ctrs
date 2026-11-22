@@ -1,0 +1,13 @@
+import * as esbuild from 'esbuild';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { spawnSync, execFileSync } from 'node:child_process';
+const contract = JSON.parse(fs.readFileSync('workload.json'));
+await esbuild.build({ entryPoints: ['/opt/seed/src/marked.ts'], bundle: true, format: 'esm', outfile: '/opt/app/lib/marked.esm.js' });
+const result = spawnSync(process.execPath, ['/opt/app/bin/marked.js'], { input: contract.test.input, encoding: 'utf8', timeout: 30000 });
+if (result.status !== 0 || result.stderr !== '' || result.stdout !== contract.test.original) throw Error(JSON.stringify(result));
+const hash = path => crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
+const lock = hash('/opt/seed/package-lock.json');
+const npm = execFileSync('npm', ['--version'], { encoding: 'utf8', timeout: 10000 }).trim();
+if (lock !== contract.source.lock_sha256 || process.version !== contract.tools.node || npm !== contract.tools.npm) throw Error('input/tool mismatch');
+console.log(JSON.stringify({ output: result.stdout, node: process.version, npm, esbuild: esbuild.version, lock_sha256: lock, artifact_sha256: hash('/opt/app/lib/marked.esm.js') }));

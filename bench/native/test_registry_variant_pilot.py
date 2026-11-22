@@ -25,8 +25,8 @@ class VariantTransferProof(unittest.TestCase):
                 self.assertEqual(json.loads(path.read_text())['reference_kind'], kind)
 
     def test_retained_receipts_require_pinned_contents_even_with_identical_ids(self):
-        contract = json.loads((pilot.runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
-        pins = {name: contract['images']['np-v5/' + name]
+        contract = json.loads((pilot.runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
+        pins = {name: contract['images']['np-v6/' + name]
                 for name in ('api', 'postgres', 'redis', 'marked')}
         for engine_name, id_kind in (('ctrs', 'config'), ('orbstack', 'manifest')):
             rows = [{'Id': pin[id_kind], 'Architecture': 'arm64', 'RootFS': {'Layers': pin['diff_ids']}}

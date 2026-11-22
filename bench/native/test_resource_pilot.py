@@ -41,7 +41,7 @@ class ResourcePins(unittest.TestCase):
 
     def test_installed_image_identity_rejects_digest_layers_and_architecture(self):
         pins = refs()
-        pin = pilot.mixed_cycle.PIN['images']['np-v5/api']
+        pin = pilot.mixed_cycle.PIN['images']['np-v6/api']
         info = {'Architecture': 'arm64', 'RepoDigests': [pins['api']], 'RootFS': {'Layers': pin['diff_ids']}}
         for changed in ({'Architecture': 'amd64'}, {'RepoDigests': []}, {'RootFS': {'Layers': []}}):
             engine = SimpleNamespace(sh=lambda *a, **kw: SimpleNamespace(stdout=json.dumps([info | changed])))

@@ -11,8 +11,8 @@ import runner
 
 class W1Tests(unittest.TestCase):
     def execute(self, fault=None):
-        portfolio = json.loads((runner.FIXTURES / "w8-v5/portfolio.json").read_text())
-        pins = {service: portfolio["images"]["np-v5/" + name] for service, name in
+        portfolio = json.loads((runner.FIXTURES / "w8-v6/portfolio.json").read_text())
+        pins = {service: portfolio["images"]["np-v6/" + name] for service, name in
                 (("api", "api"), ("db", "postgres"), ("cache", "redis"))}
         restarted = []
         commands = []

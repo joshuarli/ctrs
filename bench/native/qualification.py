@@ -134,7 +134,7 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         for name in ('postgres', 'redis', 'api_base', 'fixture_api'):
             if re.fullmatch(r'.+@sha256:[0-9a-f]{64}', str(assets.get('images', {}).get(name))) is None:
                 raise ReadinessError('unfrozen service image: ' + name)
-        for name, image in (('postgres', 'np-v5/postgres'), ('redis', 'np-v5/redis'), ('fixture_api', 'np-v5/api')):
+        for name, image in (('postgres', 'np-v6/postgres'), ('redis', 'np-v6/redis'), ('fixture_api', 'np-v6/api')):
             if not assets['images'][name].endswith('@' + PIN['images'][image]['manifest']):
                 raise ReadinessError('assets.lock service image differs from running portfolio: ' + name)
         inputs = doc.get('inputs')
@@ -282,7 +282,7 @@ def require_leg_readiness(path, *, ctrs_binary, guest, portfolio_layout, worker_
                 runner.FIXTURES / 'w1/seed.sql', runner.LOAD_PY, runner.RATE_LOAD_PY,
                 runner.FIXTURES / 'w4/app.py', runner.FIXTURES / 'w4/latency.py',
                 runner.FIXTURES / 'w5-v2/workload.json', runner.FIXTURES / 'w5-v2/mounted-inputs.mjs',
-                runner.FIXTURES / 'w8-v5/portfolio.json',
+                runner.FIXTURES / 'w8-v6/portfolio.json',
                 ci_jobs.FIXTURE, runner.FIXTURES / 'w11-v2/worker-pin.json', runner.CASES_FILE,
                 runner.BENCH / 'schema.json', W11_CELLS_FILE, W1_W10_CELLS_FILE]
     required += [file for file in runner.BENCH.rglob('*.py')

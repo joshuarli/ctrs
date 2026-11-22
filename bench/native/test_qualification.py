@@ -47,7 +47,7 @@ class Readiness(unittest.TestCase):
         self.assets.write_text(f'[freeze]\nstatus="frozen"\ncell_contract_sha256="{contract_digest}"\n[tools]\npython="test-version"\n'
             'docker_cli="test-version"\ndocker_compose="test-version"\ndocker_buildx="test-version"\n[images]\n' +
             '\n'.join(f'{name}="example/{name}@{gate.PIN["images"][image]["manifest"]}"' for name, image in
-                (('postgres', 'np-v5/postgres'), ('redis', 'np-v5/redis'), ('fixture_api', 'np-v5/api'), ('api_base', 'np-v5/api'))))
+                (('postgres', 'np-v6/postgres'), ('redis', 'np-v6/redis'), ('fixture_api', 'np-v6/api'), ('api_base', 'np-v6/api'))))
         review = root / 'review.json'
         review.write_text(json.dumps({'kind': 'native-cell-contract-review', 'reviewer': 'test-reviewer',
             'conclusion': 'complete', 'cell_contract_sha256': contract_digest}))
@@ -340,7 +340,7 @@ class ManualAdmission(unittest.TestCase):
             self.assertIn(gate.runner.BENCH / 'runner.py', required)
             self.assertIn(gate.runner.RATE_LOAD_PY, required)
             self.assertIn(gate.runner.FIXTURES / 'w4/latency.py', required)
-            self.assertIn(gate.runner.FIXTURES / 'w8-v5/portfolio.json', required)
+            self.assertIn(gate.runner.FIXTURES / 'w8-v6/portfolio.json', required)
             self.assertIn(gate.runner.FIXTURES / 'w2/v3.py', required)
             self.assertIn(gate.runner.FIXTURES / 'w13/transfer_tool.py', required)
             self.assertIn(gate.runner.FIXTURES / 'w14/lifecycle_tool.py', required)

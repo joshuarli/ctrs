@@ -209,7 +209,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
         names += ['under_pull_setup', 'under_pull_verification', 'under_pull_cleanup']
     result['phase_status'] = {phase: {'status': 'partial'} for phase in names}
     try:
-        _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v5/api'])
+        _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v6/api'])
         prepare_warm_engine(engine, run, api_image=api_image)
         coordinator = ownership.current_coordinator()
         coordinator['owned_service'] = {'kind': 'local-fixture-registry',
@@ -241,7 +241,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
             refs = {}
             with phase('pre_pull_setup'):
                 engine_transfer_start = len(portfolio.transfers)
-                retained_pins = {name: contract['images']['np-v5/' + name]
+                retained_pins = {name: contract['images']['np-v6/' + name]
                                  for name in ('api', 'postgres', 'redis', 'marked')}
                 old_refs = [w8_under_pull.baseline_image_reference(engine.name, pin)[1]
                             for pin in retained_pins.values()]
@@ -341,7 +341,7 @@ def main():
     diagnostic_signals.install_cleanup_signals()
     layout = args.layout.resolve()
     receipt = json.loads((layout / 'receipt.json').read_text())
-    contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+    contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
     portfolio = registry_portfolio.prepare_layout(layout, {
         name: image['reference'] for name, image in receipt['images'].items()})
     run = 'w8-unique-' + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)

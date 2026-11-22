@@ -228,7 +228,7 @@ class ClientLocation(unittest.TestCase):
                     return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': ident, 'Config': {'Image': image}}]), '')
                 if args[:2] == ['image', 'inspect']:
                     image = {'api-ref': 'api', 'db-ref': 'postgres', 'cache-ref': 'redis'}[args[2]]
-                    pin = syscall_pilot.PIN['images']['np-v5/' + image]
+                    pin = syscall_pilot.PIN['images']['np-v6/' + image]
                     return subprocess.CompletedProcess(args, 0, json.dumps([{'Architecture': 'arm64', 'RepoDigests': [args[2]], 'RootFS': {'Layers': pin['diff_ids']}}]), '')
                 if args[:3] == ['exec', 'api-id', 'python'] and args[3] == '-c' and '/app/app.py' in args[4]:
                     return subprocess.CompletedProcess(args, 0, json.dumps(syscall_pilot.PIN['api_files_sha256']), '')

@@ -18,7 +18,7 @@ import ownership
 import mixed_resources
 import runner
 
-PIN = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+PIN = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
 WORKER = json.loads((runner.FIXTURES / 'w11-v2/worker-pin.json').read_text())
 VERSION = 'w11-v3-bounded-working-set'
 OPERATIONS = 5000
@@ -204,7 +204,7 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
             raise ValueError('running engine resource envelope differs from the freeze or is unknown')
         for name, ref in refs.items():
             info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
-            pin = WORKER['worker'] if name == 'worker' else PIN['images']['np-v5/' + name]
+            pin = WORKER['worker'] if name == 'worker' else PIN['images']['np-v6/' + name]
             if info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != pin['diff_ids']:
                 raise ValueError('running image identity differs from pin: ' + name)
             save(directory / (name + '-image.json'), info)

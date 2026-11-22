@@ -322,14 +322,14 @@ def load_cases() -> dict:
 
 
 def pinned_api_image(engine) -> tuple[str, dict]:
-    """The portfolio's np-v5/api image on `engine`, verified against its
+    """The portfolio's np-v6/api image on `engine`, verified against its
     pinned config, manifest and layer digests, and the identity two engines'
     trials must share to pair."""
     if linux_lane.enabled():
         return linux_lane.image(engine, 'api')
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
-    pin_path = FIXTURES / "w8-v5/portfolio.json"
-    pin = json.loads(pin_path.read_text())["images"]["np-v5/api"]
+    pin_path = FIXTURES / "w8-v6/portfolio.json"
+    pin = json.loads(pin_path.read_text())["images"]["np-v6/api"]
     image = baseline_image_reference(engine.name, pin)[1]
     inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
     require_baseline_images(engine.name, {"api": pin}, inspected)
@@ -1214,12 +1214,12 @@ def prepare_pinned_stack(engine, override, *, layout=None):
         return linux_lane.stack(engine, override)
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
 
-    pin_path = FIXTURES / "w8-v5/portfolio.json"
+    pin_path = FIXTURES / "w8-v6/portfolio.json"
     source = json.loads(pin_path.read_text())
     seed_sha = sha256_file(W1_DIR / "seed.sql")
     if seed_sha != source["seed_sql_sha256"]:
         raise ValueError("stack seed differs from the pinned portfolio")
-    repositories = {"api": "np-v5/api", "db": "np-v5/postgres", "cache": "np-v5/redis"}
+    repositories = {"api": "np-v6/api", "db": "np-v6/postgres", "cache": "np-v6/redis"}
     pins = {service: source["images"][repository] for service, repository in repositories.items()}
     if layout is not None:
         import registry_portfolio
@@ -2580,9 +2580,9 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
     try:
         if fixture_version != W3_FIXTURE_VERSION:
             raise ValueError("W3 fixture version mismatch")
-        pin_path = FIXTURES / "w8-v5/portfolio.json"
+        pin_path = FIXTURES / "w8-v6/portfolio.json"
         contract = json.loads(pin_path.read_text())
-        pin = contract["images"]["np-v5/postgres"]
+        pin = contract["images"]["np-v6/postgres"]
         image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
         inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
@@ -2905,7 +2905,7 @@ def trial_w10(ctx, engine: Engine, state: str,
         engine.ensure_up()
         if crash_engine and (engine.proc is None or engine.proc.poll() is not None):
             raise ValueError("initial recovery daemon was not launched by this run")
-        layout = WORK / "inputs/w8-portfolio-v5/layout" if crash_engine else None
+        layout = WORK / "inputs/w8-portfolio-v6/layout" if crash_engine else None
         _, rec["inputs"] = prepare_pinned_stack(engine, override, layout=layout)
         stack_owned = True
         if not crash_engine:
@@ -3915,8 +3915,8 @@ def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
 
     pins = {}
     if repositories:
-        contract = json.loads((FIXTURES / "w8-v5/portfolio.json").read_text())
-        pins = {name: contract["images"][f"np-v5/{name}"] for name in repositories}
+        contract = json.loads((FIXTURES / "w8-v6/portfolio.json").read_text())
+        pins = {name: contract["images"][f"np-v6/{name}"] for name in repositories}
     for name in dict.fromkeys(engines):
         engine = Engine(name, ctx.run_id, resource_lane=ctx.resource_lane)
         try:
@@ -3935,7 +3935,7 @@ def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
                     require_baseline_images(name, pins, inspected)
                 except (RuntimeError, ValueError) as exc:
                     raise ValueError(f"{case} pinned portfolio on {name}: {exc}. "
-                                     "Restore the frozen images using bench/native/fixtures/w8-v5/README.md.") from exc
+                                     "Restore the frozen images using bench/native/fixtures/w8-v6/README.md.") from exc
         finally:
             engine.stop()
 
@@ -4264,7 +4264,7 @@ def main() -> int:
     p.add_argument("--lifecycle-clients", type=int, default=32)
     p.add_argument("--idle-seconds", type=float, default=30)
 
-    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v5/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
+    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v6/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v2 common OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
     p.add_argument("--pairs", type=int, default=10, help="number of pairs (1 to 100)")

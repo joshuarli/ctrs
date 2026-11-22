@@ -81,15 +81,15 @@ class UnderPull(unittest.TestCase):
                                     {'begin_monotonic': 3, 'end_monotonic': 4}], events)
 
     def test_failed_health_after_compose_up_cleans_project(self):
-        contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+        contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
         engine = mock.Mock()
         engine.name = 'orbstack'
         def command(args, **kwargs):
             if args[:2] == ['image', 'inspect']:
                 ref = args[-1]
                 name = next(name for name in ('api', 'postgres', 'redis')
-                            if contract['images']['np-v5/' + name]['manifest'] == ref)
-                pin = contract['images']['np-v5/' + name]
+                            if contract['images']['np-v6/' + name]['manifest'] == ref)
+                pin = contract['images']['np-v6/' + name]
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': pin['manifest'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}]), '')
             return subprocess.CompletedProcess(args, 0, '', '')
         engine.sh.side_effect = command
@@ -102,15 +102,15 @@ class UnderPull(unittest.TestCase):
         self.assertTrue(any('down' in call.args[0] for call in engine.sh.call_args_list))
 
     def test_failure_after_start_terminates_client_and_cleans_stack(self):
-        contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+        contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
         engine = mock.Mock()
         engine.name = 'ctrs'
         def command(args, **kwargs):
             if args[:2] == ['image', 'inspect']:
                 ref = args[-1]
                 name = next(name for name in ('api', 'postgres', 'redis')
-                            if contract['images']['np-v5/' + name]['config'] == ref)
-                pin = contract['images']['np-v5/' + name]
+                            if contract['images']['np-v6/' + name]['config'] == ref)
+                pin = contract['images']['np-v6/' + name]
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Id': pin['config'], 'RootFS': {'Layers': pin['diff_ids']}, 'Architecture': 'arm64'}]), '')
             if args[:1] == ['exec']:
                 return subprocess.CompletedProcess(args, 0, json.dumps(contract['api_files_sha256']), '')

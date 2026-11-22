@@ -158,7 +158,7 @@ class WorkloadSafetyTests(unittest.TestCase):
                 "meta": [["txs", runner.W3_TXS]], "fsync": "on"}
         with tempfile.TemporaryDirectory() as tmp:
             engine = fake_engine()
-            pin = json.loads((runner.FIXTURES / "w8-v5/portfolio.json").read_text())["images"]["np-v5/postgres"]
+            pin = json.loads((runner.FIXTURES / "w8-v6/portfolio.json").read_text())["images"]["np-v6/postgres"]
             volume_owner = "test-run-000001"
 
             def execute(args, **kwargs):
@@ -606,8 +606,8 @@ class ExitStatusTests(unittest.TestCase):
         context = Mock(run_id="test")
         engine = Mock()
         engine.sh.side_effect = RuntimeError("No such image")
-        contract = json.loads((runner.FIXTURES / "w8-v5/portfolio.json").read_text())
-        references = [contract["images"][f"np-v5/{name}"]["config"]
+        contract = json.loads((runner.FIXTURES / "w8-v6/portfolio.json").read_text())
+        references = [contract["images"][f"np-v6/{name}"]["config"]
                       for name in ("api", "postgres", "redis")]
         err = io.StringIO()
         with patch.object(runner, "RunContext", return_value=context), \
@@ -622,7 +622,7 @@ class ExitStatusTests(unittest.TestCase):
         clone.assert_not_called()
         trial.assert_not_called()
         self.assertIn("W13-overlap pinned portfolio on ctrs", err.getvalue())
-        self.assertIn("w8-v5/README.md", err.getvalue())
+        self.assertIn("w8-v6/README.md", err.getvalue())
 
     def test_w2_baseline_serializes_sampling_mode_and_requires_pins(self):
         engine = fake_engine()

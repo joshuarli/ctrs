@@ -135,7 +135,7 @@ def main():
                     Path(qualification.__file__), Path(mixed_cycle.mixed_resources.__file__),
                     runner.BENCH / 'resource_cycles.py', runner.COLLECT, runner.BENCH / 'macos_counters.py', runner.BENCH / 'ownership.py',
                     runner.BENCH / 'ci_jobs.py', runner.LOAD_PY, runner.FIXTURES / 'w4/app.py',
-                    runner.FIXTURES / 'w8-v5/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json')
+                    runner.FIXTURES / 'w8-v6/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json')
     hashes = {}
     for index, path in enumerate(source_paths):
         target = sources / f'{index}-{path.name}'; target.write_bytes(path.read_bytes())

@@ -656,6 +656,12 @@ def _anchor_key(record: dict) -> str:
     identity["fixture_version"] = (record.get("metrics") or {}).get("fixture_version")
     key = {k: identity[k] for k in ("host_id", "arch", "case", "state",
                                    "workload_params", "builder_driver", "fixture_version")}
+    for section, field in (("paired_inputs", "portfolio_sha256"), ("inputs", "portfolio_sha256"),
+                           ("provenance", "w8_source_contract_sha256")):
+        metadata = record.get(section)
+        if isinstance(metadata, dict) and isinstance(digest := metadata.get(field), str):
+            key["portfolio_sha256"] = digest
+            break
     if 'lane' in identity:
         key['lane'] = identity['lane']
     return _canonical(key)
