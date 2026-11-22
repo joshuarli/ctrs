@@ -320,6 +320,23 @@ OrbStack's corresponding host guarantee remains unknown. Obtain its explicit
 contract or separately qualify acknowledged commits across host failure on a
 disposable setup before claiming a comparative durability-qualified result.
 
+The public OrbStack volume documentation identifies where named-volume data
+lives and how to back it up. The host flush guarantee remains unspecified
+there. [OrbStack volume documentation](https://docs.orbstack.dev/docker/file-sharing)
+
+The next ctrs-only diagnostic measures the stronger Full attachment with
+the existing eight-client W3-v4 pgbench fixture. Earlier Full probes used
+one writer. Use a detached checkout of signed release source `99db1aa` and
+cherry-pick `f536b6e` to change only the disk attachment mode. Build the
+signed host executable with `RUSTC_WRAPPER="" CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`.
+Use the same verified release kernel, initramfs, disk template, and v6
+PostgreSQL image in private stores. Alternate Fsync/Full, Full/Fsync and
+Fsync/Full, using a fresh named volume per leg. Record the signed binary
+digest and the raw W3-v4 results for every leg. Each run must check all
+16,000 write transactions after PostgreSQL restart and retain all three
+PostgreSQL durability settings. This measures the cost under group commit.
+Equivalent host durability across engines remains a separate gate.
+
 ### W4 pipeline comparison with common images
 
 Prepare one Linux ARM64 v4 worker image from the pinned W4 latency
