@@ -446,11 +446,19 @@ resolve dependencies, so the resulting archive starts a new cohort.
 The comparison measures `docker run --rm --pull=never IMAGE http --version`
 with the engine already ready and image import outside the timed boundary.
 Verify the exact `3.2.4` output and the frozen incremental note. Retain the
-import duration and any first-create layer materialization in separate
-receipts. Use fresh private ctrs stores to restore the imported-but-unrun
-condition across pairs. OrbStack's materialization during import is part of
-its preparation. Keep both installed defaults and report the measured
-allocations, ten alternating pairs and sampled resources.
+import duration in a separate receipt. First-create materialization, when
+required by the engine, occurs inside the measured command. Use fresh private
+ctrs stores to restore the imported-but-unrun condition across pairs. Reload
+the archive on OrbStack under its already verified campaign tag. OrbStack's
+materialization during import is part of its preparation. Keep both installed
+defaults and report the measured allocations, ten alternating pairs, and
+resources scoped to first use.
+
+```sh
+CTRS_GUEST_DIR="$release/guest/out" python3 bench/native/runner.py httpie-first-use \
+  --archive "$archive" --receipt "$freeze_receipt" \
+  --ctrs-binary "$release/target/release/ctrs" --pairs 10
+```
 
 ### Installed-default W2 fixed-work cohort
 

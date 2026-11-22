@@ -251,6 +251,19 @@ class ReportingTests(unittest.TestCase):
                     self.assertIn("Equivalent host storage durability is unverified.",
                                   reporting.render_markdown(report))
 
+    def test_frozen_httpie_reports_first_use_only_for_matching_input_receipts(self):
+        records = pair(case='W7', metric='httpie_first_use_s', ratio=.8)
+        for record in records:
+            record['workload_params']['fixture_version'] = reporting.HTTPIE_FIRST_USE
+            record['paired_inputs'] = {'archive_sha256': 'common'}
+            record['metrics']['import_seconds'] = 100
+        report = reporting.analyze(records)
+        self.assertEqual(metric_result(report, 'httpie_first_use_s')['ratio_median'], .8)
+        self.assertEqual({metric['metric'] for metric in report['cohorts'][0]['metrics']},
+                         {'httpie_first_use_s', 'cpu_seconds_est', 'peak_phys_footprint_bytes'})
+        records[0]['paired_inputs'] = {'archive_sha256': 'different'}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
+
     def test_overlap_metric_directions_and_paired_inputs(self):
         records = pair(case="W13-overlap", metric="w2_latency_p99_ms", ratio=.5)
         for record in records:

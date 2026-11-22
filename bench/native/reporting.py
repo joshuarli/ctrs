@@ -14,6 +14,7 @@ import resource_cells
 from pathlib import Path
 
 import ci_jobs
+from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
 from workspace import INSTALL_TIMING_REVISION
 
@@ -104,6 +105,8 @@ def case_metrics(case: str, params) -> list[str]:
         return metrics
     if case == "W12" and isinstance(params, dict) and params.get("timing_revision") == INSTALL_TIMING_REVISION:
         return [*CASE_METRICS["W12"], "install_verification_seconds"]
+    if case == 'W7' and isinstance(params, dict) and params.get('fixture_version') == HTTPIE_FIRST_USE:
+        return ['httpie_first_use_s']
     return CASE_METRICS.get(case, [])
 
 
@@ -419,10 +422,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
     paired_w5 = (identity['case'] == 'W5' and isinstance(params, dict)
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
     paired_w3 = identity['case'] == 'W3' and any('paired_inputs' in record for record in records)
+    paired_httpie = (identity['case'] == 'W7' and isinstance(params, dict)
+                     and params.get('fixture_version') == HTTPIE_FIRST_USE)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
     pinned_stack = (identity['case'] in ('W1', 'W2') and isinstance(params, dict)
                     and params.get('pinned_stack') is True)
-    require_paired_inputs = (paired_w3 or paired_w5 or paired_w8 or pinned_stack
+    require_paired_inputs = (paired_w3 or paired_w5 or paired_w8 or paired_httpie or pinned_stack
                              or verified_transfer or identity['case'] == 'W13-overlap')
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
@@ -522,6 +527,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             metrics += ["under_pull_p95_ms", "under_pull_p99_ms"]
     if paired_w5:
         metrics = case_metrics("W5", params)
+    if paired_httpie:
+        metrics = [*case_metrics('W7', params), 'cpu_seconds_est', 'peak_phys_footprint_bytes']
     if identity["case"] == "W2":
         metrics.remove("cpu_seconds_est")
     w2_saturation = (identity["case"] == "W2" and isinstance(params, dict)

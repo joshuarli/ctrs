@@ -4368,6 +4368,12 @@ def main() -> int:
     p.add_argument("--lifecycle-clients", type=int, default=32)
     p.add_argument("--idle-seconds", type=float, default=30)
 
+    p = sub.add_parser("httpie-first-use", help="compare first use of a frozen native W7 HTTPie image")
+    p.add_argument("--archive", type=Path, required=True, help="common Linux ARM64 image archive")
+    p.add_argument("--receipt", type=Path, required=True, help="saved HTTPie freeze receipt")
+    p.add_argument("--ctrs-binary", type=Path, required=True, help="signed ctrs binary")
+    p.add_argument("--pairs", type=int, default=10, help="number of alternating pairs (1 to 100)")
+
     p = sub.add_parser("w8-baseline", description="Paired W8 pull and deploy using one shared derived artifact per pair.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v6/layout --ctrs-binary /path/to/signed/ctrs --resource-lane installed-default --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v6 OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
@@ -4464,12 +4470,12 @@ def main() -> int:
         return cmd_report(args)
     if getattr(args, "case", None) == "W8" and args.cmd in ("run", "baseline", "noop"):
         ap.error("legacy W8 proxy is not scoreable; use w8-baseline --layout PATH --ctrs-binary PATH")
-    if args.cmd in ("w8-baseline", "w8-cancel"):
-        if args.cmd == "w8-baseline" and not 1 <= args.pairs <= 100:
+    if args.cmd in ("w8-baseline", "w8-cancel", "httpie-first-use"):
+        if hasattr(args, "pairs") and not 1 <= args.pairs <= 100:
             ap.error("--pairs must be between 1 and 100")
         if args.cmd == "w8-baseline" and args.orbstack_storage_file and not args.diagnostic:
             ap.error("--orbstack-storage-file requires --diagnostic")
-        if args.resource_lane == "installed-default" and "CTRS_IDLE_SECS" in os.environ:
+        if getattr(args, "resource_lane", "installed-default") == "installed-default" and "CTRS_IDLE_SECS" in os.environ:
             ap.error("--resource-lane installed-default requires the default CTRS_IDLE_SECS environment")
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
             ap.error(f"{args.cmd} requires native ARM64 macOS")
@@ -4482,6 +4488,11 @@ def main() -> int:
         DOCKER = find_docker()
         RESULTS.mkdir(parents=True, exist_ok=True)
         diagnostic_signals.install_cleanup_signals()
+        if args.cmd == "httpie-first-use":
+            if args.lane != 'macos-arm64':
+                ap.error('httpie-first-use requires the macos-arm64 lane')
+            import httpie_first_use
+            return httpie_first_use.run_batch(args)
         if args.cmd == "w8-cancel":
             import w8_cancel
             return w8_cancel.run_cancel(args)
