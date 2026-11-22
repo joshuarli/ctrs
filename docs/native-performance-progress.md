@@ -256,6 +256,26 @@ python3 bench/native/reporting.py --match base-20261122T093654-6f3a
 `trials.jsonl` SHA-256
 `5f2d444b5b1e58daed9e90375306b33f613a9210b3d2baa166baafe2a1aaf25d`.
 
+#### W1 engine-cold admission on ctrs
+
+The cold entry point creates a fresh private ctrs store, imports the three
+pinned v6 images from the local layout, and stops the preparation daemon.
+It requires the private socket to disappear before timing starts. The next
+launch verifies the same images and seed, runs Compose through the first
+exact DB/cache roundtrip, and finishes with the existing database restart
+and owned cleanup checks. The cold metrics cover daemon readiness and launch
+through the first exact roundtrip. They include runtime readiness polling and
+exclude the image import. VM resource sampling begins at the existing sampler
+boundary after guest wake.
+
+```sh
+python3 bench/native/runner.py run --case W1 --engine ctrs --state cold --cold
+```
+
+Use the signed release, installed defaults and the frozen local v6 layout.
+This is a standalone ctrs diagnostic. Equivalent engine-cold measurements on
+an isolated OrbStack target remain open.
+
 ### W3 migration and committed-state cohort
 
 `pyramid.py run --name w3-migration:cohort` runs the declared migration,

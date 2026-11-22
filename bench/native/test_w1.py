@@ -10,7 +10,7 @@ import runner
 
 
 class W1Tests(unittest.TestCase):
-    def execute(self, fault=None):
+    def execute(self, fault=None, *, cold=False):
         portfolio = json.loads((runner.FIXTURES / "w8-v6/portfolio.json").read_text())
         pins = {service: portfolio["images"]["np-v6/" + name] for service, name in
                 (("api", "api"), ("db", "postgres"), ("cache", "redis"))}
@@ -78,15 +78,47 @@ class W1Tests(unittest.TestCase):
             elapsed += 1
             return elapsed, {"ok": True}
 
-        engine = SimpleNamespace(name="ctrs", ensure_up=lambda: None, sh=sh)
+        engine = SimpleNamespace(name="ctrs", sh=sh, external=False, proc=None)
+        original_prepare = runner.prepare_pinned_stack
+
+        def ensure_up():
+            nonlocal elapsed
+            if cold:
+                commands.append(["start-daemon"])
+                elapsed += 2
+                engine.proc = SimpleNamespace(poll=lambda: None)
+
+        def stop():
+            nonlocal elapsed
+            commands.append(["stop-daemon"])
+            elapsed += 3
+            engine.proc = None
+            if fault == "socket remains":
+                Path(engine.socket.removeprefix("unix://")).touch()
+
+        def prepare(engine, override, *, layout=None):
+            nonlocal elapsed
+            if layout is not None:
+                commands.append(["stage-pinned-stack"])
+                elapsed += 50
+            return original_prepare(engine, override)
+
+        engine.ensure_up = ensure_up
+        engine.stop = stop
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(runner, "RESULTS", Path(directory)), \
+                patch.object(runner, "WORK", Path(directory)), \
+                patch.object(runner, "prepare_pinned_stack", side_effect=prepare), \
                 patch.object(runner, "start_sampler", return_value=(None, None)), \
                 patch.object(runner.time, "monotonic", side_effect=lambda: elapsed), \
                 patch.object(runner, "wait_health", side_effect=wait_health), \
                 patch.object(runner, "http_json", side_effect=read), \
                 patch.object(runner, "http_json_write", side_effect=write):
-            record = runner.trial_w1(runner.RunContext("w1-test"), engine, "warm")
+            (Path(directory) / "inputs/w8-portfolio-v6/layout").mkdir(parents=True)
+            engine.socket = "unix://" + str(Path(directory) / "docker.sock")
+            ctx = runner.RunContext("w1-test")
+            ctx.workload_params["cold"] = cold
+            record = runner.trial_w1(ctx, engine, "cold" if cold else "warm")
         return record, commands, restarted
 
     def test_requires_acknowledged_writes_and_exact_reads_across_owned_restart(self):
@@ -118,6 +150,22 @@ class W1Tests(unittest.TestCase):
                 if fault != "cleanup failed":
                     self.assertNotIn("db_restart_to_verified_s", record["metrics"])
                 json.dumps(record)
+
+    def test_cold_start_excludes_import_and_teardown_from_startup_measurement(self):
+        record, commands, _ = self.execute(cold=True)
+        self.assertTrue(record["correctness"]["ok"], record["validation_errors"])
+        self.assertEqual(record["design"], "cold-start-diagnostic")
+        self.assertEqual(record["metrics"]["cold_daemon_ready_s"], 2.)
+        self.assertEqual(record["metrics"]["cold_roundtrip_s"], 3.25)
+        self.assertTrue(record["correctness"]["checks"]["cold_pinned_images_preserved"])
+        self.assertEqual([cmd[0] for cmd in commands if cmd[0] in ("start-daemon", "stop-daemon", "stage-pinned-stack")],
+                         ["start-daemon", "stage-pinned-stack", "stop-daemon", "start-daemon"])
+
+    def test_cold_start_refuses_to_reuse_a_live_preparation_socket(self):
+        record, commands, _ = self.execute("socket remains", cold=True)
+        self.assertFalse(record["correctness"]["ok"])
+        self.assertIn("did not release", record["validation_errors"][0])
+        self.assertEqual(commands.count(["start-daemon"]), 1)
 
 
 if __name__ == "__main__":

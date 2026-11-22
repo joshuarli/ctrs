@@ -1259,6 +1259,7 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
     started = False
     sampler = trace = None
     t0 = None
+    cold_started = None
 
     def compose(args):
         return engine.sh(["compose", "-f", str(COMPOSE_FILE), "-f", str(override),
@@ -1308,8 +1309,31 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
     try:
         if fixture_version != W1_FIXTURE_VERSION:
             raise ValueError("W1 fixture version mismatch")
+        if rec["workload_params"].get("cold") is True:
+            rec["design"] = "cold-start-diagnostic"
+            if engine.name != "ctrs" or engine.external:
+                raise ValueError("W1 cold start requires an owned native ctrs daemon")
+            layout = WORK / "inputs/w8-portfolio-v6/layout"
+            if not layout.is_dir():
+                raise ValueError(f"W1 cold start requires the pinned portfolio at {layout}")
+            engine.ensure_up()
+            if engine.proc is None or engine.proc.poll() is not None:
+                raise ValueError("W1 cannot establish the owned preparation daemon")
+            _, prepared_inputs = prepare_pinned_stack(engine, override, layout=layout)
+            engine.stop()
+            if engine.proc is not None or Path(engine.socket.removeprefix("unix://")).exists():
+                raise ValueError("W1 preparation daemon did not release its private socket")
+            cold_started = time.monotonic()
         engine.ensure_up()
+        if cold_started is not None:
+            if engine.proc is None or engine.proc.poll() is not None:
+                raise ValueError("W1 cold startup did not launch an owned daemon")
+            rec["metrics"]["cold_daemon_ready_s"] = time.monotonic() - cold_started
         refs, rec["inputs"] = prepare_pinned_stack(engine, override)
+        if cold_started is not None:
+            if rec["inputs"] != prepared_inputs:
+                raise ValueError("W1 preinstalled images changed across cold start")
+            checks["cold_pinned_images_preserved"] = True
         rec["paired_inputs"] = {key: rec["inputs"][key] for key in ("portfolio_sha256", "seed_sha256")}
         sampler, trace = start_sampler(engine, trial_dir)
         started = True
@@ -1328,6 +1352,8 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
                 or not re.fullmatch(r"rt-[0-9]+", str(rt.get("cache_token")))):
             raise ValueError("W1 initial DB/cache roundtrip differs from pin")
         rec["metrics"]["time_to_roundtrip_s"] = round(time.monotonic() - t0, 3)
+        if cold_started is not None:
+            rec["metrics"]["cold_roundtrip_s"] = time.monotonic() - cold_started
         checks["roundtrip"] = True
         for service in ("api", "cache"):
             inspect_service(service)
@@ -3636,6 +3662,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     trial = trials[case_id]
     if case_id == "W4":
         kw.setdefault("fixture_version", W4_LATENCY_VERSION)
+    if case_id == "W1" and cold:
+        state = "cold"
     if case_id == "W2" and pair_id is not None:
         kw["pinned_stack"] = True
     defaults = {name: parameter.default
@@ -3656,8 +3684,11 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         # Socket paths must stay under SUN_LEN (~104): keep cold engine
         # dirs short and outside the deep results tree.
         short = f"{engine_name}-cold-{ctx.run_id[-6:]}-{time.time_ns() % 100000:05d}"
+        fresh_dir = WORK / "engines" / short
+        if case_id == "W1":
+            fresh_dir.mkdir(parents=True, exist_ok=False)
         engine = Engine(engine_name, ctx.run_id,
-                        fresh_dir=WORK / "engines" / short,
+                        fresh_dir=fresh_dir,
                         resource_lane=ctx.resource_lane)
         stop = True
     else:
@@ -3913,6 +3944,8 @@ def prepare_engines(args, w5_image_archive: Path) -> int:
 def cmd_run(args) -> int:
     ctx = RunContext(f"run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
                      f"{random.randint(0, 0xffff):04x}")
+    if args.case == "W1" and args.cold:
+        ctx.resource_lane = "installed-default"
     kw = {}
     if args.case in ("W2", "W8", "W10", "W11"):
         kw = {"concurrency": args.concurrency, "duration": args.duration,
