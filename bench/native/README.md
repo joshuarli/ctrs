@@ -52,7 +52,8 @@ count. Scenario workloads wait (up to `--quiet-timeout`, default 2 h) for
 remains and the 1-minute load is below 4. Scenario cohorts also pass
 `--max-pairs 16`: the runner keeps adding pairs until ten are admitted
 (correct, at most 2 cores busy outside the engine and harness) or 16
-have run. Every pair, admitted or not, stays in the record.
+have run. It exits 1 if the admission target is unmet and keeps every
+attempt in the record.
 
 Each run writes `.work/native-perf/pyramid/<UTC>/`: a log per workload,
 `summary.json` and `summary.md` with exit status, duration, the

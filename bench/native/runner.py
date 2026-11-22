@@ -4225,9 +4225,10 @@ def cmd_baseline(args) -> int:
         clone_warm_engine(candidate_dir(ctx.run_id))
     rng = random.Random(args.seed)
     failed = False
+    max_pairs = getattr(args, "max_pairs", None)
     try:
         import reporting
-        limit = max(args.pairs, getattr(args, "max_pairs", None) or args.pairs)
+        limit = max(args.pairs, max_pairs or args.pairs)
         admitted = pair = broken_pairs = 0
         while pair < limit and (admitted < args.pairs if limit > args.pairs else pair < args.pairs):
             pair += 1
@@ -4319,6 +4320,10 @@ def cmd_baseline(args) -> int:
             if not linux_lane.enabled():
                 engine.stop()
     print(f"results: {ctx.jsonl}")
+    if max_pairs is not None and admitted < args.pairs and not failed:
+        print(f"admitted {admitted} of {args.pairs} required pairs after {pair} attempts",
+              file=sys.stderr)
+        failed = True
     return 1 if failed else 0
 
 
@@ -4487,7 +4492,8 @@ def main() -> int:
     p.add_argument("--b", required=True, choices=linux_lane.ENGINES)
     p.add_argument("--max-pairs", type=int,
                    help="keep running pairs past --pairs until --pairs of them are admitted "
-                        "(correct and uncontended) or this many have run; every pair stays in the record")
+                        "(correct and uncontended) or this many have run; exit 1 if the target "
+                        "is unmet; every pair stays in the record")
     allocation = p.add_mutually_exclusive_group()
     allocation.add_argument("--candidate-cpus", type=int,
                    help="same-engine candidate: slot b runs ctrs with CTRS_CPUS=N in its own warm "

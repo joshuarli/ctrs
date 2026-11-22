@@ -866,6 +866,22 @@ class ExitStatusTests(unittest.TestCase):
             self.assertEqual(runner.cmd_baseline(args), 0)
         self.assertEqual(sorted(set(calls)), [1, 2, 3])
 
+    def test_max_pairs_returns_failure_when_the_admission_target_is_unmet(self):
+        args = argparse.Namespace(a="ctrs", b="orbstack", seed=3, pairs=2, max_pairs=3,
+                                  randomize=False, case="W1", state="warm", cold=False)
+        context = Mock(engines={}, jsonl="trials.jsonl")
+        row = {"correctness": {"ok": True}, "metrics": {},
+               "host_load": {"cpus": 10, "start": [11.0], "end": [11.0]}}
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "check_baseline_setup"), \
+                patch.object(runner, "run_one", return_value=row) as trial, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        self.assertEqual(trial.call_count, 6)
+        self.assertIn("admitted 0 of 2", err.getvalue())
+        self.assertIn("results: trials.jsonl", out.getvalue())
+
     def test_cohort_stops_after_consecutive_broken_pairs(self):
         args = argparse.Namespace(a="ctrs", b="orbstack", seed=3, pairs=10, max_pairs=16,
                                   randomize=False, case="W1", state="warm",
