@@ -489,6 +489,20 @@ installed-default --content retained` with the v6 layout and signed
 binary. Use `--content derived` for the other condition. The ten-pair
 timing cohorts and comparable backing-allocation measurements remain open.
 
+The two installed-default checks with concurrent API load passed on
+`8f23986`. Each engine completed 35,159 reads and 14,841 writes, verified
+every persisted payload, and recorded successful completions during each of
+the four pull intervals. All four legs verified the deployment and retained
+pins, passed their host gates and reported complete physical footprint.
+ctrs used host NAT. Each check supplies one valid pair.
+
+| Content | Run | `trials.jsonl` SHA-256 |
+| --- | --- | --- |
+| Retained | `w8-paired-fa188fe00a13` | `dd0abc5597c7ef85db7d8e2647ee1098b9a3e293f8b17c91d0923d87662ed830` |
+| Derived | `w8-paired-eb317bd82df9` | `7e2d21f324dfa2604626c11c7fb1412e096c659c4d9e56b6c948e46b743358fc` |
+
+Add `--under-load` to the one-pair command to reproduce these checks.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
