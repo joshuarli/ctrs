@@ -342,11 +342,9 @@ workload-phase engine CPU was 48.87 s on ctrs and 39.03 s on OrbStack.
 The API cgroup recorded medians of 26.61 s and 21.06 s respectively,
 including counter-reader execution. On the host, the ctrs VM helper used
 46.68 s and the ctrs daemon used 2.17 s. OrbStack's helper used 39.03 s.
-The process split puts most of the measured gap in the VM helper. It
-does not attribute that time to guest scheduling, transport, or app code.
-Run the eight-client guest-direct cohort and the paired fixed-rate
-conditions next. Guest-direct engine CPU includes the in-guest load client,
-so compare its engine totals within that placement.
+The process split puts most of the measured gap in the VM helper. Its CPU
+total combines guest scheduling, transport and app code. See the
+[guest-direct cohort below](#installed-default-w2-container-to-container-fixed-work-cohort).
 
 ```sh
 export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
@@ -356,6 +354,45 @@ python3 bench/native/reporting.py --match base-20261122T081048-91d4
 
 `trials.jsonl` SHA-256
 `5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
+
+### Installed-default W2 container-to-container fixed-work cohort
+
+Run `base-20261122T091635-df7a` used clean source `c26aaac` and the
+same signed binary and guest assets as the published-port cohort. All ten
+alternating pairs matched the v6 portfolio, SQL seed, load client and API
+file receipts. Each leg completed 50,000 mixed read/write requests at
+eight-client concurrency, verified every persisted write and recorded
+zero errors. Both guests had 9 vCPUs. Guest MemTotal was 8,407,957,504 bytes
+on ctrs and 63,157,620,736 on OrbStack 2.2.5 (Docker 29.8.2). Maximum
+outside-engine CPU during the workload was 0.83 core.
+
+| Metric | Paired median ratio | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Measured engine CPU per verified request | 1.1306 | 1.1234–1.1434 | Loss |
+| Sampled peak physical footprint | 0.4427 | 0.4124–0.4627 | Strict win |
+| Request rate (OrbStack / ctrs) | 0.5814 | 0.5764–0.5898 | Strict win |
+| API p50 | 0.5946 | 0.5910–0.6080 | Strict win |
+| API p95 | 0.4793 | 0.4728–0.4839 | Strict win |
+| API p99 | 0.4544 | 0.4443–0.4592 | Strict win |
+
+Lower ratios favor ctrs. Median request rates for this fixed work were
+2,144 and 1,247 requests/s on ctrs and OrbStack, respectively. The
+limiting component at eight-client concurrency remains unknown. The CPU
+loss persists with zero ctrs host NAT connections. Median workload-phase
+engine CPU was 39.19 s on ctrs and 34.54 s on OrbStack, including the
+in-guest client on both engines. The API cgroup recorded medians of 24.10 s
+and 19.98 s including counter-reader execution. These process totals
+leave the CPU contribution of each transport unresolved. The paired
+fixed-offered-rate conditions remain pending.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w2-container-to-container-fixed-work-c8:cohort
+python3 bench/native/reporting.py --match base-20261122T091635-df7a
+```
+
+`trials.jsonl` SHA-256
+`2ddff2311be62f118080899d69f8c798d90babb77a849000101e0abd3b744899`.
 
 ### Installed-default W13 overlap cohort
 
