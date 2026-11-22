@@ -156,6 +156,30 @@ oneshot cases); `tests/fuse-inode-bound.sh` exit 0 (150,000-file walk, peak
 optional Rosetta pulls (`amd64/alpine:3.22`, `node:22-alpine`), not engine
 results. These setup checks preceded the resumed cohorts.
 
+### Combined release confirmation
+
+After `cargo xtask all`, record the SHA-256 hashes of the signed binary,
+kernel and initramfs. Verify the ad-hoc signature and virtualization
+entitlement. Record the build source revision and the kernel build identity
+when using a previously built `Image`.
+
+Run `make test` from the confirmation checkout. Set `CTRS_BINARY` to the
+absolute path of the verified artifact and `CTRS_GUEST_DIR` to the matching
+guest directory when running `conformance/smoke.sh`. The smoke script checks
+the existing signature before using the binary. Run `tests/watch-recovery.sh`,
+`tests/fuse-inode-bound.sh` and `tests/e2e.sh` with a dedicated ctrs daemon on
+those assets and a fresh private data root, state and Unix socket. Start the
+daemon with `CTRS_TEST_FSEVENTS_GATE` pointing to a private file path, and set
+`CTRS_DAEMON_LOG` to its log for watch recovery. The e2e script also checks the
+guest kernel feature probes. Keep the Docker client and builder state private.
+
+Build the agent's layer tests from the same source with
+`cargo test -p ctrs-init --target aarch64-unknown-linux-musl --release --no-run`.
+Run the resulting test executable with the `linux::layers::tests::` filter in
+a root ARM64 Linux container served by that private Mac VM. Include the gzip
+member concatenation and truncated-stream cleanup assertions. Verify the
+artifact hashes again after all checks and retain results by command.
+
 `bench/native/runner.py prepare` succeeded on both engines. W12's
 `fixtures/w12/prepare.py` fails closed: the source archive and lock match
 their pins and the first five diff IDs match, but the rebuilt

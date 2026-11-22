@@ -33,8 +33,16 @@ rm -rf "$DATA" "$HOME_DIR"
 mkdir -p "$HOME_DIR"
 rm -f "$SOCK"
 
-step 'build + ad-hoc sign host binary'
-if cargo xtask host >>"$LOG" 2>&1; then
+if [ -n "${CTRS_BINARY:-}" ]; then
+  step 'verify prebuilt signed host binary'
+  if [ -x "$CTRS_BINARY" ] && codesign --verify --strict "$CTRS_BINARY" >>"$LOG" 2>&1; then
+    BIN=$CTRS_BINARY
+    ok 'prebuilt host binary signed'
+  else
+    bad 'prebuilt host binary missing, non-executable or invalidly signed'
+    BIN=""
+  fi
+elif step 'build + ad-hoc sign host binary' && cargo xtask host >>"$LOG" 2>&1; then
   BIN=$ROOT/target/release/ctrs
   [ -x "$BIN" ] && ok 'host binary built + signed' || bad 'host binary missing'
 else
