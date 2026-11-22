@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -62,6 +63,53 @@ class Selection(unittest.TestCase):
 
     def test_skip_removes_a_workload(self):
         self.assertEqual(names(self.select("edit", skip=["manifest"])), ["harness-tests"])
+
+    def test_warm_w2_cohorts_cover_every_declared_load_cell(self):
+        qualified = json.loads((pyramid.HERE / "qualification-cells.json").read_text())
+        expected = {cell["load"] for cell in qualified.values()
+                    if cell["workload"] == "W2" and cell["state"] == "warm"}
+        actual = []
+        for workload in self.select("scenario", area=["api"]):
+            if workload.tier != "scenario" or "--case" not in workload.argv:
+                continue
+            argv = workload.argv
+
+            def value(flag):
+                return argv[argv.index(flag) + 1]
+
+            if value("--case") != "W2" or workload.design != "paired":
+                continue
+            location = {"host": "published-port", "guest": "container-to-container"}[value("--client-location")]
+            if "--request-rate" in argv:
+                self.assertEqual((value("--operations"), value("--request-rate"), value("--concurrency")),
+                                 ("10000", "500", "4"))
+                actual.append(f"{location}-fixed-offered-rate")
+            elif "--operations" in argv:
+                self.assertEqual(value("--operations"), "50000")
+                actual.append(f"{location}-fixed-work-c{value('--concurrency')}")
+            else:
+                self.assertEqual(value("--duration"), "20")
+                actual.append(f"{location}-saturation-c{value('--concurrency')}")
+            self.assertEqual(value("--pairs"), "10")
+        self.assertCountEqual(actual, expected)
+
+    def test_w10_targets_keep_shared_engine_interruptions_out_of_cohorts(self):
+        by_name = {w.name: w for w in self.items}
+        for name, target, guard in (
+            ("w10-db-recovery:cohort", "db", "pinned-portfolio"),
+            ("w10-queue-recovery:cohort", "queue", "w4-image"),
+        ):
+            entry = by_name[name]
+            self.assertIn("baseline", entry.argv)
+            self.assertEqual(entry.argv[entry.argv.index("--interrupt-service") + 1], target)
+            self.assertIn(guard, entry.requires)
+        owned = by_name["w10-engine-recovery"]
+        self.assertNotIn(owned, self.select("scenario"))
+        self.assertIn(owned, self.select(name=[owned.name]))
+        self.assertIn("run", owned.argv)
+        self.assertEqual(owned.argv[owned.argv.index("--engine") + 1], "ctrs")
+        self.assertIn("w8-layout", owned.requires)
+        self.assertFalse(owned.report)
 
 
 class Entrypoint(unittest.TestCase):

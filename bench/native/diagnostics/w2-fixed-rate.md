@@ -50,11 +50,17 @@ TMPDIR=$PWD/.work/tmp PYTHONDONTWRITEBYTECODE=1 python3.14 \
 ```
 
 Standalone `run` uses the exploratory Compose inputs. W2 `baseline` requires
-the common W8 v2 images preinstalled. It checks image IDs, ordered DiffIDs,
+the current common W8 images preinstalled. It checks image IDs, ordered DiffIDs,
 the seed and the running API image's source files. Priming the API image
 starts the VM before sampling. The paired report requires matching input
 receipts. Timing qualification also requires signed binary and boot
 identities, explicit resource settings, pre/post readiness and exclusivity.
+
+`pyramid.py list --area api --tier scenario` lists the warm paired grid.
+The two `fixed-offered-rate:cohort` selections each schedule 10,000 requests
+at 500 per second with four clients. The fixed-work and saturation cohorts
+each cover 1, 4, 8 and 16 clients on each path. `w2-api:cohort` is the
+published-port, eight-client fixed-work condition.
 
 `runner.py check w2` covers actual local HTTP counts and exact writes, a
 deliberately delayed server's visible backlog, and controlled-clock pacing that

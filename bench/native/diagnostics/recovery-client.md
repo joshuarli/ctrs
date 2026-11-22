@@ -93,8 +93,8 @@ and the planned Redis downtime is three seconds. The API/database workload
 mix options apply to those two conditions.
 
 ```sh
-python3.14 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
-  --interrupt-service queue --concurrency 4 --pairs 10
+python3.14 bench/native/pyramid.py run --name w10-recovery:cohort \
+  --name w10-db-recovery:cohort --name w10-queue-recovery:cohort
 ```
 
 The fixture enables Redis AOF with `appendfsync always` and a fresh named
@@ -142,8 +142,7 @@ private guest disk. It sends SIGKILL only to its own daemon child and waits
 for both old processes to exit before restarting.
 
 ```sh
-python3.14 bench/native/runner.py run --case W10 --engine ctrs \
-  --interrupt-service engine --duration 90
+python3.14 bench/native/pyramid.py run --name w10-engine-recovery
 ```
 
 The runner restores the original Compose project without rebuilding or
@@ -176,4 +175,10 @@ test_registry_portfolio test_w4`. All 91 focused tests passed. They cover
 a simulated engine interruption on the local HTTP fixture, identity and
 artifact rejection, refusal to signal a foreign daemon, and waiting for
 the old VM. An equivalent OrbStack engine interruption still requires
-an isolated target.
+a dedicated native target with the same interruption boundary. This Mac
+uses OrbStack's shared Docker socket. OrbStack Linux machines share its
+VM kernel, and `orb restart docker` acts on the Docker engine. Restarting
+an OrbStack Linux machine supplies a machine-recovery result. A
+Docker-engine restart on the shared socket affects other projects.
+[OrbStack architecture](https://docs.orbstack.dev/architecture) and
+[command-line controls](https://docs.orbstack.dev/headless).
