@@ -232,6 +232,13 @@ PY2
       sleep .1
     done
     if ! tail -c +"$CONSOLE_OFFSET" "$DATA/vm-console.log" | rg -q 'host change events did not fit; the share is rescanned'; then triggered=0; fi
+    # The daemon flushes the buffered gate events on the next FSEvents
+    # callback, which can arrive after the guest's rescan. Wait for that
+    # flush before asserting that each real event was captured.
+    for i in $(seq 1 300); do
+      if tail -c +"$LOG_OFFSET" "$LOG" | rg -q 'test gate delivered guest overflow batch'; then break; fi
+      sleep .1
+    done
   fi
   if [ "$triggered" != 1 ]; then
     echo "FAIL $CASE: loss condition not observed"; FAIL=1
