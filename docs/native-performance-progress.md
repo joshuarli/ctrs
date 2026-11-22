@@ -171,7 +171,7 @@ were lost with scratch. Recover their exact private-built images from an
 archived artifact if available. A rebuild that changes an image pin
 requires a new fixture version and fresh results for its consumers.
 
-W6 completed and W7 started independently of the common portfolio.
+W6 and W7 completed independently of the common portfolio.
 Once the pinned common inputs are restored or replaced with verified
 versioned fixtures, run `w13-overlap:cohort`,
 `w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
@@ -218,8 +218,44 @@ python3 bench/native/reporting.py --match base-20261122T063709-0627
 `d1fe8a523db792ebf118804489839db138f0af704d8be8858d9700a71aa9203e`.
 This covers uncached builds under installed defaults. Warm builds,
 complete CPU accounting and fresh confirmation remain open.
-W7 started from the same harness and assets in run
-`base-20261122T065539-5b0c`.
+
+### Installed-default W7 cohort
+
+Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
+signed binary, guest assets and engine allocations as W6. Each engine
+completed all 10 trials. Each trial built and loaded Hyperfine 2.0.0 and
+HTTPie 3.2.4 in uncached, warm and one-file incremental states and ran
+each image. BuildKit progress verified cache behavior. All expected
+versions and per-build notes matched. No pairs were rejected. The
+maximum measured outside-engine CPU was 1.49 cores.
+
+All entries below are paired median ctrs / OrbStack timing ratios with
+95% confidence intervals.
+
+| App and state | Build and load | First use |
+| --- | ---: | ---: |
+| Hyperfine uncached | 0.886 [0.875, 0.893] | 0.114 [0.090, 0.121] |
+| Hyperfine warm | 0.416 [0.363, 0.422] | 0.058 [0.057, 0.061] |
+| Hyperfine incremental | 0.267 [0.259, 0.278] | 0.074 [0.071, 0.078] |
+| HTTPie uncached | 0.783 [0.771, 0.799] | 0.589 [0.574, 0.605] |
+| HTTPie warm | 0.417 [0.412, 0.426] | 0.295 [0.291, 0.309] |
+| HTTPie incremental | 0.308 [0.297, 0.329] | 0.313 [0.302, 0.326] |
+
+All twelve timing cells cleared the strict-win threshold under the
+installed defaults. The cohort does not isolate which build or engine
+phase drives the differences. Sampled peak physical footprint was
+inconclusive at 1.088 [0.923, 1.345], with all pairs sampled. Engine CPU
+remains incomplete because all ten ctrs trials used host NAT. W7
+remains open for resource parity and independent confirmation.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w7-buildx:cohort
+python3 bench/native/reporting.py --match base-20261122T065539-5b0c
+```
+
+`trials.jsonl` SHA-256
+`fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
 
 ## Linux lane pilot (amd64) — 2026-11-21
 

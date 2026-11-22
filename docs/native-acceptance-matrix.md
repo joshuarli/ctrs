@@ -32,7 +32,7 @@ OrbStack's). Never pool lanes.
 | W4 | Queue workers 1/4/16 | yes | yes | yes (one-pair pilot `base-20261120T061132-4479`, inputs from `prepare --only W4`) | no | unmeasured |
 | W5 | Marked esbuild watch (bind, volume) | yes | yes | yes (one-pair pilot `base-20261120T061159-14e4`) | no | unmeasured; 5 edits per trial cannot support tails |
 | W6 | Default-builder Rust+C CI build | yes | yes | yes | D: `base-20261122T063709-0627` (10/10 pairs, source `2910f31`, both engines 9 vCPUs) | **Physical footprint loss** 1.364× [1.182, 1.485], with complete samples. Rust build 0.944× [0.932, 0.951] non-inferior and zlib build 0.524× [0.513, 0.643] strict win. CPU incomplete due to host NAT accounting. Warm-build cohort open. [Evidence and reproduction](native-performance-progress.md#installed-default-w6-cohort) |
-| W7 | Default buildx → loaded images | yes | yes | yes | D: `base-20261120T150445-1408` (10/10 pairs, source `0536435`) | D: hyperfine uncached build 0.997× [0.957, 1.02] non-inferior; every other cell a strict win: hyperfine warm 0.476×, incremental 0.304×, first use 0.07–0.15×; httpie uncached 0.726×, first use 0.511×. Resources **incomplete** (8 sampled pairs) |
+| W7 | Default buildx → loaded images | yes | yes | yes | D: `base-20261122T065539-5b0c` (10/10 pairs, source `2910f31`, both engines 9 vCPUs) | All 12 build/load and first-use timings cleared the strict-win threshold. Hyperfine uncached 0.886× [0.875, 0.893]; HTTPie uncached 0.783× [0.771, 0.799]. Footprint 1.088× [0.923, 1.345] inconclusive. CPU incomplete due to host NAT accounting. [Evidence and reproduction](native-performance-progress.md#installed-default-w7-cohort) |
 | W8 | Pull-to-healthy from local registry (w8-v5) | yes | yes | yes (functional gate, both engines) | no | unmeasured |
 | W9 | Parallel fixed build/test jobs | yes | yes | yes (one-pair pilot `base-20261120T061332-4abb`, pinned Marked digest) | no | unmeasured |
 | W10 | Interrupt/recover service/DB/queue | yes | yes | yes (one-pair pilot, change tier) | no | unmeasured; engine-interruption parity needs isolated OrbStack |
@@ -104,7 +104,8 @@ networking) and **qualified** (none yet).
 5. W6 sampled peak physical footprint 1.36× loss in the resumed
    installed-default cohort. The VZ helper retained the allocation
    across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
-6. Unscored: W1, W4, W5, W8, W9, W10 (pilots at most). W7 rerun pending.
+6. W7 sampled peak physical footprint inconclusive and CPU incomplete.
+   Unscored: W1, W4, W5, W8, W9, W10 (pilots at most).
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.
