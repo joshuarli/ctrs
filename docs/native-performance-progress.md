@@ -525,6 +525,30 @@ open. The functional proof used the bounded-working-set workload.
 `plan.json` SHA-256
 `ae60b1e3bbdf0c5e32f01f24a1ccaa4bb08fea26b28b518efab26726cf1593bb`.
 
+The v5 resource observation `w11-mixed-20261122T091336-64f6` passed
+two exact cycles on each engine at source `8f23986`. All four
+post-cleanup intervals ran for 32.10–32.15 seconds and returned verified
+physical footprint, descriptor counts and backing allocation. For ctrs,
+allocation covered the isolated VM data disk. For OrbStack it covered the
+engine's open `data.img.raw` and `swap.img`. APFS shared extents remain
+outside the exclusive-allocation scope. Cleanup passed with zero errors.
+The resource budget needs a warmup plus five subsequent observations.
+These two cycles per engine verify collection and leave growth and
+12-hour reliability open.
+
+To reproduce, use the v5 worker and v6 portfolio in the mixed-pilot command
+with `--cycles 2 --resource-observation-seconds 32` and a fresh
+`--ctrs-root`. Pass `--orbstack-storage-file` for each of the two files
+under the running engine's group-container data directory. The collector
+verifies each open backing identity on every observation.
+
+`trials.jsonl` SHA-256
+`a5de6b5abcd8bbadb6df97e459d950e72311569934f87cb9f0730fcae60107e2`.
+`plan.json` SHA-256
+`f11ee0bedc4add94082efac2dc2cff895d29135bb0ff6c43bd9f95ba725ae520`.
+`driver-result.json` SHA-256
+`f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0`.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
