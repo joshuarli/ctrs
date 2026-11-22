@@ -1739,6 +1739,13 @@ start ticks. The current reporter admitted the pair after checking the
 ordered result hashes. Raw trials SHA-256
 `683df1ceb49d7476fe191d6fb43ec9927493f72855fb1c3e13951b0d6bc3d2da`.
 
+Named-volume admission `base-20261122T135409-22b2` used the same harness
+and signed release. Both engines verified all 120 results using
+`UseFsEventsOnParentDirectory`. There were no missed or stale results
+and each watcher kept its PID and start ticks. The current reporter
+admitted the pair. Raw trials SHA-256
+`d552ae484e500a1a8a1d2f18de04e3ade485374b2efc003458013a9df0038f3d`.
+
 ```sh
 for mount in bind volume; do
   python3 bench/native/runner.py baseline --case W12-watch --watch-mount "$mount" \
@@ -1769,7 +1776,9 @@ Median trial p50 was 0.649 s on ctrs and 0.724 s on OrbStack. Host polling
 of the compiled output is part of the latency. No ctrs leg reported a
 host NAT connection. Setup added a median 28.80 engine CPU-seconds per
 pair, while edits used 6.83 fewer CPU-seconds. The setup phase includes
-installing and checking the workspace and waiting for the initial build.
+mount preparation, the offline install, the installed-tree verification
+walk, a standalone TypeScript compile and the watcher's initial compile.
+The receipt gives a single CPU total for those operations.
 Raw trials SHA-256
 `a39223750c6e0a1aad9981ab249982e0a7b76d379b430d1261cc8441a2d144dc`.
 
