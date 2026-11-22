@@ -654,6 +654,43 @@ Pass the following run directories, in order, to
 Batch log SHA-256
 `f620b515afc922f5e6c6b96c32f05d44a58a25fe1076e55f0025519436187f04`.
 
+#### Outside-engine CPU admission
+
+The native block `w2-guest-client-cpu-leaf-20261122T104218-c699` exercised
+the new host-counter receipts at source `bbe7b30` with the same signed
+artifacts and 49 Hz observer. Each leg verified 35,140 reads and 14,860
+writes, with zero errors and clean teardown. The profiling legs sampled
+all nine API threads with raw event coverage verified. The smallest
+thread sample counts were 42 on ctrs and 26 on OrbStack.
+
+| Engine | Profiler off, outside-engine cores | Profiler on, outside-engine cores |
+| --- | ---: | ---: |
+| ctrs | 0.161 | 0.190 |
+| OrbStack | 0.793 | 0.787 |
+
+All four phase receipts had complete process CPU boundaries and both host
+gate calls exited zero for each leg. The ctrs post-run hot-process lists
+named PID 1902, which was the owned VM in both boundary receipts. The
+report admitted one of the ten blocks required for an overhead verdict.
+Independent review of host processes remains required. The previous nine
+valid 49 Hz blocks use the older admission policy and stay separate. The
+25 Hz observer has its own pending admission.
+
+```sh
+python3 bench/native/diagnostics/syscall_pilot.py \
+  --tools-archive "$native_tools_tar" --image-refs "$common_refs_json" \
+  --ctrs-binary target/release/ctrs --profile-kind cpu-leaf \
+  --client-location guest --operations 50000 --concurrency 8
+python3 bench/native/diagnostics/w2_observer_report.py \
+  .work/native-perf/results/w2-guest-client-cpu-leaf-20261122T104218-c699
+```
+
+Use the API, PostgreSQL and Redis references from the same v6 portfolio
+loaded by both engines. The tool archive SHA-256 is
+`990b13e40dcd7726198911b133c2ac59a7df8576f7c914b88b5f4b6527340ae4`.
+The block's `plan.json` SHA-256 is
+`bef3d2d0f196dbce83946622e1177e186a659cdc2d250461acb132a441689499`.
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
