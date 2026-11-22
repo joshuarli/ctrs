@@ -137,29 +137,30 @@ def evaluate_cycles(initial, cleanup_values, *, warmup_cycles, minimum_cycles,
 
 def _private_bytes(path, original):
     # sys/attr.h and getattrlist(2) define a 4-byte packed returned-attribute record.
-    returned_attrs, private_size, extended = 0x80000000, 0x8, 0x20
-    request = ctypes.create_string_buffer(struct.pack('=HH5I', 5, 0, returned_attrs, 0, 0, 0, private_size))
-    response = ctypes.create_string_buffer(struct.calcsize('=I5Iq'))
-    read = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True).fgetattrlist
-    read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
+    returned_attrs, devid, objtype, fileid = 0x80000000, 0x2, 0x8, 0x02000000
+    linkcount, private_size = 0x1, 0x8
+    nofollow, extended = 0x1, 0x20
+    regular_file = 1  # VREG from sys/vnode.h
+    common = returned_attrs | devid | objtype | fileid
+    request = ctypes.create_string_buffer(struct.pack('=HH5I', 5, 0, common, 0, 0, linkcount, private_size))
+    layout = struct.Struct('=6IiIQIq')
+    response = ctypes.create_string_buffer(layout.size)
+    read = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True).getattrlist
+    read.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
     read.restype = ctypes.c_int
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        current = os.fstat(fd)
-        if ((current.st_dev, current.st_ino) != (original.st_dev, original.st_ino)
-                or not stat.S_ISREG(current.st_mode) or current.st_nlink != 1):
-            raise ValueError('private allocation requires the same singly linked regular file')
-        if read(fd, request, response, len(response), extended):
-            error = ctypes.get_errno()
-            raise OSError(error, os.strerror(error))
-        length, common, _, _, _, returned, value = struct.unpack('=I5Iq', response.raw)
-        if not returned & private_size:
-            raise OSError(errno.ENOTSUP, 'private allocation attribute was not returned')
-        if length != len(response) or common != returned_attrs or value < 0:
-            raise ValueError('invalid private allocation attribute response')
-        return value
-    finally:
-        os.close(fd)
+    if read(os.fsencode(path), request, response, layout.size, nofollow | extended):
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    length, common_mask, _, _, file_mask, extended_mask, device, kind, inode, links, value = (
+        layout.unpack(response.raw)
+    )
+    if common_mask != common or file_mask != linkcount or extended_mask != private_size:
+        raise OSError(errno.ENOTSUP, 'private allocation or identity attributes were not returned')
+    if length != layout.size or value < 0:
+        raise ValueError('invalid private allocation attribute response')
+    if (device, inode) != (original.st_dev, original.st_ino) or kind != regular_file or links != 1:
+        raise ValueError('private allocation requires the same singly linked regular file')
+    return value
 
 
 def allocation_snapshot(paths, *, include_private=False):
@@ -203,5 +204,5 @@ def allocation_snapshot(paths, *, include_private=False):
             'exclusive_allocated_bytes': (sum(f['exclusive_allocated_bytes'] for f in files)
                                           if private_status == 'ok' else None),
             'exclusive_allocation_status': private_status, 'exclusive_allocation_errors': private_errors,
-            'exclusive_allocation_method': 'fgetattrlist ATTR_CMNEXT_PRIVATESIZE on macOS',
+            'exclusive_allocation_method': 'getattrlist ATTR_CMNEXT_PRIVATESIZE on macOS',
             'filesystem_free_method': 'statvfs.f_bavail * f_frsize'}

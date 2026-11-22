@@ -1,4 +1,5 @@
 import copy
+import errno
 import os
 from pathlib import Path
 import sys
@@ -103,6 +104,36 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(cells.evaluate_cycles(100, [110, 112, 114, None, 118, 125], **args)['status'], 'unknown')
         args['reference_growth'] = None
         self.assertEqual(cells.evaluate_cycles(100, [110, 112, 114, 116, 118, 125], **args)['status'], 'unknown')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS file attributes')
+    def test_private_allocation_requires_a_matching_regular_file_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'disk'
+            path.write_bytes(b'x' * 65536)
+            original = path.stat()
+            try:
+                private_bytes = cells._private_bytes(path, original)
+            except OSError as error:
+                if error.errno == errno.ENOTSUP:
+                    self.skipTest('filesystem does not support private allocation attributes')
+                raise
+            self.assertGreater(private_bytes, 0)
+
+            parked = path.with_name('parked')
+            path.rename(parked)
+            path.write_bytes(b'y' * 65536)
+            with self.assertRaisesRegex(ValueError, 'same singly linked regular file'):
+                cells._private_bytes(path, original)
+
+            path.unlink()
+            path.symlink_to(parked)
+            with self.assertRaises((OSError, ValueError)):
+                cells._private_bytes(path, original)
+
+            path.unlink()
+            os.link(parked, path)
+            with self.assertRaisesRegex(ValueError, 'same singly linked regular file'):
+                cells._private_bytes(path, original)
 
     def test_sparse_file_allocation_and_missing_file(self):
         with tempfile.TemporaryDirectory() as directory:

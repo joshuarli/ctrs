@@ -1410,6 +1410,12 @@ files for the private allocation probe. Their ordinary allocation receipts
 passed the ownership checks. Both engines missed growth budgets in the
 short run, and both 12-hour legs remain open.
 
+A later `getattrlist` metadata check returned private allocation for both
+OrbStack files with the same device and inode IDs as the W11 receipt. The
+sampler now requests file identity and private allocation together. A new
+cycle is needed to measure private allocation growth. Metadata receipt
+SHA-256: `65cd55f1287288a29c4c4fc5231a962feab581e0edaed0d98bb58ce86f196ae2`.
+
 | Receipt | SHA-256 |
 | --- | --- |
 | `trials.jsonl` | `b4e684c256ca6eaaedc64cf054ffb2901699a0ae42e4f2dd0d495636bd46f947` |
