@@ -1713,6 +1713,13 @@ The reporter verifies that each watcher kept its PID and start ticks, and
 checks the edited paths and compiled output hashes of each result. The two
 engines must agree on the fixture inputs and the ordered edit receipts.
 
+Bind admission `base-20261122T130910-762c` on `b7c59e1` with signed
+`99db1aa` verified 120 results from 60 edit sequences on each engine,
+with zero missed or stale results. Each watcher retained its PID and
+start ticks. The current reporter admitted the pair after checking the
+ordered result hashes. Raw trials SHA-256
+`683df1ceb49d7476fe191d6fb43ec9927493f72855fb1c3e13951b0d6bc3d2da`.
+
 ```sh
 for mount in bind volume; do
   python3 bench/native/runner.py baseline --case W12-watch --watch-mount "$mount" \
