@@ -943,6 +943,49 @@ for both `--content retained` and `--content derived`, using the same
 binary, v6 layout and private store. Record the binary and boot asset
 hashes with the pull, cancellation and retry receipts.
 
+### Installed-default W10 API recovery cohort
+
+Run `base-20261122T104521-90d4` at `ca24add` admitted all ten alternating
+pairs. Both engines ran the same pinned v6 portfolio and SQL seed at
+installed defaults with 9 vCPUs. Eight clients ran persistent 20-second
+workloads with a 30% offered write mix. The owned API was interrupted after
+six seconds and held down for three seconds. Every acknowledged write was
+present and exact. Across the ten trials, ctrs verified 94,117 acknowledged
+writes plus 3 exact rows with interrupted acknowledgements. OrbStack
+verified 69,368 acknowledged writes plus 33 exact uncertain rows. Both
+engines recorded zero unexpected errors. Maximum measured outside-engine
+load was 1.02 cores.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired ratio and 95% CI |
+| --- | ---: | ---: | --- |
+| Start command to first exact read | 547.1 ms | 442.5 ms | 1.2385 [1.1952, 1.3145] |
+| Recovered request p99 | 6.79 ms | 11.16 ms | 0.6092 [0.5744, 0.6159] |
+| Measured engine CPU per successful response | 1,010 µs | 866 µs | 1.1671 [1.1482, 1.1734] |
+| Sampled peak physical footprint | 2.39 GB | 5.86 GB | 0.4036 [0.3913, 0.4100] |
+
+The start command itself took a median 21.6 ms on ctrs and 101.4 ms on
+OrbStack. Median time from command return to the first exact read was
+522.7 ms and 342.7 ms respectively. The gap is in the post-command
+readiness interval. The saturation driver recorded 45,178–48,620 expected
+outage failures per ctrs trial and 42,482–44,834 per OrbStack trial.
+Recovered p99 uses successful load after the first exact read. The CPU
+denominator counts successful load responses and the counter omits host
+NAT CPU. The measured CPU is already higher on ctrs. Database, queue and
+isolated whole-engine recovery remain separate cells.
+
+Reproduce at `ca24add` on `origin/campaign/w10-recovery-inputs` with
+the original signed Mac artifacts and the preloaded v6 image references.
+
+```sh
+python3 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
+  --resource-lane installed-default --interrupt-service api --pairs 10 \
+  --pair-quiet-load 4 --max-pairs 16
+python3 bench/native/reporting.py --match base-20261122T104521-90d4
+```
+
+`trials.jsonl` SHA-256
+`d8002cc4f1717f89df692e27ecbf5340d8b3893fc670ea8bb1a40a8e0b7772f3`.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
