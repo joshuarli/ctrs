@@ -427,6 +427,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
     result = {"identity": identity, "evidence_status": "pilot",
               "promotion_eligible": False, "engines": {}, "rejections": [],
               "metrics": [], "metadata_gaps": []}
+    unverified_storage_durability = sides == ("ctrs", "orbstack") and identity["case"] in ("W3", "W3-v4")
+    if unverified_storage_durability:
+        result["note"] = "Equivalent host storage durability is unverified. Ratios are diagnostic."
     if identity['case'] in ('W13', 'W14') and not verified_transfer:
         result["metadata_gaps"].append("paired_inputs (historical: image chosen by repository name, not verified)")
     if identity["case"] == "W2" and isinstance(params, dict) and params.get("request_rate") is not None:
@@ -584,6 +587,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
                                  for _, a, b in valid for record in (a, b))
             if incomplete_cpu and assessment in FAVORABLE + ("inconclusive", "loss"):
                 assessment = "incomplete"
+        if unverified_storage_durability and assessment in FAVORABLE:
+            assessment = "durability-unverified"
         complete_resource = not missing or metric not in (
             "peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success",
             "engine_cpu_per_success", *LINUX_RESOURCE_METRICS, *W4_RESOURCE_METRICS,

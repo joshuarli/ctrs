@@ -237,6 +237,20 @@ class ReportingTests(unittest.TestCase):
         for metric in ("rw_p99_ms", "rw_tps", "ro_tps"):
             self.assertEqual(metric_result(report, metric)["ratio_median"], .5)
 
+    def test_storage_comparison_retains_ratios_without_favorable_durability_claim(self):
+        for case, metric in (("W3", "transaction_p95_ms"), ("W3-v4", "rw_p99_ms")):
+            for ratio, assessment in ((.5, "durability-unverified"), (1., "durability-unverified"),
+                                      (2., "loss")):
+                with self.subTest(case=case, ratio=ratio):
+                    records = [record for n in range(1, 11)
+                               for record in pair(n, ratio=ratio, case=case, metric=metric)]
+                    report = reporting.analyze(records)
+                    result = metric_result(report, metric)
+                    self.assertEqual(result["ratio_median"], ratio)
+                    self.assertEqual(result["assessment"], assessment)
+                    self.assertIn("Equivalent host storage durability is unverified.",
+                                  reporting.render_markdown(report))
+
     def test_overlap_metric_directions_and_paired_inputs(self):
         records = pair(case="W13-overlap", metric="w2_latency_p99_ms", ratio=.5)
         for record in records:

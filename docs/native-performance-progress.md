@@ -247,6 +247,26 @@ python3 bench/native/reporting.py --match base-20261122T093602-8149
 `trials.jsonl` SHA-256
 `15658c72db794c6420bde922dfb8cce4bfaf9550a8112f7b64f827666ddde045`.
 
+Run the full migration comparison with the verified signed Mac release and
+its isolated initialized warm store. Keep the release binary and guest
+assets fixed across all pairs.
+
+```sh
+python3 bench/native/runner.py baseline --case W3 --a ctrs --b orbstack \
+  --resource-lane installed-default --pairs 10 --pair-quiet-load 4 --max-pairs 16
+```
+
+The W3 and W3-v4 reports retain paired ratios and confidence intervals.
+Favorable assessments are marked `durability-unverified` until both engines'
+host flush contracts are established. An orderly PostgreSQL restart verifies
+committed logical state. Guest `fdatasync` and device flush tracing establish
+guest behavior. The current ctrs VZ attachment uses [Fsync](https://developer.apple.com/documentation/virtualization/vzdiskimagesynchronizationmode/fsync?language=objc),
+which can return while data is still in the drive cache. Apple documents
+cache-to-permanent-storage synchronization for [Full](https://developer.apple.com/documentation/virtualization/vzdiskimagesynchronizationmode/full?language=objc).
+OrbStack's corresponding host guarantee remains unknown. Obtain its explicit
+contract or separately qualify acknowledged commits across host failure on a
+disposable setup before claiming a comparative durability-qualified result.
+
 ### Installed-default W6 cohort
 
 Run `base-20261122T063709-0627` used harness source `2910f31` and the signed
