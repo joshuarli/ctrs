@@ -25,12 +25,13 @@ id = "W1"
 family = "web-stack-bring-up"
 title = "compose up: API + Postgres + Redis -> verified health + DB/cache roundtrip + persistence across db restart"
 fixture = "fixtures/w1"
-fixture_version = "w1-v2-pinned-restart"
+fixture_version = "w1-v3-verified-recovery"
 status = "implemented"
-metrics = ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s",
+metrics = ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s", "db_restart_to_verified_s",
            "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]                    # cold implemented for ctrs only (engine-cold); orbstack cold unsupported on shared daemon
 correctness = ["pinned image IDs and ordered DiffIDs", "exact initial database row and cache roundtrip", "acknowledged write before restart", "same owned database container and named volume with a new start time", "exact DB/cache reads after restart", "acknowledged new write after restart", "owned cleanup"]
+note = "Recovery runs from the restart command through the verified post-restart reads and write. The timer excludes the subsequent identity check, which must still pass before the metric is recorded."
 
 [[case]]
 id = "W2"

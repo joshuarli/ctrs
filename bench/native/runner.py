@@ -1207,7 +1207,7 @@ def wait_health(base: str, deadline_s: float, *, request=None):
     return None, last
 
 
-W1_FIXTURE_VERSION = "w1-v2-pinned-restart"
+W1_FIXTURE_VERSION = "w1-v3-verified-recovery"
 
 
 def prepare_pinned_stack(engine, override, *, layout=None):
@@ -1254,6 +1254,7 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
     override = trial_dir / "pinned-compose.json"
     checks = rec["correctness"]["checks"]
     rec["metrics"]["fixture_version"] = fixture_version
+    rec["workload_params"].update(fixture_version=fixture_version, pinned_stack=True)
     recovery = rec["recovery"] = {}
     started = False
     sampler = trace = None
@@ -1309,6 +1310,7 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
             raise ValueError("W1 fixture version mismatch")
         engine.ensure_up()
         refs, rec["inputs"] = prepare_pinned_stack(engine, override)
+        rec["paired_inputs"] = {key: rec["inputs"][key] for key in ("portfolio_sha256", "seed_sha256")}
         sampler, trace = start_sampler(engine, trial_dir)
         started = True
         t0 = time.monotonic()
@@ -1332,17 +1334,20 @@ def trial_w1(ctx, engine: Engine, state: str, fixture_version: str = W1_FIXTURE_
         before = recovery["database_before"] = database_identity()
         key = "keep-" + trial_token
         write_record("write_before_restart", key, "persist-ok")
+        restart_started = time.monotonic()
         engine.sh(["restart", before["id"]], timeout=120)
         t_ready, health_body = wait_health(base, HEALTH_DEADLINE_S)
         if t_ready is None:
             raise RuntimeError(f"W1 restart health deadline; last={health_body}")
+        read_record("persist_after_db_restart", key, "persist-ok")
+        write_record("write_after_restart", key + "-after", "restart-ok")
+        read_record("read_after_restart", key + "-after", "restart-ok")
+        restart_verified = time.monotonic()
         after = recovery["database_after"] = database_identity()
         if (before["id"] != after["id"] or before["volume"] != after["volume"]
                 or before["started_at"] == after["started_at"]):
             raise ValueError("W1 did not observe the owned database restart on the same volume")
-        read_record("persist_after_db_restart", key, "persist-ok")
-        write_record("write_after_restart", key + "-after", "restart-ok")
-        read_record("read_after_restart", key + "-after", "restart-ok")
+        rec["metrics"]["db_restart_to_verified_s"] = round(restart_verified - restart_started, 3)
         rec["correctness"]["ok"] = True
     except Exception as exc:
         rec["correctness"]["ok"] = False
