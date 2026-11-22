@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 
 import linux_lane
@@ -377,7 +378,7 @@ def watch_config(mount):
             WATCH_FIXTURE_VERSIONS[mount])
 
 
-def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
+def trial_w12_watch(ctx, engine, state, mount='bind', edits=60, *, setup_breakdown=False):
     import re
     import subprocess
     import time
@@ -401,6 +402,15 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
     created = vol_created = False
     sampler = trace = None
     phase = lambda label: runner.resource_phase(engine, rec, label)
+
+    if setup_breakdown:
+        setup_receipt = {'resources': {'phases': {}}}
+        rec['resources']['setup_phases'] = setup_receipt['resources']['phases']
+
+    def setup_phase(label):
+        if setup_breakdown:
+            return runner.resource_phase(engine, setup_receipt, label)
+        return nullcontext()
 
     def run(args, timeout=900):
         return engine.sh(['exec', name, *args], timeout=timeout)
@@ -465,53 +475,58 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(source)], check=True)
         base_sources = {path: (source / path).read_text() for path in paths}
         with phase('setup'):
-            if mount == 'volume':
-                engine.sh(['volume', 'create', '--label', label, volume])
-                vol_created = True
-                mount_arg = f'type=volume,src={volume},dst=/app'
-            else:
-                mount_arg = f'type=bind,src={source.resolve()},dst=/app'
-            engine.sh(['run', '-d', '--name', name, '--label', label, '--network', 'none',
-                       '--mount', mount_arg, '-w', '/app', image, 'sleep', 'infinity'])
-            created = True
-            if mount == 'volume':
-                run(['sh', '-ec', 'cp -a /fixture/source/. /app/'])
-            info = json.loads(engine.sh(['inspect', name]).stdout)[0]
-            if info['Config']['Labels'].get('dev.ctrs.campaign.run') != ctx.run_id or info['HostConfig']['NetworkMode'] != 'none':
-                raise ValueError('W12 watcher ownership or network mismatch')
-            mounts = info['Mounts']
-            if len(mounts) != 1 or mounts[0]['Destination'] != '/app' or mounts[0]['Type'] != mount or not mounts[0].get('RW'):
-                raise ValueError('W12 watcher mount mismatch')
-            if mounts[0].get('Name' if mount == 'volume' else 'Source') != (volume if mount == 'volume' else str(source.resolve())):
-                raise ValueError('W12 watcher mount identity mismatch')
-            rec['inputs'] = {'image_id': image, 'mounts': info['Mounts'], 'cache': 'offline npm cache present; node_modules cold'}
-            rec['inputs']['phase_cache_state'] = {'setup': 'node_modules cold', 'edits': 'node_modules warm'}
-            install_lock(run, spec)
-            rec['inputs'].update(source_sha256=spec['source']['sha256'], dependency_lock_sha256=spec['install_lock_sha256'], diff_ids=spec['prepared_image']['diff_ids'])
-            run(['npm', 'ci', '--offline', '--legacy-peer-deps', '--cache', '/fixture/npm-cache', '--no-audit', '--no-fund'])
-            rec['metrics'].update(filesystem_counts(run))
-            tools = {'node': run(['node', '--version']).stdout.strip(), 'npm': run(['npm', '--version']).stdout.strip()}
-            if tools != {'node': spec['tools']['node'], 'npm': spec['tools']['npm']}:
-                raise ValueError('W12 watcher tool version mismatch')
-            rec['inputs']['tools'] = tools
-            apply([{'kind': 'write', 'path': WATCH_IMPORTER,
-                    'content': 'export const value = "w12-watch-initial";\n'}])
-            run(['sh', '-ec', 'mkdir -p /tmp/w12; ./node_modules/.bin/tsc --project tsconfig.json'])
-            initial = evaluate([{'path': WATCH_IMPORTER, 'content': 'export const value = "w12-watch-initial";\n'}])
-            if any(item['actual'] != item['expected'] for item in initial):
-                raise ValueError('watch output oracle disagrees with initial TypeScript compilation')
-            engine.sh(['exec', '-d', '-e', f'TSC_WATCHFILE={watch_file}', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
-                       'sh', '-ec', 'echo "$$" > /tmp/w12/watch.pid; exec ./node_modules/.bin/tsc --watch '
-                       '-p tsconfig.json --pretty false --preserveWatchOutput > /tmp/w12/watch.log 2>&1'])
-            deadline = time.monotonic() + 90
-            while time.monotonic() < deadline:
-                log = run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout
-                if 'Watching for file changes' in log and 'Found 0 errors' in log:
-                    break
-                time.sleep(.2)
-            else:
-                raise TimeoutError('W12 watcher did not become ready')
-            rec['inputs']['watcher_before'] = read_watcher_identity()
+            with setup_phase('mount'):
+                if mount == 'volume':
+                    engine.sh(['volume', 'create', '--label', label, volume])
+                    vol_created = True
+                    mount_arg = f'type=volume,src={volume},dst=/app'
+                else:
+                    mount_arg = f'type=bind,src={source.resolve()},dst=/app'
+                engine.sh(['run', '-d', '--name', name, '--label', label, '--network', 'none',
+                           '--mount', mount_arg, '-w', '/app', image, 'sleep', 'infinity'])
+                created = True
+                if mount == 'volume':
+                    run(['sh', '-ec', 'cp -a /fixture/source/. /app/'])
+                info = json.loads(engine.sh(['inspect', name]).stdout)[0]
+                if info['Config']['Labels'].get('dev.ctrs.campaign.run') != ctx.run_id or info['HostConfig']['NetworkMode'] != 'none':
+                    raise ValueError('W12 watcher ownership or network mismatch')
+                mounts = info['Mounts']
+                if len(mounts) != 1 or mounts[0]['Destination'] != '/app' or mounts[0]['Type'] != mount or not mounts[0].get('RW'):
+                    raise ValueError('W12 watcher mount mismatch')
+                if mounts[0].get('Name' if mount == 'volume' else 'Source') != (volume if mount == 'volume' else str(source.resolve())):
+                    raise ValueError('W12 watcher mount identity mismatch')
+                rec['inputs'] = {'image_id': image, 'mounts': info['Mounts'], 'cache': 'offline npm cache present; node_modules cold'}
+                rec['inputs']['phase_cache_state'] = {'setup': 'node_modules cold', 'edits': 'node_modules warm'}
+            with setup_phase('install'):
+                install_lock(run, spec)
+                rec['inputs'].update(source_sha256=spec['source']['sha256'], dependency_lock_sha256=spec['install_lock_sha256'], diff_ids=spec['prepared_image']['diff_ids'])
+                run(['npm', 'ci', '--offline', '--legacy-peer-deps', '--cache', '/fixture/npm-cache', '--no-audit', '--no-fund'])
+            with setup_phase('verify-install'):
+                rec['metrics'].update(filesystem_counts(run))
+                tools = {'node': run(['node', '--version']).stdout.strip(), 'npm': run(['npm', '--version']).stdout.strip()}
+                if tools != {'node': spec['tools']['node'], 'npm': spec['tools']['npm']}:
+                    raise ValueError('W12 watcher tool version mismatch')
+                rec['inputs']['tools'] = tools
+            with setup_phase('seed-compile'):
+                apply([{'kind': 'write', 'path': WATCH_IMPORTER,
+                        'content': 'export const value = "w12-watch-initial";\n'}])
+                run(['sh', '-ec', 'mkdir -p /tmp/w12; ./node_modules/.bin/tsc --project tsconfig.json'])
+                initial = evaluate([{'path': WATCH_IMPORTER, 'content': 'export const value = "w12-watch-initial";\n'}])
+                if any(item['actual'] != item['expected'] for item in initial):
+                    raise ValueError('watch output oracle disagrees with initial TypeScript compilation')
+            with setup_phase('watch-start'):
+                engine.sh(['exec', '-d', '-e', f'TSC_WATCHFILE={watch_file}', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
+                           'sh', '-ec', 'echo "$$" > /tmp/w12/watch.pid; exec ./node_modules/.bin/tsc --watch '
+                           '-p tsconfig.json --pretty false --preserveWatchOutput > /tmp/w12/watch.log 2>&1'])
+                deadline = time.monotonic() + 90
+                while time.monotonic() < deadline:
+                    log = run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout
+                    if 'Watching for file changes' in log and 'Found 0 errors' in log:
+                        break
+                    time.sleep(.2)
+                else:
+                    raise TimeoutError('W12 watcher did not become ready')
+                rec['inputs']['watcher_before'] = read_watcher_identity()
         with phase('edits'):
             for event in plan:
                 kind, marker = event['kind'], event['token']

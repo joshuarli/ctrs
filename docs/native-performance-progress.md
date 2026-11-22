@@ -1782,6 +1782,13 @@ The receipt gives a single CPU total for those operations.
 Raw trials SHA-256
 `a39223750c6e0a1aad9981ab249982e0a7b76d379b430d1261cc8441a2d144dc`.
 
+The W12 proof tool measures each setup operation with independent engine
+CPU and wall-clock boundaries. Run `python3 bench/native/fixtures/w12/proof.py
+--engine ctrs --mount bind` and repeat with `--engine orbstack` using the
+pinned W12 assets and a signed ctrs build. The diagnostic samples appear
+under `setup_phases`. Use the regular paired cohort for acceptance,
+since the extra counter reads add work to setup.
+
 ### Independent Gitea holdout
 
 `holdout-v3-exact-content` verifies the seeded repository and issue fields in

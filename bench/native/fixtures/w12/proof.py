@@ -43,7 +43,8 @@ for engine_name in engines:
         selected = choices if args.all else [('layout', args.layout)] if args.layout else [('mount', args.mount)]
         for kind, value in selected:
             rec = (workspace.trial_w12(ctx, engine, 'warm', layout=value) if kind == 'layout' else
-                   workspace.trial_w12_watch(ctx, engine, 'warm', mount=value, edits=60))
+                   workspace.trial_w12_watch(ctx, engine, 'warm', mount=value, edits=60,
+                                             setup_breakdown=True))
             ctx.write(rec)
             metrics = rec['metrics']
             summary = {'engine': engine_name, kind: value, 'correctness': rec['correctness'],
@@ -54,6 +55,12 @@ for engine_name in engines:
                        'mounts': rec.get('inputs', {}).get('mounts'),
                        'backend': metrics.get('backend'), 'missed': metrics.get('missed'),
                        'stale': metrics.get('stale'), 'edit_count': len(metrics.get('edits', []))}
+            if kind == 'mount':
+                summary['setup_phases'] = {
+                    key: {'wall_seconds': phase['operation_wall_seconds'],
+                          'cpu_seconds': phase.get('cpu_seconds')}
+                    for key, phase in rec['resources']['setup_phases'].items()
+                }
             print(json.dumps(summary), flush=True)
             failed |= not rec['correctness']['ok']
     finally:
