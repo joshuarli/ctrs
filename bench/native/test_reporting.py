@@ -124,6 +124,26 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(cohort['rejections'][0]['reason'],
                              'paired workspace inputs or outputs differ or are missing')
 
+        for record in records:
+            record['workload_params']['build_output_receipt_version'] = reporting.BUILD_OUTPUT_RECEIPT_VERSION
+            base = record['inputs']['initial_output']
+            record['inputs'].update(warm_output=base, restored_output=base,
+                                    changed_output={'client_manifest_sha256': 'changed-output'})
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+        for field, value in (('warm_output', None), ('restored_output', {'hash': 'stale'}),
+                             ('changed_output', records[0]['inputs']['initial_output'])):
+            with self.subTest(field=field):
+                mismatched = copy.deepcopy(records)
+                for record in mismatched:
+                    record['inputs'][field] = value
+                cohort = reporting.analyze(mismatched)['cohorts'][0]
+                self.assertEqual(cohort['valid_pairs'], 0)
+                self.assertEqual(cohort['rejections'][0]['reason'],
+                                 'paired workspace inputs or outputs differ or are missing')
+
+        records[1]['inputs']['changed_output'] = {'client_manifest_sha256': 'different-output'}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
+
     def test_w12_watch_pairs_exact_edits_and_requires_a_persistent_watcher(self):
         plan = reporting.edit_plan(reporting.watch_source_paths(), 60)
         edits = [{'sequence': event['sequence'], 'kind': event['kind'], 'path': path,

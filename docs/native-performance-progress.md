@@ -1908,6 +1908,12 @@ phase cache states, installed file and byte counts, package count, initial
 build output and discovered tests. Each engine verifies its own mount and
 image identity during the trial.
 
+Build output receipt version 1 also keeps the warm rebuild, multi-file
+change and branch-restore output receipts. The reporter checks that the
+warm rebuild and restore match the initial build, the changed output
+differs, and both engines agree on all four output receipts. The producer
+checks each output against the fixture pin during its timed phase.
+
 #### Installed-default W12 full-bind cohort
 
 `base-20261122T113705-c0df` admitted ten alternating pairs at `fa72716`

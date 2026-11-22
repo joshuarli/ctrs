@@ -17,6 +17,7 @@ BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild
                 'multi-file-change', 'branch-switch')
 INSTALL_VERIFICATION = 'verify-install'
 INSTALL_TIMING_REVISION = 2
+BUILD_OUTPUT_RECEIPT_VERSION = 1
 WATCH_FIXTURE_VERSIONS = {'bind': 'w12-watch-v4', 'volume': 'w12-watch-volume-v2'}
 WATCH_IMPORTER = 'server/w12watch/importer.ts'
 WATCH_CREATED = 'server/w12watch/created.ts'
@@ -206,6 +207,7 @@ def trial_w12(ctx, engine, state, layout='full-bind'):
     rec = ctx.new_record(engine, 'W12', state, trial_dir)
     rec['metrics'].update(fixture_version='w12-v2', layout=layout)
     rec['workload_params']['timing_revision'] = INSTALL_TIMING_REVISION
+    rec['workload_params']['build_output_receipt_version'] = BUILD_OUTPUT_RECEIPT_VERSION
     rec['inputs'] = {}
     spec = source_contract()
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -328,17 +330,20 @@ fs.writeFileSync(p,next)}'''
             rec['inputs']['tests'] = tests
         with phase('warm-rebuild'):
             build()
-            verify_output(output(), expected['base'])
+            rec['inputs']['warm_output'] = output()
+            verify_output(rec['inputs']['warm_output'], expected['base'])
         with phase('multi-file-change'):
             patch()
             build()
             typecheck()
-            verify_output(output(), expected['changed'])
+            rec['inputs']['changed_output'] = output()
+            verify_output(rec['inputs']['changed_output'], expected['changed'])
         with phase('branch-switch'):
             patch(True)
             build()
             typecheck()
-            verify_output(output(), expected['base'])
+            rec['inputs']['restored_output'] = output()
+            verify_output(rec['inputs']['restored_output'], expected['base'])
         rec['correctness']['checks']['exact_outputs'] = True
         rec['metrics'].update(phase_metrics(rec['resources']['phases']))
         rec['correctness']['ok'] = True

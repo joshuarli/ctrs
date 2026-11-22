@@ -17,7 +17,8 @@ import ci_jobs
 from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
 from transfer import FIXTURE_VERSION as W13_CAPACITY_VERSION, tool_limited
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
-from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS, edit_plan, watch_latency_metrics, watch_source_paths
+from workspace import (BUILD_OUTPUT_RECEIPT_VERSION, INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS,
+                       edit_plan, watch_latency_metrics, watch_source_paths)
 
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
@@ -425,6 +426,25 @@ def _w12_inputs(record, extra_fields=()):
     return shared | {'installed_tree': install}
 
 
+def _w12_workflow_receipt(record):
+    params = workload_params(record)
+    fields = ('initial_output', 'tests')
+    if 'build_output_receipt_version' not in params:
+        return _w12_inputs(record, fields)
+    version = params['build_output_receipt_version']
+    if type(version) is not int or version != BUILD_OUTPUT_RECEIPT_VERSION:
+        return None
+    shared = _w12_inputs(record, (*fields, 'warm_output', 'changed_output', 'restored_output'))
+    if not shared:
+        return None
+    base = shared['initial_output']
+    changed = shared['changed_output']
+    if (not isinstance(base, dict) or not isinstance(changed, dict)
+            or base != shared['warm_output'] or base != shared['restored_output'] or base == changed):
+        return None
+    return shared
+
+
 def _w12_watch_receipt(record, mount, edit_count):
     shared = _w12_inputs(record)
     metrics = record['metrics']
@@ -623,8 +643,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "executed parameters or seeds differ"
         elif require_paired_inputs and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
-        elif verified_workspace and (not (receipt := _w12_inputs(a[0], ('initial_output', 'tests')))
-                                     or receipt != _w12_inputs(b[0], ('initial_output', 'tests'))):
+        elif verified_workspace and (not (receipt := _w12_workflow_receipt(a[0]))
+                                     or receipt != _w12_workflow_receipt(b[0])):
             reason = 'paired workspace inputs or outputs differ or are missing'
         elif verified_workspace_watch and (
                 not (receipt := _w12_watch_receipt(a[0], params.get('mount'), params.get('edits')))
