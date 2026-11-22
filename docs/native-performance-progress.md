@@ -1747,6 +1747,32 @@ for mount in bind volume; do
 done
 ```
 
+#### Installed-default W12 bind watch cohort
+
+`base-20261122T131311-6799` ran `b7c59e1` on signed release `99db1aa`.
+All ten alternating pairs verified 2,400 outputs with zero misses, stale
+results or watcher changes. The current reporter independently checked
+each edited path, output hash and latency summary. Both engines used
+9 vCPUs. Guest memory was 8.41 GB on ctrs and 63.16 GB on OrbStack.
+Outside CPU during edits stayed below 0.34 cores. Four short OrbStack
+cleanup phases lacked that counter, so those legs used endpoint
+host-load admission. The maximum endpoint load was 3.00 on 10 host CPUs.
+
+| Metric | ctrs / OrbStack paired median | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Edit-to-result p50 | 0.8809 | 0.8381–0.9311 | Strict win |
+| Edit-to-result p95 | 0.9712 | 0.9393–1.0258 | Non-inferior |
+| Sampled physical footprint | 0.2686 | 0.2440–0.2835 | Strict win |
+| Whole-trial engine CPU | 1.1862 | 1.1699–1.2150 | Loss |
+
+Median trial p50 was 0.649 s on ctrs and 0.724 s on OrbStack. Host polling
+of the compiled output is part of the latency. No ctrs leg reported a
+host NAT connection. Setup added a median 28.80 engine CPU-seconds per
+pair, while edits used 6.83 fewer CPU-seconds. The setup phase includes
+installing and checking the workspace and waiting for the initial build.
+Raw trials SHA-256
+`a39223750c6e0a1aad9981ab249982e0a7b76d379b430d1261cc8441a2d144dc`.
+
 ### Independent Gitea holdout
 
 `holdout-v3-exact-content` verifies the seeded repository and issue fields in
