@@ -179,7 +179,8 @@ def prepare_warm_engine(engine, run, *, api_image):
 def allocation_receipt(snapshots):
     stages = ('before_pull', 'before_app_cleanup', 'after_app_cleanup')
     receipt = {'status': 'unknown', 'snapshots': snapshots,
-               'deployment_delta_bytes': None, 'after_app_cleanup_delta_bytes': None}
+               'deployment_delta_bytes': None, 'after_app_cleanup_delta_bytes': None,
+               'exclusive_deployment_delta_bytes': None, 'exclusive_after_app_cleanup_delta_bytes': None}
     if any(snapshots.get(stage, {}).get('status') != 'ok' for stage in stages):
         receipt['error'] = 'missing or invalid owned allocation snapshot'
         return receipt
@@ -192,6 +193,10 @@ def allocation_receipt(snapshots):
     receipt.update(status='ok',
                    deployment_delta_bytes=deployed['allocated_bytes'] - before['allocated_bytes'],
                    after_app_cleanup_delta_bytes=cleaned['allocated_bytes'] - before['allocated_bytes'])
+    if all(s.get('exclusive_allocation_status') == 'ok' for s in (before, deployed, cleaned)):
+        baseline = before['exclusive_allocated_bytes']
+        receipt.update(exclusive_deployment_delta_bytes=deployed['exclusive_allocated_bytes'] - baseline,
+                       exclusive_after_app_cleanup_delta_bytes=cleaned['exclusive_allocated_bytes'] - baseline)
     return receipt
 
 
@@ -226,7 +231,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
 
             def snapshot(stage):
                 try:
-                    snapshots[stage] = mixed_resources.allocation(manifest, paths)
+                    snapshots[stage] = mixed_resources.allocation(manifest, paths, include_private=True)
                 except Exception as exc:
                     snapshots[stage] = {'status': 'unknown', 'errors': [str(exc)]}
 

@@ -83,7 +83,7 @@ def fd_snapshot(manifest):
     return result
 
 
-def allocation(manifest, paths):
+def allocation(manifest, paths, *, include_private=False):
     snapshot = cells.allocation_snapshot(paths)
     if snapshot['status'] != 'ok':
         return snapshot
@@ -105,12 +105,13 @@ def allocation(manifest, paths):
         for item in snapshot['files']:
             if (item['path'], str(item['inode'])) not in handles:
                 raise ValueError(f'file not held open by owned process: {item["path"]}')
-        after = cells.allocation_snapshot(paths)
+        after = cells.allocation_snapshot(paths, include_private=include_private)
         if after['status'] != 'ok' or [(f['device'], f['inode']) for f in after['files']] != [(f['device'], f['inode']) for f in snapshot['files']]:
             raise ValueError('file identity changed during ownership check')
         snapshot = after
     except Exception as exc:
-        snapshot.update(status='unknown', allocated_bytes=None)
+        snapshot.update(status='unknown', allocated_bytes=None, exclusive_allocation_status='unknown',
+                        exclusive_allocated_bytes=None)
         snapshot['errors'].append(repr(exc))
     return snapshot
 

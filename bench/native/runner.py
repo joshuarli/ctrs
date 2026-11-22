@@ -34,7 +34,6 @@ import resource_cycles
 import recovery_client
 import recovery_trace
 import ci_jobs
-import storage_v4
 import w2_peer
 from transfer import trial_w13
 import overlap
@@ -3746,6 +3745,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             cold: bool = False, pair_id: int | None = None,
             order_index: int | None = None, keep_warm: bool = False,
             slot: str | None = None, **kw) -> dict:
+    import storage_v4
+
     if linux_lane.enabled():
         linux_lane.require_case(engine_name, case_id, cold)
         if case_id == 'W2':

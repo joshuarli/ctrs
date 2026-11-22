@@ -1035,6 +1035,16 @@ installed-default --content retained` with the v6 layout and signed
 binary. Use `--content derived` for the other condition. The ten-pair
 timing cohorts and comparable backing-allocation measurements remain open.
 
+The backing-file diagnostic now records private bytes alongside `st_blocks`
+before the pull, after deployment and after cleanup. A 65,536-byte APFS
+file reported all bytes private before cloning. The file and clone each
+reported zero private bytes while sharing all blocks. After a 4,096-byte
+overwrite in the clone, both reported 16,384 private bytes, while both
+`st_blocks` values still represented 65,536 bytes. The diagnostic measures
+deletion-reclaimable bytes per selected file. Shared extents remain excluded
+even when both files are selected. Engine backing-file evidence is pending.
+[Apple `getattrlist` manual](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2)
+
 The two installed-default checks with concurrent API load passed on
 `8f23986`. Each engine completed 35,159 reads and 14,841 writes, verified
 every persisted payload, and recorded successful completions during each of

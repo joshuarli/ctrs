@@ -1,8 +1,10 @@
 import copy
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import resource_cells as cells
 
@@ -108,7 +110,7 @@ class AcceptanceTests(unittest.TestCase):
             with path.open('wb') as out:
                 out.seek(8 * 1024 * 1024)
                 out.write(b'x')
-            snapshot = cells.allocation_snapshot([path])
+            snapshot = cells.allocation_snapshot([path], include_private=True)
             st = path.stat()
             self.assertEqual(snapshot['status'], 'ok')
             self.assertEqual(snapshot['allocated_bytes'], st.st_blocks * 512)
@@ -117,8 +119,19 @@ class AcceptanceTests(unittest.TestCase):
             # Free space moves while other processes write; the snapshot only has to agree with the live figure.
             free = os.statvfs(path)
             self.assertAlmostEqual(snapshot['files'][0]['filesystem_free_bytes'], free.f_bavail * free.f_frsize, delta=64 << 20)
-            self.assertIsNone(snapshot['exclusive_allocated_bytes'])
-            self.assertEqual(snapshot['exclusive_allocation_status'], 'unsupported')
+            if sys.platform != 'darwin':
+                self.assertIsNone(snapshot['exclusive_allocated_bytes'])
+                self.assertEqual(snapshot['exclusive_allocation_status'], 'unsupported')
+            with patch.object(sys, 'platform', 'darwin'), patch.object(cells, '_private_bytes', return_value=0):
+                shared = cells.allocation_snapshot([path], include_private=True)
+            self.assertEqual(shared['exclusive_allocation_status'], 'ok')
+            self.assertEqual(shared['exclusive_allocated_bytes'], 0)
+            self.assertEqual(shared['allocated_bytes'], st.st_blocks * 512)
+            with patch.object(sys, 'platform', 'darwin'), patch.object(cells, '_private_bytes', side_effect=PermissionError):
+                unavailable = cells.allocation_snapshot([path], include_private=True)
+            self.assertEqual(unavailable['status'], 'ok')
+            self.assertEqual(unavailable['exclusive_allocation_status'], 'unknown')
+            self.assertIsNone(unavailable['exclusive_allocated_bytes'])
             missing = cells.allocation_snapshot([path, Path(directory) / 'missing'])
             self.assertEqual(missing['status'], 'unknown')
             self.assertIsNone(missing['allocated_bytes'])

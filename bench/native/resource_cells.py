@@ -1,8 +1,12 @@
 """Explicit owned-process and owned-file resource acceptance cells."""
+import ctypes
+import errno
 import math
 import os
 import stat
 import statistics
+import struct
+import sys
 import time
 
 
@@ -131,10 +135,37 @@ def evaluate_cycles(initial, cleanup_values, *, warmup_cycles, minimum_cycles,
     return result
 
 
-def allocation_snapshot(paths):
+def _private_bytes(path, original):
+    # sys/attr.h and getattrlist(2) define a 4-byte packed returned-attribute record.
+    returned_attrs, private_size, extended = 0x80000000, 0x8, 0x20
+    request = ctypes.create_string_buffer(struct.pack('=HH5I', 5, 0, returned_attrs, 0, 0, 0, private_size))
+    response = ctypes.create_string_buffer(struct.calcsize('=I5Iq'))
+    read = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True).fgetattrlist
+    read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
+    read.restype = ctypes.c_int
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        current = os.fstat(fd)
+        if ((current.st_dev, current.st_ino) != (original.st_dev, original.st_ino)
+                or not stat.S_ISREG(current.st_mode) or current.st_nlink != 1):
+            raise ValueError('private allocation requires the same singly linked regular file')
+        if read(fd, request, response, len(response), extended):
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        length, common, _, _, _, returned, value = struct.unpack('=I5Iq', response.raw)
+        if not returned & private_size:
+            raise OSError(errno.ENOTSUP, 'private allocation attribute was not returned')
+        if length != len(response) or common != returned_attrs or value < 0:
+            raise ValueError('invalid private allocation attribute response')
+        return value
+    finally:
+        os.close(fd)
+
+
+def allocation_snapshot(paths, *, include_private=False):
     """Stat only explicit owned regular files; allocation can include shared extents."""
     started = time.monotonic()
-    files, errors, seen = [], [], set()
+    files, errors, private_errors, seen = [], [], [], set()
     for path in paths:
         try:
             st = os.stat(path, follow_symlinks=False)
@@ -148,16 +179,29 @@ def allocation_snapshot(paths):
             if not _number(blocks):
                 raise ValueError('st_blocks unavailable')
             fs = os.statvfs(path)
+            private = None
+            if include_private and sys.platform == 'darwin':
+                try:
+                    private = _private_bytes(path, st)
+                except (OSError, ValueError) as exc:
+                    private_errors.append(f'{os.fspath(path)}: {exc}')
             files.append({'path': os.fspath(path), 'device': st.st_dev, 'inode': st.st_ino,
                           'logical_bytes': st.st_size, 'allocated_bytes': blocks * 512,
+                          'exclusive_allocated_bytes': private,
                           'filesystem_free_bytes': fs.f_bavail * fs.f_frsize})
         except (OSError, ValueError) as exc:
             errors.append(f'{os.fspath(path)}: {exc}')
     if not paths:
         errors.append('no owned paths')
+    private_status = 'not-requested'
+    if include_private:
+        private_status = 'unsupported' if sys.platform != 'darwin' else 'unknown' if errors or private_errors else 'ok'
     return {'status': 'unknown' if errors else 'ok', 'errors': errors, 'files': files,
             'started_monotonic': started, 'ended_monotonic': time.monotonic(),
             'allocated_bytes': None if errors else sum(f['allocated_bytes'] for f in files),
             'allocation_method': 'stat.st_blocks * 512; may include shared clone extents',
-            'exclusive_allocated_bytes': None, 'exclusive_allocation_status': 'unsupported',
+            'exclusive_allocated_bytes': (sum(f['exclusive_allocated_bytes'] for f in files)
+                                          if private_status == 'ok' else None),
+            'exclusive_allocation_status': private_status, 'exclusive_allocation_errors': private_errors,
+            'exclusive_allocation_method': 'fgetattrlist ATTR_CMNEXT_PRIVATESIZE on macOS',
             'filesystem_free_method': 'statvfs.f_bavail * f_frsize'}

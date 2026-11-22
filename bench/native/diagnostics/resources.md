@@ -32,11 +32,15 @@ wall time are separate. Any missing daemon/VM or native counter invalidates tota
 
 Allocation snapshots run outside workload/cleanup CPU boundaries: before setup,
 before work, after work/verification and immediately after cleanup, then after
-the reclamation window. `st_blocks * 512` includes shared clone extents; exclusive
-APFS allocation and isolated build-cache size remain unknown. The scope is the
-explicit active backing files, not total installed product storage. Do not compare
+the reclamation window. `st_blocks * 512` includes shared clone extents. The W8
+allocation diagnostic also samples macOS per-file private bytes with `fgetattrlist` and
+`ATTR_CMNEXT_PRIVATESIZE`. These are the bytes an individual file would release
+on deletion, excluding bytes held by a clone or snapshot. Missing private
+attributes leave that observation unknown. Isolated build-cache size remains
+unknown. The scope is the explicit active backing files. Do not compare
 an aged shared OrbStack disk with a fresh ctrs disk as a storage win. Repeated-cycle
 deltas are descriptive until background allocation and workload histories are controlled.
+[Apple `getattrlist` manual](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2)
 
 Next use is a fresh stack setup/readiness plus a declared smaller fixed workload,
 including command cost. It excludes cleanup. Exact seed and acknowledged-write
