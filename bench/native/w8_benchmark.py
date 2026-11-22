@@ -57,8 +57,10 @@ def completion_metrics(directory, intervals):
             'under_pull_p99_ms': values[round(.99 * (len(values) - 1))]}
 
 
-def validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids):
-    if (receipt.get('schema_version') != 1 or receipt.get('fixture_version') != 'w8-v3' or
+def validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids, *, content='derived'):
+    retained = content == 'retained'
+    variant = registry_variant.RETAINED_VERSION if retained else registry_variant.DERIVED_VERSION
+    if (receipt.get('schema_version') != 1 or receipt.get('fixture_version') != variant or
             receipt.get('source_fixture_version') != contract['fixture_version'] or
             receipt.get('source_contract_sha256') != hashlib.sha256(registry_variant._encoded(contract)).hexdigest() or
             receipt.get('seed_sha256') != hashlib.sha256(seed).hexdigest()):
@@ -78,15 +80,20 @@ def validate_receipt(receipt, contract, source, seed, previous_digests, previous
                 len(derived_image['layers']) != image['layer_count'] or
                 len(derived_image['diff_ids']) != image['layer_count']):
             raise ValueError('receipt image mapping mismatch')
+        selected = registry_variant.largest_layer_digest(manifest['layers']) if retained else None
         for original, source_diff, derived, derived_diff in zip(
                 manifest['layers'], image['diff_ids'], derived_image['layers'], derived_image['diff_ids'], strict=True):
             key = (original['digest'], source_diff)
+            source_digests.add(key[0])
+            source_diff_ids.add(key[1])
+            if retained and original['digest'] != selected:
+                if derived != original or derived_diff != source_diff:
+                    raise ValueError('retained layer differs from source')
+                continue
             value = (derived['digest'], derived_diff, derived['size'])
             if key in expected and expected[key] != value:
                 raise ValueError('conflicting shared layer mapping')
             expected[key] = value
-            source_digests.add(key[0])
-            source_diff_ids.add(key[1])
     mappings = {}
     digests = set()
     diff_ids = set()
@@ -117,7 +124,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         if not args.diagnostic:
             raise ValueError('W8 backing allocation requires diagnostic mode')
         measure = partial(measure, orbstack_storage_files=storage_files)
-    prepare = prepare or registry_variant.prepare_variant
+    prepare = prepare or partial(registry_variant.prepare_variant, retain_other_layers=args.content == 'retained')
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
     resident = args.resource_lane == 'matched'
@@ -125,7 +132,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     source = registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
-    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE,
+    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'content': args.content,
                            'under_load': args.under_load, 'resource_lane': args.resource_lane}
     if resident:
         ctx.workload_params.update(comparison_lane='resource-matched-resident-control', ctrs_idle_seconds=0)
@@ -137,7 +144,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         'guest_initramfs_sha256', 'guest_data_sha256') if key in outputs})
     pilot.save(ctx.results_dir / 'plan.json', {'pairs': args.pairs, 'seed': args.seed,
         'under_load': args.under_load, 'diagnostic': args.diagnostic, 'fixture_version': FIXTURE,
-        'resource_scope': SCOPE, 'resource_lane': args.resource_lane,
+        'resource_scope': SCOPE, 'resource_lane': args.resource_lane, 'content': args.content,
         'source_layout': str(args.layout), 'provenance': ctx.provenance,
         'orbstack_storage_files': [str(path.absolute()) for path in storage_files],
         'order': 'AB/BA', 'qualification_eligible': False})
@@ -158,7 +165,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
             layout = ctx.results_dir / f'pair-{pair}-layout'
             receipt = prepare(args.layout, contract, layout, seed)
-            validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids)
+            validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids, content=args.content)
             portfolio = registry_portfolio.prepare_layout(layout, {name: image['reference'] for name, image in receipt['images'].items()})
             server = serve(portfolio, 0)
             thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})

@@ -15,6 +15,7 @@ import ci_jobs
 import diagnostic_signals
 import mixed_resources
 import registry_portfolio
+import registry_variant
 import ownership
 import resource
 import resource_cycles
@@ -238,6 +239,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
         else:
             deployment_phase = phase
         relays_before = runner.relay_counts(engine)
+        markers = {item['digest']: item for item in receipt['layers']}
         with phase('whole_workflow'):
             refs = {}
             with phase('pre_pull_setup'):
@@ -260,6 +262,11 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 for repository, digest in portfolio.manifests.items():
                     short = repository.rsplit('/', 1)[1]
                     image = receipt['images'][repository]
+                    changed_layers = [layer for layer in image['layers'] if layer['digest'] in markers]
+                    if not changed_layers or (receipt['fixture_version'] != registry_variant.RETAINED_VERSION
+                                              and len(changed_layers) != len(image['layers'])):
+                        raise ValueError('missing changed layer markers')
+                    selected = [markers[layer['digest']] for layer in changed_layers]
                     ref = f'127.0.0.1:{server.server_port}/{repository}@{digest}'
                     with phase('pre_pull_inspection_' + short):
                         require_variant_absent(engine, image, directory / (short + '-pre-image.json'))
@@ -284,10 +291,8 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                             'stdout': cp.stdout, 'stderr': cp.stderr, 'transfers': transfers})
                         if cp.returncode:
                             raise ValueError('pull failed')
-                        require_layers_transferred(image['layers'], portfolio.transfers[engine_transfer_start:])
+                        require_layers_transferred(changed_layers, portfolio.transfers[engine_transfer_start:])
                     with phase('markers_' + short):
-                        markers = {item['digest']: item for item in receipt['layers']}
-                        selected = [markers[layer['digest']] for layer in image['layers']]
                         container = runner.project_name(run, engine.name, 'marker-' + short)
                         try:
                             marker_output = engine.sh(['run', '--rm', '--name', container, '--pull=never',
@@ -351,7 +356,7 @@ def main():
     run = 'w8-unique-' + time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(2)
     root = runner.RESULTS / run
     root.mkdir()
-    save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v4-under-pull' if args.under_load else 'w8-v3',
+    save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': 'w8-v4-under-pull' if args.under_load else registry_variant.DERIVED_VERSION,
         'receipt': receipt, 'reason': 'functional resource diagnostic; timing and guest pre-content absence unqualified',
         'resource_scope_version': 'w8-engine-fixture-v1',
         'resource_scope': 'warm engine plus native registry/coordinator process; excludes boot/preconditioning, CLI footprint, sampler and active backing allocation; waited-child CPU disclosed separately'})

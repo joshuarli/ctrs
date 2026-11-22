@@ -224,20 +224,20 @@ def registry(lane='macos-arm64') -> list[Workload]:
                  argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "orbstack",
                        "--pairs", "10", "--resource-lane", "matched", "--case", "W12",
                        "--workspace-layout", "full-bind", "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS))),
-        *(Workload(name, "scenario", "pull", purpose,
+        *(Workload(f"w8-pull{load_name}{lane_name}{content_name}:cohort", "scenario", "pull",
+                   f"pull and deploy {content} portfolio{load_text} with {lane_text}",
                    UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
                    argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",
                          str(WORK / "native-perf/inputs/w8-portfolio-v6/layout"),
-                         "--ctrs-binary", str(CTRS_BIN), "--pairs", "10", *flags))
-          for name, purpose, flags in (
-              ("w8-pull:cohort", "pinned portfolio pull and deploy from a local registry", ()),
-              ("w8-pull-under-load:cohort", "pinned portfolio pull and deploy with concurrent API work",
-               ("--under-load",)),
-              ("w8-pull-installed-default:cohort", "pull and deploy using installed engine defaults",
-               ("--resource-lane", "installed-default")),
-              ("w8-pull-under-load-installed-default:cohort",
-               "pull and deploy with concurrent API work using installed engine defaults",
-               ("--resource-lane", "installed-default", "--under-load")))),
+                         "--ctrs-binary", str(CTRS_BIN), "--pairs", "10",
+                         *content_flags, *lane_flags, *load_flags))
+          for content, content_name, content_flags in (
+              ("derived", "", ()), ("retained", "-retained", ("--content", "retained")))
+          for lane_text, lane_name, lane_flags in (
+              ("matched resources", "", ()),
+              ("installed defaults", "-installed-default", ("--resource-lane", "installed-default")))
+          for load_name, load_text, load_flags in (
+              ("", "", ()), ("-under-load", " under concurrent API load", ("--under-load",)))),
         Workload("holdout", "full", "holdout", "Gitea + Postgres app never tuned against",
                  600, 2, "estimated", ENGINES,
                  argv=(sys.executable, str(RUNNER), "holdout", "--engines", "ctrs,orbstack"), report=False),

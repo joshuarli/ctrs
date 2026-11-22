@@ -130,7 +130,7 @@ class Selection(unittest.TestCase):
         ])
 
     def test_w8_load_cohort_preserves_the_paired_inputs(self):
-        idle, under_load, installed, installed_under_load = self.select("scenario", area=["pull"])
+        idle, under_load, installed, installed_under_load, *retained = self.select("scenario", area=["pull"])
         self.assertEqual(idle.name, "w8-pull:cohort")
         self.assertEqual(under_load.name, "w8-pull-under-load:cohort")
         self.assertEqual(under_load.argv, (*idle.argv, "--under-load"))
@@ -138,6 +138,12 @@ class Selection(unittest.TestCase):
         self.assertEqual(installed.name, "w8-pull-installed-default:cohort")
         self.assertEqual(installed.argv, (*idle.argv, "--resource-lane", "installed-default"))
         self.assertEqual(installed_under_load.argv, (*installed.argv, "--under-load"))
+        self.assertEqual(len(retained), 4)
+        for original, alternative in zip((idle, under_load, installed, installed_under_load), retained, strict=True):
+            self.assertEqual(alternative.name, original.name.replace(":cohort", "-retained:cohort"))
+            base, switches = original.argv[:original.argv.index("--pairs") + 2], original.argv[original.argv.index("--pairs") + 2:]
+            self.assertEqual(alternative.argv, (*base, "--content", "retained", *switches))
+            self.assertEqual(alternative.requires, original.requires)
 
 
 class Entrypoint(unittest.TestCase):

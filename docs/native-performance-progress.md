@@ -425,7 +425,8 @@ engines resident.
 Run the no-load and concurrent API controls as `w8-pull:cohort` and
 `w8-pull-under-load:cohort`. The installed-default counterparts are
 `w8-pull-installed-default:cohort` and
-`w8-pull-under-load-installed-default:cohort`.
+`w8-pull-under-load-installed-default:cohort`. Add `-retained` before
+`:cohort` to select the corresponding retained-layer condition.
 
 ### Rebuilt W12 workspace fixture
 

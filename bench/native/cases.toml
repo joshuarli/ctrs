@@ -133,12 +133,12 @@ note = "Real pinned upstream apps in multi-stage Dockerfiles: rust:1.100.0-bookw
 id = "W8"
 fixture_version = "w8-paired-v1"
 family = "real-image-deployment"
-title = "paired derived common portfolio pull and deployment"
+title = "paired retained or derived portfolio pull and deployment"
 fixture = "fixtures/w8-v3 + independent host registry"
 status = "implemented"
 metrics = ["pull_to_health_s", "under_pull_p95_ms", "under_pull_p99_ms", "cpu_seconds_est", "peak_phys_footprint_bytes"]
 states = ["warm"]
-params = { under_load = [false, true] }
+params = { under_load = [false, true], content = ["derived", "retained"] }
 correctness = ["full transfers", "image identities and markers", "exact application outputs", "owned cleanup"]
 note = "Paired pilot only; warm preconditioning excluded; allocation, continuous peaks, client and sampler accounting and qualification remain open."
 

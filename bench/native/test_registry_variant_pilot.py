@@ -1,7 +1,9 @@
 import subprocess
 import json
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 from diagnostics import registry_pilot
 import unittest
@@ -9,6 +11,57 @@ from diagnostics import registry_variant_pilot as pilot
 
 
 class VariantTransferProof(unittest.TestCase):
+    def test_retained_workflow_requires_only_the_delivered_changed_layer(self):
+        name = 'np-v6/api'
+        kept = {'digest': 'sha256:retained', 'size': 100}
+        changed = {'digest': 'sha256:changed', 'size': 200}
+        marker = changed | {'marker': 'marker-path', 'source_diff_id': 'source-diff'}
+        contract = {'images': {f'np-v6/{image}': {} for image in ('api', 'postgres', 'redis', 'marked')}}
+        receipt = {'fixture_version': pilot.registry_variant.RETAINED_VERSION, 'seed_sha256': 'seed',
+                   'images': {name: {'layers': [kept, changed]}}, 'layers': [marker]}
+        portfolio = SimpleNamespace(manifests={name: 'sha256:manifest'}, transfers=[])
+        engine = mock.Mock(name='engine')
+        engine.name = 'orbstack'
+        delivery_complete = True
+
+        def shell(args, **kwargs):
+            if args[0] == 'pull':
+                portfolio.transfers.append(changed | {'method': 'GET', 'complete': delivery_complete,
+                                                      'bytes': 200 if delivery_complete else 199})
+            if args[0] == 'run':
+                self.assertEqual(args[-3:], ['cat', f'127.0.0.1:7070/{name}@sha256:manifest', '/marker-path'])
+                return subprocess.CompletedProcess(args, 0, 'seed\nsource-diff\n', '')
+            return subprocess.CompletedProcess(args, 0, '[]', '')
+
+        def deploy(*args, phase):
+            with phase('stack_health'):
+                return {}
+
+        engine.sh.side_effect = shell
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            mock.patch.object(pilot, 'prepare_warm_engine'),
+            mock.patch.object(pilot, 'require_variant_absent'),
+            mock.patch.object(pilot, 'finish_engine'),
+            mock.patch.object(pilot.ownership, 'current_coordinator', return_value={}),
+            mock.patch.object(pilot.runner, 'start_sampler', return_value=(None, None)),
+            mock.patch.object(pilot.runner, 'resource_phase', side_effect=lambda *args: nullcontext()),
+            mock.patch.object(pilot.w8_under_pull, 'baseline_image_reference', return_value=('id', 'pinned')),
+            mock.patch.object(pilot.w8_under_pull, 'require_baseline_images'),
+            mock.patch.object(pilot.ci_jobs, 'cleanup'),
+            mock.patch.object(pilot, 'deploy', side_effect=deploy),
+        ):
+            root = Path(temp)
+            result = pilot.measure_engine(engine, root, 'run', contract, portfolio, receipt, root,
+                                          mock.Mock(server_port=7070))
+            delivery_complete = False
+            incomplete = pilot.measure_engine(engine, root, 'retry', contract, portfolio, receipt, root,
+                                              mock.Mock(server_port=7070))
+        self.assertTrue(result['correctness'], result['errors'])
+        self.assertEqual([entry['digest'] for entry in result['pulls'][0]['transfers']], ['sha256:changed'])
+        self.assertFalse(incomplete['correctness'])
+        self.assertIn('layer not transferred completely', incomplete['errors'][0])
+
     def test_cached_variant_is_rejected_using_each_stores_resolvable_id(self):
         image = {'config': 'sha256:config', 'manifest': 'sha256:manifest'}
         for name, kind in (('ctrs', 'config'), ('orbstack', 'manifest')):

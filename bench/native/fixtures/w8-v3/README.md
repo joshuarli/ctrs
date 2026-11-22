@@ -113,6 +113,11 @@ checks with invalid timing. Each pair shares one newly derived artifact and
 alternates order. Original pinned common images must already be installed on
 both engines. Startup and warm preconditioning are outside the whole-workflow
 resource interval. Nested phases are diagnostic and must not be added to it.
+With `--content retained`, the largest layer of each image gets the per-pair
+marker. Every other compressed layer descriptor and DiffID must equal the
+source. The registry must deliver each changed layer in full, and the existing
+retained image pins must verify before and after deployment. This records
+retained image contents while cache state below the image API remains unknown.
 The sampled footprint is not a continuous peak; CLI and sampler resources,
 active storage allocation, metadata qualification and the full matrix remain
 open. This is a pilot, not qualification.

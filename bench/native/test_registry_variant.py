@@ -10,6 +10,7 @@ import unittest
 
 import registry_portfolio as registry
 import registry_variant as variant
+import w8_benchmark
 
 
 def digest(data):
@@ -84,6 +85,19 @@ class VariantTests(unittest.TestCase):
         self.assertNotEqual(image['diff_ids'][largest], digest(self.raw[largest]))
         portfolio = registry.prepare_layout(self.root / 'partial', {'app': 'app'})
         self.assertEqual(portfolio.manifests['app'], image['manifest'])
+        source = registry.prepare_pinned_portfolio(self.source, contract)
+        prior_digests, prior_diff_ids = set(), set()
+        w8_benchmark.validate_receipt(receipt, contract, source, b'cancel',
+                                      prior_digests, prior_diff_ids, content='retained')
+        self.assertEqual(prior_digests, {image['layers'][largest]['digest']})
+        self.assertEqual(prior_diff_ids, {image['diff_ids'][largest]})
+        with self.assertRaisesRegex(ValueError, 'reused'):
+            w8_benchmark.validate_receipt(receipt, contract, source, b'cancel',
+                                          prior_digests, prior_diff_ids, content='retained')
+        changed = copy.deepcopy(receipt)
+        changed['images']['app']['layers'][retained]['size'] += 1
+        with self.assertRaisesRegex(ValueError, 'retained layer differs'):
+            w8_benchmark.validate_receipt(changed, contract, source, b'cancel', set(), set(), content='retained')
 
     def test_deterministic_unique_shared_and_preserved(self):
         before = self.snapshot(self.source)

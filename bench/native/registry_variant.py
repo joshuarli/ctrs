@@ -20,6 +20,8 @@ GZIP_LAYERS = {'application/vnd.oci.image.layer.v1.tar+gzip',
 TAR_LAYERS = {'application/vnd.oci.image.layer.v1.tar',
               'application/vnd.docker.image.rootfs.diff.tar'}
 LABEL = 'org.ctrs.fixture.version'
+DERIVED_VERSION = 'w8-v3'
+RETAINED_VERSION = 'w8-v3-retained-cancel'
 CHUNK = 1024 * 1024
 
 
@@ -153,6 +155,10 @@ def _layer(blob, media, diff_id, seed_hash, root):
             'diff_id': 'sha256:' + output_hash.hexdigest(), 'marker': marker}
 
 
+def largest_layer_digest(layers):
+    return max(layers, key=lambda layer: layer['size'])['digest']
+
+
 def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=False):
     """Create a new w8-v3 layout and receipt; seed is 1..1024 explicit bytes."""
     if not isinstance(seed, bytes) or not 1 <= len(seed) <= 1024:
@@ -165,7 +171,7 @@ def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=
         if parent.is_symlink():
             raise ValueError('symlink in destination path')
     portfolio = registry.prepare_pinned_portfolio(source, contract)
-    version = 'w8-v3-retained-cancel' if retain_other_layers else 'w8-v3'
+    version = RETAINED_VERSION if retain_other_layers else DERIVED_VERSION
     dest.mkdir()
     try:
         (dest / 'blobs' / 'sha256').mkdir(parents=True)
@@ -181,7 +187,7 @@ def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=
             config = registry._json(portfolio.routes[(name, 'blobs', image['config'])][2].metadata())
             layers = []
             diff_ids = []
-            changed_digest = max(manifest['layers'], key=lambda layer: layer['size'])['digest'] if retain_other_layers else None
+            changed_digest = largest_layer_digest(manifest['layers']) if retain_other_layers else None
             for descriptor, diff_id in zip(manifest['layers'], image['diff_ids'], strict=True):
                 blob = portfolio.routes[(name, 'blobs', descriptor['digest'])][2]
                 if retain_other_layers and descriptor['digest'] != changed_digest:

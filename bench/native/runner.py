@@ -4343,6 +4343,8 @@ def main() -> int:
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
     p.add_argument("--resource-lane", choices=RESOURCE_LANES, default="matched",
                    help="installed defaults or the matched resident control (default: matched, ctrs idle timeout disabled)")
+    p.add_argument("--content", choices=("derived", "retained"), default="derived",
+                   help="derive all layers or retain the original layers except each image's largest layer (default: derived)")
     p.add_argument("--pairs", type=int, default=10, help="number of pairs (1 to 100)")
     p.add_argument("--under-load", action="store_true", help="run fixed background application work during pulls")
     p.add_argument("--seed", type=int, default=1, help="integer incorporated into unique per-pair seeds")

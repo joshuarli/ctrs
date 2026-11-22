@@ -105,7 +105,7 @@ class PairedBatch(unittest.TestCase):
                           {'pid': 1, 'role': 'daemon', 'kernel_start_identity': 2}]}}}
             measure = mock.Mock(return_value=result)
             server = mock.Mock()
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=True, resource_lane='matched')
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=True, resource_lane='matched', content='derived')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.runner, 'FIXTURES', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
@@ -128,7 +128,7 @@ class PairedBatch(unittest.TestCase):
                 receipt = prepare_fake(source, contract, dest, seed)
                 receipt['layers'].pop()
                 return receipt
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched')
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched', content='derived')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout') as prepare_layout:
@@ -220,7 +220,7 @@ class PairedBatch(unittest.TestCase):
                                 'counter_methods': ['proc_pid_rusage'],
                                 'footprint_method': 'rusage_info_v0.ri_phys_footprint',
                                 'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
-            args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False, resource_lane='matched')
+            args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False, resource_lane='matched', content='derived')
             with mock.patch.object(w8.runner, 'RunContext', Context), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
@@ -326,7 +326,7 @@ class PairedBatch(unittest.TestCase):
                 def serve_forever(self, **kwargs): pass
                 def shutdown(self): pass
                 def server_close(self): pass
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched')
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched', content='derived')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
