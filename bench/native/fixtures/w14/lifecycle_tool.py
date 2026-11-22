@@ -10,22 +10,22 @@ import threading
 import time
 import uuid
 
+FIXTURE_VERSION = 'w14-v4-buffered-frames'
 RECONNECT_DEADLINE_SECONDS = 60
+MAX_FRAME_BYTES = 65536
 
 
-def send(sock, value):
-    sock.sendall(json.dumps(value, separators=(',', ':')).encode() + b'\n')
+def send(stream, value):
+    stream.write(json.dumps(value, separators=(',', ':')).encode() + b'\n')
+    stream.flush()
 
 
-def receive(sock):
-    data = bytearray()
-    while not data.endswith(b'\n'):
-        part = sock.recv(1)
-        if not part:
-            raise ConnectionResetError('unexpected EOF')
-        data.extend(part)
-        if len(data) > 65536:
-            raise ValueError('oversized response')
+def receive(stream):
+    data = stream.readline(MAX_FRAME_BYTES + 1)
+    if len(data) > MAX_FRAME_BYTES:
+        raise ValueError('oversized response')
+    if not data.endswith(b'\n'):
+        raise ConnectionResetError('unexpected EOF')
     return json.loads(data)
 
 
@@ -76,26 +76,26 @@ class Server(socketserver.ThreadingTCPServer):
         super().__init__(address, Handler)
 
 
-class Handler(socketserver.BaseRequestHandler):
+class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         active = False
         try:
             while True:
-                req = receive(self.request)
+                req = receive(self.rfile)
                 if req['op'] == 'count':
                     with self.server.lock:
-                        send(self.request, {'open': self.server.open_clients})
+                        send(self.wfile, {'open': self.server.open_clients})
                     return
                 if not active:
                     with self.server.lock:
                         self.server.open_clients += 1
                     active = True
                 if req['op'] == 'get':
-                    send(self.request, {**response(req['id']), 'instance': self.server.instance})
+                    send(self.wfile, {**response(req['id']), 'instance': self.server.instance})
                 elif req['op'] in ('stream', 'cancel'):
                     for i in range(req['chunks']):
                         time.sleep(req['interval'])
-                        send(self.request, response(req['id'], i))
+                        send(self.wfile, response(req['id'], i))
                 else:
                     raise ValueError('unknown operation')
         except (OSError, ValueError, KeyError):
@@ -107,7 +107,8 @@ class Handler(socketserver.BaseRequestHandler):
 
 
 def connect(host, port, timeout):
-    return socket.create_connection((host, port), timeout=timeout)
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        return sock.makefile('rwb')
 
 
 def get(sock, ident):

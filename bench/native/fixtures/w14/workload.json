@@ -1,1 +1,1 @@
-{"fixture_version":"w14-v2","clients":32,"operations_per_client":100,"chunks":50,"interval_seconds":0.02,"idle_seconds":30,"protocol":"newline JSON over published TCP port","modes":["fresh","persistent","streaming","cancel","idle-resume","reconnect"]}
+{"fixture_version":"w14-v4-buffered-frames","clients":32,"operations_per_client":100,"chunks":50,"interval_seconds":0.02,"idle_seconds":30,"protocol":"newline JSON over published TCP port","modes":["fresh","persistent","streaming","cancel","idle-resume","reconnect"]}

@@ -23,7 +23,8 @@ def wait_for_client_ports(needed, free=ephemeral_ports_free, sleep=time.sleep, c
     return clock() - start
 
 
-SOURCE = (Path(__file__).parent / 'fixtures/w14/lifecycle_tool.py').read_text()
+TOOL_PATH = Path(__file__).parent / 'fixtures/w14/lifecycle_tool.py'
+SOURCE = TOOL_PATH.read_text()
 
 
 def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
@@ -35,7 +36,8 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
         raise ValueError('invalid lifecycle parameters')
     directory = ctx.trial_dir(engine.name, 'W14', state)
     rec = ctx.new_record(engine, 'W14', state, directory)
-    rec['metrics'].update(fixture_version='w14-v3', mode=mode, clients=[], successes=0,
+    rec['workload_params']['fixture_version'] = tool.FIXTURE_VERSION
+    rec['metrics'].update(fixture_version=tool.FIXTURE_VERSION, mode=mode, clients=[], successes=0,
                           errors={}, server_open_connections=None, leaked_sessions=None)
     name = 'w14-' + uuid.uuid4().hex[:12]
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -45,7 +47,8 @@ def trial_w14(ctx, engine, state, mode='fresh', clients=32, operations=100,
         engine.ensure_up()
         image, identity = runner.pinned_api_image(engine)
         rec.setdefault('inputs', {}).update(image_id=image, **identity)
-        rec['paired_inputs'] = {**identity, 'fixture_sha256': runner.sha256_file(Path(__file__))}
+        rec['paired_inputs'] = {**identity, 'fixture_sha256': runner.sha256_file(Path(__file__)),
+                                'protocol_sha256': runner.sha256_file(TOOL_PATH)}
         port = runner.free_port()
         engine.sh(['run', '-d', '--pull=never', '--name', name, '--label', label,
                    '-p', f'127.0.0.1:{port}:{port}', '--entrypoint', 'python3', image,

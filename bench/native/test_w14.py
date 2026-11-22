@@ -1,4 +1,5 @@
 import errno
+import io
 import socket
 import threading
 import unittest
@@ -20,14 +21,23 @@ class LifecycleTests(unittest.TestCase):
 
     def test_codec_and_verification(self):
         a, b = socket.socketpair()
-        with a, b:
-            tool.send(a, tool.response('id', 2))
-            tool.verify(tool.receive(b), 'id', 2)
+        with a, b, a.makefile('wb') as out, b.makefile('rb') as stream:
+            out.write(b'{"id":"id","chunk":2,"body":"w14:id:2"}\n'
+                      b'{"id":"id","chunk":3,"body":"w14:id:3"}\n')
+            out.flush()
+            tool.verify(tool.receive(stream), 'id', 2)
+            tool.verify(tool.receive(stream), 'id', 3)
             with self.assertRaises(ValueError):
                 tool.verify(tool.response('id', 1), 'id', 2)
             a.sendall(b'broken\n')
             with self.assertRaises(ValueError):
-                tool.receive(b)
+                tool.receive(stream)
+
+    def test_codec_bounds_and_requires_a_complete_frame(self):
+        with self.assertRaisesRegex(ValueError, 'oversized response'):
+            tool.receive(io.BytesIO(b'x' * tool.MAX_FRAME_BYTES + b'\n'))
+        with self.assertRaisesRegex(ConnectionResetError, 'unexpected EOF'):
+            tool.receive(io.BytesIO(b'{}'))
 
     def test_statistics_and_errors(self):
         self.assertEqual(tool.percentile([0, 10], 95), 9.5)
