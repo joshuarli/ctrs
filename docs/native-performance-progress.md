@@ -1126,6 +1126,28 @@ python3 bench/native/reporting.py --match base-20261122T073402-7351
 `trials.jsonl` SHA-256
 `08090558a7c1bd1643ad60040574aab8bdea9a5ee10bd2782d32776e40b539b0`.
 
+#### W13 Mac loopback headroom
+
+On 2026-11-22, `bench/native/diagnostics/w13_host_headroom.py` at
+`7f07f18` completed five byte-exact 1 GiB trials per direction and stream
+count without either engine. Four streams split the same 1 GiB. The
+launcher counted distinct stream-receipt arrays as separate conditions.
+Grouping by each array's length verifies exactly five trials in each
+condition. All 20 trials passed their byte and SHA-256 checks.
+
+| Host loopback condition | Median (GB/s) | Observed range (GB/s) |
+| --- | ---: | ---: |
+| Download, 1 stream | 2.55 | 2.53–2.60 |
+| Download, 4 streams | 2.27 | 2.20–2.32 |
+| Upload, 1 stream | 5.05 | 4.79–5.28 |
+| Upload, 4 streams | 4.48 | 4.34–4.51 |
+
+These controls measure the transfer tool over Mac loopback. The engine
+comparison still needs matching direction, stream count and payload size
+on both engines and the corresponding in-guest controls. Raw
+`host.jsonl` SHA-256
+`826585c7c0dda12be32023dbbb9e1c4757886b7d90e2c442b82cd5855c89a77f`.
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
@@ -1469,6 +1491,34 @@ endpoint. The receipt reports only cache events for that endpoint during
 the interruption through the first exact post-restart read. It reports the
 observed wall-to-monotonic clock offset range and includes the daemon log's
 millisecond resolution in event time bounds.
+
+#### W10 refusal-cache trace
+
+The ctrs-only diagnostic `w10-refusal-cache-e0512b7f1465` used harness
+`ca24add`, the original signed release from the API cohort, eight
+clients, seed 11 and a 20-second request window. The API backend identities
+matched before and after interruption. All persisted writes were exact
+and the trial reported zero unexpected errors.
+
+Relative to restart command start, the command returned at 21.23 ms.
+The owned endpoint's cache expired at 271.59–272.60 ms and again at
+523.59–524.60 ms. The daemon recorded ages of 250 ms and 2,167 and 2,245
+cache hits at those expiries. The first exact read began at 523.61 ms and
+completed at 535.39 ms. The cache suppressed connection attempts between
+expiries, leaving application readiness within each window unobserved.
+
+Compare the parked 50 ms change from `54c6a00` against a 250 ms release on
+the same runtime source, with identical guest assets and private stores.
+Admit on exact state and complete recovery first. Use ten alternating
+pairs with a readiness-time upper 95% bound of 0.95 and a post-recovery
+p99 and measured CPU per success upper bound of 1.03. Retain outage
+errors and host NAT coverage. Confirm a passing candidate against
+OrbStack separately before changing the default.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `trials.jsonl` | `53cd874dccc7c2de4b995fab8e73f26988c167b46b117096bb97a21207fbc99b` |
+| `correlated-cache-events.json` | `6058b9910e269fc578801031122be8c02fc6e3e8a66c1d999e20498af24ea47b` |
 
 ### Installed-default W10 database recovery cohort
 
