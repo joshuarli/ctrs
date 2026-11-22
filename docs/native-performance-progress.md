@@ -1567,10 +1567,17 @@ The sentinel checksum and the fixture image's config and layer identities
 matched after restarting the clone's daemon. Receipt SHA-256:
 `875731cffbc6e855682642a737e82cec08c295f273c9b727d7787bd2eb887367`.
 For physical reclaim, run the same 420-second W11 diagnostic with a new
-`--ctrs-root`, 9 vCPUs, 8,192 MiB and 32-second observations. Require exact
-workload and cleanup receipts, then restart that owned store in place.
-Repeat the idle control, trim and restart checks on the same device and
-inode. Compare both allocated and private bytes before and after trim.
+`--ctrs-root`, 9 vCPUs, 8,192 MiB and 32-second observations. Before boot,
+create `data/vm/data.img` under that root by truncating a new file to the
+template size and copying the template's `SEEK_DATA`–`SEEK_HOLE` extents.
+Verify content across the union of the two extent maps. A native check
+copied the 1 TiB template with exact logical contents and 25,247,744 bytes
+of both ordinary and private allocation.
+
+Require exact workload and cleanup receipts, then restart that owned
+store in place. Repeat the idle control, trim and restart checks on the
+same device and inode. Require ordinary and private allocation to match
+at the stopped and trim boundaries before claiming physical reclaim.
 
 #### W11 short OrbStack growth result
 
