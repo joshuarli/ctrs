@@ -3382,6 +3382,25 @@ def _holdout_images(engine: Engine, compose) -> dict:
     return images
 
 
+def _holdout_fields_match(row, expected):
+    return isinstance(row, dict) and all(field in row and type(row[field]) is type(value) and row[field] == value
+                                         for field, value in expected.items())
+
+
+def _holdout_list_matches(rows, key, expected):
+    if not isinstance(rows, list) or len(rows) != min(50, len(expected)):
+        return False
+    seen = set()
+    for row in rows:
+        value = row.get(key) if isinstance(row, dict) else None
+        if type(value) not in (int, str) or value in seen or value not in expected:
+            return False
+        if not _holdout_fields_match(row, expected[value]):
+            return False
+        seen.add(value)
+    return True
+
+
 def trial_holdout(ctx, engine: Engine, state: str,
                   ops: int = 240, repos: int = 8, issues: int = 5,
                   clones: int = 4, seed: int = 1) -> dict:
@@ -3399,10 +3418,14 @@ def trial_holdout(ctx, engine: Engine, state: str,
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     trial_dir.mkdir(parents=True, exist_ok=True)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
-    rec["metrics"]["fixture_version"] = "holdout-v2-arm64"
+    rec["metrics"]["fixture_version"] = "holdout-v3-exact-content"
     checks = rec["correctness"]["checks"]
     sampler = trace = None
     t0 = None
+    repo_data = {f'repo-{i:02d}': {'name': f'repo-{i:02d}', 'private': False,
+                                'default_branch': 'main', 'description': f'holdout repo {i}'}
+                 for i in range(repos)}
+    issue_data = {j + 1: {'title': f'issue-{j}', 'body': f'seeded {j}'} for j in range(issues)}
 
     def compose(args, *, timeout=30, check=True):
         return engine.sh(["compose", "-f", str(HOLDOUT_COMPOSE), "-p", proj, *args],
@@ -3474,20 +3497,14 @@ def trial_holdout(ctx, engine: Engine, state: str,
         # Seed: real REST writes — repos with auto_init, then issues.
         t_seed = time.monotonic()
         repo_ok = issue_ok = 0
-        for i in range(repos):
-            name = f"repo-{i:02d}"
-            st, _ = _holdout_api(
-                base, "POST", "/user/repos",
-                {"name": name, "private": False, "auto_init": True,
-                 "default_branch": "main",
-                 "description": f"holdout repo {i}"})
-            if st in (200, 201):
+        for name, fields in repo_data.items():
+            st, created = _holdout_api(base, 'POST', '/user/repos', fields | {'auto_init': True})
+            if st in (200, 201) and _holdout_fields_match(created, fields):
                 repo_ok += 1
-            for j in range(issues):
-                st, _ = _holdout_api(
-                    base, "POST", f"/repos/{HOLDOUT_USER}/{name}/issues",
-                    {"title": f"issue-{j}", "body": f"seeded {j}"})
-                if st in (200, 201):
+            for number, issue in issue_data.items():
+                st, created = _holdout_api(
+                    base, 'POST', f'/repos/{HOLDOUT_USER}/{name}/issues', issue)
+                if st in (200, 201) and _holdout_fields_match(created, issue | {'number': number}):
                     issue_ok += 1
         rec["metrics"]["seed_s"] = round(time.monotonic() - t_seed, 3)
         rec["metrics"]["repos_created"] = repo_ok
@@ -3507,22 +3524,27 @@ def trial_holdout(ctx, engine: Engine, state: str,
         t_w = time.monotonic()
         api_errors = 0
         for i in range(ops):
-            repo = f"repo-{i % repos:02d}"
+            repo = f"repo-{(i + i // 8) % repos:02d}"
+            repo_path = f'/repos/{HOLDOUT_USER}/{repo}'
             if i % 8 == 7:
-                st, _ = _holdout_api(
-                    base, "GET", f"/repos/{HOLDOUT_USER}/{repo}/branches")
+                path = f'{repo_path}/branches'
+                st, rows = _holdout_api(base, 'GET', path)
+                matches = _holdout_list_matches(rows, 'name', {'main': {'name': 'main'}})
             elif i % 3 == 0:
-                st, _ = _holdout_api(
-                    base, "GET",
-                    f"/repos/{HOLDOUT_USER}/{repo}/issues"
-                    "?state=all&limit=50")
+                path = f'{repo_path}/issues?state=all&limit=50'
+                st, rows = _holdout_api(base, 'GET', path)
+                matches = _holdout_list_matches(rows, 'number', issue_data)
             elif i % 3 == 1:
-                st, _ = _holdout_api(
-                    base, "GET", f"/repos/{HOLDOUT_USER}/{repo}")
+                path = repo_path
+                st, row = _holdout_api(base, 'GET', path)
+                matches = _holdout_fields_match(row, repo_data[repo])
             else:
-                st, _ = _holdout_api(
-                    base, "GET", "/user/repos?limit=50")
-            if st != 200:
+                path = '/user/repos?limit=50'
+                st, rows = _holdout_api(base, 'GET', path)
+                matches = _holdout_list_matches(rows, 'name', repo_data)
+            if st != 200 or not matches:
+                if not api_errors:
+                    rec['validation_errors'].append(f'holdout read {path}: status {st}, seeded content match {matches}')
                 api_errors += 1
         rec["metrics"]["workload_s"] = round(time.monotonic() - t_w, 3)
         rec["metrics"]["ops"] = ops
@@ -3534,20 +3556,33 @@ def trial_holdout(ctx, engine: Engine, state: str,
         # Real git smart-HTTP: shallow clones through the published port,
         # credentials in the URL exactly as a user would type them.
         t_c = time.monotonic()
-        clone_ok = 0
+        cloned = []
         for c in range(clones):
             repo = f"repo-{c % repos:02d}"
             dest = trial_dir / f"clone-{c}"
             url = (f"http://{HOLDOUT_USER}:{HOLDOUT_PASSWORD}"
                    f"@127.0.0.1:{port}/{HOLDOUT_USER}/{repo}.git")
             cp = subprocess.run(
-                ["git", "clone", "--depth", "1", "--quiet", url,
+                ["git", "clone", "--depth", "1", "--branch", "main", "--quiet", url,
                  str(dest)], capture_output=True, text=True, timeout=120)
-            if cp.returncode == 0 and (dest / "README.md").exists():
-                clone_ok += 1
+            if cp.returncode == 0:
+                cloned.append((repo, dest))
+            else:
+                rec['validation_errors'].append(f'holdout clone {repo} exited {cp.returncode}')
         rec["metrics"]["clone_s"] = round(time.monotonic() - t_c, 3)
         rec["metrics"]["clones"] = clones
-        checks["clones_exact"] = clone_ok == clones
+        clone_hashes = []
+        for repo, dest in cloned:
+            readme = subprocess.run(['git', '-C', str(dest), 'show', 'HEAD:README.md'],
+                                    capture_output=True, timeout=30)
+            description = repo_data[repo]['description']
+            expected = f'# {repo}\n\n{description}'.encode()
+            if readme.returncode != 0 or readme.stdout.splitlines() != expected.splitlines():
+                rec['validation_errors'].append(f'holdout clone {repo} has an unexpected README')
+                continue
+            clone_hashes.append(hashlib.sha256(readme.stdout).hexdigest())
+        checks["clones_exact"] = len(clone_hashes) == clones
+        rec['paired_inputs'] = rec['inputs'] | {'cloned_readme_sha256': clone_hashes}
 
         checks["all"] = all(
             v for k, v in checks.items() if k != "all")
@@ -4294,10 +4329,13 @@ def cmd_holdout(args) -> int:
     kw = {"ops": args.ops, "repos": args.repos, "issues": args.issues,
           "clones": args.clones, "seed": args.seed}
     failed = False
+    correct_inputs = []
     try:
         for eng in [e.strip() for e in args.engines.split(",") if e.strip()]:
             rec = run_one(ctx, eng, "HOLDOUT", "warm", **kw)
             m = rec["metrics"]
+            if rec['correctness']['ok'] and not rec['validation_errors']:
+                correct_inputs.append(rec['paired_inputs'])
             failed = failed or not rec["correctness"]["ok"] or bool(
                 rec.get("validation_errors"))
             print(f"{eng}: ok={rec['correctness']['ok']} "
@@ -4309,6 +4347,9 @@ def cmd_holdout(args) -> int:
     finally:
         for engine in ctx.engines.values():
             engine.stop()
+    if correct_inputs and any(inputs != correct_inputs[0] for inputs in correct_inputs[1:]):
+        print('holdout engines disagree on image or cloned README digests', file=sys.stderr)
+        failed = True
     print(f"results: {ctx.jsonl}")
     return 1 if failed else 0
 

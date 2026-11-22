@@ -925,6 +925,66 @@ class ExitStatusTests(unittest.TestCase):
         stop.assert_called_once_with(sampler)
         request.assert_not_called()
 
+    def test_holdout_rejects_successful_responses_with_wrong_seed_or_clone(self):
+        image = {'ref': 'pinned', 'id': 'sha256:' + '1' * 64}
+        repo = {'name': 'repo-00', 'description': 'holdout repo 0',
+                'default_branch': 'main', 'private': False}
+        issue = {'number': 1, 'title': 'issue-0', 'body': 'seeded 0'}
+
+        def run_trial(root, bad_read=False, bad_clone=False):
+            engine = fake_engine()
+            project = runner.project_name(FixtureContext(root).run_id, engine.name, 'HOLDOUT')
+            container = {'Image': image['id'], 'Config': {'Labels': {
+                'com.docker.compose.project': project, 'com.docker.compose.service': 'gitea'}}}
+            engine.sh.side_effect = [completed(), completed('container'),
+                                     completed(json.dumps([container])), completed()]
+
+            def api(base, method, path, body=None):
+                if method == 'POST':
+                    return 201, issue if path.endswith('/issues') else repo
+                if path.endswith('/branches'):
+                    return 200, [{'name': 'main'}]
+                if '/issues?' in path:
+                    return 200, [issue | {'body': 'wrong body'}] if bad_read else [issue]
+                if path.startswith('/user/repos?'):
+                    return 200, [repo]
+                return 200, repo
+
+            readme = b'# repo-00\n\nwrong project\n' if bad_clone else b'# repo-00\n\nholdout repo 0\n'
+            with (patch.object(runner, '_holdout_images', return_value={'gitea': image}),
+                  patch.object(runner, 'compose_down'),
+                  patch.object(runner, 'start_sampler', return_value=(None, None)),
+                  patch.object(runner, 'http_json', return_value=(200, {})),
+                  patch.object(runner, '_holdout_api', side_effect=api),
+                  patch.object(runner.subprocess, 'run', side_effect=[completed(), completed(readme)])):
+                return runner.trial_holdout(FixtureContext(root), engine, 'warm', ops=8,
+                                            repos=1, issues=1, clones=1)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            good = run_trial(root / 'good')
+            self.assertTrue(good['correctness']['ok'], good['validation_errors'])
+            self.assertEqual(len(good['paired_inputs']['cloned_readme_sha256']), 1)
+            bad = run_trial(root / 'bad-read', bad_read=True)
+            self.assertFalse(bad['correctness']['ok'])
+            self.assertIn('status 200, seeded content match False', bad['validation_errors'][0])
+            bad = run_trial(root / 'bad-clone', bad_clone=True)
+            self.assertFalse(bad['correctness']['ok'])
+            self.assertIn('unexpected README', bad['validation_errors'][0])
+
+    def test_holdout_rejects_different_inputs_across_successful_engines(self):
+        args = argparse.Namespace(engines='ctrs,orbstack', ops=240, repos=8,
+                                  issues=5, clones=4, seed=1)
+        base = {'correctness': {'ok': True}, 'metrics': {}, 'validation_errors': []}
+        receipts = [base | {'paired_inputs': {'cloned_readme_sha256': [engine]}}
+                    for engine in ('ctrs', 'orbstack')]
+        with (patch.object(runner, 'RunContext', return_value=Mock(engines={}, jsonl='trials')),
+              patch.object(runner, 'run_one', side_effect=receipts),
+              contextlib.redirect_stdout(io.StringIO()),
+              contextlib.redirect_stderr(io.StringIO()) as errors):
+            self.assertEqual(runner.cmd_holdout(args), 1)
+        self.assertIn('engines disagree', errors.getvalue())
+
 
 class GuestProvenanceTests(unittest.TestCase):
     def test_guest_override_uses_selected_assets_even_with_matching_size_and_mtime(self):
