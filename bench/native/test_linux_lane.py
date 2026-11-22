@@ -476,8 +476,7 @@ class NativeWorkloads(unittest.TestCase):
         with patch.object(lane, 'enabled', return_value=True):
             results = []
             for worker, redis in [('1', '2'), ('3', '4')]:
-                engine.sh.side_effect = [Mock(stdout=json.dumps([image(worker)])),
-                                         Mock(stdout=json.dumps([image(redis)]))]
+                engine.sh.return_value.stdout = json.dumps([image(worker), image(redis)])
                 result = runner.pipeline_image_inputs(engine, 'worker-id', 'cache-id-' + redis)
                 results.append(result[2])
             self.assertEqual(results[0], results[1])

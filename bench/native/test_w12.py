@@ -1,12 +1,27 @@
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import workspace
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_watch_configuration_keeps_native_parent_events_and_mac_file_events_separate(self):
+        for native in (False, True):
+            with patch.object(workspace.linux_lane, 'enabled', return_value=native):
+                for mount in ('bind', 'volume'):
+                    method, version = workspace.watch_config(mount)
+                    expected = 'UseFsEventsOnParentDirectory' if native or mount == 'volume' else 'UseFsEvents'
+                    self.assertEqual(method, expected)
+                    if native:
+                        self.assertEqual(version, 'w12-watch-linux-' + mount + '-v1')
+                    else:
+                        self.assertEqual(version, 'w12-watch-v4' if mount == 'bind' else 'w12-watch-volume-v2')
+                for mount in ('', 'foreign'):
+                    with self.assertRaisesRegex(ValueError, 'unknown W12 watch mount'):
+                        workspace.watch_config(mount)
+
     def test_install_requires_exact_migrated_lock(self):
         spec = workspace.source_contract()
         run = Mock()

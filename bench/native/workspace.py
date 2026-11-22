@@ -349,16 +349,22 @@ fs.writeFileSync(p,next)}'''
     return rec
 
 
+def watch_config(mount):
+    if mount not in ('bind', 'volume'):
+        raise ValueError('unknown W12 watch mount')
+    if linux_lane.enabled():
+        return 'UseFsEventsOnParentDirectory', 'w12-watch-linux-' + mount + '-v1'
+    return ('UseFsEvents' if mount == 'bind' else 'UseFsEventsOnParentDirectory',
+            WATCH_FIXTURE_VERSIONS[mount])
+
+
 def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
     import re
     import subprocess
     import time
     import runner
 
-    if mount not in ('bind', 'volume'):
-        raise ValueError('unknown W12 watch mount')
-    watch_file = 'UseFsEvents' if mount == 'bind' else 'UseFsEventsOnParentDirectory'
-    version = WATCH_FIXTURE_VERSIONS[mount]
+    watch_file, version = watch_config(mount)
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
     rec['metrics'].update(fixture_version=version, mount=mount, backend='fs.watch', watch_file=watch_file,
