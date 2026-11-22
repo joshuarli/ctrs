@@ -1164,6 +1164,34 @@ application cleanup. Read both ordinary and private deltas on the same
 backing identities. Preserve the idle deltas alongside the deployment
 and cleanup deltas for review.
 
+#### W8 backing allocation with no concurrent load
+
+Both no-load conditions completed on `8b6b2be` with the signed `99db1aa`
+release. Each engine verified the pinned outputs and cleanup. The five
+allocation snapshots for each leg covered stable backing identities and
+returned private bytes. Both idle windows exceeded ten seconds.
+
+| Content | Engine | Deployment allocation delta | After application cleanup | Private delta after cleanup |
+| --- | --- | ---: | ---: | ---: |
+| Retained | ctrs | 706,117,632 bytes | 706,838,528 bytes | 706,838,528 bytes |
+| Retained | OrbStack | 998,490,112 bytes | 991,838,208 bytes | 991,838,208 bytes |
+| Derived | ctrs | 1,228,455,936 bytes | 1,229,193,216 bytes | 1,229,225,984 bytes |
+| Derived | OrbStack | 1,382,703,104 bytes | 1,376,403,456 bytes | 1,376,403,456 bytes |
+
+ctrs recorded 32,768 bytes of growth in both pre-pull idle windows and
+425,984 and 442,368 bytes in the post-cleanup windows. OrbStack recorded
+zero change in all four idle windows. The cleanup removed the owned
+application resources and left the pulled images in the stores. The
+backing files started with different allocation histories, and the
+diagnostic supplies one pair per condition.
+
+| Content | Run | Raw trials SHA-256 |
+| --- | --- | --- |
+| Retained | `w8-paired-e67bc5619fec` | `aa050a34fe99b9ee5d4f75feeec6d712bed182d9d865cecce7f7af77932a1790` |
+| Derived | `w8-paired-b8a7b50e0d1e` | `fcdc4f22131b7daf0d844bd6afbca9f3307411f77b6c58bc6d997610d6e3709a` |
+
+#### W8 timing cohorts
+
 Run the scored installed-default cohorts on the same signed release after
 the retained and derived cancellation checks. Each of the four combinations
 gets ten alternating pairs and its own result directory. Check OrbStack's
