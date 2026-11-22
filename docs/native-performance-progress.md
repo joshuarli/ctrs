@@ -1190,6 +1190,32 @@ diagnostic supplies one pair per condition.
 | Retained | `w8-paired-e67bc5619fec` | `aa050a34fe99b9ee5d4f75feeec6d712bed182d9d865cecce7f7af77932a1790` |
 | Derived | `w8-paired-b8a7b50e0d1e` | `fcdc4f22131b7daf0d844bd6afbca9f3307411f77b6c58bc6d997610d6e3709a` |
 
+#### W8 backing allocation under concurrent API load
+
+The same allocation diagnostic completed both content conditions with API
+load. Every leg verified 35,159 reads and 14,841 writes alongside deployment
+and cleanup. All five snapshots returned both allocation measures for the
+same backing identities, and both idle windows exceeded ten seconds.
+
+| Content | Engine | Deployment allocation delta | After application cleanup | Private delta after cleanup |
+| --- | --- | ---: | ---: | ---: |
+| Retained | ctrs | 664,174,592 bytes | 666,402,816 bytes | 666,402,816 bytes |
+| Retained | OrbStack | 1,056,239,616 bytes | 994,926,592 bytes | 994,926,592 bytes |
+| Derived | ctrs | 1,105,756,160 bytes | 1,107,771,392 bytes | 1,107,804,160 bytes |
+| Derived | OrbStack | 1,441,845,248 bytes | 1,380,020,224 bytes | 1,380,020,224 bytes |
+
+ctrs recorded 32,768 bytes of growth in each pre-pull idle window and
+409,600 and 425,984 bytes in the post-cleanup windows. OrbStack recorded
+zero change in those windows. The wrapper verified that the legacy
+OrbStack registry was running again before releasing the W3 run. The
+allocation comparisons remain descriptive because initial storage histories
+differed and each condition supplied only one pair.
+
+| Content | Run | Raw trials SHA-256 |
+| --- | --- | --- |
+| Retained | `w8-paired-f0baad335ce2` | `eb30425f61d1f109e4dd706b73baedb79b0fcc0993b3b4c130323d498775d320` |
+| Derived | `w8-paired-22a69f1c75ab` | `d79b855c26bb75aba5e967922d7c451aec44f245feefdd930301f36e33f65072` |
+
 #### W8 timing cohorts
 
 Run the scored installed-default cohorts on the same signed release after
