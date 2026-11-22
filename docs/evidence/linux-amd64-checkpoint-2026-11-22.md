@@ -1,5 +1,11 @@
 # Recoverable Linux checkpoint — 2026-11-22
 
+Follow-up: [the integrated runtime result](linux-integrated-runtime-2026-11-22.md)
+records the approved in-place host bridge repair, current-main e2e and active
+firewall/cleanup proof, and a subsequent independent image-store restore
+using private Docker/containerd. The initial incident and restore limitations
+below remain historical facts; the bridge incident's cause is unconfirmed.
+
 The Linux adapter exists. Use `--lane linux-amd64`, engines `ctrs` and
 `dockerd`, and W2/W6/W7/W13. Native Linux x86_64 only: no fallback or
 emulation. This checkpoint preserves the 2026-11-21 pilot, including its

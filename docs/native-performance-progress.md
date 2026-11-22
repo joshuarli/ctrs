@@ -77,6 +77,13 @@ and its committed SHA-256 manifest, not from a new adapter implementation. Steps
    Docker daemon. The suite uses fixed names and prune labels: never run
    it against a concurrently used daemon. Preserve integrated logs and
    active firewall deny/allow controls, not just post-stop rule snapshots.
+   **2026-11-22: [integrated Linux runtime result](evidence/linux-integrated-runtime-2026-11-22.md)**:
+   current-main ctrs **482/1/26**, fully isolated Docker **471/2/30**
+   (pass/fail/skip). Remaining failures are host VRF support on both and
+   Docker's default AppArmor mount restriction. During-operation deny/allow,
+   scoped exceptions and cleanup are verified; host `docker0` was repaired
+   with approval, without a daemon restart. Frozen independent image-store
+   restoration and future sudo provenance are verified. No macOS gate closes.
 3. Use the existing `--lane linux-amd64` path in `runner.py`/`pyramid.py`
    with engines `ctrs` and `dockerd` for W2, W6, W7 and W13. Restore
    `linux-amd64-v1` using `prepare --linux-archive`; do not regenerate its
