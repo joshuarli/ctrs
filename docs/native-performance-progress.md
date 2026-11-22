@@ -302,8 +302,17 @@ python3 bench/native/runner.py run --case W1 --engine ctrs --state cold --cold
 ```
 
 Use the signed release, installed defaults and the frozen local v6 layout.
-This is a standalone ctrs diagnostic. Equivalent engine-cold measurements on
-an isolated OrbStack target remain open.
+The ctrs admission `run-20261122T154102-607b` used harness `2e5fb82` and
+signed release `99db1aa`. Its fresh private store preserved all three
+image pins. The socket answered in 44 ms and the first exact roundtrip
+completed 5.244 s from daemon launch. The database restart, persisted
+state, post-restart read/write and owned cleanup checks passed.
+This was one trial. It used nine host NAT connections, so the engine
+counters omit their host kernel CPU. Equivalent engine-cold measurements
+on an isolated OrbStack target remain open.
+
+`trials.jsonl` SHA-256
+`b90d4a60590192d48b04c68eef3c62b33a7871745f2bd5227cc49c188016090b`.
 
 OrbStack's installed `create --isolated` option isolates a Linux machine's
 host integration. The built-in Docker engine and those machines still share
@@ -1975,6 +1984,37 @@ python3 bench/native/reporting.py --match base-20261122T144132-719e
 
 `trials.jsonl` SHA-256
 `cc0d2392b340a26300fe7653c1298ce90eae5e344ddf4ffc85a4f4b8a02b5410`.
+
+#### Installed-default W12 all-volume cohort
+
+`base-20261122T151113-701c` ran `fa72716` on signed release `99db1aa`.
+All ten alternating pairs verified the source, dependency lock,
+installed tree, exact build output and test-discovery receipts. Both
+engines mounted one writable named volume at `/app` and used 9 vCPUs.
+Guest memory was 8.41 GB on ctrs and 63.16 GB on OrbStack. Outside-engine
+CPU was below 0.65 cores across measured phases. All ctrs legs recorded
+zero host NAT connections.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired median and 95% CI | Descriptive result |
+| --- | ---: | ---: | --- | --- |
+| Workflow time | 82.78 s | 83.53 s | 0.9915 [0.9880, 0.9986] | Non-inferior |
+| Offline `npm ci` | 10.90 s | 11.07 s | 0.9892 [0.9666, 1.0540] | Inconclusive |
+| Verification walk | 0.276 s | 0.317 s | 0.8812 [0.8612, 0.9056] | Strict win |
+| Jest discovery | 0.318 s | 0.366 s | 0.8689 [0.8615, 0.8886] | Strict win |
+| Whole-trial engine CPU | 200.25 CPU-s | 202.26 CPU-s | 0.9915 [0.9839, 0.9954] | Non-inferior |
+| Sampled peak physical footprint | 4.19 GB | 12.17 GB | 0.3481 [0.3353, 0.3788] | Strict win |
+
+The workflow sums install through branch restore and excludes setup and
+cleanup. Both layouts that keep dependencies and build output in named
+volumes reached workflow non-inferiority. The full-bind loss and its
+reproduced verification-walk gap remain open.
+
+```sh
+python3 bench/native/reporting.py --match base-20261122T151113-701c
+```
+
+`trials.jsonl` SHA-256
+`f7cb64acab3ee7db305807da7421d36ac5f403d8e8698feea9b0cad2539e1b99`.
 
 #### W12 inode-pruning probe
 

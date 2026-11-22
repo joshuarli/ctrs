@@ -27,7 +27,7 @@ OrbStack's). Never pool lanes.
 
 | ID | Workflow | Spec | Impl | Functional (this host) | Compared (this host) | Critical result (this host) |
 | --- | --- | --- | --- | --- | --- | --- |
-| W1 | Compose up API+PG+Redis, restart | yes | yes | yes, v3 on both engines | D: `base-20261122T093654-6f3a` (10/10 warm pairs) | Verified restart 0.686× [0.675, 0.698], initial roundtrip 0.848× [0.719, 0.912], and footprint 0.419× [0.387, 0.429] were strict wins. CPU accounting is incomplete due to host NAT. Engine-cold coverage remains open. [Evidence](native-performance-progress.md#installed-default-w1-warm-stack-cohort) |
+| W1 | Compose up API+PG+Redis, restart | yes | yes | yes, warm v3 on both engines and a cold ctrs admission | D: `base-20261122T093654-6f3a` (10/10 warm pairs) | Verified restart 0.686× [0.675, 0.698], initial roundtrip 0.848× [0.719, 0.912], and footprint 0.419× [0.387, 0.429] were strict wins. CPU accounting is incomplete due to host NAT. Equivalent engine-cold comparison remains open. [Warm evidence](native-performance-progress.md#installed-default-w1-warm-stack-cohort) [Cold admission](native-performance-progress.md#w1-engine-cold-admission-on-ctrs) |
 | W2 | API fixed work, published port | yes | yes | yes (both lanes) | D: `base-20261122T081048-91d4` (10/10 pairs, 50,000 requests, both engines 9 vCPUs) | **Measured CPU per request loss** 1.250× [1.235, 1.259] before uncharged host NAT. p99 0.612× [0.598, 0.633], request rate 0.746× [0.737, 0.755] and footprint 0.313× [0.303, 0.328] were strict wins. [Current evidence](native-performance-progress.md#installed-default-w2-fixed-work-cohort), [historical installed and matched comparisons](evidence/native-w2-ipi-2026-11-18.md) |
 | W2 | API fixed work, container-to-container | yes | yes | yes (installed defaults) | D: `base-20261122T091635-df7a` (10/10 pairs, 50,000 requests, both engines 9 vCPUs) | **Measured CPU per request loss** 1.131× [1.123, 1.143] with zero ctrs host NAT connections and both guest load clients included. p99 0.454× [0.444, 0.459], request rate 0.581× [0.576, 0.590] and footprint 0.443× [0.412, 0.463] were strict wins in this cohort. [Evidence](native-performance-progress.md#installed-default-w2-container-to-container-fixed-work-cohort) |
 | W2 | API fixed offered rate, published port | yes | yes | ctrs passed, OrbStack missed scheduled slots | D: `base-20261122T093101-7063` (0/2 valid pairs) | Both engines completed 10,000 exact requests in each leg. The OrbStack legs exceeded the 10 ms start-lag budget on 53 and 41 slots. The stop rule fired and timing comparisons remain unmeasured. [Evidence](native-performance-progress.md#installed-default-w2-published-port-fixed-offered-rate) |
@@ -49,9 +49,12 @@ The workflow ratio was 1.2999 [1.2883, 1.3223], with measured CPU at
 1.1630 [1.1593, 1.1725] and sampled physical footprint at 0.3606
 [0.3455, 0.3871]. The v2 mixed-layout cohort also completed ten pairs.
 The workflow was non-inferior at 0.9990 [0.9887, 1.0026], with an
-inconclusive install interval and a strict footprint win. The v2
-all-volume cohort is pending. Both watch cohorts are complete.
+inconclusive install interval and a strict footprint win. The ten-pair
+v2 all-volume cohort had non-inferior workflow time at 0.9915
+[0.9880, 0.9986] and non-inferior CPU, with a strict footprint win.
+Both watch cohorts are complete.
 [Mixed-layout evidence](native-performance-progress.md#installed-default-w12-mixed-layout-cohort)
+[All-volume evidence](native-performance-progress.md#installed-default-w12-all-volume-cohort)
 The table retains W12 timing history from the previous workspace fixture.
 [Current cohort](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 
@@ -108,8 +111,9 @@ qualification gaps.
 
 1. **W12 full-bind workflow.** Median paired workflow time was 1.300×
    and measured engine CPU was 1.163×. The offline install and verification
-   walk account for about 71% of the workflow time gap. The mixed and
-   all-volume cohorts and inode-cap probe will test the bind mount's cost.
+   walk account for about 71% of the workflow time gap. Both layouts that
+   used volumes for dependencies and build outputs cleared workflow
+   non-inferiority. The full-bind inode-cap probe is pending.
    [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 2. **W10 API recovery.** Time to the first exact read was 1.239×. The
    gap accrued after the start command returned. Trace the
