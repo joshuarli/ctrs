@@ -567,6 +567,19 @@ set with the lock. The Hyperfine recipe still uses the network with
 cohort. Revision 3 remains the archived network-resolved comparison and
 the Linux amd64 workload.
 
+The pinned Hyperfine source contains 134 crates.io packages in `Cargo.lock`
+with no Git dependencies. Run
+`python3 bench/native/fixtures/w7/hyperfine/prepare_vendor.py` from the repo
+to restore the offline source archive. It runs `cargo vendor --locked` with
+a private Cargo home, checks the registry checksums against the lock, then
+resolves `aarch64-unknown-linux-gnu` with `cargo metadata --frozen` from an
+empty Cargo home. All 104 registry crates in the filtered graph resolved
+from the vendored directory. Cargo 1.99.1 and the repository's Cargo
+1.102.0 nightly independently produced archive SHA-256
+`46ac26bd0205449fff0f866be91cb730bd27ae05d4708964f5f2afc79c129e7e`.
+Native offline Hyperfine builds and cache-state admission remain open.
+[Cargo vendor command](https://doc.rust-lang.org/cargo/commands/cargo-vendor.html)
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
