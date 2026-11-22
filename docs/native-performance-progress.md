@@ -189,6 +189,35 @@ a root ARM64 Linux container served by that private Mac VM. Include the gzip
 member concatenation and truncated-stream cleanup assertions. Verify the
 artifact hashes again after all checks and retain results by command.
 
+#### Combined release results
+
+On 2026-11-22 the confirmation checkout `2b603fc` and release source
+`99db1aa` had identical Cargo inputs, crates, guest sources and xtask code.
+The ad-hoc signature and virtualization entitlement passed. SHA-256 checks
+agreed before and after the native suite.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Signed ctrs | `10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17` |
+| Guest kernel | `19657ca4cc150ae8d04d003ac494676bcc5845dd3a3a21cd6bfb17df605d4e6f` |
+| Guest initramfs | `fb0f832b79eca9463d3aafb0bebdff8a5e620e2ff1779c896727fc91d3e32c87` |
+
+| Check | Result | Log SHA-256 |
+| --- | --- | --- |
+| `make test` | 270 Rust and 504 Python tests passed | `ebed0024a14794bd583ce2dbf6777406e3267668414f41db3e2b84fe0a276ea6` |
+| `conformance/smoke.sh` | 21 passed | `e28bb91f2f50c9356bd335b638366aeca5f4d0c70ef62783e147428efd4ababb` |
+| `tests/watch-recovery.sh` | 12 checks passed, including host loss, guest overflow, one-shot re-add and the capacity case | `845b91f8541003320303eb7d65bf6864966d96ec220767ef01cd9f8b91aa9f7e` |
+| `tests/fuse-inode-bound.sh` | Read all 150,000 files and 64 held-open files. VZ helper descriptors peaked at 65,510 against a 73,728 limit and recovered to 58. | `d6241dd53406e726da5b453a4f2977806f3e8f25d51afb9468893666219fc86a` |
+| ARM64 guest layer tests | 13 passed, including concatenated gzip members and truncated gzip rollback | `31229da7b26c1b1d7c4e77bc2aa574fea7cffa0f463fa725d5ce4c38911918f4` |
+| `tests/e2e.sh` | 509 passed, zero failed or skipped | `f3e5cb8ef49950aaea337e0cc696653b5eef089ccd96e0343d343c80de104008` |
+
+The workspace and guest test builds used `RUSTC_WRAPPER=""` and
+`CARGO_ENCODED_RUSTFLAGS=""`. Capture stdout separately when parsing the
+guest test build's `--message-format=json` artifact path. The standalone
+failure and isolation suites have their own queue entries.
+
+#### Earlier asset preparation
+
 `bench/native/runner.py prepare` succeeded on both engines. W12's
 `fixtures/w12/prepare.py` fails closed: the source archive and lock match
 their pins and the first five diff IDs match, but the rebuilt
