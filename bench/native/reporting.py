@@ -33,7 +33,7 @@ CASE_METRICS = {
     "W1": ["wall_seconds", "time_to_health_s", "time_to_roundtrip_s"],
     "W2": ["rps", "p50_ms", "p95_ms", "p99_ms", "cpu_seconds_per_success"],
     "W3": ["tx_tps", "transaction_p95_ms", "up_s", "migrate_s", "txmix_s", "checkpoint_s",
-           "restart_s", "pgdata_allocated_bytes"],
+           "restart_s", "pgdata_allocated_bytes", "engine_cpu_per_success"],
     "W3-v4": ["init_s", "rw_tps", "rw_p50_ms", "rw_p95_ms", "rw_p99_ms", "ro_tps", "ro_p99_ms", "checkpoint_s", "restart_s", "pgdata_allocated_bytes", "db_size_bytes"],
     "W4": [metric for count in (1, 4, 16) for metric in
            (f"workers_{count}_s", f"queue_p95_ms_at_{count}", f"queue_p99_ms_at_{count}")] + list(W4_RESOURCE_METRICS),
@@ -238,6 +238,17 @@ def _metric(record: dict, name: str):
     resources = record.get("resources", {})
     if name == "engine_cpu_per_success" and record.get("case") == "W10":
         return _recovery_cpu_per_success(record)
+    if name == "engine_cpu_per_success" and record.get("case") == "W3":
+        count = record.get("metrics", {}).get("verified_transactions")
+        checks = record.get("correctness", {}).get("checks", {})
+        if (type(count) is not int or count <= 0 or checks.get("verify_rows") is not True
+                or checks.get("txmix") is not True):
+            return None, "missing verified W3 transaction count"
+        phase = (resources.get("phases") or {}).get("transactions", {})
+        cpu = phase.get("cpu_seconds")
+        if phase.get("errors") != [] or not _number(cpu) or cpu <= 0:
+            return None, "missing or invalid W3 transaction CPU phase"
+        return cpu / count, None
     if name in W4_RESOURCE_METRICS and record.get("case") == "W4":
         return _queue_resource(record, *W4_RESOURCE_METRICS[name])
     if name in W5_RESOURCE_METRICS and record.get("case") == "W5":
@@ -368,6 +379,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
                  and params.get('fixture_version') == W8_PAIRED_FIXTURE)
     paired_w5 = (identity['case'] == 'W5' and isinstance(params, dict)
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
+    paired_w3 = identity['case'] == 'W3' and any('paired_inputs' in record for record in records)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
     paired_w2 = verified_transfer or (identity['case'] == 'W13-overlap' or
                  (identity['case'] == 'W2' and isinstance(params, dict)
@@ -441,7 +453,7 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "missing or duplicated trial order"
         elif workload_params(a[0]) != workload_params(b[0]):
             reason = "executed parameters or seeds differ"
-        elif (paired_w2 or paired_w5 or paired_w8) and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
+        elif (paired_w2 or paired_w3 or paired_w5 or paired_w8) and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
@@ -481,6 +493,10 @@ def _analyze_cohort(identity: dict, records: list[dict],
         for pair_id, a, b in valid:
             left, left_reason = _metric(a, metric)
             right, right_reason = _metric(b, metric)
+            if (identity["case"] == "W3" and metric == "engine_cpu_per_success"
+                    and left is not None and right is not None
+                    and a["metrics"]["verified_transactions"] != b["metrics"]["verified_transactions"]):
+                left_reason = "W3 verified transaction counts differ within pair"
             if (metric == "cpu_seconds_per_success" and not w2_saturation
                     and left is not None and right is not None):
                 keys = ("requests_ok", "reads_ok", "writes_ok")

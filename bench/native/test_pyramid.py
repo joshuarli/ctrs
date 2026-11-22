@@ -61,6 +61,13 @@ class Selection(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.select("change", name=["connections"])
 
+    def test_w3_migration_cohort_runs_the_declared_sql_workload(self):
+        entry, = self.select(name=["w3-migration:cohort"])
+        argv = entry.argv
+        self.assertEqual((argv[argv.index("--case") + 1], argv[argv.index("--pairs") + 1]),
+                         ("W3", "10"))
+        self.assertIn("pinned-portfolio", entry.requires)
+
     def test_a_named_workload_above_the_ceiling_is_an_error(self):
         with self.assertRaises(SystemExit):
             self.select("edit", name=["w14-fresh:cohort"])

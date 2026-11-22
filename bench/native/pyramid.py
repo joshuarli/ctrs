@@ -77,6 +77,8 @@ CELLS: tuple[tuple[str, str, str, tuple[str, ...], float | None, tuple[str, ...]
        ("--case", "W2", "--client-location", location, "--concurrency", "4",
         "--operations", "10000", "--request-rate", "500"), None, ("pinned-portfolio",))
       for path, location in (("published-port", "host"), ("container-to-container", "guest"))),
+    ("w3-migration", "storage", "PostgreSQL migration, verified transactions, checkpoint and restart",
+     ("--case", "W3"), None, ("pinned-portfolio",)),
     ("w3v4-storage", "storage", "pgbench fixed work on a named volume",
      ("--case", "W3-v4"), 14, ("pinned-portfolio",)),
     ("w4-pipeline", "pipeline", "HTTP ingest through Redis workers to exact outputs on volumes",

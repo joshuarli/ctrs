@@ -191,6 +191,15 @@ For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
 stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.
 
+### W3 migration and committed-state cohort
+
+`pyramid.py run --name w3-migration:cohort` runs the declared migration,
+300-transaction mix, checkpoint and PostgreSQL restart with the v6 image
+pin. The pair verifies identical migration and transaction SQL. CPU per
+transaction uses the transaction phase and the count verified against
+committed state after restart. The native cohort and equivalent host
+storage durability remain open.
+
 ### Installed-default W6 cohort
 
 Run `base-20261122T063709-0627` used harness source `2910f31` and the signed

@@ -2622,6 +2622,10 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
         tx = trial_dir / "txmix.sql"
         tx.write_text("SET synchronous_commit = on;\n\\timing on\n"
                       + "".join(_w3_tx_sql(i) for i in range(W3_TXS)))
+        rec["paired_inputs"] = {"portfolio_sha256": rec["inputs"]["portfolio_sha256"],
+                                "postgres_manifest": pin["manifest"],
+                                "migration_sha256": sha256_file(mig),
+                                "transactions_sha256": sha256_file(tx)}
         for f in (mig, tx):
             cp = engine.sh(["cp", str(f), f"{name}:/tmp/{f.name}"],
                            timeout=60, check=False)
@@ -2674,6 +2678,8 @@ def trial_w3(ctx, engine: Engine, state: str, fixture_version: str = W3_FIXTURE_
         expected = {"rows": [[i, f"v{i}"] for i in range(W3_TXS)],
                     "meta": [["txs", W3_TXS]], "fsync": "on"}
         checks["verify_rows"] = out.returncode == 0 and json.loads(out.stdout) == expected
+        if checks["verify_rows"] and checks["txmix"]:
+            rec["metrics"]["verified_transactions"] = W3_TXS
         if not checks["verify_rows"]:
             rec["validation_errors"].append("persisted rows, counter, or fsync differs from W3 fixture")
         # Allocated-storage cell: bytes actually allocated for the
