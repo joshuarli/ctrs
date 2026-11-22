@@ -409,6 +409,21 @@ def _fixed_rate_lateness(record: dict) -> dict | None:
     return {"late": len(late), "blocked": blocked, "other": len(late) - blocked}
 
 
+def _w12_build_receipt(record):
+    inputs = record.get('inputs')
+    if not isinstance(inputs, dict):
+        return None
+    shared = {name: inputs.get(name) for name in ('source_sha256', 'dependency_lock_sha256',
+              'diff_ids', 'tools', 'phase_cache_state', 'initial_output', 'tests')}
+    if not all(shared.values()):
+        return None
+    metrics = record['metrics']
+    install = {name: metrics.get(name) for name in ('dependency_count', 'files', 'bytes')}
+    if any(type(value) is not int or value <= 0 for value in install.values()):
+        return None
+    return shared | {'installed_tree': install}
+
+
 def _analyze_cohort(identity: dict, records: list[dict],
                     sides: tuple[str, str] = ("ctrs", "orbstack"),
                     side_of=None,
@@ -422,6 +437,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
     paired_w5 = (identity['case'] == 'W5' and isinstance(params, dict)
                  and params.get('fixture_version') == W5_RECEIPT_VERSION)
     paired_w3 = identity['case'] == 'W3' and any('paired_inputs' in record for record in records)
+    verified_workspace = (identity['case'] == 'W12' and isinstance(params, dict)
+                          and params.get('timing_revision') == INSTALL_TIMING_REVISION)
     paired_httpie = (identity['case'] == 'W7' and isinstance(params, dict)
                      and params.get('fixture_version') == HTTPIE_FIRST_USE)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
@@ -510,6 +527,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "executed parameters or seeds differ"
         elif require_paired_inputs and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
+        elif verified_workspace and (not (receipt := _w12_build_receipt(a[0]))
+                                     or receipt != _w12_build_receipt(b[0])):
+            reason = 'paired workspace inputs or outputs differ or are missing'
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
         if not reason:

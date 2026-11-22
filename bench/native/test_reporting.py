@@ -100,6 +100,28 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(result["valid_pairs"], 0)
             self.assertEqual(result["rejections"][0]["reason"], "paired inputs differ or are missing")
 
+    def test_w12_admits_only_equivalent_workspace_receipts(self):
+        records = pair(case='W12', metric='workflow_seconds')
+        for record in records:
+            record['workload_params']['timing_revision'] = reporting.INSTALL_TIMING_REVISION
+            record['metrics'].update(dependency_count=3, files=34, bytes=56818)
+            record['inputs'] = {'source_sha256': 'source', 'dependency_lock_sha256': 'lock',
+                                'diff_ids': ['base', 'runtime'], 'tools': {'npm': '10.9.2'},
+                                'phase_cache_state': {'install': 'node_modules cold'},
+                                'initial_output': {'client_manifest_sha256': 'verified-output'},
+                                'tests': ['fixture/test.js'],
+                                'mounts': [{'Name': record['engine']}], 'image_id': record['engine']}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+        for section, key, value in (('inputs', 'diff_ids', ['other runtime']),
+                                    ('inputs', 'tests', None), ('metrics', 'files', 35),
+                                    ('metrics', 'dependency_count', True)):
+            mismatched = copy.deepcopy(records)
+            mismatched[1][section][key] = value
+            cohort = reporting.analyze(mismatched)['cohorts'][0]
+            self.assertEqual(cohort['valid_pairs'], 0)
+            self.assertEqual(cohort['rejections'][0]['reason'],
+                             'paired workspace inputs or outputs differ or are missing')
+
     def test_w4_resource_metrics_use_the_verified_worker_condition(self):
         records = pair(case="W4", metric="workers_4_s")
         for record, cpu, footprint in zip(records, (8, 10), (125, 100), strict=True):

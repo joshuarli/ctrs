@@ -1331,6 +1331,12 @@ directory and the existing offline package cache. Keep separate paired
 cohorts and preserve the full workflow time, the two install intervals and
 the exact output receipts for each layout.
 
+For timing revision 2, the reporter admits a pair only when both legs
+record the same source and dependency lock, image DiffIDs, tool versions,
+phase cache states, installed file and byte counts, package count, initial
+build output and discovered tests. Each engine verifies its own mount and
+image identity during the trial.
+
 ```sh
 for layout in full-bind bind-source-volume-deps all-volume; do
   python3 bench/native/runner.py baseline --case W12 --workspace-layout "$layout" \
