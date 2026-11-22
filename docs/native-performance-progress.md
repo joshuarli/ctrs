@@ -2140,8 +2140,33 @@ incomplete. Idle anon+kernel is 53.96/738.60 MiB; observed peaks are
 173.22/859.15 MiB; peak-minus-idle 119.30/120.31 MiB; retained-minus-idle
 .14/.69 MiB. These are not isolated transaction peaks or broad efficiency
 claims. The first initialization and negative retained deltas are retained.
-The current queue proceeds to residual HTTPie materialization/create profiling,
+The queue next proceeded to residual HTTPie materialization/create profiling,
 then the complete W1–W13 Linux admissibility survey. Mac gates stay open.
+
+### HTTPie residual follow-up, 2026-11-22
+
+[Evidence and replay](evidence/linux-httpie-residual-2026-11-22.md): the
+remaining pre-create boundary reproduces at .260–.267s versus Docker
+.040–.042s. Actual install workers repeatedly canonicalize tar paths, and
+independent perf also finds gzip inflate work. Three bounded hypotheses
+tested worker-local extraction paths, bounded decoded buffering, and their
+explicit combination. Each had ten predeclared alternating three-way rounds,
+current H3 / candidate / frozen Docker, CPUs 0–7.
+
+All **90/90 correct and host-admitted; 89/90 resource-valid**. R1 paired C/B
+first-use ratio **.985 [.938,1.183]**, R2 **.979 [.744,1.041]**, combined R3
+**.937 [.875,1.019]**. None meets the declared upper ≤.95 latency gate; R1
+and R3 also exceed the sampled active-footprint guard. R3 medians are
+baseline .503s, candidate .457s, Docker .438s, not a qualified win. One R1
+Docker resource failure stays invalid. All edits were reverted; H3 remains
+unchanged. Three-attempt bound exhausted; no fourth hypothesis or pooled win.
+Root-run ctrs-init suites passed 92/92/93 tests respectively; each unchanged
+create/run/rootfs subset passed 135, failed 0, skipped 17 Mac bind cases.
+CPU remains incomplete; active anon+kernel is sampled, not memory.current.
+Ctrs stopped, host Docker lifecycle unchanged. Raw data and all binaries/
+patches are at `/home/ubuntu/ctrs-evidence/linux-httpie-residual-20261122/`.
+Next: every W1–W13 Linux admissibility cell and remaining sanctioned W13
+headroom configurations. No macOS gate closes.
 
 ### Finite Mac handoff; no gate closes from Linux
 
