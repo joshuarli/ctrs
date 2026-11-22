@@ -47,11 +47,26 @@ BIN=$ROOT/target/release/ctrs
 
 # Each scenario leaves at most one hdiutil mount behind via the trap.
 FULL_MNT=""
-engines=()
+engine_starts=()
+engine_start_identity() {
+  local parent state started
+  read -r parent state started < <(ps -p "$1" -o ppid=,state=,lstart=) || return 1
+  [ "$parent" = "$$" ] && [[ "$state" != Z* ]] && [ -n "$started" ] || return 1
+  printf '%s\n' "$started"
+}
+signal_engine() {
+  local signal=$1 pid=$2 started
+  started=$(engine_start_identity "$pid") || return 1
+  [ "$started" = "${engine_starts[$pid]:-}" ] && kill "$signal" "$pid"
+}
 cleanup() {
-  for pid in "${engines[@]:-}"; do [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null; done
+  local pid
+  for pid in "${!engine_starts[@]}"; do signal_engine -TERM "$pid" 2>/dev/null; done
   sleep 2
-  for pid in "${engines[@]:-}"; do [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null; done
+  for pid in "${!engine_starts[@]}"; do
+    signal_engine -KILL "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+  done
   if [ -n "$FULL_MNT" ] && mount | grep -q "$FULL_MNT"; then hdiutil detach "$FULL_MNT" -force >/dev/null 2>&1; fi
   rm -rf "$PREFIX"-*
 }
@@ -69,7 +84,7 @@ fresh_engine() {
   rm -rf "$EH_DATA" "$EH_SOCK" "$EH_PIDFILE"
   env "$@" CTRS_DATA_DIR="$EH_DATA" CTRS_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
   EH_PID=$!
-  engines+=("$EH_PID")
+  engine_starts[$EH_PID]=$(engine_start_identity "$EH_PID") || return 1
   local i
   # The API answering means the daemon really booted; the socket file
   # alone can be a stale leftover.
@@ -86,7 +101,7 @@ recovery_engine() { # like fresh_engine but keeps the root and the stale socket
   EH_SOCK=$PREFIX-$name.sock
   CTRS_DATA_DIR="$EH_DATA" CTRS_SOCKET="$EH_SOCK" HOME=$PREFIX-$name-home "$BIN" daemon >>"$LOG" 2>&1 &
   EH_PID=$!
-  engines+=("$EH_PID")
+  engine_starts[$EH_PID]=$(engine_start_identity "$EH_PID") || return 1
   local i
   # The stale socket from the killed engine exists until the recovery
   # daemon unlinks and rebinds it; readiness is the API answering, not
@@ -98,7 +113,10 @@ recovery_engine() { # like fresh_engine but keeps the root and the stale socket
   echo "recovery engine $name did not answer /version within 90s" >>"$LOG"
   return 1
 }
-hard_kill() { kill -9 "$1" 2>/dev/null; wait "$1" 2>/dev/null; }
+hard_kill() {
+  signal_engine -KILL "$1" || { bad "cannot inject SIGKILL into owned engine PID $1"; return 1; }
+  wait "$1" 2>/dev/null || :
+}
 saft() { DOCKER_HOST="unix://$EH_SOCK" DOCKER_CONTEXT= perl -e 'alarm 120; exec @ARGV' "$@"; }
 dockq() { DOCKER_HOST="unix://$EH_SOCK" DOCKER_CONTEXT= docker "$@"; }
 
@@ -330,7 +348,7 @@ if fresh_engine s12 CTRS_TEST_VM_CRASH=1; then
     sentinel_state() { DOCKER_HOST="unix://$EH_SOCK_SENTINEL" DOCKER_CONTEXT= docker inspect -f '{{.State.Status}}' ctrs21-f12-sentinel 2>/dev/null; }
     before_sentinel=$(sentinel_state)
     # inject the crash into the s12 engine only
-    kill -USR2 "$EH_PID_S12"
+    signal_engine -USR2 "$EH_PID_S12" || bad 'S12 could not signal the owned VM crash injector'
     st=""; after=""
     for i in $(seq 1 45); do
       read after st < <(DOCKER_HOST="unix://$EH_SOCK_S12" DOCKER_CONTEXT= docker inspect -f '{{.State.StartedAt}} {{.State.Status}}' ctrs21-f12 2>/dev/null)
