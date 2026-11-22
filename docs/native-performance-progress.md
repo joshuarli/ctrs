@@ -2701,8 +2701,105 @@ headroom rule; there is no scored W13 throughput verdict. Durable images,
 source bundle, inputs, raw records/traces, schedules and analysis live under
 `/home/ubuntu/ctrs-evidence/linux-survey-20261122/` with the committed manifest.
 
-The next bounded profile loops are **W5 bind** (paired C/D 1.352) and **W12**
+The subsequent bounded profile loops covered **W5 bind** (paired C/D 1.352) and **W12**
 (full-bind install 1.338, workflow 1.042; all-volume typecheck 1.140, plus all
 other point-estimate losing phases). No survey result is an engine change.
 Mac-only FD/APFS/VM-disk/12h qualification remains on the Mac handoff. Linux
 shares the host kernel; no Linux result closes a macOS/OrbStack gate.
+
+### Final Linux standing after the bounded queue, 2026-11-22
+
+[Losing-cell profiles and controls](evidence/linux-gaps-2026-11-22.md) are now
+landed. W5's exact 60-edit boundary-free control removes the measured bind
+gap: 0.151253/0.150781 s. Actual Docker phase-boundary work adds about 45 ms
+outside each edit timer and changes cadence relative to the existing esbuild
+polling backend. This is not an engine speedup or a replacement of the pilot.
+W12's eight new normal controls and four separately instrumented profiles are
+all correct/admitted/strict resource-valid. Node/npm accounts for about 90%
+userspace plus 8–9% kernel CPU; runtime own-process CPU is 0.01–1.81%.
+Quota/priority and speculative-mitigation differences were checked and absent.
+Original losses, variable volume installs and slower normal full-bind warm
+rebuild remain visible; an exclusive engine-specific cause is not established.
+No unsupported patch or meaningless candidate cohort was manufactured.
+
+This table is Linux-only and preserves each cohort's age, sample count and
+scope. **C/D** means within-pair ctrs/Docker, lower is faster; it is not a
+cross-cohort ratio of medians. Three-pair cells are pilots, not qualified wins.
+All sampled Linux CPU is incomplete/lower-bound; strict ownership invalids
+are never zero or replaced. Anon+kernel excludes file cache and is not a
+Mac VM-footprint comparison. Full IQR/interval/resource tables and exact
+commands remain in the linked evidence, not collapsed into a single league.
+
+| Workload | Linux result / exact boundary | Correctness, resources and remaining limitation |
+|---|---|---|
+| **W1** restart/recovery | Five paired native pilots; exact acknowledged state and new-write recovery C/D .776 [.768,.802]. | 10/10 correct/admitted/resource-valid. Application restart, not engine/kernel crash or physical power loss. [Checkpoint](evidence/linux-checkpoint-2026-11-22.md). |
+| **W2** API/DB | Existing 50,000-op, concurrency-8 coverage; observer and loopback/host-IP/container-peer profiles; two engine hypotheses rejected and reverted. | Candidate cohorts 60/60 correct/admitted, 58/60 resource-valid. No qualified p99 improvement; app/DB dominates but an engine-specific deficit cause is unproven. [W2 evidence](evidence/linux-w2-2026-11-22.md). |
+| **W3 / W3-v4** storage/transactions | Basic five-pair pilot plus ten full-input v4 pairs; RW p99 C/D 1.040 [.830,1.958], RW TPS .902 [.797,.999], restart 1.100 [1.025,1.142]. | v4 20/20 correct/admitted/resource-valid; native pgbench/flush contracts verified. Losses retained; independent profiles reverse TPS ordering, no supported engine candidate. Fits page cache, not sustained disk or power-loss proof. [W3-v4](evidence/linux-w3v4-2026-11-22.md). |
+| **W4** queue | Three native pairs at 1/4/16 workers; completion C/D .707/.722/.662, queue p99 .747/.762/.778. | 6/6 correct/admitted/resource-valid; imported common bytes and frozen native workers/cache. [Survey](evidence/linux-survey-2026-11-22.md). |
+| **W5** bind/volume watch | Three five-edit median pilots: bind C/D 1.352, volume .737. Separate matched 60-edit observer controls remove bind gap; no engine change. | Survey 6/6 correct/admitted, 5/6 resource-valid. Exact persistent-app outputs remain mandatory. Boundary-free controls lack phase CPU qualification; not a tail-parity claim. [Follow-up](evidence/linux-gaps-2026-11-22.md). |
+| **W6** Rust build | Ten paired native pilots; build C/D .956 [.914,1.011]. | 20/20 correct/admitted/resource-valid; no significant timing win. Frozen common fixture; ordinary build workflow, not a Mac builder comparison. Initial Linux pilot above. |
+| **W7** build/first use | Promoted H3 HTTPie first-use C/B .773 [.707,.786]; still C/D 1.164 [1.036,1.180]. Three residual hypotheses all rejected/reverted. | H3 30/30 valid; residual 90/90 correct/admitted, 89/90 resource-valid. Build/load excluded from first-use timing; no new uncached-build claim. [H3](evidence/linux-httpie-2026-11-22.md), [residuals](evidence/linux-httpie-residual-2026-11-22.md). |
+| **W8** pull/materialize under load | Three native frozen-portfolio pairs; whole workflow C/D .567, pull-to-health .563. | 6/6 correct/admitted/resource-valid. Existing local registry/shared bytes and derived variants; not internet speed. [Survey](evidence/linux-survey-2026-11-22.md). |
+| **W9** finite CI jobs | Three native pairs; fixed-16 completion C/D .731/.627/.553/.635 at concurrency 1/4/8/16. | 6/6 correct/admitted/resource-valid; several intervals span one. Closed finite work, no synthetic infinite throughput extrapolation. [Survey](evidence/linux-survey-2026-11-22.md). |
+| **W10** API/DB/queue recovery | Three pairs each; recovery C/D .741/.471/.723. Exact recovery/new work checked. | 18/18 correct/admitted/resource-valid. Component restart/recovery, not kernel panic or hardware failure. [Survey](evidence/linux-survey-2026-11-22.md). |
+| **W11** finite mixed work | Three planned native pairs, two timing-admitted; mixed-work C/D .979 [.900,1.058]. | 6 correct, 5 host-admitted, 4 strict resource-valid records; only one complete admitted resource pair. Mac FD/APFS/VM-disk and existing 12h/engine qualification are not closed by this finite Linux pilot. [Survey](evidence/linux-survey-2026-11-22.md). |
+| **W12** workspace / watch | Three pairs per full-bind/all-volume/watch mount. Original workflow C/D 1.042/.966; original phase losses retained. Native watch p50 .893/.793 and p95 .872/.778. Follow-up eight controls/four perf workflows, no supported engine patch. | Full workflows 12/12 valid; native watch 12/12 correct/admitted, 7/12 strict resource-valid, no volume resource pair. Legacy per-file bind watcher fails identically on both engines (97/120, same 23 misses), preserved invalid. Native parent-directory strategy passes all 120 outputs per trial without polling/deadline/oracle changes. [Survey](evidence/linux-survey-2026-11-22.md), [follow-up](evidence/linux-gaps-2026-11-22.md). |
+| **W13** network | **Tool-headroom blocked**: existing one-stream and sanctioned four-stream configurations cannot demonstrate the unchanged 2× ceiling over both engine paths. No new scored cohort. | Historical transfers remain byte-exact and tool-limited; three Docker ownership failures remain invalid. Four-stream controls also tool-limited, despite exact bytes. No threshold relaxation, receiver rewrite or throughput-parity verdict. [Checkpoint](evidence/linux-checkpoint-2026-11-22.md), [four-stream evidence](evidence/linux-survey-2026-11-22.md). |
+
+#### Recoverability, compatibility and finite stopping boundary
+
+The [recoverable baseline](evidence/linux-amd64-checkpoint-2026-11-22.md) and
+[corrected independent restore/runtime proof](evidence/linux-integrated-runtime-2026-11-22.md)
+remain authoritative: common fixture lock SHA
+`246c0c6aca1d8c0a749f37b9281ec32735a326e414de872b45b1e77fa4f3b874`,
+preserved archive and binary identities, restore via existing `--linux-archive`
+without regenerating locks. Disposable Docker always uses private netns,
+private containerd/address/root/state, explicit `--containerd`, separate
+Docker roots/socket and no default bridge/socket. Do not repeat the initial
+incompletely isolated restoration; the docker0 incident cause stays unconfirmed.
+
+Integrated compatibility remains **ctrs 482/1/26; isolated Docker 471/2/30**
+(pass/fail/skip). Both VRF failures are host unsupported; Docker's remaining
+SYS_ADMIN mount failure is the default AppArmor boundary. Earlier copy-UID
+behavior and all historical ctrs failures are reconciled in that report.
+Active IPv4 deny/allow controls and exact stop cleanup were proved there;
+independent active IPv6 policy proof was not performed. No broad full-e2e
+pass is implied by classified nonzero failures.
+
+The five historical Docker transient-scope failures remain unchanged and
+invalid. [Actual process/start-time transitions](evidence/linux-httpie-2026-11-22.md)
+reproduce runc ancestry/reparenting gaps, but missing historical offending-PID
+snapshots prevent individual retrospective attribution. New invalid survey and
+residual receipts are also retained. Strict ownership was never weakened.
+
+Preserved evidence roots under `/home/ubuntu/ctrs-evidence/` include
+`linux-amd64-v1`, `linux-integrated-20261122`, `linux-w2-20261122`,
+`linux-httpie-20261122`, `linux-checkpoint-20261122`, `linux-w3v4-20261122`,
+`linux-httpie-residual-20261122`, `linux-survey-20261122` and
+`linux-gaps-20261122`. Each scientific slice has committed SHA-256 manifests
+and replay/restore instructions. Survey/gap manifests cover **4,175 / 2,546**
+durable artifacts; frozen pre-rebase bundles are labelled by their actual
+heads, never relabelled as final integrated source.
+
+**Linux goals left:** no unstarted movable workload, sanctioned W13 tool
+configuration, or currently profile-supported engine candidate remains in
+this bounded queue. H3 is the promoted product change; all unqualified runtime
+edits are reverted. Unexplained W3/W12 residuals and incomplete CPU/ownership
+attribution remain honest limitations, not claims of parity or impossibility.
+A new exploratory hypothesis or larger qualification campaign needs its own
+declaration; it is not a silently extended pilot or an erased losing cell.
+
+The finite Mac handoff immediately above is unchanged: combined kernel/agent/
+watch correctness at one build, W5/W12-watch, H3/new-default comparisons,
+remaining acceptance-matrix cells including the existing long reliability
+contract, and W13 headroom on that host. **Linux shares the host kernel; Mac
+has a VM boundary. All full macOS/OrbStack gates remain open.** No Mac work was
+run or held hostage to Linux completion.
+
+Final integrated offline check after the incoming Mac-only benchmark/reporting
+updates: `make test-bench TMPDIR=/home/ubuntu/repos/ctrs/.work/tmp` printed
+`Ran 542 tests in 25.178s`, `OK (skipped=16)`, exit 0. The first attempt in the
+fresh documentation worktree encountered 28 missing explicit `.work/tmp`
+scratch-parent errors; creating that parent fixed the environment, without
+changing tests or guards. Both attempts and both large-manifest verification
+logs are preserved by `docs/evidence/linux-standing-2026-11-22.sha256`.
