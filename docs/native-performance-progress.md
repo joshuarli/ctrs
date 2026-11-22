@@ -1279,8 +1279,8 @@ read the committed database/cache value after restart, and produced the
 pinned Marked artifact. ctrs and OrbStack `result.json` SHA-256s were
 `39d2878bfc08b3169100207cae8ee4903106459cf4da1e4b23008c2bba812418` and
 `900a8d3ebe891c22518de1c4975fe897819eea17b0b542563f123bd4b3709b34`.
-The images are installed on the campaign Mac. The W8 timing cohort and
-fresh comparative results for portfolio consumers remain open.
+The images are installed on the campaign Mac. The retained-content timing
+cohort without concurrent load is recorded below.
 
 The paired W8 control reports the whole-workflow CPU delta and sampled
 physical footprint for the verified engine processes and fixture
@@ -1426,6 +1426,51 @@ for content in retained derived; do
     --content "$content" --pairs 10 --under-load
 done
 ```
+
+#### W8 retained-content timing without concurrent load
+
+All ten AB/BA installed-default pairs in `w8-paired-a56d7a800f7b`
+passed host admission and deployment verification on harness `ce50555`
+with signed release `99db1aa`. Both engines reported nine guest vCPUs.
+ctrs reported 8,407,957,504 bytes of guest memory and OrbStack reported
+63,157,620,736. OrbStack's Docker server reported 29.8.2.
+
+Each pair shared four freshly derived layers totaling 206,480,802 to
+206,480,812 compressed bytes. The registry logged complete delivery of
+each changed digest and equal total blob bytes within every pair. Both
+engines verified the retained image pins, the installed markers, 688
+reads, 312 writes, persisted payloads after restart and the Marked output.
+Host gate receipts passed and the OrbStack running-container inventory was
+empty before and after each leg. The store was prewarmed and no cache
+purge was used.
+
+| Metric | Median ctrs/OrbStack | Paired 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| First pull to stack health | 0.5457 | [0.5045, 0.5493] | Strict win |
+| Sampled peak physical footprint | 0.1689 | [0.1621, 0.2466] | Strict win |
+| Measured whole-workflow CPU | 0.2858 | [0.2797, 0.2977] | Incomplete Mac NAT accounting |
+
+Median first-pull-to-health time was 6.484 s (range 6.335–7.072 s) for
+ctrs and 11.960 s (11.722–13.851 s) for OrbStack. At the recorded phase
+boundaries, the paired median gap was 5.47 s overall and 5.00 s before
+the stack-health phase, across the four pull/install and image
+verification paths. Verification and cleanup after health are outside
+that timing and inside the resource interval. The resource interval
+includes the owned engine and fixture coordinator. Eleven ctrs host NAT
+connections in each leg left their host-kernel CPU uncharged. Matched
+resident controls use the same four conditions and ten pairs per
+condition with `--resource-lane matched`. Backing allocation remains
+covered by the separate diagnostics above.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Signed ctrs binary | `10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17` |
+| Guest kernel | `19657ca4cc150ae8d04d003ac494676bcc5845dd3a3a21cd6bfb17df605d4e6f` |
+| Guest initramfs | `fb0f832b79eca9463d3aafb0bebdff8a5e620e2ff1779c896727fc91d3e32c87` |
+| Guest data template | `9ded055a953c718b93b45432714ab8e0d4bb3528e5b439f6d157525dfaa76de8` |
+| Plan | `65d13bdbc5a1eaa1fcbbaaa988352ad1a12c76c9626274e6f89b147c92de83fe` |
+| Raw trials | `a8df6c4fa048e19d36a2d7854fdca699bcdce4b27fba4888d664410fdcca07cf` |
+| Report | `03fa7dbbafd1091286a780b1e931cd0f0cbdaf7fdb757e59d5d0dcc714766658` |
 
 #### Mac release check after the shared layer-install change
 
