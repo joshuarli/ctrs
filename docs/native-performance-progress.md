@@ -1914,6 +1914,38 @@ python3 bench/native/reporting.py --match base-20261122T113705-c0df
 `trials.jsonl` SHA-256
 `f13b187c281dc2838597476765e0a9744c43f2c788f1c5020db95ca34e0aa2b7`.
 
+#### Installed-default W12 mixed-layout cohort
+
+`base-20261122T144132-719e` used harness `fa72716` and the same signed
+`99db1aa` release and fixture as the full-bind cohort. Both engines used
+9 vCPUs. Guest memory was 8.41 GB on ctrs and 63.16 GB on OrbStack. Both
+used a source bind at `/app` and named volumes at `/app/node_modules`,
+`/app/production-server` and `/app/client/.next`. All ten alternating pairs
+matched the installed tree, build output and test-discovery receipts.
+No ctrs leg recorded a host NAT connection. Outside-engine CPU stayed
+below 1.18 cores in the measured phases.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired median and 95% CI | Descriptive result |
+| --- | ---: | ---: | --- | --- |
+| Workflow time | 83.65 s | 83.71 s | 0.9990 [0.9887, 1.0026] | Non-inferior |
+| Offline `npm ci` | 11.60 s | 11.06 s | 1.0487 [0.9823, 1.0944] | Inconclusive |
+| Verification walk | 0.294 s | 0.321 s | 0.9197 [0.9087, 0.9563] | Non-inferior |
+| Jest discovery | 0.348 s | 0.378 s | 0.9174 [0.9029, 0.9240] | Strict win |
+| Whole-trial engine CPU | 202.04 CPU-s | 203.32 CPU-s | 0.9927 [0.9831, 0.9989] | Non-inferior |
+| Sampled peak physical footprint | 4.15 GB | 12.35 GB | 0.3386 [0.3263, 0.3680] | Strict win |
+
+Build, typecheck, warm rebuild, multi-file change and branch restore each
+met the non-inferiority bound. The full-bind cohort remains a loss. All
+three volume mounts changed together, so this comparison leaves their
+individual effects unknown.
+
+```sh
+python3 bench/native/reporting.py --match base-20261122T144132-719e
+```
+
+`trials.jsonl` SHA-256
+`cc0d2392b340a26300fe7653c1298ce90eae5e344ddf4ffc85a4f4b8a02b5410`.
+
 #### W12 inode-pruning probe
 
 Test inode-pruning cost in two alternating pairs of private ctrs guests at

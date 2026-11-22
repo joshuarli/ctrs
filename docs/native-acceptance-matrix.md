@@ -47,9 +47,12 @@ OrbStack's). Never pool lanes.
 W12 v2 full-bind completed ten installed-default pairs on 2026-11-22.
 The workflow ratio was 1.2999 [1.2883, 1.3223], with measured CPU at
 1.1630 [1.1593, 1.1725] and sampled physical footprint at 0.3606
-[0.3455, 0.3871]. The v2 mixed and all-volume workflow comparisons remain
-open. Both watch cohorts are complete. The table retains W12 timing
-history from the previous workspace fixture.
+[0.3455, 0.3871]. The v2 mixed-layout cohort also completed ten pairs.
+The workflow was non-inferior at 0.9990 [0.9887, 1.0026], with an
+inconclusive install interval and a strict footprint win. The v2
+all-volume cohort is pending. Both watch cohorts are complete.
+[Mixed-layout evidence](native-performance-progress.md#installed-default-w12-mixed-layout-cohort)
+The table retains W12 timing history from the previous workspace fixture.
 [Current cohort](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 
 | ID | Workflow | Spec | Impl | Functional | Compared | Notes |
