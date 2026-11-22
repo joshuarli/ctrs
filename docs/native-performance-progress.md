@@ -95,6 +95,14 @@ and its committed SHA-256 manifest, not from a new adapter implementation. Steps
    footprint is coincident anon+kernel, with `memory.current` secondary.
    The checkpoint records containerd/runc, binary/source identities,
    strict ownership limitations and verified retrieval/restore commands.
+   **2026-11-22: [W2 observer/profile/experiment result](evidence/linux-w2-2026-11-22.md)**:
+   fixed 50,000ops/C8, bounded observer, six Linux path/engine controls and two
+   predeclared 30-trial cohorts. All 60 cohort trials correct/admitted; 58 resource-valid
+   (two strict Docker ownership failures retained). Seccomp dispatch and adaptive
+   small-message relay candidates did not meet the p99 interval win gate; both
+   reverted. Evidence/binaries/raw traces preserved under `~/ctrs-evidence/`.
+   Dominant application/shared-DB-connection work is not an established engine
+   defect. No macOS gate closes; HTTPie has not started.
    The earlier Linux pilot remains descriptive, not qualification.
 4. **2026-11-20: build proof complete.** All patches 0001–0017 applied
    and Linux 6.18.58 built from empty Docker cache volumes on an 8-CPU
