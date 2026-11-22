@@ -297,7 +297,7 @@ one valid installed-default pair. Each engine verified all 300
 transactions after restart, matched the PostgreSQL manifest and both SQL
 hashes, and returned a transaction CPU phase without errors. Both engines
 observed 9 vCPUs. The 10-pair cohort and equivalent host storage durability
-remain open.
+were pending at admission.
 
 ```sh
 python3 bench/native/runner.py baseline --case W3 --a ctrs --b orbstack \
@@ -316,6 +316,31 @@ assets fixed across all pairs.
 python3 bench/native/runner.py baseline --case W3 --a ctrs --b orbstack \
   --resource-lane installed-default --pairs 10 --pair-quiet-load 4 --max-pairs 16
 ```
+
+`base-20261122T130640-24d2` ran ten alternating pairs from harness
+`0d75114` with signed release `99db1aa`. All 20 legs passed, with 6,000
+committed rows verified after PostgreSQL restart. The manifest and SQL
+pins matched, `synchronous_commit` was enabled for the timed workload,
+and the resulting row receipt confirmed `fsync=on` in every leg. The
+reporter used host-load admission, with a maximum endpoint one-minute
+load of 3.12 on 10 host CPUs. Outside CPU was recorded in 16 transaction
+phases and reached 1.26 cores in those phases.
+
+| Metric | Normalized paired median | 95% CI |
+| --- | ---: | ---: |
+| Verified transaction throughput (OrbStack / ctrs) | 0.0904 | 0.0893–0.1095 |
+| Commit p95 (ctrs / OrbStack) | 0.0691 | 0.0605–0.0820 |
+| Migration time | 0.3404 | 0.3097–0.3548 |
+| Checkpoint time | 0.1359 | 0.1267–0.1939 |
+| Restart time | 1.0726 | 0.8469–1.3336 |
+| Engine CPU per verified transaction | 0.1448 | 0.1353–0.1684 |
+| PGDATA allocated bytes | 1.0029 | 1.0029–1.0029 |
+| Sampled physical footprint | 0.1453 | 0.1366–0.1498 |
+
+Median trial commit p95 was 0.192 ms on ctrs and 2.817 ms on OrbStack.
+Restart time was inconclusive. The other listed ratios are
+`durability-unverified`. Raw trials SHA-256
+`0a3e43eb632babfaf02a9cd3660a3ca48d42056117a9a1594de397d464afc864`.
 
 The W3 and W3-v4 reports retain paired ratios and confidence intervals.
 Favorable assessments are marked `durability-unverified` until both engines'
