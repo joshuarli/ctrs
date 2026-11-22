@@ -191,6 +191,38 @@ For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
 stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.
 
+### Installed-default W1 warm stack cohort
+
+Run `base-20261122T093654-6f3a` used clean source `be29aa5` and the same
+signed binary and guest assets as W2. Both engines used 9 vCPUs with their
+installed memory settings. All ten alternating pairs matched the v6
+portfolio and SQL seed. Every leg verified initial DB and cache reads,
+the exact written value after PostgreSQL restarted on the same volume,
+and a new write and read after restart. Health checks polled at 100 ms.
+
+| Metric | Paired median ratio | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Compose up to health | 0.8475 | 0.7184–0.9122 | Strict win |
+| Compose up to exact DB/cache roundtrip | 0.8477 | 0.7186–0.9121 | Strict win |
+| Database restart to verified reads and write | 0.6855 | 0.6749–0.6983 | Strict win |
+| Total time through verified recovery | 0.8146 | 0.7153–0.8654 | Strict win |
+| Sampled peak physical footprint | 0.4191 | 0.3870–0.4293 | Strict win |
+| Measured engine CPU | 0.4459 | 0.4262–0.4622 | Incomplete, host NAT CPU uncharged |
+
+Lower ratios favor ctrs. Median verified restart time was 0.623 s on ctrs
+and 0.919 s on OrbStack. The stop-to-return internals were uninstrumented,
+so the result gives the client-observed time through verified recovery.
+The ctrs trials used 91 host NAT connections in total. Engine-cold
+comparison remains open while OrbStack shares its daemon and store.
+
+```sh
+python3 bench/native/pyramid.py run --name w1-stack:cohort
+python3 bench/native/reporting.py --match base-20261122T093654-6f3a
+```
+
+`trials.jsonl` SHA-256
+`5f2d444b5b1e58daed9e90375306b33f613a9210b3d2baa166baafe2a1aaf25d`.
+
 ### W3 migration and committed-state cohort
 
 `pyramid.py run --name w3-migration:cohort` runs the declared migration,
