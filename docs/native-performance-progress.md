@@ -1694,20 +1694,6 @@ allocation change. Total allocation rose at every boundary and grew by
 and free extents on this private disk after cleanup, then test whether
 guest trim reclaims the host bytes.
 
-#### W11 guest storage attribution
-
-Use the signed `99db1aa` release and the `ae96711` mixed pilot with a
-six-minute work window per engine and 32 seconds of post-cleanup observation.
-Take read-only samples immediately before and after exact row cleanup.
-Record `pg_database_size`, the items heap and total relation sizes,
-`pg_stat_wal.wal_bytes`, and the live and dead tuple estimates. Read
-`df -Pk "$PGDATA"`, `du -sk "$PGDATA"` and `du -sk "$PGDATA/pg_wal"`
-inside the owned database container. Verify the ctrs mount resolves to
-`/dev/vda` and retain guest device and mount identity in both legs.
-Match at least six exact cycles to the host backing observations by cycle
-index. The samples add work to cleanup and serve as diagnostic evidence.
-The trial leaves the existing trim, database, and durability policies in use.
-
 Use a stopped APFS clone of that private store for trim. Mount a new probe
 volume and verify its ext4 mount resolves to the guest data disk `/dev/vda`.
 Use `storage_trim_guest.py` to fsync a sentinel, sample guest usage and issue
@@ -1787,6 +1773,43 @@ SHA-256: `65cd55f1287288a29c4c4fc5231a962feab581e0edaed0d98bb58ce86f196ae2`.
 | `trials.jsonl` | `b4e684c256ca6eaaedc64cf054ffb2901699a0ae42e4f2dd0d495636bd46f947` |
 | `plan.json` | `69fa21643125255e0f4b3efaa2f1536d9d1528504b82c0957a4328e1d2331e59` |
 | `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+
+#### W11 physical footprint attribution
+
+Recomputed the steady physical footprint for all 23 post-cleanup
+observations from 2,241 native samples in the two short runs. Join each
+sample's process IDs to the verified ownership manifest and sort by the
+sum of the same sample's physical-footprint counters. Take the middle
+sample, or the average of the two middle samples, retaining each
+process's contribution. Their sums reproduced every recorded steady
+footprint.
+
+| Engine | Cycles for the growth check | Helper change | Other process change | Total change |
+| --- | --- | ---: | ---: | ---: |
+| ctrs | 1 to 11 | VZ helper +24,363,008 B | ctrs daemon +679,936 B | +25,042,944 B |
+| OrbStack | 1 to 8 | OrbStack Helper +49,845,624 B | OrbStack app −49,152 B | +49,796,472 B |
+
+From cycle 0 to the final observation, the ctrs VZ helper contributed
+53,985,280 bytes of the 55,443,456-byte increase. The OrbStack Helper fell
+by 304,362,352 bytes from cycle 0 to the final observation. These results
+localize the measured footprint to the helpers. Guest page cache, balloon
+state, and host-side helper allocations still need separate measurements.
+The derived `observations.jsonl` SHA-256 is
+`8a3153923d264a43adde0e076e6d59eefeaf53aedcc1654a5806eb4869369365`.
+
+#### W11 guest storage attribution
+
+Use the signed `99db1aa` release and the `ae96711` mixed pilot with a
+six-minute work window per engine and 32 seconds of post-cleanup observation.
+Take read-only samples immediately before and after exact row cleanup.
+Record `pg_database_size`, the items heap and total relation sizes,
+`pg_stat_wal.wal_bytes`, and the live and dead tuple estimates. Read
+`df -Pk "$PGDATA"`, `du -sk "$PGDATA"` and `du -sk "$PGDATA/pg_wal"`
+inside the owned database container. Verify the ctrs mount resolves to
+`/dev/vda` and retain guest device and mount identity in both legs.
+Match at least six exact cycles to the host backing observations by cycle
+index. The samples add work to cleanup and serve as diagnostic evidence.
+Use the current trim, database, and durability policies.
 
 The 12-hour check now requires the API, DB and cache container IDs, guest
 PIDs, start times and restart counters to match from setup through every
