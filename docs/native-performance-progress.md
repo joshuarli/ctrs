@@ -1507,9 +1507,11 @@ cache hits at those expiries. The first exact read began at 523.61 ms and
 completed at 535.39 ms. The cache suppressed connection attempts between
 expiries, leaving application readiness within each window unobserved.
 
-Compare the parked 50 ms change from `54c6a00` against a 250 ms release on
-the same runtime source, with identical guest assets and private stores.
-Admit on exact state and complete recovery first. Use ten alternating
+Compare `campaign/mac-w10-refusal50` at `63cd346` with signed baseline
+`99db1aa`. The candidate applies the parked `54c6a00` change and adjusts
+its expiry tests. Build both with the same guest assets and run the
+`ca24add` fixture, alternating private daemons from cloned warm-image stores.
+Admit one pair on exact state and complete recovery first. Use ten alternating
 pairs with a readiness-time upper 95% bound of 0.95 and a post-recovery
 p99 and measured CPU per success upper bound of 1.03. Retain outage
 errors and host NAT coverage. Confirm a passing candidate against
