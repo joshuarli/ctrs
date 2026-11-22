@@ -241,7 +241,7 @@ metrics = ["setup_seconds", "time_to_health_s", "admin_s", "seed_s",
            "clones", "peak_total_rss_kb", "peak_phys_footprint_bytes", "cpu_seconds_est"]
 states = ["warm"]
 params = { ops = 240, repos = 8, issues_per_repo = 5, clones = 4, seed = 1 }
-correctness = ["healthz", "admin_created", "repos_exact", "issues_exact",
+correctness = ["healthz", "pinned_images", "admin_created", "repos_exact", "issues_exact",
                "workload_zero_errors", "clones_exact"]
 note = "EXCLUDED from the scored W-matrix. Declared pilot parameters require input/version qualification before final confirmation. Run once per engine for the frozen candidate; if a failure is used for tuning, retire it as independent evidence and choose a fresh holdout. Different stack from W fixtures (Go forge + git protocol + Postgres)."
 

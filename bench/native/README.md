@@ -285,7 +285,9 @@ over the REST API, times a read workload through the published port,
 and finishes with real `git clone` smart-HTTP operations. Results land
 in `.work/native-perf/holdout-*/` like any trial but are excluded from
 the scored matrix; parameters are frozen in `cases.toml` — do not tune
-against its failures.
+against its failures. The ARM64 manifest digests are frozen in its Compose
+file. The runner fetches missing images before sampling, forbids pulls during
+startup, and records the loaded image IDs and Compose SHA-256.
 
 W9 v2 runs 16 fixed Marked build/test jobs at each declared concurrency, using the
 pinned common W8 image. Supply --image-ref for run/baseline/noop; see

@@ -797,6 +797,54 @@ class ExitStatusTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.cmd_holdout(args), 1)
 
+    def test_holdout_preparation_checks_native_manifest_before_admission(self):
+        refs = {name: f"fixture/{name}@sha256:{digit * 64}"
+                for name, digit in (("gitea", "1"), ("db", "2"))}
+        config = {"services": {name: {"image": ref} for name, ref in refs.items()}}
+        compose = Mock(side_effect=[completed(json.dumps(config)), completed()])
+        engine = Mock()
+        image = {"Os": "linux", "Architecture": "arm64", "Id": "sha256:" + "3" * 64}
+        engine.sh.side_effect = [completed(json.dumps([image | {"RepoDigests": [ref]}]))
+                                 for ref in refs.values()]
+        self.assertEqual(runner._holdout_images(engine, compose),
+                         {name: {"ref": ref, "id": image["Id"]} for name, ref in refs.items()})
+        compose.assert_called_with(["pull", "--policy", "missing"], timeout=600)
+
+        for invalid in ({"Architecture": "amd64"}, {"RepoDigests": ["fixture/gitea:latest"]}):
+            compose.side_effect = [completed(json.dumps(config)), completed()]
+            engine.sh.side_effect = [completed(json.dumps([image | {"RepoDigests": [refs["gitea"]]} | invalid]))]
+            with self.assertRaisesRegex(ValueError, "holdout image identity differs for gitea"):
+                runner._holdout_images(engine, compose)
+        config["services"]["db"]["image"] = "postgres:17-alpine"
+        compose.reset_mock(side_effect=True)
+        compose.return_value = completed(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "requires pinned"):
+            runner._holdout_images(engine, compose)
+        compose.assert_called_once_with(["config", "--format", "json"])
+
+    def test_holdout_starts_without_pulls_and_refuses_a_different_running_image(self):
+        images = {"gitea": {"ref": "pinned", "id": "sha256:" + "1" * 64}}
+        engine = fake_engine()
+        foreign_image = {"Image": "sha256:" + "2" * 64, "Config": {"Labels": {}}}
+        engine.sh.side_effect = [completed(), completed("container"),
+                                 completed(json.dumps([foreign_image]))]
+        sampler = Mock()
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.object(runner, "_holdout_images", return_value=images),
+            patch.object(runner, "compose_down"),
+            patch.object(runner, "start_sampler", return_value=(sampler, None)),
+            patch.object(runner, "stop_sampler") as stop,
+            patch.object(runner, "http_json") as request,
+        ):
+            record = runner.trial_holdout(FixtureContext(temp), engine, "warm")
+        self.assertFalse(record["correctness"]["ok"])
+        self.assertEqual(record["inputs"]["images"], images)
+        self.assertIn("running image or ownership differs", record["validation_errors"][0])
+        self.assertEqual(engine.sh.call_args_list[0].args[0][-4:], ["up", "-d", "--pull", "never"])
+        stop.assert_called_once_with(sampler)
+        request.assert_not_called()
+
 
 class GuestProvenanceTests(unittest.TestCase):
     def test_guest_override_uses_selected_assets_even_with_matching_size_and_mtime(self):

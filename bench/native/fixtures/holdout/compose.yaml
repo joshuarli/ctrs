@@ -6,7 +6,7 @@
 # NP_GITEA_PORT is supplied by the runner environment.
 services:
   gitea:
-    image: gitea/gitea:1.24.7
+    image: docker.io/gitea/gitea@sha256:456ce162035768fc71a2cf2f0f6975efd5ca1171f5606d2e30bfd08c4a9b5cd9
     environment:
       USER_UID: "1000"
       USER_GID: "1000"
@@ -35,7 +35,7 @@ services:
       - appnet
 
   db:
-    image: postgres:17-alpine
+    image: docker.io/library/postgres@sha256:93f3c32bafb7d4d20965c4df530899ae40923f0ccd63deede2f36681fa0aeceb
     environment:
       POSTGRES_USER: gitea
       POSTGRES_PASSWORD: gitea

@@ -189,7 +189,6 @@ W4_FIXED_WORK = {"jobs": w4_fixture.JOBS, "events": w4_fixture.JOBS * w4_fixture
 # `holdout` subcommand; excluded from the scored W-matrix.
 HOLDOUT_DIR = FIXTURES / "holdout"
 HOLDOUT_COMPOSE = HOLDOUT_DIR / "compose.yaml"
-HOLDOUT_IMAGE = "gitea/gitea:1.24.7"
 HOLDOUT_USER = "npadmin"
 HOLDOUT_PASSWORD = "npadmin-pass-123"
 W3_PASSWORD = "npw3pw"
@@ -3206,6 +3205,25 @@ def _holdout_api(base: str, method: str, path: str, body: dict | None = None,
         return e.code, {}
 
 
+def _holdout_images(engine: Engine, compose) -> dict:
+    services = json.loads(compose(["config", "--format", "json"]).stdout)["services"]
+    refs = {service: spec["image"] for service, spec in services.items()}
+    if set(refs) != {"gitea", "db"} or any(
+            not re.fullmatch(r".+@sha256:[0-9a-f]{64}", ref) for ref in refs.values()):
+        raise ValueError("holdout requires pinned Gitea and PostgreSQL images")
+    compose(["pull", "--policy", "missing"], timeout=600)
+    images = {}
+    for service, ref in refs.items():
+        image, = json.loads(engine.sh(["image", "inspect", ref], timeout=30).stdout)
+        digest = ref.rsplit("@", 1)[1]
+        if (image.get("Os") != "linux" or image.get("Architecture") != "arm64"
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(image.get("Id")))
+                or not any(value.endswith("@" + digest) for value in image.get("RepoDigests") or ())):
+            raise ValueError(f"holdout image identity differs for {service}")
+        images[service] = {"ref": ref, "id": image["Id"]}
+    return images
+
+
 def trial_holdout(ctx, engine: Engine, state: str,
                   ops: int = 240, repos: int = 8, issues: int = 5,
                   clones: int = 4, seed: int = 1) -> dict:
@@ -3223,17 +3241,23 @@ def trial_holdout(ctx, engine: Engine, state: str,
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
     trial_dir.mkdir(parents=True, exist_ok=True)
     rec = ctx.new_record(engine, case_id, state, trial_dir)
+    rec["metrics"]["fixture_version"] = "holdout-v2-arm64"
     checks = rec["correctness"]["checks"]
     sampler = trace = None
-    t0 = time.monotonic()
+    t0 = None
+
+    def compose(args, *, timeout=30, check=True):
+        return engine.sh(["compose", "-f", str(HOLDOUT_COMPOSE), "-p", proj, *args],
+                         env_extra=cenv, timeout=timeout, check=check)
+
     try:
         engine.ensure_up()
         compose_down(engine, proj, HOLDOUT_COMPOSE)
+        images = _holdout_images(engine, compose)
+        rec["inputs"] = {"images": images, "compose_sha256": sha256_file(HOLDOUT_COMPOSE)}
         sampler, trace = start_sampler(engine, trial_dir)
-        t_up = time.monotonic()
-        up = engine.sh(
-            ["compose", "-f", str(HOLDOUT_COMPOSE), "-p", proj,
-             "up", "-d"], env_extra=cenv, timeout=600, check=False)
+        t0 = t_up = time.monotonic()
+        up = compose(["up", "-d", "--pull", "never"], timeout=600, check=False)
         rec["metrics"]["setup_seconds"] = round(time.monotonic() - t_up, 3)
         if up.returncode != 0:
             rec["correctness"]["ok"] = False
@@ -3241,6 +3265,15 @@ def trial_holdout(ctx, engine: Engine, state: str,
                 f"compose up rc={up.returncode}: "
                 f"{(up.stderr or up.stdout)[-300:]}")
             return rec
+
+        for service, image in images.items():
+            cid, = compose(["ps", "-q", service]).stdout.split()
+            container, = json.loads(engine.sh(["inspect", "--", cid], timeout=30).stdout)
+            labels = container["Config"]["Labels"]
+            if (container["Image"] != image["id"] or labels.get("com.docker.compose.project") != proj
+                    or labels.get("com.docker.compose.service") != service):
+                raise ValueError(f"holdout running image or ownership differs for {service}")
+        checks["pinned_images"] = True
 
         # /api/healthz answers once Gitea finished its first-boot schema
         # setup against Postgres.
@@ -3366,12 +3399,15 @@ def trial_holdout(ctx, engine: Engine, state: str,
     except Exception as exc:
         rec["correctness"]["ok"] = False
         rec["validation_errors"].append(f"exception: {exc}")
-        rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
+        if t0 is not None:
+            rec["metrics"]["wall_seconds"] = round(time.monotonic() - t0, 3)
         return rec
     finally:
-        compose_down(engine, proj, HOLDOUT_COMPOSE)
-        if sampler is not None:
-            stop_sampler(sampler)
+        try:
+            compose_down(engine, proj, HOLDOUT_COMPOSE)
+        finally:
+            if sampler is not None:
+                stop_sampler(sampler)
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)
