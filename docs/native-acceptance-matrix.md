@@ -117,10 +117,12 @@ networking) and **qualified** (none yet).
 5. W6 sampled peak physical footprint 1.36× loss in the resumed
    installed-default cohort. The VZ helper retained the allocation
    across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
-6. W7 sampled peak physical footprint inconclusive and CPU incomplete.
-   The offline W7 fixtures and the W4, W5 and W8 cohorts still need native
-   evidence. W10 has API, database and queue pairs, with whole-engine parity
-   pending on an isolated OrbStack target.
+6. W7 sampled peak physical footprint is inconclusive and CPU accounting
+   is incomplete. The offline W7 fixtures and the W4 and W8 cohorts still
+   need native evidence. W5 has ten admitted pairs, with bind and volume
+   p95 each required for frozen qualification. W10 has API, database
+   and queue pairs, with whole-engine parity pending on an isolated
+   OrbStack target.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.

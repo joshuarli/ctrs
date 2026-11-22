@@ -109,6 +109,8 @@ class Readiness(unittest.TestCase):
 
     def test_a_missing_load_or_state_cannot_be_covered_by_other_cells(self):
         for name in ('w2.warm.container-to-container-saturation-c16.p99-ms',
+                     'w5.warm.bind.bind-edit-to-result-p95-s',
+                     'w5.warm.volume.volume-edit-to-result-p95-s',
                      'w6.warm.rust-default-builder.build-rust-s',
                      'w8.derived.cancelled-delivery.cancellation-or-cleanup-failures',
                      'w10.warm.database-interruption.recovery-s'):
