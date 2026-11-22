@@ -128,7 +128,7 @@ def observe(plan_value, cycle, directory):
     except Exception as exc:
         row['file_descriptors'] = {'status': 'unknown', 'errors': [repr(exc)]}
     try:
-        row['allocation'] = allocation(manifest, plan_value['owned_files'])
+        row['allocation'] = allocation(manifest, plan_value['owned_files'], include_private=True)
     except Exception as exc:
         row['allocation'] = {'status': 'unknown', 'errors': [repr(exc)]}
     return row
@@ -147,13 +147,20 @@ def summarize(plan_value, observations):
               'minimum_coverage_met': len(observations) >= budgets['warmup_cycles'] + budgets['minimum_post_warmup_cycles'] and all(
                   r.get('interval', {}).get('status') == 'ok' and r['interval'].get('elapsed_s', 0) >= minimum for r in observations),
               'qualification_eligible': False,
-              'exclusive_allocation': {'status': 'unknown', 'reason': 'shared APFS extents not measured'},
+              'exclusive_allocation': {'status': 'unknown', 'reason': 'incomplete owned private-byte observations'},
               'build_cache': {'status': 'unknown', 'reason': 'build cache is not isolated'}}
     file_ids = [tuple((f['device'], f['inode']) for f in r.get('allocation', {}).get('files', [])) for r in observations]
     files_stable = bool(file_ids) and bool(file_ids[0]) and all(ids == file_ids[0] for ids in file_ids)
     ordered = all(r.get('cycle') == i and r.get('version') == VERSION for i, r in enumerate(observations))
     if not ordered:
         result['minimum_coverage_met'] = False
+    if result['minimum_coverage_met'] and files_stable:
+        allocations = [row.get('allocation', {}) for row in observations]
+        private = [value(row, 'allocation', 'exclusive_allocated_bytes') for row in observations]
+        if (all(cell.get('exclusive_allocation_status') == 'ok' for cell in allocations)
+                and all(type(size) is int and size >= 0 for size in private)):
+            result['exclusive_allocation'] = {'status': 'ok', 'samples_bytes': private,
+                'peak_increase_bytes': max(private) - private[0], 'final_delta_bytes': private[-1] - private[0]}
     for name, cell, key, budget in (('physical_footprint', 'interval', 'steady_phys_footprint_bytes', budgets['physical_footprint_bytes']),
             ('file_descriptors', 'file_descriptors', 'total', budgets['file_descriptors']),
             ('active_disk_allocation', 'allocation', 'allocated_bytes', budgets['active_disk_allocation_bytes'])):

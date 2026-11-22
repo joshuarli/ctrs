@@ -45,6 +45,22 @@ class Growth(unittest.TestCase):
         rows[2]['allocation']['files'][0]['inode'] = 3
         self.assertEqual(resources.summarize(self.plan, rows)['active_disk_allocation']['status'], 'unknown')
 
+    def test_private_allocation_requires_stable_owned_files_and_every_observation(self):
+        for row, private in zip(self.rows, (0, 4, 6, 4, 3, 2), strict=True):
+            row['allocation'].update(exclusive_allocated_bytes=private, exclusive_allocation_status='ok')
+        result = resources.summarize(self.plan, self.rows)
+        self.assertEqual(result['exclusive_allocation'], {'status': 'ok', 'samples_bytes': [0, 4, 6, 4, 3, 2],
+            'peak_increase_bytes': 6, 'final_delta_bytes': 2})
+        self.assertEqual(result['active_disk_allocation']['post_warmup_growth'], 0)
+        self.assertEqual(resources.summarize(self.plan, self.rows[:5])['exclusive_allocation']['status'], 'unknown')
+        self.rows[3]['allocation']['exclusive_allocation_status'] = 'unknown'
+        result = resources.summarize(self.plan, self.rows)
+        self.assertEqual(result['exclusive_allocation']['status'], 'unknown')
+        self.assertEqual(result['active_disk_allocation']['status'], 'pass')
+        self.rows[3]['allocation']['exclusive_allocation_status'] = 'ok'
+        self.rows[3]['allocation']['files'][0]['inode'] += 1
+        self.assertEqual(resources.summarize(self.plan, self.rows)['exclusive_allocation']['status'], 'unknown')
+
     def test_manifest_and_native_counter_failures(self):
         manifest = {'engine': 'ctrs', 'required_processes': [
             {'pid': 1, 'role': 'daemon', 'comm': 'd', 'start_identity': 'a', 'kernel_start_identity': 1},

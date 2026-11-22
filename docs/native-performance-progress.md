@@ -1334,8 +1334,11 @@ Inspect `resources.cycle_growth` in each W11 trial record. The first
 complete observation establishes the baseline, and at least five more
 must cover 30 seconds each. Read the footprint, descriptor and active disk
 growth results alongside owned cleanup and exact-state checks. The
-diagnostic will leave the 12-hour qualification and exclusive APFS
-allocation open.
+run also samples APFS private bytes after cleanup on the same verified
+backing files. The private-byte summary requires the full observation
+count, stable file identities and complete attribute coverage. The
+growth gate uses the declared active-backing, footprint and descriptor
+budgets. The 12-hour qualification remains open.
 
 The 12-hour check now requires the API, DB and cache container IDs, guest
 PIDs, start times and restart counters to match from setup through every
