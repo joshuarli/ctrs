@@ -1472,6 +1472,22 @@ covered by the separate diagnostics above.
 | Raw trials | `a8df6c4fa048e19d36a2d7854fdca699bcdce4b27fba4888d664410fdcca07cf` |
 | Report | `03fa7dbbafd1091286a780b1e931cd0f0cbdaf7fdb757e59d5d0dcc714766658` |
 
+#### W8 concurrent-load resource sampler rejection
+
+The first OrbStack leg in `w8-paired-5527bdad376c` completed the 50,000
+background API operations with overlap in all four pulls. It also passed
+the deployment checks. The harness rejected the leg during resource
+validation. A periodic sample started at monotonic 151671.639771 s and
+read the fixture coordinator at 151671.639948 s, after the cleanup end
+boundary read that process at 151671.639935 s. Sorting the periodic sample
+by its start time put its later CPU reading before the true end boundary.
+
+Phase accounting now requires a periodic sample to finish before the
+phase end boundary starts. Replaying the saved cleanup trace keeps five
+interior samples and reports 0.7834 CPU-s with no validation errors.
+The original leg remains rejected in its run records. Use the corrected
+harness for subsequent cohorts and keep all stored samples for review.
+
 #### Mac release check after the shared layer-install change
 
 Source `83e9c15` changes the gzip decoder compiled into the Linux guest

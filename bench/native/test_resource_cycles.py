@@ -92,13 +92,28 @@ class ResourceCycleTests(unittest.TestCase):
                     phase['after']['procs'].pop()
                 else:
                     sample = cycles.boundary_sample(manifest, copy.deepcopy(phase['before']))
-                    sample.update(monotonic=10.005)
+                    sample.update(monotonic=10.005, cpu_sample_ended_monotonic=10.0051)
                     sample['procs'].pop()
                     samples.append(sample)
                 result = cycles.phase_summary(manifest, phase, samples)
                 self.assertEqual(result['status'], 'unknown')
                 self.assertIsNone(result['peak_phys_footprint_bytes'])
                 self.assertIsNone(result['cpu_seconds'])
+
+    def test_sample_crossing_end_boundary_is_outside_the_phase(self):
+        manifest, phase = self.phase()
+        sample = cycles.boundary_sample(manifest, copy.deepcopy(phase['before']))
+        sample.update(monotonic=10.004, cpu_sample_ended_monotonic=10.005)
+        sample['procs'][1].update(footprint_bytes=2000)
+        crossing = copy.deepcopy(sample)
+        crossing.update(monotonic=10.0099, cpu_sample_ended_monotonic=10.0102)
+        crossing['procs'][1].update(cputime_s=10.006, user_cpu_s=6.003, system_cpu_s=4.003,
+                                    footprint_bytes=4000)
+        result = cycles.phase_summary(manifest, phase, [sample, crossing])
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['interior_sample_count'], 1)
+        self.assertAlmostEqual(result['cpu_seconds'], .004)
+        self.assertEqual(result['peak_phys_footprint_bytes'], 2008)
 
     def test_sampler_failure_invalidates_each_phase_without_losing_its_error(self):
         manifest, phase = self.phase()
