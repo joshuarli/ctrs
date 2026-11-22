@@ -3394,7 +3394,7 @@ class RunContext:
             "ownership_collector_sha256": sha256_file(BENCH / ('linux_cgroups.py' if linux_lane.enabled() else 'ownership.py')),
             "counter_module_sha256": sha256_file(BENCH / ('linux_cgroups.py' if linux_lane.enabled() else 'macos_counters.py')),
             "worktree_dirty": bool(subprocess.run(
-                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                ["git", "-c", f"safe.directory={REPO}", "status", "--porcelain", "--untracked-files=normal"],
                 cwd=REPO, capture_output=True, text=True).stdout.strip()),
         })
         self.workload_params: dict = {}
@@ -3452,9 +3452,9 @@ class RunContext:
 
 
 def git_sha() -> str:
-    cp = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
+    cp = subprocess.run(["git", "-c", f"safe.directory={REPO}", "rev-parse", "HEAD"], cwd=REPO,
                         capture_output=True, text=True)
-    return cp.stdout.strip() or "unknown"
+    return cp.stdout.strip() if cp.returncode == 0 and cp.stdout.strip() else "unknown"
 
 
 def safe_version(engine: Engine) -> str:

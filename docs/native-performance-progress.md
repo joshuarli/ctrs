@@ -62,31 +62,31 @@ Decisions, including the vCPU default and kernel patch 0017, are in
 
 **On a Linux host.** On Linux, ctrs runs its agent directly on the host
 kernel, and the baseline is the Docker daemon on the same host (normally
-Docker Engine: dockerd with containerd), not OrbStack. That is a new
-lane. Its results never pool with the macOS cells, and the macOS gates
-above stay open until they are measured on a Mac. Steps:
+Docker Engine: dockerd with containerd), not OrbStack. The native amd64
+lane and adapter are implemented; its results never pool with the macOS
+cells, and the macOS gates above stay open until measured on a Mac.
+Resume from the [recoverable Linux checkpoint](evidence/linux-amd64-checkpoint-2026-11-22.md)
+and its committed SHA-256 manifest, not from a new adapter implementation. Steps:
 
 1. `./scripts/setup-dev`, then `make test` and `make lint`. Run
    `ctrs-init`'s Linux-only tests as root:
    `cargo test -p ctrs-init --target <arch>-unknown-linux-musl`.
-2. Bring up the Linux engine (`cargo xtask linux`; run
+2. Bring up the Linux engine (`cargo xtask linux --arch amd64`; run
    `tests/linux-host.sh` and `tests/kernel-features.sh` in a privileged
-   container) and run `tests/e2e.sh` against it. Run e2e against the
-   host's dockerd too, so both engines are known to complete the same
-   work.
-3. Add a Docker Engine adapter to the harness. Today it accepts only
-   `ctrs` and `orbstack` (`runner.py --a/--b/--engine`, `mixed_job.py`,
-   and `pyramid.py` `ENGINES`, which requires `macos-arm64`). Its
-   resource accounting is macOS-only too: `ri_phys_footprint`, and
-   process matching on Virtualization.framework (`collect.py`). On Linux,
-   account by cgroup: the dockerd, containerd and shim processes plus
-   the container cgroups for Docker, and the ctrs daemon and agent plus
-   their container cgroups for ctrs. Every container runs on the same
-   kernel, so per-cgroup CPU, memory and IO compare directly. Then write
-   the Linux lane into `campaign-native-performance.md`, with the host,
-   Docker version, storage driver and cgroup version as identity, and
-   start with W2, W6/W7 and W13. Bind mounts on Linux are native, so the
-   W12 virtiofs loss does not apply.
+   container) and run `tests/e2e.sh` against it and an owned disposable
+   Docker daemon. The suite uses fixed names and prune labels: never run
+   it against a concurrently used daemon. Preserve integrated logs and
+   active firewall deny/allow controls, not just post-stop rule snapshots.
+3. Use the existing `--lane linux-amd64` path in `runner.py`/`pyramid.py`
+   with engines `ctrs` and `dockerd` for W2, W6, W7 and W13. Restore
+   `linux-amd64-v1` using `prepare --linux-archive`; do not regenerate its
+   lock. Native x86_64 only, no architecture fallback. Docker baseline:
+   Engine 29.9.2 (`0367cbe`), kernel `6.8.0-1060-aws`, systemd cgroup v2,
+   overlayfs. Accounting is cgroup CPU and `memory.stat` anon/file/kernel;
+   footprint is coincident anon+kernel, with `memory.current` secondary.
+   The checkpoint records containerd/runc, binary/source identities,
+   strict ownership limitations and verified retrieval/restore commands.
+   The earlier Linux pilot remains descriptive, not qualification.
 4. **2026-11-20: build proof complete.** All patches 0001–0017 applied
    and Linux 6.18.58 built from empty Docker cache volumes on an 8-CPU
    x86_64 Linux host; no patch fixes. With `CARGO_ENCODED_RUSTFLAGS=""`,

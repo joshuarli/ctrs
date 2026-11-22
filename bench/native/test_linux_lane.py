@@ -332,6 +332,20 @@ class Engines(unittest.TestCase):
                 lane.build_images(engine, ('rust',))
 
 
+class GitProvenance(unittest.TestCase):
+    def test_revision_trust_is_scoped_to_the_current_command_and_repository(self):
+        with patch.object(runner.subprocess, 'run', return_value=Mock(returncode=0, stdout='frozen-sha\n')) as git:
+            self.assertEqual(runner.git_sha(), 'frozen-sha')
+        git.assert_called_once_with(['git', '-c', f'safe.directory={runner.REPO}', 'rev-parse', 'HEAD'],
+                                    cwd=runner.REPO, capture_output=True, text=True)
+
+    def test_failed_or_empty_revision_is_not_fabricated(self):
+        for status, output in [(1, 'untrusted'), (0, '')]:
+            with self.subTest(status=status, output=output), \
+                    patch.object(runner.subprocess, 'run', return_value=Mock(returncode=status, stdout=output)):
+                self.assertEqual(runner.git_sha(), 'unknown')
+
+
 class LinuxReporting(unittest.TestCase):
     def test_footprint_analog_and_secondary_current_are_reported_for_dockerd(self):
         records = [{'run_id': 'run', 'host_id': 'host', 'arch': 'x86_64', 'git_sha': 'sha',

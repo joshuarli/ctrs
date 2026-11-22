@@ -10,9 +10,10 @@ Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 The native ARM64 macOS versus OrbStack campaign is paused with no gate
 passed. To resume, read `docs/campaign-native-performance.md`, then the
 "Wound down" section of `docs/native-performance-progress.md`, which gives
-separate steps for a Linux host and a Mac. On Linux the baseline is the
-host's Docker Engine (a new lane that needs a harness adapter), and the
-macOS-vs-OrbStack gates still need a Mac.
+separate steps for a Linux host and a Mac. The native `linux-amd64`
+`ctrs`/`dockerd` lane already exists, with cgroup-v2 accounting and frozen
+fixtures. Resume from [the recoverable Linux checkpoint](docs/evidence/linux-amd64-checkpoint-2026-11-22.md),
+not by implementing an adapter. Linux results never close macOS-vs-OrbStack gates.
 
 ## Commands
 
