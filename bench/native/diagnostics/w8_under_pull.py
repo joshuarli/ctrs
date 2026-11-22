@@ -15,6 +15,9 @@ CLIENT = Path(__file__).with_name('w8_load_guest.py')
 
 
 def baseline_image_reference(engine_name, pin):
+    if runner.linux_lane.enabled():
+        kind = {'ctrs': 'config', 'dockerd': 'manifest'}[engine_name]
+        return kind, pin['linux_ids'][engine_name] if 'linux_ids' in pin else pin[kind]
     kind = {'ctrs': 'config', 'orbstack': 'manifest'}[engine_name]
     return kind, pin[kind]
 
@@ -26,7 +29,7 @@ def require_baseline_images(engine_name, pins, images):
         _, reference = baseline_image_reference(engine_name, pin)
         rootfs = image.get('RootFS') if isinstance(image, dict) else None
         if (not isinstance(rootfs, dict) or rootfs.get('Layers') != pin['diff_ids']
-                or image.get('Id') != reference or image.get('Architecture') != 'arm64'):
+                or image.get('Id') != reference or image.get('Architecture') != ('amd64' if runner.linux_lane.enabled() else 'arm64')):
             raise ValueError('baseline image differs from pin: ' + name)
     return dict(zip(pins, images, strict=True))
 

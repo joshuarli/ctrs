@@ -108,6 +108,26 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             module.restore(archive, output, pin)
 
+    def test_native_amd64_is_explicit_and_does_not_admit_arm_images(self):
+        with self.assertRaisesRegex(ValueError, 'linux/amd64'):
+            registry.prepare_layout(self.root, {'linux/app': 'app'}, architecture='amd64')
+        config = self.blob(encoded({'os': 'linux', 'architecture': 'amd64',
+            'rootfs': {'type': 'layers', 'diff_ids': self.diff_ids}}), 'application/vnd.oci.image.config.v1+json')
+        manifest = self.blob(encoded({'schemaVersion': 2, 'config': config, 'layers': self.layers}), registry.OCI_MANIFEST)
+        manifest['annotations'] = {'org.opencontainers.image.ref.name': 'native'}
+        (self.root / 'index.json').write_bytes(encoded({'schemaVersion': 2, 'manifests': [manifest]}))
+        contract = {'schema_version': 1, 'fixture_version': 'w8-v6-common-portfolio',
+                    'images': {'linux/app': {'layout_reference': 'native', 'manifest': manifest['digest'],
+                                            'config': config['digest'], 'layer_count': 2, 'diff_ids': self.diff_ids}}}
+        native = registry.prepare_pinned_portfolio(self.root, contract, architecture='amd64')
+        self.assertEqual(native.manifests, {'linux/app': manifest['digest']})
+        with self.assertRaisesRegex(ValueError, 'linux/arm64'):
+            registry.prepare_pinned_portfolio(self.root, contract)
+        with self.assertRaisesRegex(ValueError, 'empty pinned'):
+            registry.prepare_pinned_portfolio(self.root, {**contract, 'images': {}}, architecture='amd64')
+        with self.assertRaisesRegex(ValueError, 'unsupported portfolio architecture'):
+            registry.prepare_layout(self.root, {'linux/app': 'native'}, architecture='other')
+
     def test_both_repositories_serve_identical_verified_manifest_and_blobs(self):
         portfolio = registry.prepare_layout(self.root, {'ctrs/app': 'app', 'orb/app': 'app'})
         self.assertEqual(portfolio.manifests, {'ctrs/app': self.manifest['digest'], 'orb/app': self.manifest['digest']})

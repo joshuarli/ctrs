@@ -160,7 +160,7 @@ def largest_layer_digest(layers):
     return max(layers, key=lambda layer: layer['size'])['digest']
 
 
-def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=False):
+def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=False, architecture='arm64'):
     """Create a new w8-v3 layout and receipt; seed is 1..1024 explicit bytes."""
     if not isinstance(seed, bytes) or not 1 <= len(seed) <= 1024:
         raise ValueError('seed must contain 1..1024 bytes')
@@ -171,7 +171,7 @@ def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=
     for parent in (dest.parent, *dest.parent.parents):
         if parent.is_symlink():
             raise ValueError('symlink in destination path')
-    portfolio = registry.prepare_pinned_portfolio(source, contract)
+    portfolio = registry.prepare_pinned_portfolio(source, contract, architecture=architecture)
     version = RETAINED_VERSION if retain_other_layers else DERIVED_VERSION
     dest.mkdir()
     try:
@@ -225,7 +225,7 @@ def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=
             images[name] = {'reference': image['layout_reference'], 'source_manifest': image['manifest'], 'manifest': descriptor['digest'], 'config': manifest['config']['digest'], 'layers': layers, 'diff_ids': diff_ids}
         (dest / 'index.json').write_bytes(_encoded(index))
         receipt = {'schema_version': 1, 'fixture_version': version, 'source_fixture_version': contract['fixture_version'], 'source_contract_sha256': hashlib.sha256(_encoded(contract)).hexdigest(), 'method': 'append owned marker to each selected source tar before terminal records; gzip level 9 mtime 0' if retain_other_layers else 'append owned marker to each source tar before terminal records; gzip level 9 mtime 0', 'seed_sha256': seed_hash, 'python': sys.version, 'zlib_version': zlib.ZLIB_VERSION, 'zlib_runtime_version': zlib.ZLIB_RUNTIME_VERSION, 'images': images, 'layers': [{'source_digest': key[0], 'source_diff_id': key[1], **value} for key, value in sorted(derived.items())]}
-        registry.prepare_layout(dest, {name: image['layout_reference'] for name, image in contract['images'].items()})
+        registry.prepare_layout(dest, {name: image['layout_reference'] for name, image in contract['images'].items()}, architecture=architecture)
         (dest / 'receipt.json').write_bytes(_encoded(receipt) + b'\n')
         return receipt
     except BaseException:

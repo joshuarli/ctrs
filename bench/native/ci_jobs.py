@@ -6,6 +6,8 @@ import re
 import time
 import uuid
 
+import linux_lane
+
 FIXTURE = Path(__file__).parent / 'fixtures/w9-v2/jobs.json'
 SPEC = json.loads(FIXTURE.read_text())
 TIMEOUT = 120
@@ -65,6 +67,10 @@ def cleanup(engine, name, owner, *, command=None):
 
 
 def validate_image_ref(image_digest_ref):
+    if linux_lane.enabled():
+        if image_digest_ref not in linux_lane.workload_lock()['images']['marked']['ids'].values():
+            raise ValueError('W9 requires the frozen native Linux Marked image')
+        return
     if (not re.fullmatch(r'[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}', image_digest_ref)
             or image_digest_ref.rsplit('@', 1)[-1] != IMAGE_DIGEST):
         raise ValueError('W9 requires the pinned Marked image digest reference')

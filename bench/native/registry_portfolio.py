@@ -95,8 +95,10 @@ def _blob(root, descriptor):
     return VerifiedBlob(path, digest, size, after)
 
 
-def prepare_layout(layout, repositories):
+def prepare_layout(layout, repositories, *, architecture='arm64'):
     """Return immutable verified responses for {repository: OCI ref.name} selections."""
+    if architecture not in ('arm64', 'amd64'):
+        raise ValueError('unsupported portfolio architecture')
     root = Path(layout)
     if _json(_read(root / "oci-layout")).get("imageLayoutVersion") != "1.0.0":
         raise ValueError("unsupported OCI layout")
@@ -122,10 +124,10 @@ def prepare_layout(layout, repositories):
                 raise ValueError("invalid image index")
             candidates = [d for d in image_index["manifests"] if isinstance(d, dict) and
                           d.get("platform", {}).get("os") == "linux" and
-                          d.get("platform", {}).get("architecture") == "arm64" and
-                          d.get("platform", {}).get("variant", "v8") == "v8"]
+                          d.get("platform", {}).get("architecture") == architecture and
+                          (architecture != 'arm64' or d.get("platform", {}).get("variant", "v8") == "v8")]
             if len(candidates) != 1:
-                raise ValueError("expected one linux/arm64 image")
+                raise ValueError("expected one linux/" + architecture + " image")
             descriptor = candidates[0]
             blob = _blob(root, descriptor)
             data = blob.metadata()
@@ -140,8 +142,8 @@ def prepare_layout(layout, repositories):
         if not isinstance(config_descriptor, dict) or not all(isinstance(layer, dict) for layer in layers):
             raise ValueError("invalid image descriptors")
         config = _json(_blob(root, config_descriptor).metadata())
-        if config.get("os") != "linux" or config.get("architecture") != "arm64":
-            raise ValueError("image config is not linux/arm64")
+        if config.get("os") != "linux" or config.get("architecture") != architecture:
+            raise ValueError("image config is not linux/" + architecture)
         digest = descriptor["digest"]
         routes[(name, "manifests", digest)] = (media, digest, blob)
         for item in [config_descriptor, *layers]:
@@ -268,14 +270,14 @@ COMMON_PORTFOLIO_VERSIONS = frozenset({
 })
 
 
-def prepare_pinned_portfolio(layout, contract):
+def prepare_pinned_portfolio(layout, contract, *, architecture='arm64'):
     """Verify every selected manifest, config and diff ID against the pinned contract."""
     if contract.get('schema_version') != 1 or contract.get('fixture_version') not in COMMON_PORTFOLIO_VERSIONS:
         raise ValueError('unsupported portfolio contract')
     images = contract.get('images')
     if not isinstance(images, dict) or not images:
         raise ValueError('empty pinned portfolio')
-    portfolio = prepare_layout(layout, {name: image['layout_reference'] for name, image in images.items()})
+    portfolio = prepare_layout(layout, {name: image['layout_reference'] for name, image in images.items()}, architecture=architecture)
     if portfolio.manifests != {name: image['manifest'] for name, image in images.items()}:
         raise ValueError('portfolio manifest differs from pin')
     for name, image in images.items():

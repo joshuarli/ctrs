@@ -1,0 +1,244 @@
+{
+  "fixture_version": "linux-amd64-workloads-v1",
+  "platform": "linux/amd64",
+  "archive_sha256": "233e6408606e11a191a6e1f64f3fd968906be120ce99346ff718ee196fecc502",
+  "images": {
+    "worker": {
+      "reference": "np-linux-survey/worker:frozen",
+      "diff_ids": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:ba2541ec790ab743d0e3ee06e9eb5b3e8343b1fdc09cb65853c7c90803bbff00",
+        "sha256:963bbe74d7fd1230e35556a68a082c3c38f483207d18f981eb8a966fa9868b2f",
+        "sha256:be42025181029a31b54804a781dadf85528fb4d251f42ad239a3b1219740c2b7",
+        "sha256:8b6da3bd28008659e694315022ffb9c31aa31b5840b77e8f6197872538b9473a",
+        "sha256:95ebc5daadfb552d2f27352263ecaf4c8ddef539a38d46723fd15d324e05493f"
+      ],
+      "ids": {
+        "dockerd": "sha256:594fe1098f5d42328b2acd2739e692eb32dbd81d148a8f9f3ff6d8f266726ea7",
+        "ctrs": "sha256:710053b2708ecb305c7e296ca464d41e1f2142cfcc73b7cb06984bb0fe2234f3"
+      }
+    },
+    "worker_v4": {
+      "reference": "np-linux-survey/worker_v4:frozen",
+      "diff_ids": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:ba2541ec790ab743d0e3ee06e9eb5b3e8343b1fdc09cb65853c7c90803bbff00",
+        "sha256:963bbe74d7fd1230e35556a68a082c3c38f483207d18f981eb8a966fa9868b2f",
+        "sha256:be42025181029a31b54804a781dadf85528fb4d251f42ad239a3b1219740c2b7",
+        "sha256:8b6da3bd28008659e694315022ffb9c31aa31b5840b77e8f6197872538b9473a",
+        "sha256:18bd9220fe7f5eeb12643638e9037f20c17f431401f9bdfa1c2f33cb543512d1"
+      ],
+      "ids": {
+        "dockerd": "sha256:6ea343aae697a97bec32d8af0c0234344f5955187b08dd8d8bff622d4bc7b3ba",
+        "ctrs": "sha256:4ff7f3f8736894165675a47abef5c947a7df6c7e81bb7ec1e3bbababce7818e7"
+      }
+    },
+    "marked": {
+      "reference": "np-linux-survey/marked:frozen",
+      "diff_ids": [
+        "sha256:6c4c763d22d0c5f9b2c5901dfa667fbbc4713cee6869336b8fd5022185071f1c",
+        "sha256:34f63e9295b6f4af5496e4fac5c738374181deb06a9156e6e6b9314f415af573",
+        "sha256:16248767172b6bef6fa23ab771517c05037af9dbfb47f32e625a1723fc363791",
+        "sha256:bf9d82a144a9c49dd27d7801d64993da8d6601a40de5d5379e880450ffb9a9c9",
+        "sha256:9a1d79c05eacc0e45d09c30a407f776642d6e3c4344c9a69e76ec89014c44a0f",
+        "sha256:5cdec8ae27cb7b35a11b4596c2b1e60748e8cc5805efe3ab5bb6004576dda7fc",
+        "sha256:09b854561b06d433ef7a620a71e2ac3f3a2c6cf57dec5d54425d80173ce0d51d",
+        "sha256:da98a377a5ac6e0c3f3f4190fefc306a3d952bf811de137855b5d4c11557bb09",
+        "sha256:a524e76064563449753defc5c672ceed01f4e9fb3277848abff5fa6a69d8e54c",
+        "sha256:ae252fc6154903dda6f8b56ce11b37c96d0ef7ea6de5e6503bfb40c325bec272",
+        "sha256:1d2874f38e5835470e782c91aa8b3778981c1f8f47ffbfbb27373b62d0721ddb",
+        "sha256:db8688f434b7cfc6428a00311c6147313f8f605ffcc213df068699ef06c2d878"
+      ],
+      "ids": {
+        "dockerd": "sha256:4522b5d92bad72772462c3603df4d5024186a9318243287f9563bab8f95819fa",
+        "ctrs": "sha256:43ed459c16cdc29b3268777914fb2f1656da812c50ef587f1bcb45c57cf44919"
+      }
+    },
+    "workspace": {
+      "reference": "np-linux-survey/workspace:frozen",
+      "diff_ids": [
+        "sha256:6c4c763d22d0c5f9b2c5901dfa667fbbc4713cee6869336b8fd5022185071f1c",
+        "sha256:34f63e9295b6f4af5496e4fac5c738374181deb06a9156e6e6b9314f415af573",
+        "sha256:16248767172b6bef6fa23ab771517c05037af9dbfb47f32e625a1723fc363791",
+        "sha256:bf9d82a144a9c49dd27d7801d64993da8d6601a40de5d5379e880450ffb9a9c9",
+        "sha256:9a1d79c05eacc0e45d09c30a407f776642d6e3c4344c9a69e76ec89014c44a0f",
+        "sha256:b4def39b588aa2f2561531f145e4d59667e5fc2adf31d192c3b4e6568a7310d0",
+        "sha256:25fd1d8239bd1a00a826267ad3cb670d2d0f1402221d9a7329b85400ca2c19c2",
+        "sha256:ff6e980f0d483afd82ee3fe293416b3fd3e5987ec6aa25c3bf6dd790355b652e",
+        "sha256:7e0b178f048bae2f4844b9926e6adc0d7c93770fc0db396c2fc115452800f10d"
+      ],
+      "ids": {
+        "dockerd": "sha256:86b30d94feb06f8eae41e6158d661e724413418d45e41988dc5cbf9b2c3e81ed",
+        "ctrs": "sha256:a96a216604aa9847863ae4e24675446d43238149ebae5c49be6db8b3ee4ca1ef"
+      }
+    }
+  },
+  "workspace_receipts": {
+    "base": {
+      "server": {
+        "sha256": "6bad94face77f007869dd8dba4f520ca71a426049e515f84c7881c6d8babfb57",
+        "files": 121,
+        "bytes": 425189
+      },
+      "client_manifest_sha256": "f5450ad2c4c14087abdd0bbfc116cb9f80486ff3abe6d3ff9e2ccbf078e7a9ae",
+      "runtime": {
+        "main": "56b2f01fd1baae509df10d72e70ec1ae5dd3b8cce05cfd73e278c0398e312d40",
+        "polyfills": "bbe7b6de14c3b2433f449ed428290d6f4efd58efa6602cb70e42f609a5f82300"
+      }
+    },
+    "changed": {
+      "server": {
+        "sha256": "07e9957c9014ad968dc6ec6cff578cb93a1937e3c1f9da35606c8e0489c964fc",
+        "files": 121,
+        "bytes": 426236
+      },
+      "client_manifest_sha256": "f5450ad2c4c14087abdd0bbfc116cb9f80486ff3abe6d3ff9e2ccbf078e7a9ae",
+      "runtime": {
+        "main": "56b2f01fd1baae509df10d72e70ec1ae5dd3b8cce05cfd73e278c0398e312d40",
+        "polyfills": "bbe7b6de14c3b2433f449ed428290d6f4efd58efa6602cb70e42f609a5f82300"
+      }
+    },
+    "tests": [
+      "client/components/__tests__/footer.test.tsx",
+      "client/components/__tests__/shortener.test.tsx"
+    ]
+  },
+  "common_lock_sha256": "246c0c6aca1d8c0a749f37b9281ec32735a326e414de872b45b1e77fa4f3b874",
+  "files": {
+    "fixtures/w4/latency.py": "6c6b838a3bb85b7b2d931ab8fca5d1dfa1c769d84109efc485fea6efdb79b6e9",
+    "fixtures/w4/app.py": "b4bd15673c035a6d010ae8a3a982ba8b1929903c082d5593e95a79b219fa386a",
+    "fixtures/w4/Dockerfile": "f8e3560a44b69550069ad9fc2c8d5c004608d4d9e4a7886e2a56cea7face8be1",
+    "fixtures/w4/Dockerfile.latency": "42c920fdf46d8d57b141be7afcd74e362b55f86a3d574bd7412ff1549f2e9900",
+    "fixtures/w5-v2/verify.mjs": "152de0299bd2d43e41b6391d355d5af97d9ef8db5d721d7a868d056c1c765b6c",
+    "fixtures/w5-v2/mounted-inputs.mjs": "87259864bd9a138add36b74f2d5c6620e0ea51b496e3eed101dc9bee35e5a038",
+    "fixtures/w5-v2/edit.mjs": "4c1e3a1c3532081bac82a31a7f00a53e5f19c10f08dd68f4249d901436ab04ec",
+    "fixtures/w5-v2/watch.mjs": "034aecf93a3ac60bfcf15ccc2a5637d3ec41d2a417e52d394866e1871b435319",
+    "fixtures/w5-v2/workload.json": "30ab2d21baa5149d945c55964f2cc90835c1346db6f9b431a492c23568da6051",
+    "fixtures/w8-v6/Dockerfile.marked": "3e78852233f931f655df83c5efb218dede487b25ec27bc042d47cb77ce964b44",
+    "fixtures/w12/Dockerfile": "60b5b0584a3be02b79fbf5dd8915fa3cc79985f5760e5476e3b5dc0095d9d80e",
+    "fixtures/w12/identity-proof.py": "057782b12898979379266121d28e02b873529ea95e868034403616359b68fac4",
+    "fixtures/w12/workload.json": "51ea890924814eb21b261317b39e655580a19b9a819e8068555991a1b23798b7",
+    "fixtures/w12/patch.json": "d7b5713a56957160bff4678d196181176f3ba637bc323d01242d277919d81bc3",
+    "fixtures/w12/watch-edit.js": "8dc1a487ad91bfc7135576d41ea2712f57759157032dcc9e7f7f193ac3e7a6f4",
+    "fixtures/w12/proof.py": "9083a0bd7476d4594772a459897a62095536244259d5e864cc16421d62bd7baa",
+    "fixtures/w12/README.md": "175900bb90b37cba0327f4f2ae477e51e63c34ee8796973558c37d619d9761c4",
+    "fixtures/w12/change.patch": "ea1d34b616ec7266968a28ecdf3cb4bcceb07069844e729645f6395776016c47",
+    "fixtures/w12/install-lock.json": "2ca90c08e0633b6da70036940a5e1e0e119d3f1b246af5ee8412cef04f43db97",
+    "fixtures/w12/receipt.js": "ed7767c48e7204d17b81cd03ba91ad6b02ff955c3d03c0d6d11934fc65a1b6e7",
+    "fixtures/w12/watch-eval.js": "71f63898e6afba054925a7cdab10abe04790c6fe0182d9f47788b207bf9d1a9b",
+    "fixtures/w12/prepare.py": "618b83995bd2a01d26ec55e786bca61e8b16052c2b83c5a38783b066a9f28fe5"
+  },
+  "bases": {
+    "node:22.15.0-bookworm-slim@sha256:557e52a0fcb928ee113df7e1fb5d4f60c1341dbda53f55e3d815ca10807efdce": "sha256:557e52a0fcb928ee113df7e1fb5d4f60c1341dbda53f55e3d815ca10807efdce",
+    "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90": "sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+  },
+  "portfolio": {
+    "schema_version": 1,
+    "fixture_version": "w8-v6-common-portfolio",
+    "status": "native Linux amd64; frozen untimed; not a macOS artifact",
+    "archive_sha256": "05d8ff1c8b24a49bd738ccde0b2f237e82afec5694fd87195142fbe3ee69c3eb",
+    "archive_bytes": 339415040,
+    "images": {
+      "np-v6/api": {
+        "layout_reference": "api",
+        "manifest": "sha256:5ded5ff86d430e45c0c69c8a29196a8e220f81c3a0c2da82b23715d1ec567484",
+        "config": "sha256:3fb8052b20e2579a3b736cf314fed240fbd307be970a82e0c5d2e8eedd534910",
+        "layer_count": 8,
+        "diff_ids": [
+          "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+          "sha256:ba2541ec790ab743d0e3ee06e9eb5b3e8343b1fdc09cb65853c7c90803bbff00",
+          "sha256:963bbe74d7fd1230e35556a68a082c3c38f483207d18f981eb8a966fa9868b2f",
+          "sha256:be42025181029a31b54804a781dadf85528fb4d251f42ad239a3b1219740c2b7",
+          "sha256:9028bd61e943f279892ea59b4ac90864e2328b4a5d38de6e0876ffdc05e9e630",
+          "sha256:8d3e95bef4816fca196b6c06c2dc7b3a7614dbd07742ebbb9253ad4128d1a673",
+          "sha256:3f23e3c870e2f0687170e04964977dd9345e1213a51f4093f1ccfd06a5871f93",
+          "sha256:c8022444e103631798d65ca512c31f0c7900dfc767589d3d741ecabb349d2f6a"
+        ],
+        "linux_ids": {
+          "dockerd": "sha256:edd3f7624170cb696e92eef1ef90dfa2b9d52230f0a665bcb750098b6b63ba91",
+          "ctrs": "sha256:3fb8052b20e2579a3b736cf314fed240fbd307be970a82e0c5d2e8eedd534910"
+        }
+      },
+      "np-v6/postgres": {
+        "layout_reference": "postgres",
+        "manifest": "sha256:e80acae3f1109e8e4533618b594918936f2858c63afc7204c4773148a673add8",
+        "config": "sha256:fa7e2700e906190f900a3c9d47e87f9032cfa38b60d9ac25129a357f85c2da8c",
+        "layer_count": 9,
+        "diff_ids": [
+          "sha256:75f1d9657d880da5f75298e8f40e9928bb6e260c50d26f97af196845307e3064",
+          "sha256:49e89b68f3e96515abbb5a0c6f9dfb7d07d460aeb66332f49cd055981843bf5e",
+          "sha256:3ff9db87daca41e8e9e348632ab512bdf2b4cba49db6e1d36b056d4fd58c2757",
+          "sha256:286cd51193e58cdf34c624d3406595111589ed58083805cda02b0116c274e10b",
+          "sha256:32c03b3f67c306c869729cbcc4a787b6813d1402fce00c4ff41d52c614d58158",
+          "sha256:b36c870d5b584f85abeebd9d24ca834a7665f58028ab87d619923a525e37e319",
+          "sha256:8100beda58affcb5d8e978e651db12ec5b17af5b0077811baf644d25220bdf65",
+          "sha256:1cd791314a258a328da9e9772be0bed9a32a55216a42bd3683ba681477d08aaf",
+          "sha256:15d547b5af36b5ef53d2888da9e2a37a4dbf08f96e50819317ce2c68d09b95ae"
+        ],
+        "linux_ids": {
+          "dockerd": "sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32",
+          "ctrs": "sha256:fa7e2700e906190f900a3c9d47e87f9032cfa38b60d9ac25129a357f85c2da8c"
+        }
+      },
+      "np-v6/redis": {
+        "layout_reference": "redis",
+        "manifest": "sha256:e4ee3e03ce8f75471f40937a7c6b2b0e500390b6812fcdf5cb32c01295ded446",
+        "config": "sha256:bb8953020f6597e47d5d699a9910a25d77a69608dbd58e0f722940598ed85fc0",
+        "layer_count": 7,
+        "diff_ids": [
+          "sha256:fdc5834cb53a4bde074c41b5baf85f9d5cece29df379fecafea8c396ba8c29d9",
+          "sha256:b8e109153b2f53c41944da1aec4aab197dc43034ce5cd0b301cd3c6d2b24f02b",
+          "sha256:41e3919d346001d4238c77daae4fb2dcdcb9ca0dc8eeeddfaa53e46234371dfc",
+          "sha256:13fc045c0068bc0d5e18cb1c7d9935e8ae45079e3bde40fb189109ee23aed952",
+          "sha256:75e0551a2133bba6c6c1ab72a93aefb46028cc4ca43056de0e3d7ed35f6c55dd",
+          "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "sha256:b9a554fbbd68afa59d5177b417a22d4ee161d965f5a1dc6bd500793046f0e2d1"
+        ],
+        "linux_ids": {
+          "dockerd": "sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+          "ctrs": "sha256:bb8953020f6597e47d5d699a9910a25d77a69608dbd58e0f722940598ed85fc0"
+        }
+      },
+      "np-v6/marked": {
+        "layout_reference": "marked",
+        "manifest": "sha256:4522b5d92bad72772462c3603df4d5024186a9318243287f9563bab8f95819fa",
+        "config": "sha256:43ed459c16cdc29b3268777914fb2f1656da812c50ef587f1bcb45c57cf44919",
+        "layer_count": 12,
+        "diff_ids": [
+          "sha256:6c4c763d22d0c5f9b2c5901dfa667fbbc4713cee6869336b8fd5022185071f1c",
+          "sha256:34f63e9295b6f4af5496e4fac5c738374181deb06a9156e6e6b9314f415af573",
+          "sha256:16248767172b6bef6fa23ab771517c05037af9dbfb47f32e625a1723fc363791",
+          "sha256:bf9d82a144a9c49dd27d7801d64993da8d6601a40de5d5379e880450ffb9a9c9",
+          "sha256:9a1d79c05eacc0e45d09c30a407f776642d6e3c4344c9a69e76ec89014c44a0f",
+          "sha256:5cdec8ae27cb7b35a11b4596c2b1e60748e8cc5805efe3ab5bb6004576dda7fc",
+          "sha256:09b854561b06d433ef7a620a71e2ac3f3a2c6cf57dec5d54425d80173ce0d51d",
+          "sha256:da98a377a5ac6e0c3f3f4190fefc306a3d952bf811de137855b5d4c11557bb09",
+          "sha256:a524e76064563449753defc5c672ceed01f4e9fb3277848abff5fa6a69d8e54c",
+          "sha256:ae252fc6154903dda6f8b56ce11b37c96d0ef7ea6de5e6503bfb40c325bec272",
+          "sha256:1d2874f38e5835470e782c91aa8b3778981c1f8f47ffbfbb27373b62d0721ddb",
+          "sha256:db8688f434b7cfc6428a00311c6147313f8f605ffcc213df068699ef06c2d878"
+        ],
+        "linux_ids": {
+          "dockerd": "sha256:4522b5d92bad72772462c3603df4d5024186a9318243287f9563bab8f95819fa",
+          "ctrs": "sha256:43ed459c16cdc29b3268777914fb2f1656da812c50ef587f1bcb45c57cf44919"
+        }
+      }
+    },
+    "runtime_versions": {
+      "python": "3.13.18",
+      "postgres": "17.12",
+      "redis": "7.4.12",
+      "node": "v22.15.0",
+      "npm": "10.9.2",
+      "esbuild": "0.25.3"
+    },
+    "marked_artifact_sha256": "0823c3960d93d71ea9b2e9bd1fe032659016ddf97b757cc35b38108ae677ef0b",
+    "marked_contract": "../w5-v2/workload.json",
+    "api_files_sha256": {
+      "/app/app.py": "d160d030f8598f37d3d1a0706c6d10acf5b1545d33a4ed667a06eaa5d9d7f351",
+      "/app/requirements.txt": "b9775ff8524dc8addc4c8fdafb7a86c5a2940ad5b557c2a47db2ee836c51f1b7"
+    },
+    "seed_sql_sha256": "0eb763cb8d0a9dcd093b6f364a56aa8f1e43e41d4d4d1dad853b4797d550210e",
+    "w2_load_sha256": "3bff357920dea4aed4b4e2eb52c3e978712963dfd476ab42e990fb1b348a0992"
+  }
+}

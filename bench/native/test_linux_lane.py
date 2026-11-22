@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -272,7 +273,7 @@ class Engines(unittest.TestCase):
         self.assertIn('W3', lane.CASES)
         for case in lane.CASES:
             lane.require_case('dockerd', case)
-        for engine, case, cold in [('orbstack', 'W2', False), ('ctrs', 'W8', False), ('dockerd', 'W6', True)]:
+        for engine, case, cold in [('orbstack', 'W2', False), ('ctrs', 'W14', False), ('dockerd', 'W6', True)]:
             with self.assertRaises(ValueError):
                 lane.require_case(engine, case, cold)
 
@@ -377,6 +378,110 @@ class LinuxReporting(unittest.TestCase):
         linux = reporting.cohort_identity({**record, 'lane': 'linux-amd64'})
         self.assertNotIn('lane', legacy)
         self.assertNotEqual(legacy, linux)
+
+
+class NativeWorkloads(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=runner.REPO / '.work/tmp')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / 'common.json').write_text('frozen common bytes')
+        (self.root / 'fixture').write_bytes(b'fixture bytes')
+        self.lock = {'fixture_version': 'linux-amd64-workloads-v1', 'platform': 'linux/amd64',
+                     'common_lock_sha256': hashlib.sha256((self.root / 'common.json').read_bytes()).hexdigest(),
+                     'files': {'fixture': hashlib.sha256(b'fixture bytes').hexdigest()},
+                     'images': {'marked': {'ids': {'ctrs': 'sha256:ctrs', 'dockerd': 'sha256:docker'},
+                                           'diff_ids': ['sha256:layer']}}}
+        self.path = self.root / 'workloads.json'
+        self.path.write_text(json.dumps(self.lock))
+        for name, value in (('HERE', self.root), ('LOCK', self.root / 'common.json'), ('WORKLOAD_LOCK', self.path)):
+            guard = patch.object(lane, name, value)
+            guard.start()
+            self.addCleanup(guard.stop)
+
+    def test_workload_lock_requires_its_common_lock_and_unchanged_sources(self):
+        self.assertEqual(lane.workload_lock(), self.lock)
+        (self.root / 'fixture').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'source changed'):
+            lane.workload_lock()
+        (self.root / 'fixture').write_bytes(b'fixture bytes')
+        (self.root / 'common.json').write_text('different freeze')
+        with self.assertRaisesRegex(ValueError, 'common fixture lock'):
+            lane.workload_lock()
+
+    def test_missing_empty_and_wrong_architecture_locks_are_rejected(self):
+        self.path.unlink()
+        with self.assertRaisesRegex(ValueError, 'lock missing'):
+            lane.workload_lock()
+        self.path.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'lane/platform'):
+            lane.workload_lock()
+        self.lock['platform'] = 'linux/arm64'
+        self.path.write_text(json.dumps(self.lock))
+        with self.assertRaisesRegex(ValueError, 'lane/platform'):
+            lane.workload_lock()
+
+    def test_native_image_requires_engine_id_architecture_os_and_ordered_layers(self):
+        engine = Mock()
+        engine.name = 'dockerd'
+        info = {'Id': 'sha256:docker', 'Os': 'linux', 'Architecture': 'amd64',
+                'RootFS': {'Layers': ['sha256:layer']}}
+        engine.sh.return_value.stdout = json.dumps([info])
+        reference, identity = lane.workload_image(engine, 'marked')
+        self.assertEqual(reference, 'sha256:docker')
+        self.assertEqual(identity['image_diff_ids'], ['sha256:layer'])
+        self.assertEqual(identity['linux_workload_lock_sha256'], hashlib.sha256(self.path.read_bytes()).hexdigest())
+        for key, bad in (('Architecture', 'arm64'), ('Os', 'other'), ('Id', 'sha256:ctrs'),
+                         ('RootFS', {'Layers': []})):
+            engine.sh.return_value.stdout = json.dumps([{**info, key: bad}])
+            with self.assertRaisesRegex(ValueError, 'differs from frozen'):
+                lane.workload_image(engine, 'marked')
+        engine.sh.return_value.stdout = '[]'
+        with self.assertRaises(ValueError):
+            lane.workload_image(engine, 'marked')
+
+    def test_native_jobs_require_exact_frozen_id_not_arm_or_mutable_tags(self):
+        with patch.object(lane, 'enabled', return_value=True):
+            runner.ci_jobs.validate_image_ref('sha256:docker')
+            for ref in ('', 'np-v6/marked:latest', 'sha256:foreign'):
+                with self.assertRaisesRegex(ValueError, 'frozen native Linux'):
+                    runner.ci_jobs.validate_image_ref(ref)
+
+    def test_native_job_resource_receipts_keep_empty_invalid_and_incomplete_cpu(self):
+        phase = {'cpu_seconds': 1.5, 'errors': [], 'method': 'native sampled lower bound'}
+        with patch.object(lane, 'enabled', return_value=True):
+            self.assertEqual(runner._job_phase_receipts({}, {}, None, prefix='jobs_'), {})
+            valid = runner._job_phase_receipts({}, {'jobs_4': phase, 'setup': phase}, None, prefix='jobs_')
+            self.assertEqual(list(valid), ['jobs_4'])
+            self.assertEqual(valid['jobs_4']['status'], 'ok')
+            self.assertFalse(valid['jobs_4']['cpu_complete'])
+            bad = {**phase, 'cpu_seconds': None, 'errors': ['unowned scope']}
+            invalid = runner._job_phase_receipts({}, {'jobs_4': bad}, None, prefix='jobs_')
+            self.assertEqual(invalid['jobs_4']['status'], 'unknown')
+            self.assertIsNone(invalid['jobs_4']['cpu_seconds'])
+
+    def test_native_job_adapter_selects_frozen_role_without_engine_ids_in_pair_parameters(self):
+        context, engine = Mock(), Mock()
+        with patch.object(lane, 'workload_image', return_value=('sha256:native', {})) as image, \
+                patch.object(runner, 'trial_w9', return_value={'correctness': True}) as trial:
+            self.assertEqual(lane.trial_w9(context, engine, 'warm'), {'correctness': True})
+        image.assert_called_once_with(engine, 'marked')
+        trial.assert_called_once_with(context, engine, 'warm', 'sha256:native')
+
+    def test_native_pipeline_pairs_content_not_different_engine_image_ids(self):
+        engine = Mock()
+        def image(character):
+            return {'Id': 'sha256:' + character * 64, 'Os': 'linux', 'Architecture': 'amd64',
+                    'RootFS': {'Layers': ['sha256:' + 'a' * 64]}, 'Config': {}}
+        with patch.object(lane, 'enabled', return_value=True):
+            results = []
+            for worker, redis in [('1', '2'), ('3', '4')]:
+                engine.sh.side_effect = [Mock(stdout=json.dumps([image(worker)])),
+                                         Mock(stdout=json.dumps([image(redis)]))]
+                result = runner.pipeline_image_inputs(engine, 'worker-id', 'cache-id-' + redis)
+                results.append(result[2])
+            self.assertEqual(results[0], results[1])
+            self.assertEqual(results[0]['redis_reference'], lane.VERSION + ':cache')
 
 
 if __name__ == '__main__':

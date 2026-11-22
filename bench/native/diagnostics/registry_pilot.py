@@ -39,16 +39,17 @@ def deploy(engine, refs, layout, directory, run_id, contract, *, phase=nullconte
                 image = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
                 manifest = json.loads((layout / 'blobs/sha256' / ref.rsplit('@sha256:', 1)[1]).read_text())
                 config = json.loads((layout / 'blobs/sha256' / manifest['config']['digest'][7:]).read_text())
-                if image['RootFS']['Layers'] != config['rootfs']['diff_ids'] or ref not in image['RepoDigests'] or image['Architecture'] != 'arm64':
+                if image['RootFS']['Layers'] != config['rootfs']['diff_ids'] or ref not in image['RepoDigests'] or image['Architecture'] != ('amd64' if runner.linux_lane.enabled() else 'arm64'):
                     raise ValueError(f'image identity mismatch: {name}')
                 save(directory / (name + '-image.json'), image)
         with phase('stack_health'):
             compose(['up', '-d', '--no-build', '--pull', 'never'])
             if runner.wait_health(base, 60)[0] is None:
                 raise RuntimeError('portfolio stack did not become healthy')
-        identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
+        identity = (runner.linux_lane.stable_identity(engine, runner.CTRS_BIN) if runner.linux_lane.enabled()
+                    else ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir))
         save(directory / 'running-engine.json', identity)
-        if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
+        if not runner.linux_lane.enabled() and engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('running daemon differs from requested binary')
         with phase('load_1000'):
             load = directory / 'load.json'

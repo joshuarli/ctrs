@@ -2315,6 +2315,11 @@ def trial_w6(ctx, engine: Engine, state: str,
 
 
 def _job_phase_receipts(identity, phases, trace, *, prefix):
+    if linux_lane.enabled():
+        return {name: {'status': 'ok' if not phase['errors'] and phase['cpu_seconds'] is not None else 'unknown',
+                       'cpu_seconds': phase['cpu_seconds'], 'cpu_complete': False,
+                       'errors': phase['errors'], 'method': phase['method']}
+                for name, phase in phases.items() if name.startswith(prefix)}
     samples = [json.loads(line) for line in trace.read_text().splitlines()]
     return {name: resource_cycles.phase_summary(identity, phase, samples)
             for name, phase in phases.items() if name.startswith(prefix)}
@@ -2345,7 +2350,12 @@ def trial_w9(ctx, engine: Engine, state: str, image_ref: str,
         sampler, trace = start_sampler(engine, trial_dir)
         with resource_phase(engine, rec, 'setup'):
             image = json.loads(engine.sh(['image', 'inspect', image_ref]).stdout)[0]
-            if image['Architecture'] != 'arm64' or image_ref not in image['RepoDigests']:
+            if linux_lane.enabled():
+                native_ref, native_inputs = linux_lane.workload_image(engine, 'marked')
+                if image_ref != native_ref:
+                    raise ValueError('W9 Linux image differs from pin')
+                rec['paired_inputs'] = native_inputs
+            elif image['Architecture'] != 'arm64' or image_ref not in image['RepoDigests']:
                 raise ValueError('W9 installed image differs from native pinned reference')
             (trial_dir / 'image.json').write_text(json.dumps(image, indent=2))
         for concurrency in concurrency_levels:
@@ -2457,7 +2467,7 @@ def pipeline_image_inputs(engine, worker_ref, redis_ref):
     inputs = {}
     for role, image in (('worker', worker), ('redis', redis)):
         layers = image['RootFS']['Layers']
-        if (image.get('Os') != 'linux' or image.get('Architecture') != 'arm64'
+        if (image.get('Os') != 'linux' or image.get('Architecture') != ('amd64' if linux_lane.enabled() else 'arm64')
                 or not re.fullmatch(r'sha256:[a-f0-9]{64}', image.get('Id', ''))
                 or not isinstance(layers, list) or not layers
                 or not all(isinstance(layer, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', layer)
@@ -2467,7 +2477,8 @@ def pipeline_image_inputs(engine, worker_ref, redis_ref):
         inputs[role] = {'diff_ids': layers, 'config': {
             **{key: config.get(key) or [] for key in ('Entrypoint', 'Cmd', 'Env')},
             **{key: config.get(key) or '' for key in ('User', 'WorkingDir')}}}
-    return worker['Id'], redis['Id'], {'images': inputs, 'redis_reference': redis_ref}
+    paired_redis = linux_lane.VERSION + ':cache' if linux_lane.enabled() else redis_ref
+    return worker['Id'], redis['Id'], {'images': inputs, 'redis_reference': paired_redis}
 
 
 def trial_w4(ctx, engine: Engine, state: str,
@@ -2495,6 +2506,15 @@ def trial_w4(ctx, engine: Engine, state: str,
     owned_containers, owned_volumes = [], []
     try:
         engine.ensure_up()
+        if linux_lane.enabled():
+            image, _ = linux_lane.workload_image(engine, 'worker_v4' if timed else 'worker')
+            native_redis, _ = linux_lane.image(engine, 'cache')
+            if image_ref is not None and image_ref != image:
+                raise ValueError('W4 Linux worker reference differs from freeze')
+            if redis_ref not in (W4_IMAGE, native_redis):
+                raise ValueError('W4 Linux cache reference differs from freeze')
+            redis_ref = native_redis
+            pinned_pipeline_inputs = True
         if queue_interruption is not None and engine.sh(
                 ["image", "inspect", redis_ref], timeout=30, check=False).returncode:
             engine.sh(["pull", redis_ref], timeout=180)
@@ -2878,7 +2898,13 @@ def w5_phase_receipts(identity, phases, samples, iterations):
         for phase in ("setup", "verify-inputs", *(f"edit-{i}" for i in range(iterations)), "cleanup"):
             name = f"{mode}-{phase}"
             if name in phases:
-                receipts[name] = resource_cycles.phase_summary(identity, phases[name], samples)
+                if linux_lane.enabled():
+                    raw = phases[name]
+                    receipts[name] = {'status': 'ok' if not raw['errors'] and raw['cpu_seconds'] is not None else 'unknown',
+                                      'cpu_seconds': raw['cpu_seconds'], 'cpu_complete': False,
+                                      'errors': raw['errors'], 'method': raw['method']}
+                else:
+                    receipts[name] = resource_cycles.phase_summary(identity, phases[name], samples)
             else:
                 receipts[name] = {"status": "unknown", "errors": ["phase boundaries unavailable"]}
     return receipts
@@ -3761,6 +3787,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
               "W10": trial_w10, "W11": trial_w11, "W12": workspace.trial_w12,
               "W12-watch": workspace.trial_w12_watch, "W13": trial_w13, "W13-overlap": overlap.trial_overlap, "W14": trial_w14,
               "HOLDOUT": trial_holdout}
+    if linux_lane.enabled():
+        trials.update(W8=linux_lane.trial_w8, W9=linux_lane.trial_w9, W11=linux_lane.trial_w11)
     if case_id not in trials:
         raise ValueError(f"case {case_id} not implemented")
     trial = trials[case_id]
@@ -3818,6 +3846,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
             rec['workload_params']['lane'] = 'linux-amd64'
             rec['provenance']['linux_host'] = linux_cgroups.host_metadata()
             rec['provenance']['linux_fixture_lock_sha256'] = sha256_file(linux_lane.LOCK)
+            if linux_lane.WORKLOAD_LOCK.exists():
+                rec['provenance']['linux_workload_lock_sha256'] = sha256_file(linux_lane.WORKLOAD_LOCK)
             rec['resources']['sampler_version'] = linux_cgroups.VERSION
             rec['resources']['ownership'] = getattr(engine, 'measurement_identity', None)
             rec['cpu_accounting'] = {'complete': False, 'reason': 'cgroup samples exclude uncharged host-kernel CPU; exited scopes are lower bounds'}

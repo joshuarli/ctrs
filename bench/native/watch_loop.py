@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 
+import linux_lane
+
 FIXTURE = Path(__file__).parent / 'fixtures/w5-v2'
 IMAGE = 'np-w5-marked:v2'
 RECEIPT_VERSION = 'w5-v3-marked-receipts'
@@ -80,9 +82,10 @@ def pinned_source(archive):
 
 def check_image(engine, source):
     spec = contract()
-    image = json.loads(engine.sh(['image', 'inspect', IMAGE]).stdout)[0]
-    if image['Architecture'] != 'arm64':
-        raise ValueError('W5 requires native ARM64 image')
+    reference = linux_lane.workload_image(engine, 'marked')[0] if linux_lane.enabled() else IMAGE
+    image = json.loads(engine.sh(['image', 'inspect', reference]).stdout)[0]
+    if image['Architecture'] != ('amd64' if linux_lane.enabled() else 'arm64'):
+        raise ValueError('W5 requires the lane native image')
     inputs = ('watch.mjs', 'edit.mjs', 'verify.mjs', 'workload.json')
     script = "const fs=require('node:fs'),c=require('node:crypto'),p=require('node:child_process');let files={};for(const f of JSON.parse(process.argv[1]))files[f]=c.createHash('sha256').update(fs.readFileSync(f)).digest('hex');console.log(JSON.stringify({node:process.version,npm:p.execFileSync('npm',['--version'],{encoding:'utf8'}).trim(),esbuild:require('esbuild/package.json').version,files}));"
     tools = json.loads(engine.sh(['run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'node',

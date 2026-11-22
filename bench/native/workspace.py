@@ -6,6 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
+import linux_lane
+
 FIXTURE = Path(__file__).parent / 'fixtures' / 'w12'
 INPUTS = Path(__file__).resolve().parents[2] / '.work' / 'tmp'
 WATCH_DEADLINE_SECONDS = 10.0
@@ -28,6 +30,12 @@ def source_contract():
     for name, expected in spec['patch'].items():
         if hashlib.sha256((FIXTURE / name).read_bytes()).hexdigest() != expected:
             raise ValueError('W12 patch hash mismatch')
+    if linux_lane.enabled():
+        lock = linux_lane.workload_lock()
+        pin = lock['images']['workspace']
+        spec['prepared_image'] = {'archive_sha256': lock['archive_sha256'], 'diff_ids': pin['diff_ids'],
+                                  **{name + '_id': ref for name, ref in pin['ids'].items()}}
+        spec['receipts'] = lock['workspace_receipts']
     return spec
 
 
@@ -87,6 +95,11 @@ def phase_metrics(phases):
 
 
 def ensure_image(engine, image, spec):
+    if linux_lane.enabled():
+        reference, _ = linux_lane.workload_image(engine, 'workspace')
+        if image != reference:
+            raise ValueError('W12 native image identity mismatch')
+        return
     cp = engine.sh(['image', 'inspect', image], check=False, timeout=60)
     if cp.returncode != 0:
         archive = INPUTS / 'w12-image.tar'
@@ -225,7 +238,8 @@ fs.writeFileSync(p,next)}'''
         ensure_image(engine, image, spec)
         ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
-        if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
+        ownership_key = 'cgroup_roots' if linux_lane.enabled() else 'required_processes'
+        if engine.measurement_identity.get('error') or not engine.measurement_identity.get(ownership_key):
             raise ValueError('W12 engine resource ownership is unverified')
         expected = spec['receipts']
         mounts = []
@@ -418,7 +432,8 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
         ensure_image(engine, image, spec)
         ready_image(engine, image, label, spec)
         sampler, trace = runner.start_sampler(engine, trial_dir)
-        if engine.measurement_identity.get('error') or not engine.measurement_identity.get('required_processes'):
+        ownership_key = 'cgroup_roots' if linux_lane.enabled() else 'required_processes'
+        if engine.measurement_identity.get('error') or not engine.measurement_identity.get(ownership_key):
             raise ValueError('W12 watcher resource ownership is unverified')
         source.mkdir()
         subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(source)], check=True)

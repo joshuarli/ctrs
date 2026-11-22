@@ -34,9 +34,13 @@ def validate_refs(refs):
     expected['worker'] = WORKER['worker']['manifest']
     if refs.keys() != expected.keys():
         raise ValueError('mixed cycles require all five pinned image references')
-    for name, digest in expected.items():
-        if not re.fullmatch(r'[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}', refs[name]) or refs[name].rsplit('@', 1)[1] != digest:
-            raise ValueError('mixed image differs from pin: ' + name)
+    if runner.linux_lane.enabled():
+        if refs not in [runner.linux_lane.mixed_refs(engine) for engine in ('ctrs', 'dockerd')]:
+            raise ValueError('mixed Linux images differ from freeze')
+    else:
+        for name, digest in expected.items():
+            if not re.fullmatch(r'[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}', refs[name]) or refs[name].rsplit('@', 1)[1] != digest:
+                raise ValueError('mixed image differs from pin: ' + name)
     if runner.sha256_file(runner.LOAD_PY) != PIN['w2_load_sha256'] or runner.sha256_file(runner.FIXTURES / 'w1/seed.sql') != PIN['seed_sql_sha256']:
         raise ValueError('application workload inputs differ from pin')
     if runner.sha256_file(runner.FIXTURES / 'w4/app.py') != WORKER['worker']['app_sha256']:
@@ -146,6 +150,8 @@ def service_lifecycle(engine, ids):
 def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=None,
         cleanup_deadline=None, expected_boot_assets=None, observation=None, expected_resources=None):
     validate_refs(refs)
+    if runner.linux_lane.enabled() and observation is not None:
+        raise ValueError('Linux mixed cycles do not implement macOS FD/allocation observations')
     if observation is not None:
         mixed_resources.plan(observation, {})
     if work_deadline is None:
@@ -206,13 +212,14 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         engine.ensure_up()
         engine.sh(['run', '--rm', '--pull=never', '--name', warmup, '--label', 'dev.ctrs.campaign.run=' + warmup,
                    '--entrypoint', 'node', refs['marked'], '-e', 'process.exit(0)'], timeout=90)
-        identity = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
+        identity = (runner.linux_lane.stable_identity(engine, runner.CTRS_BIN) if runner.linux_lane.enabled()
+                    else ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir))
         save(directory / 'running-engine-before.json', identity)
         rec['running_identity'] = identity
         if observation is not None:
             observation_plan = mixed_resources.plan(observation, identity)
             save(directory / 'resource-plan.json', observation_plan)
-        if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
+        if not runner.linux_lane.enabled() and engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
         if expected_boot_assets is not None:
             actual = {str(Path(asset['path']).resolve()): {key: asset[key] for key in ('inode', 'size', 'sha256')}
@@ -225,7 +232,13 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
         for name, ref in refs.items():
             info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
             pin = WORKER['worker'] if name == 'worker' else PIN['images']['np-v6/' + name]
-            if info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != pin['diff_ids']:
+            if runner.linux_lane.enabled():
+                if refs != runner.linux_lane.mixed_refs(engine.name):
+                    raise ValueError('mixed Linux references belong to the other engine')
+                role = {'postgres': 'db', 'redis': 'cache'}.get(name, name)
+                lookup = runner.linux_lane.workload_image if name in ('marked', 'worker') else runner.linux_lane.image
+                lookup(engine, role)
+            elif info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != pin['diff_ids']:
                 raise ValueError('running image identity differs from pin: ' + name)
             save(directory / (name + '-image.json'), info)
         sampler, trace = runner.start_sampler(engine, directory)
@@ -263,7 +276,14 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                 finally:
                     intervals[name]['end_monotonic'] = time.monotonic()
             def queue_work():
-                result = runner.trial_w4(cycle_ctx, engine, 'mixed', workers=(4,), image_ref=refs['worker'], redis_ref=refs['redis'], cleanup_command=cleanup_sh)
+                parent_identity = getattr(engine, 'measurement_identity', None)
+                parent_trace = getattr(engine, 'measurement_trace', None)
+                try:
+                    result = runner.trial_w4(cycle_ctx, engine, 'mixed', workers=(4,), image_ref=refs['worker'], redis_ref=refs['redis'], cleanup_command=cleanup_sh)
+                finally:
+                    if runner.linux_lane.enabled():
+                        engine.measurement_identity = parent_identity
+                        engine.measurement_trace = parent_trace
                 save(cycle_dir / 'queue.json', result)
                 return result
             def build_work():
@@ -315,7 +335,8 @@ def run(engine, ctx, refs, cycles=None, *, work_deadline=None, drain_deadline=No
                     raise ValueError('committed DB/cache data changed')
                 if json.loads(engine.sh(['volume', 'inspect', volume]).stdout) != volume_before:
                     raise ValueError('persistent named-volume identity changed')
-                after = ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir)
+                after = (runner.linux_lane.stable_identity(engine, runner.CTRS_BIN) if runner.linux_lane.enabled()
+                         else ownership.discover(engine.name, Path(engine.socket.removeprefix('unix://')), engine.dir))
                 save(cycle_dir / 'running-engine.json', after)
                 if after != identity:
                     raise ValueError('engine identity changed during mixed cycles')

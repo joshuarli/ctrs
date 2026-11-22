@@ -95,6 +95,14 @@ def measured_phase(engine, result, name):
 
 def summarize_resources(result, engine, trace):
     resources = result['resources']
+    if runner.linux_lane.enabled():
+        resources.update(runner.summarize_trace(trace) if trace else {})
+        resources['trace'] = str(trace) if trace is not None else None
+        resources['ownership'] = getattr(engine, 'measurement_identity', None)
+        complete = all(phase['status'] == 'complete' and not phase.get('measurement_error')
+                       for phase in result['phase_status'].values())
+        resources['status'] = 'ok' if resources.get('ownership_verified') and complete else 'unknown'
+        return
     resources['trace'] = str(trace) if trace is not None else None
     resources['ownership'] = getattr(engine, 'measurement_identity', None)
     resources['phase_summaries'] = {}
@@ -229,10 +237,13 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
     try:
         _, api_image = w8_under_pull.baseline_image_reference(engine.name, contract['images']['np-v6/api'])
         prepare_warm_engine(engine, run, api_image=api_image)
-        coordinator = ownership.current_coordinator()
-        coordinator['owned_service'] = {'kind': 'local-fixture-registry',
-            'address': server.server_address, 'fd': server.fileno()}
-        sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
+        if runner.linux_lane.enabled():
+            sampler, trace = runner.start_sampler(engine, directory)
+        else:
+            coordinator = ownership.current_coordinator()
+            coordinator['owned_service'] = {'kind': 'local-fixture-registry',
+                'address': server.server_address, 'fd': server.fileno()}
+            sampler, trace = runner.start_sampler(engine, directory, fixture_processes=(coordinator,))
         phase = lambda phase_name: measured_phase(engine, result, phase_name)
         if orbstack_storage_files:
             paths = ((engine.dir / 'data/vm/data.img',) if engine.name == 'ctrs'

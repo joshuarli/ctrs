@@ -61,6 +61,26 @@ class VariantTests(unittest.TestCase):
             self.contract['images'][name] = {'layout_reference': name, 'manifest': md['digest'], 'config': cd['digest'], 'layer_count': 2, 'diff_ids': config['rootfs']['diff_ids']}
         (self.source / 'index.json').write_bytes(variant._encoded({'schemaVersion': 2, 'manifests': entries}))
 
+    def test_native_amd64_variant_keeps_architecture_through_final_validation(self):
+        entries = []
+        for name, indexes in [('app', [0, 1]), ('tool', [0, 2])]:
+            config = {**self.configs[name], 'architecture': 'amd64'}
+            cd = self.blob(variant._encoded(config), 'application/vnd.oci.image.config.v1+json')
+            manifest = {'schemaVersion': 2, 'config': cd, 'layers': [self.layers[i] for i in indexes]}
+            md = self.blob(variant._encoded(manifest), registry.OCI_MANIFEST)
+            md['annotations'] = {'org.opencontainers.image.ref.name': name}
+            entries.append(md)
+            self.contract['images'][name] = {'layout_reference': name, 'manifest': md['digest'],
+                'config': cd['digest'], 'layer_count': 2, 'diff_ids': config['rootfs']['diff_ids']}
+        (self.source / 'index.json').write_bytes(variant._encoded({'schemaVersion': 2, 'manifests': entries}))
+        destination = self.root / 'native'
+        with self.assertRaisesRegex(ValueError, 'linux/arm64'):
+            variant.prepare_variant(self.source, self.contract, destination, b'paired-native-seed')
+        self.assertFalse(destination.exists())
+        receipt = variant.prepare_variant(self.source, self.contract, destination, b'paired-native-seed', architecture='amd64')
+        selected = registry.prepare_layout(destination, {'app': 'app', 'tool': 'tool'}, architecture='amd64')
+        self.assertEqual(selected.manifests, {name: pin['manifest'] for name, pin in receipt['images'].items()})
+
     def blob(self, data, media):
         d = digest(data)
         (self.source / 'blobs' / 'sha256' / d[7:]).write_bytes(data)

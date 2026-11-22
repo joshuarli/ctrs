@@ -5,14 +5,116 @@ from pathlib import Path
 import shutil
 import sys
 import time
+from types import SimpleNamespace
 
 import linux_cgroups
 
 VERSION = 'linux-amd64-v1'
 ENGINES = ('ctrs', 'orbstack', 'dockerd')
-CASES = ('W1', 'W2', 'W3', 'W3-v4', 'W6', 'W7', 'W13')
+CASES = ('W1', 'W2', 'W3', 'W3-v4', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9', 'W10', 'W11', 'W12', 'W12-watch', 'W13')
 HERE = Path(__file__).resolve().parent
 LOCK = HERE / 'linux' / 'fixtures.lock.json'
+WORKLOAD_LOCK = HERE / 'linux' / 'workloads.lock.json'
+
+
+def workload_lock():
+    try:
+        lock = json.loads(WORKLOAD_LOCK.read_text())
+    except FileNotFoundError as exc:
+        raise ValueError('Linux workload lock missing; restore the frozen Linux workload archive') from exc
+    if lock.get('fixture_version') != 'linux-amd64-workloads-v1' or lock.get('platform') != 'linux/amd64':
+        raise ValueError('Linux workload lane/platform mismatch')
+    if lock['common_lock_sha256'] != hashlib.sha256(LOCK.read_bytes()).hexdigest():
+        raise ValueError('Linux workload common fixture lock differs from freeze')
+    for name, expected in lock['files'].items():
+        if hashlib.sha256((HERE / name).read_bytes()).hexdigest() != expected:
+            raise ValueError('Linux workload source changed after freeze: ' + name)
+    return lock
+
+
+def workload_image(engine, role):
+    pin = workload_lock()['images'][role]
+    reference = pin['ids'][engine.name]
+    inspected, = json.loads(engine.sh(['image', 'inspect', reference]).stdout)
+    if (inspected['Id'] != reference or inspected['Os'] != 'linux'
+            or inspected['Architecture'] != 'amd64' or inspected['RootFS']['Layers'] != pin['diff_ids']):
+        raise ValueError('Linux workload image differs from frozen fixture: ' + role)
+    return reference, {'linux_workload_lock_sha256': hashlib.sha256(WORKLOAD_LOCK.read_bytes()).hexdigest(),
+                       'image_diff_ids': pin['diff_ids']}
+
+
+def mixed_refs(engine_name):
+    common = read_lock()['images']
+    extra = workload_lock()['images']
+    pins = {**{name: common[role] for name, role in (('api', 'api'), ('postgres', 'db'), ('redis', 'cache'))},
+            **{role: extra[role] for role in ('marked', 'worker')}}
+    return {name: pin['ids'][engine_name] for name, pin in pins.items()}
+
+
+def stable_identity(engine, binary):
+    identity = linux_cgroups.discover(engine.name, Path(engine.socket.removeprefix('unix://')))
+    if engine.name == 'ctrs' and identity['executable_sha256'] != hashlib.sha256(Path(binary).read_bytes()).hexdigest():
+        raise ValueError('running Linux daemon differs from requested binary')
+    identity.pop('shim_verification')
+    return identity
+
+
+def trial_w8(ctx, engine, state, under_load=False):
+    import registry_portfolio
+    import registry_variant
+    import runner
+    from diagnostics import registry_variant_pilot
+
+    directory = ctx.trial_dir(engine.name, 'W8', state)
+    record = ctx.new_record(engine, 'W8', state, directory)
+    lock = workload_lock()
+    contract = lock['portfolio']
+    parent = runner.WORK / 'inputs/linux-workloads-v1'
+    source = parent / 'layout'
+    seed = hashlib.sha256(ctx.workload_id.encode()).digest()
+    destination = parent / ('pair-' + seed.hex())
+    if not destination.exists():
+        registry_variant.prepare_variant(source, contract, destination, seed, architecture='amd64')
+    receipt = json.loads((destination / 'receipt.json').read_text())
+    if receipt['seed_sha256'] != hashlib.sha256(seed).hexdigest():
+        raise ValueError('Linux W8 pair seed differs from prepared content')
+    portfolio = registry_portfolio.prepare_layout(destination,
+        {name: pin['reference'] for name, pin in receipt['images'].items()}, architecture='amd64')
+    with registry_portfolio.running_registry(portfolio) as server:
+        result = registry_variant_pilot.measure_engine(engine, directory, ctx.run_id,
+            contract, portfolio, receipt, destination, server, under_load=under_load)
+    record['inputs'] = {'linux_workload_lock_sha256': hashlib.sha256(WORKLOAD_LOCK.read_bytes()).hexdigest(),
+                        'receipt': receipt}
+    record['paired_inputs'] = record['inputs']
+    record['metrics'] = {'fixture_version': 'w8-linux-amd64-v1',
+        'whole_workflow_s': result['resources']['phases'].get('whole_workflow', {}).get('operation_wall_seconds'),
+        'pull_to_health_s': result.get('pull_to_health_s')}
+    record['resources'] = result['resources']
+    record['correctness']['ok'] = result['correctness']
+    record['validation_errors'] = result['errors']
+    record['notes'].append('Same content-unique native portfolio per pair; independent host registry/coordinator excluded from both engine cgroup scopes. Preparation untimed. Not pooled with macOS.')
+    return record
+
+
+def trial_w9(ctx, engine, state):
+    import runner
+
+    reference, _ = workload_image(engine, 'marked')
+    return runner.trial_w9(ctx, engine, state, reference)
+
+
+def trial_w11(ctx, engine, state, cycles=3):
+    import mixed_cycle
+
+    directory = ctx.trial_dir(engine.name, 'W11', state)
+    local = SimpleNamespace(run_id=ctx.run_id, results_dir=directory, new_record=ctx.new_record)
+    record = mixed_cycle.run(engine, local, mixed_refs(engine.name), cycles=cycles)
+    record['metrics']['fixture_version'] = 'w11-linux-amd64-functional-v1'
+    record['metrics']['mixed_work_s'] = sum(value['operation_wall_seconds']
+        for name, value in record['resources']['phases'].items() if name.endswith('_mixed_work'))
+    record['paired_inputs'] = {'linux_workload_lock_sha256': hashlib.sha256(WORKLOAD_LOCK.read_bytes()).hexdigest(),
+                               'cycles': cycles}
+    return record
 
 
 def enabled():
