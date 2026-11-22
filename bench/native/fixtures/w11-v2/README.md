@@ -73,9 +73,14 @@ deadline, to remove Docker fixtures before process-group KILL. Local group
 quiescence alone does not establish remote fixture cleanup; inspect workload
 results and ownership receipts as well. A hard deadline can leave remote
 fixtures requiring explicit owned cleanup and can never qualify reliability.
-The
-work interval includes setup; too short an interval can admit no cycles and
-fails. The duration is limited to one hour and remains unqualified. Both entry
-points refuse `--qualification`: a frozen candidate, assets, workload, final
-matrix and a readiness evidence schema and proof are not available. The full
-12-hour legs are not authorized by this diagnostic.
+The work interval includes setup. A diagnostic that admits no cycles fails.
+The diagnostic duration is limited to fifteen minutes.
+
+For qualification, `mixed_job.py --qualification --readiness <reviewed-json>`
+validates the frozen readiness declaration and `assets.lock` before launching
+one engine. Set `CTRS_GUEST_DIR` to the frozen boot directory and provide a
+duration covering setup plus twelve hours of work. The OrbStack leg also
+requires explicit `--orbstack-storage-file` arguments for the owned backing
+files used for allocation accounting. The [campaign admission
+requirements](../../../../docs/campaign-native-performance.md#finite-reliability-jobs-and-continuation)
+apply to both legs.
