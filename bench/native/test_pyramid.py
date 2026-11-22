@@ -68,6 +68,15 @@ class Selection(unittest.TestCase):
                          ("W3", "10"))
         self.assertIn("pinned-portfolio", entry.requires)
 
+    def test_w6_memory_screen_fixes_work_and_compares_two_ctrs_slots(self):
+        entry, = self.select(name=["w6-build:memory5120"])
+        argv = entry.argv
+        self.assertEqual(entry.design, "candidate")
+        self.assertEqual([argv[argv.index(flag) + 1] for flag in ("--a", "--b", "--case", "--pairs",
+                          "--resource-lane", "--candidate-memory-mib")],
+                         ["ctrs", "ctrs", "W6", "10", "installed-default", "5120"])
+        self.assertIn("quiet-host", entry.requires)
+
     def test_a_named_workload_above_the_ceiling_is_an_error(self):
         with self.assertRaises(SystemExit):
             self.select("edit", name=["w14-fresh:cohort"])

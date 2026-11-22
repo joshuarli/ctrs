@@ -212,14 +212,15 @@ def registry(lane='macos-arm64') -> list[Workload]:
                   "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS)),
             design="candidate"))
     items += [
-        Workload("w6-build:memory6144", "scenario", "build",
-                 "W6 uncached builds with a 6144 MiB ctrs VM ceiling at fixed vCPUs",
-                 79, 20, "observed", ENGINES + ("quiet-host",),
+        *(Workload(f"w6-build:memory{mib}", "scenario", "build",
+                 f"W6 uncached builds with a {mib} MiB ctrs VM ceiling at fixed vCPUs",
+                 79, 20, basis, ENGINES + ("quiet-host",),
                  argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "ctrs",
                        "--resource-lane", "installed-default", "--case", "W6",
-                       "--candidate-memory-mib", "6144", "--pairs", "10",
+                       "--candidate-memory-mib", str(mib), "--pairs", "10",
                        "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS)),
-                 design="candidate"),
+                 design="candidate")
+          for mib, basis in ((6144, "observed"), (5120, "estimated"))),
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
                  "Kutt workspace with ctrs given OrbStack's vCPUs and memory", 124, 20, "observed",
                  ENGINES + ("w12-inputs", "quiet-host"),
