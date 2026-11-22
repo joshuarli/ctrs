@@ -95,9 +95,10 @@ title = "Pinned Marked TypeScript CLI: persistent esbuild watch -> exact CLI HTM
 fixture = "fixtures/w5-v2"
 fixture_version = "w5-v3-marked-receipts"
 status = "implemented"
-metrics = ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s", "bind_setup_s", "volume_setup_s"]
+metrics = ["bind_edit_to_result_median_s", "volume_edit_to_result_median_s",
+           "bind_edit_to_result_p95_s", "volume_edit_to_result_p95_s", "bind_setup_s", "volume_setup_s"]
 states = ["warm"]
-params = { iters = 5 }
+params = { iters = 5, cohort_iters = 60 }
 correctness = ["exact files on both mounted source trees and installed CLI/lock", "pinned native ARM64 tool image and esbuild from the lockfile", "persistent watcher PID/start identity", "exact rebuilt CLI output each edit", "owned cleanup"]
 note = "Both conditions use real TS sources and dependencies. Host bind uses the coordinator file write; volume includes Docker exec. Input verification is measured separately from startup and edits. Every phase requires complete owned resource boundaries before scoring."
 

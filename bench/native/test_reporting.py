@@ -131,6 +131,22 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(result['valid_pairs'], 0)
         self.assertEqual(result['rejections'][0]['reason'], 'paired inputs differ or are missing')
 
+    def test_w5_tail_uses_the_complete_verified_edits_for_its_mount(self):
+        metric = "bind_edit_to_result_p95_s"
+        records = pair(case="W5")
+        for record, scale in zip(records, (1, 2), strict=True):
+            record["workload_params"].update(fixture_version=reporting.W5_RECEIPT_VERSION, iters=60)
+            record["paired_inputs"] = {"source_sha256": "shared"}
+            record["correctness"]["checks"]["bind_persistent_exact_results"] = True
+            record["metrics"]["bind_edits_s"] = [i * scale for i in reversed(range(1, 61))]
+        self.assertEqual(reporting._metric(records[0], metric), (57, None))
+        report = reporting.analyze(records)
+        self.assertEqual(metric_result(report, metric)["ratio_median"], .5)
+        records[1]["metrics"]["bind_edits_s"].pop()
+        metric_row = metric_result(reporting.analyze(records), metric)
+        self.assertIsNone(metric_row["ratio_median"])
+        self.assertEqual(metric_row["missing_pairs"], [1])
+
     def test_w5_scopes_resource_costs_to_each_mount_and_verified_edits(self):
         records = pair(case="W5", metric="bind_edit_to_result_median_s")
         for record, scale in zip(records, (2, 1), strict=True):

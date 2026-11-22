@@ -77,6 +77,12 @@ class Selection(unittest.TestCase):
                          ["ctrs", "ctrs", "W6", "10", "installed-default", "5120"])
         self.assertIn("quiet-host", entry.requires)
 
+    def test_paired_w5_cohort_has_enough_edits_for_a_tail(self):
+        smoke, = self.select(name=["w5-esbuild-watch"])
+        cohort, = self.select(name=["w5-esbuild-watch:cohort"])
+        self.assertNotIn("--watch-edits", smoke.argv)
+        self.assertEqual(cohort.argv[cohort.argv.index("--watch-edits") + 1], "60")
+
     def test_a_named_workload_above_the_ceiling_is_an_error(self):
         with self.assertRaises(SystemExit):
             self.select("edit", name=["w14-fresh:cohort"])

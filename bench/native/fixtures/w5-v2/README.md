@@ -38,15 +38,19 @@ mount's setup, input verification, edits and cleanup.
 From the repository root, prepare and run the selected engine:
 
 ```sh
-TMPDIR="$PWD/.work/tmp" python3.14 bench/native/runner.py prepare --engines orbstack,ctrs
+TMPDIR="$PWD/.work/tmp" python3.14 bench/native/runner.py prepare --only W5 --engines orbstack,ctrs
 TMPDIR="$PWD/.work/tmp" python3.14 bench/native/runner.py run --engine orbstack --case W5 --state warm
 ```
 
-Preparation also builds the campaign's other fixtures. Use the explicit engine
-option for ctrs. Never change Docker contexts or prune shared resources. Source
-archives and build artifacts stay under `.work/`.
+Source archives and build artifacts stay under `.work/`.
 
 Current records use `w5-v3-marked-receipts`. The report admits a pair only
 when both sides observed the same ordered image DiffIDs, tool receipts
 and source and lock hashes. Keep earlier W5 cohorts separate. Functional
 pilots establish fixture behavior and leave performance qualification open.
+
+`pyramid.py run --name w5-esbuild-watch:cohort` uses 60 edits per mount.
+The report derives nearest-rank p95 from each mount's complete verified
+edits and compares those values across pairs. The five-edit check remains
+available as `w5-esbuild-watch`. Use `baseline --case W5 --watch-edits 60`
+to select the longer workload directly.

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from watch_loop import MIN_TAIL_EDITS
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 WORK = REPO / ".work"
@@ -194,9 +196,13 @@ def registry(lane='macos-arm64') -> list[Workload]:
             if "w9-image-ref" in extra else ()
         items.append(Workload(name, "change", area, purpose, per_trial, 2, basis, ENGINES + extra,
                               argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=1))))
+        cohort_args, cohort_seconds, cohort_basis = args, per_trial, basis
+        if name == "w5-esbuild-watch":
+            cohort_args = (*args, "--watch-edits", str(MIN_TAIL_EDITS))
+            cohort_seconds, cohort_basis = 120, "estimated"
         items.append(Workload(f"{name}:cohort", "scenario", area, purpose + " (paired cohort)",
-                              per_trial, 20, basis, ENGINES + extra + ("quiet-host",),
-                              argv=(sys.executable, str(RUNNER), *_baseline(*args, *image, pairs=10),
+                              cohort_seconds, 20, cohort_basis, ENGINES + extra + ("quiet-host",),
+                              argv=(sys.executable, str(RUNNER), *_baseline(*cohort_args, *image, pairs=10),
                                     "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS))))
     for name, area, purpose, args, seconds, extra in CELLS:
         if name not in CPU_CANDIDATE_CELLS:

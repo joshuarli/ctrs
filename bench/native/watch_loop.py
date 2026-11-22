@@ -14,6 +14,7 @@ import time
 FIXTURE = Path(__file__).parent / 'fixtures/w5-v2'
 IMAGE = 'np-w5-marked:v2'
 RECEIPT_VERSION = 'w5-v3-marked-receipts'
+MIN_TAIL_EDITS = 60
 
 
 def contract():

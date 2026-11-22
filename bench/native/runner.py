@@ -4074,6 +4074,8 @@ def cmd_baseline(args) -> int:
                           "seed": args.seed + pair * 10}
                 if args.case == "W9":
                     kw["image_ref"] = args.image_ref
+                if args.case == "W5" and getattr(args, "watch_edits", None) is not None:
+                    kw["iters"] = args.watch_edits
                 if args.case == "W2":
                     kw["operations"] = getattr(args, "operations", None)
                     kw["request_rate"] = getattr(args, "request_rate", None)
@@ -4090,7 +4092,9 @@ def cmd_baseline(args) -> int:
                 if args.case == "W12":
                     kw = {"layout": args.workspace_layout}
                 if args.case == "W12-watch":
-                    kw = {"mount": args.watch_mount, "edits": args.watch_edits}
+                    kw = {"mount": args.watch_mount}
+                    if args.watch_edits is not None:
+                        kw["edits"] = args.watch_edits
                 if args.case == "W13":
                     kw = {"path": args.transfer_path, "direction": args.direction,
                           "streams": args.streams, "size_bytes": args.size_bytes,
@@ -4339,7 +4343,8 @@ def main() -> int:
     p.add_argument("--workspace-layout", choices=("full-bind", "bind-source-volume-deps", "all-volume"),
                    default="full-bind", help="W12 layout")
     p.add_argument("--watch-mount", choices=("bind", "volume"), default="bind", help="W12-watch mount")
-    p.add_argument("--watch-edits", type=int, default=60, help="W12-watch edit events per trial (at least 60)")
+    p.add_argument("--watch-edits", type=int,
+                   help="edits per mount for W5 (default 5) or W12-watch (at least 60, default 60)")
     p.add_argument("--transfer-path", choices=("published-port", "container-to-container", "container-to-mac"),
                    default="published-port", help="W13 network path")
     p.add_argument("--direction", choices=("upload", "download"), default="upload", help="W13 direction")
@@ -4420,6 +4425,9 @@ def main() -> int:
         ap.error("--client-location requires W2")
     if getattr(args, "build_cache", None) is not None and args.case != "W6":
         ap.error("--build-cache requires W6")
+    if getattr(args, "watch_edits", None) is not None and (
+            args.case not in ("W5", "W12-watch") or args.watch_edits < (60 if args.case == "W12-watch" else 1)):
+        ap.error("--watch-edits requires a positive count for W5 or at least 60 for W12-watch")
     if getattr(args, "interrupt_service", None) is not None and args.case != "W10":
         ap.error("--interrupt-service requires W10")
     if getattr(args, "interrupt_service", None) == "engine" and (
