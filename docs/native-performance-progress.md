@@ -495,6 +495,30 @@ python3 bench/native/reporting.py --match base-20261122T093306-1b10
 `trials.jsonl` SHA-256
 `231f577b8eeb6bdaf972c8479bb0e3b95813d49569ce4cacde4eca62289982a1`.
 
+### W9 parallel job resource admission
+
+Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
+and the digest reference shared by both engines in the v6 portfolio
+deployment. Each engine completed 16 verified jobs at each concurrency
+of 1, 4, 8 and 16. All eight intervals returned CPU and sampled physical
+footprint receipts with no resource errors. Each interval included at
+least two samples between the boundaries. ctrs used zero host NAT
+connections.
+
+The earlier run `base-20261122T093626-994f` used an image reference from
+the isolated W11 store. The installed-default ctrs store lacked that
+reference and rejected the launch. The W9 admission repeat used the
+common deployment reference from both engines' image receipts. The full
+paired cohort remains open.
+
+```sh
+BENCH_W9_IMAGE_REF="$common_marked_digest_ref" python3 bench/native/pyramid.py run --name w9-jobs
+python3 bench/native/reporting.py --match base-20261122T094007-1ee3
+```
+
+`trials.jsonl` SHA-256
+`e48361975e639d0f4601623517eff52ebb49524c7315cf9a18e663021884a213`.
+
 ### Installed-default W13 overlap cohort
 
 Run `base-20261122T073402-7351` used harness source `6278898`, the W6
