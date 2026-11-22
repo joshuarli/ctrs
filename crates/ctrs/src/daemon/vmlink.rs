@@ -322,9 +322,12 @@ impl VmLink {
     }
 
     pub fn send_layer(&self, digest: &str, media_type: &str, blob: &Path) -> io::Result<()> {
+        Self::fetch_reply(self.send_layer_defer(digest, media_type, blob)?)
+    }
+
+    pub fn send_layer_defer(&self, digest: &str, media_type: &str, blob: &Path) -> io::Result<std::sync::mpsc::Receiver<Reply>> {
         let size = std::fs::metadata(blob)?.len();
-        self.call(|o| Msg::LayerBegin(LayerBegin { digest, media_type, size }).encode(o), Some((blob, size)))
-            .map(drop)
+        self.post(|o| Msg::LayerBegin(LayerBegin { digest, media_type, size }).encode(o), Some((blob, size)))
     }
 
     /// The same layer, but the guest reads the blob itself from `path` on
@@ -592,4 +595,35 @@ fn read_frame(conn: &mut File, buf: &mut Vec<u8>) -> io::Result<()> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
     buf.resize(len.max(HEADER), 0);
     conn.read_exact(&mut buf[4..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Reply, VmLink};
+    use std::sync::mpsc;
+
+    #[test]
+    fn deferred_installs_keep_independent_results() {
+        let (first_tx, first_rx) = mpsc::sync_channel(1);
+        let (second_tx, second_rx) = mpsc::sync_channel(1);
+        second_tx.send(Reply::LayerStored).unwrap();
+        first_tx.send(Reply::Error("unpack failed".into())).unwrap();
+        assert_eq!(VmLink::fetch_reply(first_rx).unwrap_err().to_string(), "unpack failed");
+        VmLink::fetch_reply(second_rx).unwrap();
+    }
+
+    #[test]
+    fn completed_install_survives_sender_exit() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        tx.send(Reply::LayerStored).unwrap();
+        drop(tx);
+        VmLink::fetch_reply(rx).unwrap();
+    }
+
+    #[test]
+    fn disconnected_install_does_not_succeed_without_a_reply() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        drop(tx);
+        assert_eq!(VmLink::fetch_reply(rx).unwrap_err().to_string(), "the VM stopped");
+    }
 }

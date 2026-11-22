@@ -1476,7 +1476,12 @@ impl Engine {
         }
         let mut deferred = Vec::new();
         for (digest, media_type) in &missing {
-            if let Some(rx) = self.defer_layer_fetch(&vm, digest, media_type)? {
+            let pending = if cfg!(target_os = "linux") {
+                Some(vm.send_layer_defer(digest, media_type, &self.store.blob_path(digest)?)?)
+            } else {
+                self.defer_layer_fetch(&vm, digest, media_type)?
+            };
+            if let Some(rx) = pending {
                 deferred.push((digest.clone(), media_type.clone(), rx));
                 continue;
             }

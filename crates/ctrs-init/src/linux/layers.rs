@@ -612,6 +612,52 @@ mod tests {
     const D1: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
     const D2: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn gzip_layers_restore_contents_and_empty_archives() {
+        let root = scratch("gzip");
+        for (digest, files) in [(D1, vec![("file", &b"contents"[..])]), (D2, vec![])] {
+            let blob = gzip(&layer_blob(&files));
+            let begin = LayerBegin { digest, media_type: "application/vnd.oci.image.layer.v1.tar+gzip", size: blob.len() as u64 };
+            receive(&mut &blob[..], &begin, &root).unwrap();
+            assert!(present(&root, digest));
+        }
+        assert_eq!(fs::read(dir(&root, D1).unwrap().join("file")).unwrap(), b"contents");
+        assert_eq!(fs::read_dir(dir(&root, D2).unwrap()).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concatenated_gzip_members_form_one_layer() {
+        let root = scratch("gzip-members");
+        let tar = layer_blob(&[("file", b"contents")]);
+        let split = tar.len() / 2;
+        let mut blob = gzip(&tar[..split]);
+        blob.extend(gzip(&tar[split..]));
+        let begin = LayerBegin { digest: D1, media_type: "application/vnd.oci.image.layer.v1.tar+gzip", size: blob.len() as u64 };
+        receive(&mut &blob[..], &begin, &root).unwrap();
+        assert_eq!(fs::read(dir(&root, D1).unwrap().join("file")).unwrap(), b"contents");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn truncated_gzip_never_commits_a_layer() {
+        let root = scratch("gzip-truncated");
+        let mut blob = gzip(&layer_blob(&[("file", &vec![b'x'; 512 * 1024])]));
+        blob.truncate(blob.len() / 2);
+        let begin = LayerBegin { digest: D1, media_type: "application/vnd.oci.image.layer.v1.tar+gzip", size: blob.len() as u64 };
+        assert!(receive(&mut &blob[..], &begin, &root).is_err());
+        assert!(!present(&root, D1));
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn send(root: &Path, digest: &str, blob: &[u8]) -> LayerStored {
         let begin = LayerBegin { digest, media_type: "application/vnd.oci.image.layer.v1.tar", size: blob.len() as u64 };
         receive(&mut &blob[..], &begin, root).unwrap()

@@ -1420,3 +1420,26 @@ durability loss. Full/workspace suites remain deliberate named manual gates;
 qualification is conditional on the prerequisites above, never an automatic
 check-command fallback. Continue until measured goals, explicit owner stop or
 a specific blocker of all remaining authorized work.
+
+## Linux HTTPie first use (amd64), 2026-11-22
+
+[Evidence and replay](evidence/linux-httpie-2026-11-22.md): three predeclared
+10-round baseline/candidate/frozen-Docker cohorts, 90/90 correct, resource-valid
+and host-admitted. Native materialization before create dominates the deficit.
+H1 streamed-install overlap and H2 zlib-rs alone were neutral under the strict
+gate and reverted; the explicitly combined H3 qualifies: paired first-use C/B
+**0.773 [0.707,0.786]**, medians **0.492 vs 0.649s**. Frozen Docker median
+0.428s; C/D **1.164 [1.036,1.180]**, still slower. No build timing claim.
+H3 uses the existing four-worker/FIFO install barrier and lock-pinned pure-Rust
+gzip backend; it does not move work into preparation. First-use sampled CPU
+medians B/C/D .554/.445/.248s; active anon+kernel peaks 33.23/24.16/797.93MiB,
+with idle and retained state separately disclosed. No broad memory claim.
+
+The five earlier ownership-invalid receipts remain invalid. Actual ordered
+process/start-time/cgroup reads reproduce a short-lived runc ancestry gap,
+including during the frozen 50,000-op W2 DB workload. A matching W13 diagnostic
+did not reproduce it. Old samples lack the offending PID's instantaneous
+reads, so individual attribution of all five remains unproven; strict ownership
+was not weakened. Raw data/binaries live under
+`~/ctrs-evidence/linux-httpie-20261122/` with a committed SHA-256 manifest.
+This Linux optimization closes no macOS gate; their status is unchanged.
