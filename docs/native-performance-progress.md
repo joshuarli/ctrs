@@ -19,10 +19,11 @@ D-lane pilots and none is qualified. Smaller numbers favor ctrs.
   footprint 0.313). Every W3-v4 timing, though it is not claimed until
   the flush contracts are shown to be equal. W6 Rust 0.953
   (non-inferior) and zlib 0.641. W7 wins every cell except the uncached
-  build, which is 0.997 (non-inferior). W14 streaming, reconnect,
-  persistent and idle-resume CPU.
+  build, which is 0.997 (non-inferior). Historical W14 streaming,
+  reconnect and persistent CPU. Current W14 idle-resume cleanup and footprint.
 - **Losses:** W12 full-bind, about 1.25–1.33× (the Mac virtiofs share).
   W2 fixed work uses 1.250× the measured engine CPU per request.
+  W14 idle-resume p50 is 1.128×.
   The current 9-vCPU W13-overlap cohort still has a CPU loss (1.097×).
   Its W2 p99 and throughput are inconclusive. The old 5-vCPU cohort
   recorded a 1.70× p99 loss. See the [current overlap evidence](#installed-default-w13-overlap-cohort).
@@ -174,9 +175,9 @@ requires a new fixture version and fresh results for its consumers.
 
 W6 and W7 completed independently of the common portfolio. The replacement
 v6 portfolio passed its functional proof and the W13 overlap cohort.
-The published-port fixed-work W2 cohort is recorded below. Use
-`w14-idle-resume:cohort` for the current installed defaults and
-`reporting.py --match <run>` to summarize its trials. Use Python 3.11 or later. On this host
+The published-port fixed-work W2 and W14 idle-resume cohorts are recorded
+below. Use `reporting.py --match <run>` to summarize their trials. Use
+Python 3.11 or later. On this host
 the supported interpreter is `/opt/homebrew/bin/python3`.
 For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
@@ -360,6 +361,39 @@ python3 bench/native/reporting.py --match base-20261122T073402-7351
 
 `trials.jsonl` SHA-256
 `08090558a7c1bd1643ad60040574aab8bdea9a5ee10bd2782d32776e40b539b0`.
+
+### Installed-default W14 idle-resume cohort
+
+Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
+signed binary and guest assets, and the pinned v6 API image. Both engines
+observed 9 vCPUs with the same memory allocations as W6. All ten pairs
+matched the `w14-v3` fixture inputs and completed with zero rejections.
+Each leg verified 32 resumed TCP sessions after 30 seconds of idle
+time, zero leaked sessions and successful owned cleanup. Outside-engine
+CPU during the lifecycle phase reached at most 0.38 cores.
+
+| Metric | ctrs / OrbStack paired median | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Resume p50 | 1.1281 | 1.0558–1.4681 | Loss |
+| Resume p95 | 0.9640 | 0.9080–1.2592 | Inconclusive |
+| Resume p99 | 0.9423 | 0.9061–1.2563 | Inconclusive |
+| Cleanup latency | 0.3530 | 0.2619–0.5451 | Strict win |
+| Sampled peak physical footprint | 0.3172 | 0.3031–0.3257 | Strict win |
+| Measured engine CPU | 0.1844 | 0.1597–0.1975 | Incomplete |
+
+All ten ctrs legs used host NAT (220 connections). Host-kernel CPU for
+those connections is outside the measured counters. This mode resumes
+idle connections to a running service. It does not measure a stopped VM's
+wake latency.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w14-idle-resume:cohort
+python3 bench/native/reporting.py --match base-20261122T082410-0094
+```
+
+`trials.jsonl` SHA-256
+`8bb607932e787f79531a644b4c416081a5682bede314429e70b4813f8734d0ce`.
 
 ### Rebuilt W8 common portfolio
 
