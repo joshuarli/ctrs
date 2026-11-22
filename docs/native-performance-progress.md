@@ -231,6 +231,15 @@ target and OOM counters. The screen cannot establish CPU parity or
 choose a new default. A useful result needs next-use, W2 and W7 checks
 before a separate comparison against OrbStack.
 
+The native admission smoke `base-20261122T080710-ebbc` tested the
+8,192 and 6,144 MiB limits at 9 vCPUs (`fae1787`). Docker's `/info`
+reported both exact ceilings and targets. Both uncached Rust and zlib
+builds passed, and each artifact hash matched across slots. Both slots
+recorded zero guest OOM kills, complete footprint samples and NAT usage.
+One pair verifies the configuration and build outputs. The ten-pair
+screen remains open. `trials.jsonl` SHA-256
+`fc7c6e865a0f66cb4cab7a6558fadfe7e00237e57506eaadaf0c2faee44de515`.
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
