@@ -249,6 +249,28 @@ Docker daemon must follow the integrated-runtime private netns/containerd
 isolation instructions, never adopt default sockets.
 
 The performance gate's status subcommand has a GNU awk `load` identifier
-error; its normal and `-1` admission modes worked for every scored trial.
+error; its `-1` admission mode worked before and after every scored trial.
 No global tool/environment change was made. Final cleanup, rebase/runtime
 identity audit and integration checks are preserved in the final audit logs.
+
+### Final integration
+
+Rebased onto `ea35cab849d74e289fc8a5b71778673553be796c`. Incoming changes
+do not alter crates, e2e assertions or the Linux sampler/adapter; runner
+changes add W3 metadata only. Measured runtime inputs are unchanged. Final
+host daemon tests include the three restored reply cases:
+
+```text
+test result: ok. 155 passed; 0 failed; 2 ignored
+Ran 489 tests
+OK (skipped=15)
+FIVE_OLD_RECEIPTS_STILL_IDENTICAL_TO_ORIGINAL_SOURCE_LINES
+WORKLOAD_DIAGNOSTICS [('create', 2), ('W2', 1), ('W13', 0)]
+HTTPIE_FINAL_AUDIT_OK: 90 correct/resource-valid/admitted trials; exact live binaries, affinities, frozen image, copied traces; three declared decisions; final tests
+NO_OWNED_PROCESS_CGROUP_FIREWALL_LINK_OR_BENCHMARK_CONTAINER_RESIDUE; DOCKER_PIDS_UNCHANGED
+```
+
+The first post-rebase offline run failed because sudo preparation owned the
+two scratch result-parent directories. Correcting ownership of those two
+owned directories, without changing records or tests, resolved it. Both logs
+are retained. All scored trials and the original five receipts stay untouched.
