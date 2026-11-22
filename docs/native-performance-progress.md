@@ -15,13 +15,14 @@ must be measured again.
 Host: M1 Max, 10 CPUs, 64 GiB, macOS 27.2.1, OrbStack 2.2.5. These are
 D-lane pilots and none is qualified. Smaller numbers favor ctrs.
 
-- **Wins:** W2 latency, throughput and footprint (rps 0.744, p99 0.611,
-  footprint 0.359). Every W3-v4 timing, though it is not claimed until
+- **Wins:** W2 latency, throughput and footprint (rps 0.746, p99 0.612,
+  footprint 0.313). Every W3-v4 timing, though it is not claimed until
   the flush contracts are shown to be equal. W6 Rust 0.953
   (non-inferior) and zlib 0.641. W7 wins every cell except the uncached
   build, which is 0.997 (non-inferior). W14 streaming, reconnect,
   persistent and idle-resume CPU.
 - **Losses:** W12 full-bind, about 1.25–1.33× (the Mac virtiofs share).
+  W2 fixed work uses 1.250× the measured engine CPU per request.
   The current 9-vCPU W13-overlap cohort still has a CPU loss (1.097×).
   Its W2 p99 and throughput are inconclusive. The old 5-vCPU cohort
   recorded a 1.70× p99 loss. See the [current overlap evidence](#installed-default-w13-overlap-cohort).
@@ -29,8 +30,7 @@ D-lane pilots and none is qualified. Smaller numbers favor ctrs.
   W12-watch 1.07×, published-port upload CPU/GiB 1.08×, W14 fresh
   ~1.02–1.15×.
 - **Tool-limited or inconclusive:** guest→host bulk transfer is now
-  0.72–0.94 (it was 5–7× before the NAT relay and splice work), and
-  W2 CPU/success is 1.03–1.045.
+  0.72–0.94 (it was 5–7× before the NAT relay and splice work).
 - **Unscored:** W1, W4, W5, W8, W9, W10 (pilots at most). W11 12-hour
   reliability was never run. Its admission branch
   `origin/campaign/w11-bind-completed-cycles` is parked and unmerged.
@@ -174,8 +174,9 @@ requires a new fixture version and fresh results for its consumers.
 
 W6 and W7 completed independently of the common portfolio. The replacement
 v6 portfolio passed its functional proof and the W13 overlap cohort.
-Run `w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
-`reporting.py --match <run>`. Use Python 3.11 or later. On this host
+The published-port fixed-work W2 cohort is recorded below. Use
+`w14-idle-resume:cohort` for the current installed defaults and
+`reporting.py --match <run>` to summarize its trials. Use Python 3.11 or later. On this host
 the supported interpreter is `/opt/homebrew/bin/python3`.
 For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
@@ -277,6 +278,41 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
+
+### Installed-default W2 fixed-work cohort
+
+Run `base-20261122T081048-91d4` used clean source `7eb4859`, the same
+signed binary and guest assets as W6, and the v6 API, PostgreSQL and Redis
+pins. All ten alternating pairs matched their image, SQL seed, client and
+API file receipts. Each leg completed 50,000 requests with eight clients
+through the published port, verified every persisted write, and recorded
+zero errors. Both engines observed 9 vCPUs with the W6 memory allocations.
+Maximum outside-engine CPU during load was 1.00 core.
+
+| Metric | Paired median ratio | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Measured engine CPU per verified request | 1.2499 | 1.2347–1.2594 | Loss |
+| Sampled peak physical footprint | 0.3129 | 0.3025–0.3276 | Strict win |
+| Request rate (OrbStack / ctrs) | 0.7458 | 0.7366–0.7551 | Strict win |
+| API p50 | 0.7477 | 0.7410–0.7555 | Strict win |
+| API p95 | 0.6720 | 0.6576–0.6820 | Strict win |
+| API p99 | 0.6124 | 0.5977–0.6331 | Strict win |
+
+Lower ratios favor ctrs. All ten ctrs legs used host NAT (81 connections).
+The host kernel's NAT CPU is outside the engine counters. The median
+workload-phase engine CPU was 48.87 s on ctrs and 39.03 s on OrbStack.
+The API cgroup recorded medians of 26.61 s and 21.06 s respectively,
+including counter-reader execution. The guest-direct and fixed-rate
+conditions are needed to distinguish application CPU from transport costs.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w2-api:cohort
+python3 bench/native/reporting.py --match base-20261122T081048-91d4
+```
+
+`trials.jsonl` SHA-256
+`5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
 
 ### Installed-default W13 overlap cohort
 
