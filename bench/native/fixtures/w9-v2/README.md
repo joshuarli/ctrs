@@ -23,6 +23,10 @@ failures are retained; a failed condition is not retried or omitted. Cleanup
 checks labels before removal. Pending jobs are cancelled on interruption and
 already-running calls have finite timeouts. Required engine/VM resource coverage
 remains strict; client/coordinator CPU is outside the declared engine CPU scope.
+At each concurrency, the report divides the engine CPU charged over the
+job phase by the 16 verified completions and uses that phase's sampled
+physical footprint. Missing or invalid phase receipts leave the corresponding
+resource cells unmeasured.
 
 v1 varied both work count and concurrency and used an elapsed 0.6-second hash loop.
 Those historical records remain diagnostic; new metric names, fixture version

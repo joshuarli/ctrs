@@ -20,11 +20,17 @@ MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
 W9_CONCURRENCIES = ci_jobs.SPEC['concurrency']
 W9_THROUGHPUT = "successful_jobs_per_minute_at_"
+JOB_RESOURCE_FIELDS = (("cpu_seconds_per_job", "cpu_seconds"),
+                       ("peak_phys_footprint_bytes", "peak_phys_footprint_bytes"))
 W4_RESOURCE_METRICS = {
     f"workers_{count}_{metric}": (count, field)
     for count in (1, 4, 16)
-    for metric, field in (("cpu_seconds_per_job", "cpu_seconds"),
-                          ("peak_phys_footprint_bytes", "peak_phys_footprint_bytes"))
+    for metric, field in JOB_RESOURCE_FIELDS
+}
+W9_RESOURCE_METRICS = {
+    f"jobs_at_{count}_{metric}": (count, field)
+    for count in W9_CONCURRENCIES
+    for metric, field in JOB_RESOURCE_FIELDS
 }
 W5_MODE_RESOURCES = ("cpu_seconds_per_edit", "peak_phys_footprint_bytes")
 W5_RESOURCE_METRICS = tuple(f"{mode}_{metric}" for mode in ("bind", "volume")
@@ -44,7 +50,7 @@ CASE_METRICS = {
     "W8": ["pull_wall_seconds", "load_rps", "load_p95_ms", "load_p99_ms"],
     "W9": [metric for concurrency in W9_CONCURRENCIES
            for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",
-                          f"job_completion_p95_ms_at_{concurrency}")],
+                          f"job_completion_p95_ms_at_{concurrency}")] + list(W9_RESOURCE_METRICS),
     # Legacy load_rps counts failed attempts during downtime, not useful work.
     "W10": ["recovery_s", "recovered_p99_ms", "engine_cpu_per_success"],
     # Soak windows/requests/churn counts are reliability observations.
@@ -194,18 +200,23 @@ def _recovery_cpu_per_success(record: dict):
     return sum(cpu) / count, None
 
 
-def _queue_resource(record: dict, workers: int, field: str):
+def _job_resource(record: dict, concurrency: int, field: str):
     metrics = record.get("metrics", {})
-    count = metrics.get(f"jobs_at_{workers}")
+    count = metrics.get(f"jobs_at_{concurrency}")
     checks = record.get("correctness", {}).get("checks", {})
-    if (checks.get(f"workers_{workers}") is not True or type(count) is not int
-            or count <= 0 or count != metrics.get("jobs")):
-        return None, f"missing verified W4 jobs at {workers} workers"
+    if record["case"] == "W4":
+        phase_name = check = f"workers_{concurrency}"
+        expected = metrics.get("jobs")
+    else:
+        phase_name, check = f"jobs_at_{concurrency}", f"exact_jobs_at_{concurrency}"
+        expected = ci_jobs.SPEC["fixed_jobs"]
+    if checks.get(check) is not True or type(count) is not int or count <= 0 or count != expected:
+        return None, f"missing verified {record['case']} jobs at concurrency {concurrency}"
     resources = record.get("resources", {})
-    phase = resources.get("phase_receipts", {}).get(f"workers_{workers}", {})
+    phase = resources.get("phase_receipts", {}).get(phase_name, {})
     value = phase.get(field)
     if phase.get("status") != "ok" or phase.get("errors") != [] or not _number(value) or value <= 0:
-        return None, f"missing or invalid W4 worker receipt at {workers} workers"
+        return None, f"missing or invalid {record['case']} resource receipt at concurrency {concurrency}"
     return (value / count if field == "cpu_seconds" else value), None
 
 
@@ -250,7 +261,9 @@ def _metric(record: dict, name: str):
             return None, "missing or invalid W3 transaction CPU phase"
         return cpu / count, None
     if name in W4_RESOURCE_METRICS and record.get("case") == "W4":
-        return _queue_resource(record, *W4_RESOURCE_METRICS[name])
+        return _job_resource(record, *W4_RESOURCE_METRICS[name])
+    if name in W9_RESOURCE_METRICS and record.get("case") == "W9":
+        return _job_resource(record, *W9_RESOURCE_METRICS[name])
     if name in W5_RESOURCE_METRICS and record.get("case") == "W5":
         mode, _, metric = name.partition("_")
         return _watch_resource(record, mode, metric)
@@ -546,7 +559,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
                 assessment = "incomplete"
         complete_resource = not missing or metric not in (
             "peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success",
-            "engine_cpu_per_success", *LINUX_RESOURCE_METRICS, *W4_RESOURCE_METRICS, *W5_RESOURCE_METRICS)
+            "engine_cpu_per_success", *LINUX_RESOURCE_METRICS, *W4_RESOURCE_METRICS,
+            *W5_RESOURCE_METRICS, *W9_RESOURCE_METRICS)
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
             "missing_pairs": missing, "missing_reasons": missing_reasons, "assessment": assessment,

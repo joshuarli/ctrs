@@ -363,8 +363,10 @@ class WorkloadSafetyTests(unittest.TestCase):
             self.assertTrue(successful["correctness"]["ok"], successful)
             self.assertEqual(successful["metrics"]["successful_jobs_per_minute_at_4"], 480)
             self.assertEqual(successful["metrics"]["job_completion_p95_ms_at_4"], 1600)
+            self.assertEqual(successful["metrics"]["jobs_at_4"], 16)
             self.assertFalse(failed["correctness"]["ok"])
             self.assertNotIn("job_completion_p95_ms_at_1", failed["metrics"])
+            self.assertNotIn("jobs_at_1", failed["metrics"])
             raw = Path(tmp) / "orbstack/W9/jobs-at-1.json"
             self.assertEqual(json.loads(raw.read_text())[0]["completion_seconds"], .1)
 
