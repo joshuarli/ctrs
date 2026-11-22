@@ -26,7 +26,7 @@ OrbStack's). Never pool lanes.
 
 | ID | Workflow | Spec | Impl | Functional (this host) | Compared (this host) | Critical result (this host) |
 | --- | --- | --- | --- | --- | --- | --- |
-| W1 | Compose up API+PG+Redis, restart | yes | yes | yes (one-pair pilot `base-20261120T053409-f584`) | no | pilot only: health 0.69×; no verdict below 10 pairs |
+| W1 | Compose up API+PG+Redis, restart | yes | yes | yes, v3 on both engines | D: `base-20261122T093654-6f3a` (10/10 warm pairs) | Verified restart 0.686× [0.675, 0.698], initial roundtrip 0.848× [0.719, 0.912], and footprint 0.419× [0.387, 0.429] were strict wins. CPU accounting is incomplete due to host NAT. Engine-cold coverage remains open. [Evidence](native-performance-progress.md#installed-default-w1-warm-stack-cohort) |
 | W2 | API fixed work, published port | yes | yes | yes (both lanes) | D: `base-20261122T081048-91d4` (10/10 pairs, 50,000 requests, both engines 9 vCPUs) | **Measured CPU per request loss** 1.250× [1.235, 1.259] before uncharged host NAT. p99 0.612× [0.598, 0.633], request rate 0.746× [0.737, 0.755] and footprint 0.313× [0.303, 0.328] were strict wins. [Current evidence](native-performance-progress.md#installed-default-w2-fixed-work-cohort), [historical installed and matched comparisons](evidence/native-w2-ipi-2026-11-18.md) |
 | W3 | PG transactions, checkpoint, restart | yes | yes | no | no | unmeasured |
 | W4 | Queue workers 1/4/16 | yes | yes | yes (one-pair pilot `base-20261120T061132-4479`, inputs from `prepare --only W4`) | no | unmeasured |
