@@ -29,6 +29,9 @@ CTRS_ENGINE=false
 MAC_VM=false
 if [[ $ENGINE == Ctrs ]]; then
   CTRS_ENGINE=true
+  # Docker 29.8 leaves .Server.KernelVersion empty in `version`; `info` still
+  # reports the guest kernel that distinguishes a macOS VM from Linux.
+  ENGINE_KERNEL=$($D info --format '{{.KernelVersion}}' 2>/dev/null || true)
   if [[ $HOST_OS == Darwin && $ENGINE_KERNEL == *-ctrs ]]; then MAC_VM=true; fi
 fi
 case $ENGINE_ARCH in
@@ -849,11 +852,46 @@ docker buildx rm -f "$BX" >/dev/null 2>&1
 section "registry: login, push, pull"
 REG=$(scratch_dir); export DOCKER_CONFIG_SAVED=${DOCKER_CONFIG:-}
 # A throwaway client config: no keychain, nothing of the user's touched.
-mkdir -p "$REG/cfg"; echo '{"auths":{}}' > "$REG/cfg/config.json"; ln -s ~/.docker/cli-plugins "$REG/cfg/cli-plugins"; mkdir -p "$REG/cfg/contexts"
+mkdir -p "$REG/cfg"; ln -s ~/.docker/cli-plugins "$REG/cfg/cli-plugins"; mkdir -p "$REG/cfg/contexts"
+# macOS's docker CLI falls back to the osxkeychain helper even when credsStore
+# is unset, so give the scratch config its own file-backed helper instead.
+cat > "$REG/cfg/config.json" <<'CFG'
+{"auths":{},"credsStore":"ctrsfile"}
+CFG
+cat > "$REG/cfg/docker-credential-ctrsfile" <<'HELPER'
+#!/usr/bin/env python3
+import json, os, sys
+command = sys.argv[1] if len(sys.argv) > 1 else ""
+body = sys.stdin.read().strip()
+# store receives JSON; get/erase receive the registry host as plain text.
+payload = json.loads(body) if body.startswith("{") else {}
+host = payload.get("ServerURL", body if not body.startswith("{") else "")
+path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "creds.json")
+try:
+    with open(path) as source:
+        store = json.load(source)
+except (OSError, ValueError):
+    store = {}
+if command == "store":
+    store[host] = {"Username": payload.get("Username", ""), "Secret": payload.get("Secret", "")}
+    with open(path, "w") as target:
+        json.dump(store, target)
+elif command == "get":
+    print(json.dumps(store.get(host, {"Username": "", "Secret": ""})))
+elif command == "erase":
+    store.pop(host, None)
+    with open(path, "w") as target:
+        json.dump(store, target)
+elif command == "list":
+    print(json.dumps({k: v["Username"] for k, v in store.items()}))
+else:
+    sys.exit(1)
+HELPER
+chmod +x "$REG/cfg/docker-credential-ctrsfile"
 $D run --rm httpd:2.4-alpine htpasswd -Bbn ctrsuser ctrspass > "$REG/htpasswd" 2>/dev/null
 $D run -d --name reg -p 5055:5000 -v "$REG:/auth" -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=ctrs -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd registry:2 >/dev/null
 ready http://localhost:5055/v2/
-R="env DOCKER_CONFIG=$REG/cfg $D"
+R="env DOCKER_CONFIG=$REG/cfg PATH=$REG/cfg:$PATH $D"
 LOGIN_ERROR='401 Unauthorized'
 if $CTRS_ENGINE; then LOGIN_ERROR='incorrect username or password'; fi
 t login-wrong "$LOGIN_ERROR" bash -c "echo nope | $R login localhost:5055 -u ctrsuser --password-stdin 2>&1"
