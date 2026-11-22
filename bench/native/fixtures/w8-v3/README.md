@@ -118,6 +118,8 @@ marker. Every other compressed layer descriptor and DiffID must equal the
 source. The registry must deliver each changed layer in full, and the existing
 retained image pins must verify before and after deployment. This records
 retained image contents while cache state below the image API remains unknown.
+The runner prepares each pair's archive in a child process and waits for its
+receipt before checking host isolation and starting the measured trials.
 The sampled footprint is not a continuous peak; CLI and sampler resources,
 active storage allocation, metadata qualification and the full matrix remain
 open. This is a pilot, not qualification.

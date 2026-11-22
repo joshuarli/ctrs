@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
 import threading
 import traceback
 import sys
@@ -116,6 +117,15 @@ def validate_receipt(receipt, contract, source, seed, previous_digests, previous
     previous_diff_ids.update(diff_ids)
 
 
+def build_pair_layout(layout, contract_path, destination, seed, *, content):
+    argv = [sys.executable, str(Path(registry_variant.__file__)), str(layout),
+            str(contract_path), str(destination), seed.hex()]
+    if content == 'retained':
+        argv.append('--retain-other-layers')
+    subprocess.run(argv, check=True)
+    return json.loads((destination / 'receipt.json').read_text())
+
+
 def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=None, gate_fn=None):
     engine_factory = engine_factory or runner.Engine
     measure = measure or pilot.measure_engine
@@ -124,11 +134,11 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         if not args.diagnostic:
             raise ValueError('W8 backing allocation requires diagnostic mode')
         measure = partial(measure, orbstack_storage_files=storage_files)
-    prepare = prepare or partial(registry_variant.prepare_variant, retain_other_layers=args.content == 'retained')
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
     resident = args.resource_lane == 'matched'
-    contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
+    contract_path = runner.FIXTURES / 'w8-v6/portfolio.json'
+    contract = json.loads(contract_path.read_text())
     source = registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
@@ -136,8 +146,9 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                            'under_load': args.under_load, 'resource_lane': args.resource_lane}
     if resident:
         ctx.workload_params.update(comparison_lane='resource-matched-resident-control', ctrs_idle_seconds=0)
-    ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v6/portfolio.json'),
+    ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(contract_path),
                            'w8_driver_sha256': runner.sha256_file(Path(__file__)),
+                           'w8_variant_sha256': runner.sha256_file(Path(registry_variant.__file__)),
                            'w8_pilot_sha256': runner.sha256_file(Path(pilot.__file__))})
     outputs = ctx.provenance.get('build_outputs', {})
     ctx.provenance.update({key: outputs[key] for key in ('ctrs_binary_sha256', 'guest_kernel_sha256',
@@ -164,7 +175,10 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         for pair in range(1, args.pairs + 1):
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
             layout = ctx.results_dir / f'pair-{pair}-layout'
-            receipt = prepare(args.layout, contract, layout, seed)
+            if prepare is None:
+                receipt = build_pair_layout(args.layout, contract_path, layout, seed, content=args.content)
+            else:
+                receipt = prepare(args.layout, contract, layout, seed)
             validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids, content=args.content)
             portfolio = registry_portfolio.prepare_layout(layout, {name: image['reference'] for name, image in receipt['images'].items()})
             server = serve(portfolio, 0)

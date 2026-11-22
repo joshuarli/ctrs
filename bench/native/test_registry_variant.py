@@ -99,6 +99,16 @@ class VariantTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'retained layer differs'):
             w8_benchmark.validate_receipt(changed, contract, source, b'cancel', set(), set(), content='retained')
 
+    def test_pair_preparation_waits_for_the_worker_receipt(self):
+        contract = self.root / 'portfolio.json'
+        contract.write_bytes(variant._encoded(self.contract))
+        seed = b'worker'
+        output = self.root / 'prepared'
+        receipt = w8_benchmark.build_pair_layout(self.source, contract, output, seed, content='retained')
+        self.assertEqual(receipt, json.loads((output / 'receipt.json').read_text()))
+        source = registry.prepare_pinned_portfolio(self.source, self.contract)
+        w8_benchmark.validate_receipt(receipt, self.contract, source, seed, set(), set(), content='retained')
+
     def test_deterministic_unique_shared_and_preserved(self):
         before = self.snapshot(self.source)
         for path in self.source.rglob('*'):

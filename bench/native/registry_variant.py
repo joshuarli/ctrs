@@ -1,4 +1,5 @@
 """Derive the W8 content-unique OCI portfolio from the pinned common layout."""
+import argparse
 import copy
 import gzip
 import hashlib
@@ -230,3 +231,24 @@ def prepare_variant(layout, contract, destination, seed, *, retain_other_layers=
     except BaseException:
         shutil.rmtree(dest)
         raise
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     epilog="Example: registry_variant.py common-layout portfolio.json pair-layout 0102")
+    parser.add_argument('layout', type=Path, help='original pinned OCI layout')
+    parser.add_argument('contract', type=Path, help='source portfolio pin JSON')
+    parser.add_argument('destination', type=Path, help='new OCI layout directory')
+    parser.add_argument('seed_hex', help='hex-encoded per-pair seed')
+    parser.add_argument('--retain-other-layers', action='store_true',
+                        help='change only the largest layer of each image')
+    args = parser.parse_args()
+    try:
+        prepare_variant(args.layout, json.loads(args.contract.read_text()), args.destination,
+                        bytes.fromhex(args.seed_hex), retain_other_layers=args.retain_other_layers)
+    except (OSError, ValueError, KeyError) as exc:
+        parser.exit(1, f'fixture preparation: {exc}\n')
+
+
+if __name__ == '__main__':
+    main()
