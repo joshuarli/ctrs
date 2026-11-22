@@ -335,6 +335,19 @@ python3 bench/native/reporting.py --candidate --match base-20261122T083610-c7a4
 `trials.jsonl` SHA-256
 `e392a7879a158e4ba970a086d87de8984e2b65d581bdd84ac2120ef4a3d7d195`.
 
+The next candidate is a 5,120 MiB ceiling. The 6,144 MiB slot's peak
+plateau was about 47 MB above its ceiling, and its endpoint guest used
+counter stayed below 0.59 GB. These readings motivate a lower ceiling
+and leave transient cache pressure during a build unresolved. The screen
+includes all startup pairs, uses the same footprint and build-time
+bounds as the 6,144 MiB screen, and requires a zero-OOM receipt from
+each engine slot.
+
+```sh
+python3 bench/native/pyramid.py run --name w6-build:memory5120
+python3 bench/native/reporting.py --candidate --match "$run_id"
+```
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same

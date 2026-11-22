@@ -635,6 +635,7 @@ class ReportingTests(unittest.TestCase):
             budget = record["resources"]["engine"]
             budget["ncpu"] = 9
             budget["vm_memory_ceiling_bytes"] = (6144 if candidate else 8192) << 20
+            budget["vm_oom_kills"] = 0
             if candidate:
                 record["config_overrides"] = {"CTRS_MEMORY_MIB": "6144"}
         report = reporting.analyze_noise(records, design="candidate")
@@ -646,6 +647,11 @@ class ReportingTests(unittest.TestCase):
                 cohort = reporting.analyze_noise(records, design="candidate")["cohorts"][0]
                 self.assertEqual(cohort["valid_pairs"], 9)
                 self.assertIn("memory candidate did not apply", cohort["rejections"][0]["reason"])
+        for oom in (None, False, 1):
+            with self.subTest(oom=oom), patch.dict(budget, vm_oom_kills=oom):
+                cohort = reporting.analyze_noise(records, design="candidate")["cohorts"][0]
+                self.assertEqual(cohort["valid_pairs"], 9)
+                self.assertIn("zero guest OOM kills", cohort["rejections"][0]["reason"])
 
     def test_partial_cpu_counter_cannot_decide_same_engine_candidate(self):
         records = self.candidate_records(1.0, 0.8)

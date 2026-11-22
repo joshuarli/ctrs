@@ -349,6 +349,8 @@ def candidate_configuration_issue(current: dict, candidate: dict) -> str | None:
                 and overrides["CTRS_MEMORY_MIB"] == str(after >> 20)
                 and type(cpus) is int and cpus > 0
                 and type(b.get("ncpu")) is int and b["ncpu"] == cpus):
+            if any(type(oom := metrics.get("vm_oom_kills")) is not int or oom != 0 for metrics in (a, b)):
+                return "memory candidate requires explicit zero guest OOM kills on both slots"
             return None
     return "memory candidate did not apply the requested VM ceiling at fixed vCPU count"
 
