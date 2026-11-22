@@ -70,3 +70,10 @@ failed the ctrs profiler-off post-workload gate. The gate flagged PID
 74836 as hot. The same PID and kernel start identity appear in the owned
 VM receipt and the workload CPU counters. The block remains invalid
 under its original plan.
+
+The lower-overhead candidate is `--profile-kind cpu-leaf-25`. It uses
+a fixed 40 ms CPU-time period, the same archive, exact workload and
+outside-engine admission rule. It still requires every API thread and
+zero recorded sample loss. Verify coverage in one native block before
+starting a new ten-block overhead confirmation. Keep its receipts
+separate from the 49 Hz capture.

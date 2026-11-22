@@ -7,8 +7,9 @@ import sched_trace
 
 VERSION = 'w2-cpu-v1-native-dwarf'
 LEAF_VERSION = 'w2-cpu-v1-native-leaf'
-FREQUENCY = 49
-PERIOD_NS = round(1_000_000_000 / FREQUENCY)
+LEAF_PROFILES = {'cpu-leaf': (LEAF_VERSION, 49),
+                 'cpu-leaf-25': ('w2-cpu-v1-native-leaf-25hz', 25)}
+PROFILES = {'cpu': (VERSION, 49), **LEAF_PROFILES}
 HEADER = re.compile(r'^\s*(\S+)\s+(\d+)/(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+cpu-clock:\s*(.*)$')
 FRAME = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+?)\s+\((.*)\)\s*$')
 
@@ -19,8 +20,14 @@ def check_attachment(attached_tasks, phase_tasks, clock_ticks):
         raise ValueError('profiler attachment task identity changed: ' + repr(delta['errors']))
 
 
+def period_ns(kind):
+    return round(1_000_000_000 / PROFILES[kind][1])
+
+
 def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations,
-            diagnostics='', raw_events='', leaf_only=False):
+            diagnostics='', raw_events='', profile_kind='cpu'):
+    version, frequency = PROFILES[profile_kind]
+    leaf_only = profile_kind in LEAF_PROFILES
     errors, samples = [], []
     current = None
     if re.search(r'lost|throttl', diagnostics, re.IGNORECASE):
@@ -91,8 +98,8 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
         if not leaf_only:
             per_thread[tid]['inclusive_counts'] = dict(inclusive.most_common())
     return {'status': 'unknown' if errors else 'ok', 'errors': errors,
-        'fixture_version': LEAF_VERSION if leaf_only else VERSION, 'sample_count': len(samples), 'nominal_sampling_hz': FREQUENCY,
-        'fixed_cpu_clock_period_ns': PERIOD_NS, 'raw_event_coverage_checked': bool(raw_events),
+        'fixture_version': version, 'sample_count': len(samples), 'nominal_sampling_hz': frequency,
+        'fixed_cpu_clock_period_ns': period_ns(profile_kind), 'raw_event_coverage_checked': bool(raw_events),
         'successful_operations': successful_operations, 'application_cpu': application_cpu,
         'per_thread': None if errors else per_thread,
         'qualification_eligible': False,

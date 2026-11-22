@@ -104,19 +104,30 @@ class CPUProfile(unittest.TestCase):
         index = dwarf.index('--call-graph')
         self.assertEqual(dwarf[index:index + 2], ['--call-graph', 'dwarf,16384'])
         self.assertEqual(leaf, dwarf[:index] + dwarf[index + 2:])
-        self.assertEqual(leaf[leaf.index('-c') + 1], str(cpu_profile.PERIOD_NS))
+        self.assertEqual(leaf[leaf.index('-c') + 1], str(cpu_profile.period_ns('cpu-leaf')))
         self.assertEqual(syscall_pilot.profile_identity('cpu-leaf', None, 'host'),
                          (cpu_profile.LEAF_VERSION, cpu_profile.LEAF_VERSION))
 
     def test_leaf_only_reports_per_thread_leaf_counts_without_inclusive_attribution(self):
         text = f'{TAG} 1/1 [000] 1.1: cpu-clock: 1234 leaf (/lib/libc.so)\n'
-        result = self.analyze(text, raw_events='PERF_RECORD_SAMPLE', leaf_only=True)
+        result = self.analyze(text, raw_events='PERF_RECORD_SAMPLE', profile_kind='cpu-leaf')
         self.assertEqual(result['status'], 'ok', result)
         self.assertEqual(result['fixture_version'], cpu_profile.LEAF_VERSION)
         self.assertEqual(result['nominal_sampling_hz'], 49)
         thread = result['per_thread']['1']
         self.assertEqual(thread['leaf_counts'], {'leaf (/lib/libc.so)': 1})
         self.assertNotIn('inclusive_counts', thread)
+
+    def test_25hz_candidate_uses_a_distinct_period_and_receipt(self):
+        args = syscall_pilot.cpu_record_args('cpu-leaf-25', ['1'])
+        self.assertEqual(args[args.index('-c') + 1], '40000000')
+        self.assertNotIn('--call-graph', args)
+        text = f'{TAG} 1/1 [000] 1.1: cpu-clock: 1234 leaf (/lib/libc.so)\n'
+        result = self.analyze(text, raw_events='PERF_RECORD_SAMPLE', profile_kind='cpu-leaf-25')
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['nominal_sampling_hz'], 25)
+        self.assertEqual(result['fixed_cpu_clock_period_ns'], 40_000_000)
+        self.assertNotEqual(result['fixture_version'], cpu_profile.LEAF_VERSION)
 
     def test_leaf_only_rejects_stack_loss_or_missing_thread_and_raw_coverage(self):
         text = f'{TAG} 1/1 [000] 1.1: cpu-clock: 1234 leaf (/lib/libc.so)\n'
@@ -127,7 +138,7 @@ class CPUProfile(unittest.TestCase):
                 (text + '\t2345 caller (/lib/libc.so)\n', raw, {'1': task('1', 0)}, {'1': task('1', 10)}, 'contains a call stack'),
                 (text, raw, {'1': task('1', 0), '2': task('2', 0)}, {'1': task('1', 10), '2': task('2', 1)}, 'no samples for API thread: 2')):
             with self.subTest(error=error):
-                result = self.analyze(trace, raw_events=audit, tasks_before=before, tasks_after=after, leaf_only=True)
+                result = self.analyze(trace, raw_events=audit, tasks_before=before, tasks_after=after, profile_kind='cpu-leaf')
                 self.assertEqual(result['status'], 'unknown')
                 self.assertTrue(any(error in item for item in result['errors']), result)
 

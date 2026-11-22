@@ -8,6 +8,7 @@ import statistics
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from cpu_profile import LEAF_PROFILES, period_ns
 from reporting import FOREIGN_CORES, bootstrap_ci
 
 ENGINES = ("ctrs", "orbstack")
@@ -49,7 +50,8 @@ def measurements(directory, mode, plan):
             raise ValueError(f"{directory} lacks a valid outside-engine CPU receipt within {FOREIGN_CORES} cores")
     if mode == "on":
         profile = row.get("cpu_profile") or {}
-        if profile.get("status") != "ok" or profile.get("raw_event_coverage_checked") is not True:
+        if (profile.get("status") != "ok" or profile.get("raw_event_coverage_checked") is not True
+                or profile.get("fixed_cpu_clock_period_ns") != plan["fixed_cpu_clock_period_ns"]):
             raise ValueError(f"{directory} has invalid sample coverage")
     cpu = row["application_cpu"]
     seconds, bound = cpu["cpu_seconds"], cpu["counter_quantization_bound_cpu_seconds"]
@@ -72,7 +74,9 @@ def block_ratios(directory, index, expected_plan):
     expected_modes = MODES if odd else MODES[::-1]
     if tuple(engines) != expected_engines or tuple(modes) != expected_modes:
         raise ValueError("engine and mode orders must alternate from the declared opening block")
-    if (plan.get("profile_kind") != "cpu-leaf" or plan.get("operations") != 50000
+    kind = plan.get("profile_kind")
+    if (kind not in LEAF_PROFILES or plan.get("fixed_cpu_clock_period_ns") != period_ns(kind)
+            or plan.get("operations") != 50000
             or plan.get("requested_client_location") != "guest" or plan.get("concurrency") != 8
             or plan.get("host_admission") not in (None, OUTSIDE_CPU_ADMISSION)
             or any(plan["observer_confirmation_budget"][key] != .05 for key in METRICS.values())):

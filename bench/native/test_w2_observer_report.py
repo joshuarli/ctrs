@@ -20,6 +20,7 @@ class ObserverReportTests(unittest.TestCase):
             plan = {"profile_kind": "cpu-leaf", "operations": 50000, "requested_client_location": "guest",
                     "concurrency": 8, "fixture_version": "leaf-v1", "profile_identity": "leaf-v1",
                     "client_image_sha256": "image", "client_source_sha256": "source", "seed": 7,
+                    "fixed_cpu_clock_period_ns": observer.period_ns("cpu-leaf"),
                     "engine_order": observer.ENGINES[::1 if index % 2 else -1],
                     "mode_order": observer.MODES[::1 if index % 2 else -1],
                     "observer_confirmation_budget": {"application_cpu_relative": .05,
@@ -40,7 +41,8 @@ class ObserverReportTests(unittest.TestCase):
                                application_cpu={"cpu_seconds": cpu, "status": "ok", "errors": [],
                                                 "counter_quantization_bound_cpu_seconds": .25})
                     if mode == "on":
-                        row["cpu_profile"] = {"status": "ok", "raw_event_coverage_checked": True}
+                        row["cpu_profile"] = {"status": "ok", "raw_event_coverage_checked": True,
+                                              "fixed_cpu_clock_period_ns": plan["fixed_cpu_clock_period_ns"]}
                     save(directory / "result.json", row)
                     save(directory / "before-gate.json", {"exit": 0})
                     save(directory / "after-gate.json", {"exit": 0})
