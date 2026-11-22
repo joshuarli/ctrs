@@ -2,16 +2,20 @@
 
 W12 uses Kutt v2.7.4, an MIT-licensed URL shortener with a TypeScript server,
 Next.js client and Jest tests. The locked install contains 2,830 packages.
-The source archive, lockfile, Node image, patch and expected output receipts
-are pinned in `workload.json`. The fixture adds no product dependencies.
+`workload.json` pins the source archive, upstream lock, migrated npm
+install lock, Node image, patch and expected output receipts.
 
-Cache preparation and offline installation both use `--legacy-peer-deps`.
-Node 22 requires `NODE_OPTIONS=--openssl-legacy-provider` for Kutt's webpack.
-The fixture uses both settings on both engines. The fixture Dockerfile embeds
-an npm cache populated from the lockfile and checks the archive and lock hashes.
-`identity-proof.py` checks the ordered image DiffIDs and in-image hashes on
-both engines. The engines report different immutable image IDs; both are
-recorded in `workload.json` and used on their respective engine.
+The v1 upstream lock requires supplementary registry metadata. The
+version 3 install lock was generated with npm 10.9.2 using
+`npm install --package-lock-only --legacy-peer-deps --ignore-scripts --package-lock-version=3 --no-audit --no-fund`.
+Each trial copies and verifies that lock during setup. Cache preparation
+and the measured offline install both use `--legacy-peer-deps`. The
+image retains content-addressed npm cache data. Preparation discards the
+cache index and npm logs, disables Node's compile cache and keeps
+nodemon's generated configuration in the discarded install directory.
+BuildKit rewrites layer timestamps using `SOURCE_DATE_EPOCH=0`.
+Node 22 uses `NODE_OPTIONS=--openssl-legacy-provider` for Kutt's webpack.
+The image and install-lock changes start W12 v2 and W12-watch bind v3 cohorts.
 
 W12 runs a cold offline `npm ci` with the container network disabled. It
 builds the server with `tsc` and copies the mail templates, then runs the
@@ -29,8 +33,12 @@ An owned, network-isolated Node readiness check starts the guest before
 resource sampling. Setup is recorded separately and is not scored.
 
 W12-watch uses Kutt's TypeScript compiler in watch mode with
-`TSC_WATCHFILE=UseFsEvents` and `TSC_WATCHDIRECTORY=UseFsEvents`. It records
-`fs.watch` as the configured backend. It verifies emitted JavaScript against
+`TSC_WATCHDIRECTORY=UseFsEvents`. The bind case uses
+`TSC_WATCHFILE=UseFsEvents`. The named-volume case (`w12-watch-volume-v1`)
+uses `UseFsEventsOnParentDirectory`. File watches on a native volume miss
+later in-place writes to atomically replaced files. The parent-directory
+strategy still uses `fs.watch` and runs the same edit plan.
+It verifies emitted JavaScript against
 TypeScript's `transpileModule` for the exact edited content and waits for a
 zero-error watch cycle. Bind edits use host filesystem operations. Volume
 edits use `docker exec`. Each burst writes five files within 50 ms. Missed and
@@ -45,8 +53,10 @@ TMPDIR="$PWD/.work/tmp" PYTHONDONTWRITEBYTECODE=1 python3 bench/native/fixtures/
 ```
 
 Preparation saves the image at `.work/tmp/w12-image.tar` and the source archive
-at `.work/tmp/kutt.tar.gz`. If the pinned image is unavailable, preparation
-builds a candidate and fails if its identity differs from the recorded pin.
+at `.work/tmp/kutt.tar.gz`. Without a matching local archive, it rebuilds from
+the tracked recipe and checks the archive SHA-256 before publishing it.
+`identity-proof.py` loads the verified archive and checks the ARM64 image ID,
+ordered DiffIDs, source archive and both lockfile hashes on each engine.
 
 The proof driver uses the pinned signed ctrs binary and a fresh private engine.
 It writes complete records under `.work/native-perf/results/` and prints one

@@ -15,8 +15,10 @@ BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild
 
 def source_contract():
     spec = json.loads((FIXTURE / 'workload.json').read_text())
-    if spec['fixture_version'] != 'w12-v1':
+    if spec['fixture_version'] != 'w12-v2':
         raise ValueError('unexpected W12 fixture version')
+    if digest((FIXTURE / 'install-lock.json').read_bytes()) != spec['install_lock_sha256']:
+        raise ValueError('W12 install lock differs from pin')
     for name, expected in spec['patch'].items():
         if hashlib.sha256((FIXTURE / name).read_bytes()).hexdigest() != expected:
             raise ValueError('W12 patch hash mismatch')
@@ -64,7 +66,11 @@ def phase_metrics(phases):
 def ensure_image(engine, image, spec):
     cp = engine.sh(['image', 'inspect', image], check=False, timeout=60)
     if cp.returncode != 0:
-        engine.sh(['image', 'load', '--input', str(INPUTS / 'w12-image.tar')], timeout=900)
+        archive = INPUTS / 'w12-image.tar'
+        with archive.open('rb') as source:
+            if hashlib.file_digest(source, 'sha256').hexdigest() != spec['prepared_image']['archive_sha256']:
+                raise ValueError('W12 image archive differs from pin')
+        engine.sh(['image', 'load', '--input', str(archive)], timeout=900)
         cp = engine.sh(['image', 'inspect', image], timeout=60)
     inspected = json.loads(cp.stdout)[0]
     if inspected['Id'] != image or inspected['Architecture'] != 'arm64' or inspected['RootFS']['Layers'] != spec['prepared_image']['diff_ids']:
@@ -93,6 +99,14 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def install_lock(run, spec):
+    run(['cp', '/fixture/install-lock.json', '/app/package-lock.json'])
+    checks = run(['sha256sum', '/fixture/source.tar.gz', '/app/package-lock.json']).stdout.splitlines()
+    if [line.split()[0] for line in checks] != [spec['source']['sha256'], spec['install_lock_sha256']]:
+        raise ValueError('W12 source or install lock differs from pin')
+    run(['test', '-d', '/fixture/npm-cache/_cacache'])
+
+
 def filesystem_counts(run):
     script = '''const fs=require('fs'),path=require('path');let count=0,bytes=0,deps=0;
 function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()){count++;bytes+=fs.statSync(p).size}}}
@@ -100,8 +114,8 @@ function packages(d){if(!fs.existsSync(d))return;for(const e of fs.readdirSync(d
 function pkg(p){if(fs.existsSync(path.join(p,'package.json')))deps++;packages(path.join(p,'node_modules'))}
 walk('/app');packages('/app/node_modules');console.log(JSON.stringify({files:count,bytes,dependency_count:deps}));'''
     counts = json.loads(run(['node', '-e', script]).stdout)
-    if counts['dependency_count'] < 400:
-        raise ValueError('W12 installed fewer than 400 dependencies')
+    if counts['dependency_count'] != 2830:
+        raise ValueError(f"W12 installed {counts['dependency_count']} dependencies, expected 2830")
     return counts
 
 
@@ -125,7 +139,7 @@ def trial_w12(ctx, engine, state, layout='full-bind'):
         raise ValueError('unknown W12 layout')
     trial_dir = ctx.trial_dir(engine.name, 'W12', state)
     rec = ctx.new_record(engine, 'W12', state, trial_dir)
-    rec['metrics'].update(fixture_version='w12-v1', layout=layout)
+    rec['metrics'].update(fixture_version='w12-v2', layout=layout)
     rec['inputs'] = {}
     spec = source_contract()
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -225,12 +239,9 @@ fs.writeFileSync(p,next)}'''
                 'multi-file-change': 'node_modules warm', 'branch-switch': 'node_modules warm'}
             rec['inputs']['tools'] = {'node': run(['node', '--version']).stdout.strip(),
                                       'npm': run(['npm', '--version']).stdout.strip()}
-            checks = run(['sha256sum', '/fixture/source.tar.gz', '/app/package-lock.json']).stdout.splitlines()
-            if [line.split()[0] for line in checks] != [spec['source']['sha256'], spec['source']['lock_sha256']]:
-                raise ValueError('W12 source or lock hash mismatch')
-            run(['test', '-d', '/fixture/npm-cache/_cacache'])
+            install_lock(run, spec)
             rec['inputs']['source_sha256'] = spec['source']['sha256']
-            rec['inputs']['dependency_lock_sha256'] = spec['source']['lock_sha256']
+            rec['inputs']['dependency_lock_sha256'] = spec['install_lock_sha256']
             if rec['inputs']['tools'] != {'node': spec['tools']['node'], 'npm': spec['tools']['npm']}:
                 raise ValueError('W12 tool version mismatch')
         with phase('install'):
@@ -298,9 +309,11 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
 
     if mount not in ('bind', 'volume'):
         raise ValueError('unknown W12 watch mount')
+    watch_file = 'UseFsEvents' if mount == 'bind' else 'UseFsEventsOnParentDirectory'
+    version = 'w12-watch-v3' if mount == 'bind' else 'w12-watch-volume-v1'
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
-    rec['metrics'].update(fixture_version='w12-watch-v2', mount=mount, backend='fs.watch',
+    rec['metrics'].update(fixture_version=version, mount=mount, backend='fs.watch', watch_file=watch_file,
                           edit_transport='host filesystem' if mount == 'bind' else 'docker exec',
                           missed=0, stale=0, edits=[])
     spec = source_contract()
@@ -391,11 +404,8 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                 raise ValueError('W12 watcher mount identity mismatch')
             rec['inputs'] = {'image_id': image, 'mounts': info['Mounts'], 'cache': 'offline npm cache present; node_modules cold'}
             rec['inputs']['phase_cache_state'] = {'setup': 'node_modules cold', 'edits': 'node_modules warm'}
-            checks = run(['sha256sum', '/fixture/source.tar.gz', '/app/package-lock.json']).stdout.splitlines()
-            if [line.split()[0] for line in checks] != [spec['source']['sha256'], spec['source']['lock_sha256']]:
-                raise ValueError('W12 watcher source or lock hash mismatch')
-            run(['test', '-d', '/fixture/npm-cache/_cacache'])
-            rec['inputs'].update(source_sha256=spec['source']['sha256'], dependency_lock_sha256=spec['source']['lock_sha256'], diff_ids=spec['prepared_image']['diff_ids'])
+            install_lock(run, spec)
+            rec['inputs'].update(source_sha256=spec['source']['sha256'], dependency_lock_sha256=spec['install_lock_sha256'], diff_ids=spec['prepared_image']['diff_ids'])
             run(['npm', 'ci', '--offline', '--legacy-peer-deps', '--cache', '/fixture/npm-cache', '--no-audit', '--no-fund'])
             rec['metrics'].update(filesystem_counts(run))
             tools = {'node': run(['node', '--version']).stdout.strip(), 'npm': run(['npm', '--version']).stdout.strip()}
@@ -409,7 +419,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
             initial = evaluate([{'path': base_importer, 'content': 'export const value = "w12-watch-initial";\n'}])
             if any(item['actual'] != item['expected'] for item in initial):
                 raise ValueError('watch output oracle disagrees with initial TypeScript compilation')
-            engine.sh(['exec', '-d', '-e', 'TSC_WATCHFILE=UseFsEvents', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
+            engine.sh(['exec', '-d', '-e', f'TSC_WATCHFILE={watch_file}', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
                        'sh', '-ec', './node_modules/.bin/tsc --watch -p tsconfig.json --pretty false --preserveWatchOutput > /tmp/w12/watch.log 2>&1'])
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:

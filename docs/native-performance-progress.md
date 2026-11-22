@@ -277,6 +277,35 @@ pinned Marked artifact. ctrs and OrbStack `result.json` SHA-256s were
 The images are installed on the campaign Mac. The W8 timing cohort and
 fresh comparative results for portfolio consumers remain open.
 
+### Rebuilt W12 workspace fixture
+
+The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
+the Kutt image from pinned inputs. Two uncached prototype builds and an
+independent run of the tracked prepare script produced the same archive
+SHA-256, `d852665d1d6865482e9e42dc3aeffb20922cb8bf91531935416cfaa3cb2f5f32`.
+The identity proof loaded the archive and verified the native ARM64 image
+and both lock hashes on each engine. The historical v1 image pins and
+cohort results stay separate.
+
+The migrated npm lock retains the 2,830-package install on both engines.
+All three layouts reproduced the original server, client and Jest
+receipts on both. The original volume file-watch strategy still missed
+23 of 120 results on OrbStack (`w12p24937af681`). Every miss was a
+five-file burst result, matching the historical failure after atomic
+replacement on native volumes. The separate volume fixture uses
+TypeScript's parent-directory `fs.watch` strategy, with the same 120
+expected results. Bind retains the existing file-watch strategy.
+
+Both engines returned all 120 correct results with zero misses and
+zero stale outputs in each watch condition. Bind proof runs were
+`w12pb67161e96f` and `w12p24937af681`. Parent-directory volume proof
+runs were `w12p15c4e8961f` and `w12p9792405904`.
+
+Run fresh `w12-full-bind:cohort`, `w12-mixed:cohort`,
+`w12-all-volume:cohort`, `w12-watch-bind:cohort` and
+`w12-watch-volume:cohort` pairs. The independently registered
+`w6-build-warm:cohort` covers W6's primed build-cache condition.
+
 ## Linux lane pilot (amd64) — 2026-11-21
 
 **Separate native Linux pilot; closes no macOS gate.** Do not pool these

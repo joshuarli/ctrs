@@ -193,7 +193,7 @@ id = "W12"
 family = "shared-workspace"
 title = "Kutt v2.7.4 workspace: offline npm ci, tsc + Next.js build, typecheck, Jest discovery, warm rebuild, ten-file change, branch restore"
 fixture = "fixtures/w12 (pinned source, lockfile, npm cache image)"
-fixture_version = "w12-v1"
+fixture_version = "w12-v2"
 status = "implemented"
 metrics = ["workflow_seconds", "install_seconds", "build_seconds", "typecheck_seconds",
            "test_discovery_seconds", "warm_rebuild_seconds", "multi_file_change_seconds",
@@ -208,13 +208,13 @@ id = "W12-watch"
 family = "shared-workspace"
 title = "tsc --watch (fs.watch backend) on the Kutt workspace: save, atomic replace, create+import, rename, delete, five-file bursts"
 fixture = "fixtures/w12"
-fixture_version = "w12-watch-v2"
+fixture_version = "w12-watch-v3"
 status = "implemented"
 metrics = ["missed", "stale", "correct", "results", "edit_to_result_p50_s", "edit_to_result_p95_s"]
 states = ["warm"]
 params = { mount = "bind", edits = 60, deadline_seconds = 10 }
 correctness = ["emitted JavaScript equals transpileModule of the exact edit", "zero-error watch cycle", "bursts written within 50 ms"]
-note = "Bind edits are Mac filesystem operations; volume edits use docker exec, so mounts differ in edit transport. Removed sources are scored through their importer because tsc keeps emitted output of deleted inputs. Latency includes host exec polling round trips and is diagnostic."
+note = "Bind edits are Mac filesystem operations with UseFsEvents. Volume edits use docker exec with UseFsEventsOnParentDirectory (w12-watch-volume-v1). Both use fs.watch and the same edit plan. Removed sources are scored through their importer because tsc keeps emitted output of deleted inputs. Latency includes host exec polling round trips and is diagnostic."
 
 [[case]]
 id = "W13"

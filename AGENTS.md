@@ -5,10 +5,10 @@ compatible container engine for macOS (Virtualization.framework guest) and
 Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 `docs/`.
 
-## Performance campaign (paused 2026-11-20)
+## Performance campaign (macOS resumed 2026-11-22)
 
-The native ARM64 macOS versus OrbStack campaign is paused with no gate
-passed. To resume, read `docs/campaign-native-performance.md`, then the
+The native ARM64 macOS versus OrbStack campaign has resumed with no full gate
+passed. Read `docs/campaign-native-performance.md`, then the
 "Wound down" section of `docs/native-performance-progress.md`, which gives
 separate steps for a Linux host and a Mac. The native `linux-amd64`
 `ctrs`/`dockerd` lane already exists, with cgroup-v2 accounting and frozen
@@ -83,7 +83,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
 | Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
-| macOS OrbStack performance hillclimb (paused contract) | `docs/campaign-native-performance.md` |
+| macOS OrbStack performance hillclimb | `docs/campaign-native-performance.md` |
 | Performance standing at pause, resume steps, history | `docs/native-performance-progress.md` |
 | Performance acceptance matrix (status per cell) | `docs/native-acceptance-matrix.md` |
 | Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |

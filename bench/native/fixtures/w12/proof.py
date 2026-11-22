@@ -3,7 +3,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import uuid
 
@@ -24,14 +23,13 @@ if args.engine == 'dockerd':
 if args.all and args.engine or not args.all and (not args.engine or not (args.layout or args.mount)):
     parser.error('use --all or select --engine with --layout or --mount')
 os.environ['TMPDIR'] = str(root / '.work/tmp')
-os.environ['CTRS_GUEST_DIR'] = '/Users/josh/d/ctrs/guest/out'
-runner.CTRS_BIN = Path('/Users/josh/d/ctrs/target/release/ctrs')
 runner.DOCKER = runner.find_docker()
 run_id = 'w12p' + uuid.uuid4().hex[:10]
 ctx = runner.RunContext(run_id)
 choices = [('layout', value) for value in ('full-bind', 'bind-source-volume-deps', 'all-volume')]
 choices += [('mount', value) for value in ('bind', 'volume')]
 engines = ('orbstack', 'ctrs') if args.all else (args.engine,)
+failed = False
 for engine_name in engines:
     engine_root = runner.WORK / 'engines' / (run_id + '-' + engine_name)
     if engine_root.exists():
@@ -39,11 +37,9 @@ for engine_name in engines:
     engine = runner.Engine(engine_name, run_id, fresh_dir=engine_root, resource_lane='installed-default')
     try:
         if engine_name == 'ctrs':
-            subprocess.run(['pgrep', '-fl', 'ctrs daemon'], check=False)
             engine.ensure_up()
             if engine.proc is None:
                 raise RuntimeError('refusing to adopt a daemon')
-            engine.sh(['image', 'load', '--input', str(root / '.work/tmp/w12-image.tar')], timeout=600)
         selected = choices if args.all else [('layout', args.layout)] if args.layout else [('mount', args.mount)]
         for kind, value in selected:
             rec = (workspace.trial_w12(ctx, engine, 'warm', layout=value) if kind == 'layout' else
@@ -59,7 +55,7 @@ for engine_name in engines:
                        'backend': metrics.get('backend'), 'missed': metrics.get('missed'),
                        'stale': metrics.get('stale'), 'edit_count': len(metrics.get('edits', []))}
             print(json.dumps(summary), flush=True)
-            if not rec['correctness']['ok']:
-                sys.exit(1)
+            failed |= not rec['correctness']['ok']
     finally:
         engine.stop()
+sys.exit(1 if failed else 0)

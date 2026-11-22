@@ -1,5 +1,5 @@
 {
-  "fixture_version": "w12-v1",
+  "fixture_version": "w12-v2",
   "source": {
     "name": "kutt",
     "version": "2.7.4",
@@ -13,17 +13,19 @@
     "image": "node:22.15.0-bookworm-slim@sha256:557e52a0fcb928ee113df7e1fb5d4f60c1341dbda53f55e3d815ca10807efdce"
   },
   "prepared_image": {
-    "orbstack_id": "sha256:caefe5a0e5837c16b4f75eeff7dd97e1d67ca18d64f3899c483be50fba27ed85",
-    "ctrs_id": "sha256:684ca7f8387106aa1ab667d43147ba7141fed4c8b09178b3e419eeb227de79b1",
+    "archive_sha256": "d852665d1d6865482e9e42dc3aeffb20922cb8bf91531935416cfaa3cb2f5f32",
+    "orbstack_id": "sha256:3d4c6918a3ff0b185ec1663b3bd185c399551e05fdf759dfc31ecc81ac6ae06a",
+    "ctrs_id": "sha256:9cad4b48ec2d5e09bc5a5b324e3cf44cedbbe5cfd678f4f92f37e05506cb94a0",
     "diff_ids": [
       "sha256:66a307619b8c32f57cf19fc334bb43ba2d3cfdda26f19dfc6e87b49b73e41be9",
       "sha256:6cd99b062200821a3b44a2a4493276ef4051ecd3054cabadcfb44f21d906ae83",
       "sha256:2c59c8911cd11be823e8ce3ad03d7080b099ce4cac2e72c5c2c391ccb3b263dd",
       "sha256:04e40d50649aff1ef129a507d50f49b16f1aa7fd4929b541313950ba3c637c90",
       "sha256:bf767b23dc4e1510fdfd81b1f8d09151f47523176bba1ebf2e92fdb34a2fb763",
-      "sha256:a11062827fe90301e6de097eb3fc5353772146fe8dac66b610a3f32cfa032800",
-      "sha256:f1d056096d78822b45971c27c4f92b46dd76bf870bb2ecb640c94dbc2100349b",
-      "sha256:7f5fc76f0428273b0e3c045aa693bea3a85ea2c2d4cfd8b69263f6881b5e1fd9"
+      "sha256:5b51b7cc63bd9050ee576954cf71467e3f4abc6177bb3926e8662021f176a46b",
+      "sha256:9ccc45f37905994ec2f76be2396110769461e8d0c444f96231cdcd5500304eb0",
+      "sha256:a9e63f08c5e2bbd9c31e8dccea47cf95369feec4826626ea779ac50d7fea0f91",
+      "sha256:d3ad2c3dda76b132194de8c50f3a21c53f00b6e414ec2075788d149b45b6f920"
     ]
   },
   "receipts": {
@@ -59,5 +61,6 @@
   "patch": {
     "change.patch": "ea1d34b616ec7266968a28ecdf3cb4bcceb07069844e729645f6395776016c47",
     "patch.json": "d7b5713a56957160bff4678d196181176f3ba637bc323d01242d277919d81bc3"
-  }
+  },
+  "install_lock_sha256": "2ca90c08e0633b6da70036940a5e1e0e119d3f1b246af5ee8412cef04f43db97"
 }

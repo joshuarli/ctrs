@@ -1,10 +1,24 @@
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import workspace
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_install_requires_exact_migrated_lock(self):
+        spec = workspace.source_contract()
+        run = Mock()
+        run.side_effect = [None, SimpleNamespace(stdout=(
+            f"{spec['source']['sha256']}  /fixture/source.tar.gz\n"
+            f"{spec['source']['lock_sha256']}  /app/package-lock.json\n"))]
+        with self.assertRaisesRegex(ValueError, 'install lock differs from pin'):
+            workspace.install_lock(run, spec)
+        self.assertEqual(run.call_args_list[0].args, (
+            ['cp', '/fixture/install-lock.json', '/app/package-lock.json'],))
+        self.assertEqual(run.call_count, 2)
+
     def test_edit_plan_covers_event_kinds_and_files(self):
         paths = [f'server/d{i}/file.ts' for i in range(12)]
         plan = workspace.edit_plan(paths)
