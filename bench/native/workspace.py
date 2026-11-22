@@ -14,6 +14,9 @@ BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild
 INSTALL_VERIFICATION = 'verify-install'
 INSTALL_TIMING_REVISION = 2
 WATCH_FIXTURE_VERSIONS = {'bind': 'w12-watch-v4', 'volume': 'w12-watch-volume-v2'}
+WATCH_IMPORTER = 'server/w12watch/importer.ts'
+WATCH_CREATED = 'server/w12watch/created.ts'
+WATCH_RENAMED = 'server/w12watch/renamed.ts'
 
 
 def source_contract():
@@ -102,14 +105,23 @@ def verify_burst(seconds):
         raise ValueError('W12 burst writes exceeded 50 ms')
 
 
+def watch_source_paths():
+    return [item['path'] for item in json.loads((FIXTURE / 'patch.json').read_text())]
+
+
 def edit_plan(paths, edits=60):
     if len(paths) < 10 or len(set(paths)) != len(paths) or edits < 60:
         raise ValueError('W12 watch requires 60 edits across at least 10 distinct files')
     kinds = ('save', 'atomic', 'create_import', 'rename', 'delete', 'burst')
+    generated = {'create_import': [WATCH_CREATED, WATCH_IMPORTER],
+                 'rename': [WATCH_RENAMED, WATCH_IMPORTER],
+                 'delete': [WATCH_IMPORTER]}
     result = []
     for i in range(edits):
         kind = kinds[i % len(kinds)]
-        selected = [paths[(i + j) % len(paths)] for j in range(5 if kind == 'burst' else 1)]
+        selected = generated.get(kind)
+        if selected is None:
+            selected = [paths[(i + j) % len(paths)] for j in range(5 if kind == 'burst' else 1)]
         result.append({'sequence': i, 'kind': kind, 'paths': selected,
                        'token': f'w12-watch-{i:03d}'})
     return result
@@ -339,7 +351,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                           edit_transport='host filesystem' if mount == 'bind' else 'docker exec',
                           missed=0, stale=0, edits=[])
     spec = source_contract()
-    paths = [item['path'] for item in json.loads((FIXTURE / 'patch.json').read_text())]
+    paths = watch_source_paths()
     plan = edit_plan(paths, edits)
     token = hashlib.sha256(rec['trial_id'].encode()).hexdigest()[:16]
     name, volume = 'w12w-' + token, 'w12w-' + token + '-source'
@@ -441,11 +453,10 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
             if tools != {'node': spec['tools']['node'], 'npm': spec['tools']['npm']}:
                 raise ValueError('W12 watcher tool version mismatch')
             rec['inputs']['tools'] = tools
-            base_importer = 'server/w12watch/importer.ts'
-            apply([{'kind': 'write', 'path': base_importer,
+            apply([{'kind': 'write', 'path': WATCH_IMPORTER,
                     'content': 'export const value = "w12-watch-initial";\n'}])
             run(['sh', '-ec', 'mkdir -p /tmp/w12; ./node_modules/.bin/tsc --project tsconfig.json'])
-            initial = evaluate([{'path': base_importer, 'content': 'export const value = "w12-watch-initial";\n'}])
+            initial = evaluate([{'path': WATCH_IMPORTER, 'content': 'export const value = "w12-watch-initial";\n'}])
             if any(item['actual'] != item['expected'] for item in initial):
                 raise ValueError('watch output oracle disagrees with initial TypeScript compilation')
             engine.sh(['exec', '-d', '-e', f'TSC_WATCHFILE={watch_file}', '-e', 'TSC_WATCHDIRECTORY=UseFsEvents', name,
@@ -470,22 +481,25 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
                         actions.append({'kind': 'atomic' if kind == 'atomic' else 'write', 'path': path, 'content': content})
                         items.append({'path': path, 'content': content})
                 elif kind == 'create_import':
+                    created_path, importer_path = event['paths']
                     content = f'export const value = "{marker}";\n'
                     importer = f'export {{ value }} from "./created";\nexport const marker = "{marker}";\n'
-                    actions = [{'kind': 'write', 'path': 'server/w12watch/created.ts', 'content': content},
-                               {'kind': 'write', 'path': base_importer, 'content': importer}]
+                    actions = [{'kind': 'write', 'path': created_path, 'content': content},
+                               {'kind': 'write', 'path': importer_path, 'content': importer}]
                     items = [{'path': action['path'], 'content': action['content']} for action in actions]
                 elif kind == 'rename':
+                    renamed_path, importer_path = event['paths']
                     content = f'export const value = "{marker}";\n'
                     importer = f'export {{ value }} from "./renamed";\nexport const marker = "{marker}";\n'
-                    actions = [{'kind': 'rename', 'from': 'server/w12watch/created.ts', 'path': 'server/w12watch/renamed.ts', 'content': content},
-                               {'kind': 'write', 'path': base_importer, 'content': importer}]
+                    actions = [{'kind': 'rename', 'from': WATCH_CREATED, 'path': renamed_path, 'content': content},
+                               {'kind': 'write', 'path': importer_path, 'content': importer}]
                     items = [{'path': action['path'], 'content': action['content']} for action in actions]
                 else:
+                    importer_path, = event['paths']
                     importer = f'export const value = "{marker}";\n'
-                    actions = [{'kind': 'delete', 'path': 'server/w12watch/renamed.ts'},
-                               {'kind': 'write', 'path': base_importer, 'content': importer}]
-                    items = [{'path': base_importer, 'content': importer}]
+                    actions = [{'kind': 'delete', 'path': WATCH_RENAMED},
+                               {'kind': 'write', 'path': importer_path, 'content': importer}]
+                    items = [{'path': importer_path, 'content': importer}]
                 previous = evaluate(items)
                 log_offset = len(run(['cat', '/tmp/w12/watch.log'], timeout=15).stdout)
                 started = time.monotonic()

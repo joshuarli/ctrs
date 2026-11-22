@@ -123,17 +123,18 @@ class ReportingTests(unittest.TestCase):
                              'paired workspace inputs or outputs differ or are missing')
 
     def test_w12_watch_pairs_exact_edits_and_requires_a_persistent_watcher(self):
+        plan = reporting.edit_plan(reporting.watch_source_paths(), 60)
+        edits = [{'sequence': event['sequence'], 'kind': event['kind'], 'path': path,
+                  'status': 'correct', 'output': {'path': path, 'actual': 'a' * 64, 'expected': 'a' * 64}}
+                 for event in plan for path in event['paths']]
         for mount, version in reporting.WATCH_FIXTURE_VERSIONS.items():
             records = pair(case='W12-watch', metric='edit_to_result_p50_s')
             for pid, record in enumerate(records, 2):
                 record['workload_params'].update(mount=mount, edits=60)
                 record['metrics'].update(fixture_version=version, mount=mount,
                                          dependency_count=3, files=34, bytes=56818,
-                                         results=60, correct=60, missed=0, stale=0,
-                                         edits=[{'sequence': index, 'kind': 'save', 'path': 'fixture.ts',
-                                                 'status': 'correct', 'output': {'path': 'fixture.ts',
-                                                 'actual': 'a' * 64, 'expected': 'a' * 64}}
-                                                for index in range(60)])
+                                         results=len(edits), correct=len(edits), missed=0, stale=0,
+                                         edits=copy.deepcopy(edits))
                 watcher = {'pid': pid, 'start_ticks': pid * 100}
                 record['inputs'] = {'source_sha256': 'source', 'dependency_lock_sha256': 'lock',
                                     'diff_ids': ['base'], 'tools': {'node': 'v22.15.0'},
@@ -150,7 +151,15 @@ class ReportingTests(unittest.TestCase):
             stale_output[1]['metrics']['edits'][0]['output']['actual'] = None
             missing_sequence = copy.deepcopy(records)
             missing_sequence[1]['metrics']['edits'][0]['sequence'] = 1
-            for invalid in (changed_watcher, changed_output, stale_output, missing_sequence):
+            missing_burst_output = copy.deepcopy(records)
+            for record in missing_burst_output:
+                metrics = record['metrics']
+                index = next(i for i, edit in enumerate(metrics['edits']) if edit['kind'] == 'burst')
+                del metrics['edits'][index]
+                metrics['results'] -= 1
+                metrics['correct'] -= 1
+            for invalid in (changed_watcher, changed_output, stale_output, missing_sequence,
+                            missing_burst_output):
                 cohort = reporting.analyze(invalid)['cohorts'][0]
                 self.assertEqual(cohort['valid_pairs'], 0)
                 self.assertEqual(cohort['rejections'][0]['reason'],

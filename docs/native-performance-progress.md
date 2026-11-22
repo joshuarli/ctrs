@@ -1710,8 +1710,9 @@ ticks across the edit phase. Use the signed Mac release and verified v2
 fixture archives for both mount conditions.
 
 The reporter verifies that each watcher kept its PID and start ticks, and
-checks the edited paths and compiled output hashes of each result. The two
-engines must agree on the fixture inputs and the ordered edit receipts.
+checks each edited path against the runner's edit plan. It requires every
+output from each multi-file edit, with matching compiled hashes and
+ordered receipts across engines.
 
 Bind admission `base-20261122T130910-762c` on `b7c59e1` with signed
 `99db1aa` verified 120 results from 60 edit sequences on each engine,

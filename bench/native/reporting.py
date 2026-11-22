@@ -16,7 +16,7 @@ from pathlib import Path
 import ci_jobs
 from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
-from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS
+from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS, edit_plan, watch_source_paths
 
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
@@ -437,7 +437,7 @@ def _w12_watch_receipt(record, mount, edit_count):
                    for field in ('pid', 'start_ticks'))):
         return None
     edits = metrics.get('edits')
-    if (not isinstance(edits, list) or metrics.get('results') != len(edits)
+    if (not isinstance(edits, list) or len(edits) < edit_count or metrics.get('results') != len(edits)
             or metrics.get('correct') != len(edits) or metrics.get('missed') != 0 or metrics.get('stale') != 0):
         return None
     results = []
@@ -453,8 +453,9 @@ def _w12_watch_receipt(record, mount, edit_count):
         if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected) or output.get('actual') != expected:
             return None
         results.append((sequence, kind, path, expected))
-    if ({item[0] for item in results} != set(range(edit_count))
-            or len({(sequence, path) for sequence, _, path, _ in results}) != len(results)):
+    expected_paths = [(event['sequence'], event['kind'], path)
+                      for event in edit_plan(watch_source_paths(), edit_count) for path in event['paths']]
+    if [item[:3] for item in results] != expected_paths:
         return None
     return shared | {'edits': results}
 
