@@ -53,7 +53,7 @@ def trial(engine, ref, archive, binary, root, count):
     try:
         engine.ensure_up()
         info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
-        if info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != PIN['images']['np-v5/api']['diff_ids']:
+        if info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != PIN['images']['np-v6/api']['diff_ids']:
             raise ValueError('C proof runtime image differs from pin')
         engine.sh(['run', '-d', '--pull=never', '--name', name, '--label', 'dev.ctrs.campaign.run=' + root.name,
             '--privileged', '--network', 'none', '-v', str(HELPER.resolve()) + ':/diagnostics/w2_counter_guest.py:ro',
@@ -182,7 +182,7 @@ def main():
     if runner.sha256_file(binary) != BINARY_SHA or runner.sha256_file(SOURCE) != SOURCE_SHA or runner.sha256_file(archive) != TOOLS_SHA:
         parser.error('C/tool input differs from validated pin')
     ref = json.loads(args.image_refs.read_text())['api']
-    if '@' not in ref or ref.rsplit('@', 1)[1] != PIN['images']['np-v5/api']['manifest']:
+    if '@' not in ref or ref.rsplit('@', 1)[1] != PIN['images']['np-v6/api']['manifest']:
         parser.error('runtime image differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()

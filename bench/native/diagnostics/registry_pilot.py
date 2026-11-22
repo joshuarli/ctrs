@@ -88,7 +88,7 @@ def deploy(engine, refs, layout, directory, run_id, contract, *, phase=nullconte
                 "import json,hashlib,pathlib;print(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in ['/app/app.py','/app/requirements.txt']}))"]).stdout)
             if hashes != contract['api_files_sha256']:
                 raise ValueError('deployed application contents differ from pin')
-            javascript = (runner.FIXTURES / 'w8-v5' / 'marked-check.mjs').read_text()
+            javascript = (runner.FIXTURES / 'w8-v6' / 'marked-check.mjs').read_text()
             marked = json.loads(engine.sh(['run', '--rm', '--name', marked_name, '--label', 'np.w8.run=' + run_id,
                 '--entrypoint', 'node', refs['marked'], '--input-type=module', '-e', javascript], timeout=90).stdout)
             if (marked['artifact_sha256'] != contract['marked_artifact_sha256']
@@ -125,7 +125,7 @@ def main():
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker()
     runner.CTRS_BIN = args.ctrs_binary.resolve()
-    contract_path = runner.FIXTURES / 'w8-v5' / 'portfolio.json'
+    contract_path = runner.FIXTURES / 'w8-v6' / 'portfolio.json'
     contract = json.loads(contract_path.read_text())
     if (runner.sha256_file(runner.FIXTURES / 'w1' / 'seed.sql') != contract['seed_sql_sha256']
             or runner.sha256_file(runner.LOAD_PY) != contract['w2_load_sha256']):
@@ -137,7 +137,7 @@ def main():
     save(root / 'plan.json', {'qualification_eligible': False, 'fixture_version': contract['fixture_version'],
         'reason': 'functional diagnostic; content absence, exclusivity and frozen qualification not established',
         'contract_sha256': runner.sha256_file(contract_path), 'manifests': portfolio.manifests})
-    for path in (Path(__file__), Path(registry_portfolio.__file__), contract_path, runner.FIXTURES / 'w8-v5' / 'marked-check.mjs'):
+    for path in (Path(__file__), Path(registry_portfolio.__file__), contract_path, runner.FIXTURES / 'w8-v6' / 'marked-check.mjs'):
         (root / path.name).write_bytes(path.read_bytes())
     print('RESULTS', root, flush=True)
     server = registry_portfolio.serve(portfolio, 0)

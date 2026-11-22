@@ -132,7 +132,7 @@ def w9_image_ref() -> str | None:
                              capture_output=True, text=True, timeout=20).stdout
     except subprocess.TimeoutExpired:
         return None
-    return next((line for line in out.split() if line.endswith("/np-v5/marked@" + ci_jobs.IMAGE_DIGEST)), None)
+    return next((line for line in out.split() if line.endswith("/np-v6/marked@" + ci_jobs.IMAGE_DIGEST)), None)
 
 
 def registry(lane='macos-arm64') -> list[Workload]:
@@ -186,7 +186,7 @@ def registry(lane='macos-arm64') -> list[Workload]:
         Workload("w8-pull:cohort", "scenario", "pull", "pinned portfolio pull and deploy from a local registry",
                  UNMEASURED_TRIAL_SECONDS, 20, "estimated", ENGINES + ("w8-layout", "quiet-host"),
                  argv=(sys.executable, str(RUNNER), "w8-baseline", "--layout",
-                       str(WORK / "native-perf/inputs/w8-portfolio-v5/layout"),
+                       str(WORK / "native-perf/inputs/w8-portfolio-v6/layout"),
                        "--ctrs-binary", str(CTRS_BIN), "--pairs", "10")),
         Workload("holdout", "full", "holdout", "Gitea + Postgres app never tuned against",
                  600, 2, "estimated", ENGINES,
@@ -300,7 +300,7 @@ def check_requirement(key: str) -> tuple[str, str]:
         gb = st.f_bavail * st.f_frsize / 1e9
         return ("ok", f"{gb:.0f} GB free") if gb >= 20 else ("fail", f"{gb:.0f} GB free under .work; need 20")
     if key == "pinned-portfolio":
-        pin = HERE / "fixtures/w8-v5/portfolio.json"
+        pin = HERE / "fixtures/w8-v6/portfolio.json"
         return ("ok", "pin contract present; runner checks installed images before pairing") if pin.is_file() \
             else ("fail", f"{pin} missing")
     if key == "w12-inputs":
@@ -308,8 +308,9 @@ def check_requirement(key: str) -> tuple[str, str]:
         return ("fail", f".work/tmp missing {', '.join(missing)}; rebuild with `TMPDIR=$PWD/.work/tmp python3 bench/native/fixtures/w12/prepare.py`") if missing \
             else ("ok", "")
     if key == "w8-layout":
-        layout = WORK / "native-perf/inputs/w8-portfolio-v5/layout"
-        return ("ok", "") if layout.is_dir() else ("fail", f"{layout} missing; see fixtures/w8-v3/README.md")
+        layout = WORK / "native-perf/inputs/w8-portfolio-v6/layout"
+        return ("ok", "") if layout.is_dir() else (
+            "fail", f"{layout} missing; rebuild with `python3 bench/native/fixtures/w8-v6/prepare.py`")
     if key == "w4-image":
         docker = shutil.which("docker")
         found = docker and subprocess.run([docker, "-H", f"unix://{ORB_SOCKET}", "image", "inspect", "np-w4-events:v4"],
@@ -326,7 +327,7 @@ def check_requirement(key: str) -> tuple[str, str]:
     if key == "w9-image-ref":
         ref = w9_image_ref()
         return ("ok", ref) if ref else ("fail", "no image on OrbStack carries the pinned Marked digest; install the "
-                                              "w8-v5 portfolio or set BENCH_W9_IMAGE_REF (fixtures/w9-v2/README.md)")
+                                              "w8-v6 portfolio or set BENCH_W9_IMAGE_REF (fixtures/w9-v2/README.md)")
     if key == "quiet-host":
         return "ok", "waited for at run time (1-minute load < 4, 5-minute < 6, no hold)"
     raise ValueError(f"unknown requirement {key}")

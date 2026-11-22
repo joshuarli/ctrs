@@ -34,8 +34,8 @@ try:
     if ctrs.sh(['version'], timeout=10, check=False).returncode == 0:
         raise RuntimeError('ctrs endpoint already active; refusing adoption')
     rows = orb.sh(['images', '--no-trunc', '--format', '{{.Repository}} {{.ID}}']).stdout.splitlines()
-    matches = [row.split() for row in rows if row.split() and row.split()[0].endswith('np-v5/api')]
-    matches.sort(key=lambda x: (x[0] != 'np-v5/api', x[0], x[1]))
+    matches = [row.split() for row in rows if row.split() and row.split()[0].endswith('np-v6/api')]
+    matches.sort(key=lambda x: (x[0] != 'np-v6/api', x[0], x[1]))
     if not matches:
         raise RuntimeError('API image missing')
     orb.w13_image_id = matches[0][1]

@@ -13,7 +13,7 @@ import registry_variant
 import runner
 
 
-REPOSITORY = 'np-v5/marked'
+REPOSITORY = 'np-v6/marked'
 FIXTURE_VERSION = 'w8-cancel-v1'
 
 
@@ -85,7 +85,7 @@ def remove_owned_image(engine, ref, image):
 
 
 def run_cancel(args):
-    contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+    contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
     target = {**contract, 'images': {REPOSITORY: contract['images'][REPOSITORY]}}
     run = 'w8-cancel-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)

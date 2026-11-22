@@ -58,7 +58,7 @@ def verify_images(engine, refs, directory):
     for name in ('api', 'postgres', 'redis'):
         ref = refs[name]
         info = json.loads(engine.sh(['image', 'inspect', ref]).stdout)[0]
-        pin = mixed_cycle.PIN['images']['np-v5/' + name]
+        pin = mixed_cycle.PIN['images']['np-v6/' + name]
         if info['Architecture'] != 'arm64' or ref not in info['RepoDigests'] or info['RootFS']['Layers'] != pin['diff_ids']:
             raise ValueError('installed image identity differs from pin: ' + name)
         save(directory / (name + '-image.json'), info)
@@ -141,7 +141,7 @@ def main():
                  Path(resource_cells.__file__), Path(ownership.__file__), runner.COLLECT,
                  runner.BENCH / 'macos_counters.py', runner.LOAD_PY, Path(mixed_cycle.__file__), Path(ci_jobs.__file__),
                  runner.COMPOSE_FILE, runner.FIXTURES / 'w1/seed.sql',
-                 runner.FIXTURES / 'w8-v5/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json'):
+                 runner.FIXTURES / 'w8-v6/portfolio.json', runner.FIXTURES / 'w11-v2/worker-pin.json'):
         data = path.read_bytes()
         (sources / path.name).write_bytes(data)
         source_hashes[path.name] = runner.sha256_file(sources / path.name)

@@ -30,12 +30,12 @@ const hash = p => crypto.createHash('sha256').update(fs.readFileSync(p)).digest(
   process.stdout.write(JSON.stringify({tools, source_lock, artifact, tests}));
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
 '''
-_PORTFOLIO = json.loads((Path(__file__).parent / 'fixtures/w8-v5/portfolio.json').read_text())
+_PORTFOLIO = json.loads((Path(__file__).parent / 'fixtures/w8-v6/portfolio.json').read_text())
 _MARKED = json.loads((Path(__file__).parent / 'fixtures/w5-v2/workload.json').read_text())
 TOOLS = {key: _PORTFOLIO['runtime_versions'][key] for key in ('node', 'npm', 'esbuild')}
 SOURCE_LOCK = _MARKED['source']['lock_sha256']
 ARTIFACT = _PORTFOLIO['marked_artifact_sha256']
-IMAGE_DIGEST = _PORTFOLIO['images']['np-v5/marked']['manifest']
+IMAGE_DIGEST = _PORTFOLIO['images']['np-v6/marked']['manifest']
 
 
 class ConditionFailed(RuntimeError):

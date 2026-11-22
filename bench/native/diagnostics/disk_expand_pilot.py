@@ -25,7 +25,7 @@ def main():
         parser.error('native ARM64 macOS only')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker()
-    spec = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+    spec = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
     if runner.sha256_file(args.portfolio_archive) != spec['archive_sha256']:
         parser.error('common portfolio archive differs from pin')
     elf = args.proof_binary.read_bytes()

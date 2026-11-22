@@ -1,5 +1,7 @@
 # W8 common portfolio (v5, refreshed 2026-11-18)
 
+Use [the rebuildable v6 portfolio](../w8-v6/README.md) for current comparisons.
+
 `portfolio.json` is the common multilayer pin set used by the W1/W2/W3/W8
 fixtures: the real Python API, PostgreSQL, Redis, and the Marked TypeScript
 build/test environment. All images come from one read-only OCI layout
@@ -36,17 +38,3 @@ What changed and what did not:
 Regeneration on another host requires the pinned bases and sources to remain
 retrievable, or a further fixture-version bump. Do not silently substitute
 images. Do not prune shared OrbStack/ctrs content to manufacture absence.
-The derived content-unique variant flow is documented in
-`../w8-v3/README.md` and now consumes this fixture.
-
-To install the exact common images from a retained layout and verify the
-application and Marked outputs on both engines, run from the repository root:
-
-```sh
-TMPDIR="$PWD/.work/tmp" python3 bench/native/diagnostics/registry_pilot.py \
-  --layout .work/native-perf/inputs/w8-portfolio-v5/layout \
-  --ctrs-binary target/release/ctrs
-```
-
-Plain `runner.py prepare` installs the legacy pilot images. Pinned baseline
-cases check that their required immutable images are installed before pairing.

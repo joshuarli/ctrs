@@ -108,8 +108,8 @@ def trial_w3_v4(ctx, engine, state):
     try:
         if any(type(x) is not int or x <= 0 for x in (scale, clients, threads, transactions, seed)) or threads > clients:
             raise ValueError("invalid pgbench parameters")
-        pin_path = runner.FIXTURES / "w8-v5/portfolio.json"
-        pin = json.loads(pin_path.read_text())["images"]["np-v5/postgres"]
+        pin_path = runner.FIXTURES / "w8-v6/portfolio.json"
+        pin = json.loads(pin_path.read_text())["images"]["np-v6/postgres"]
         image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
         inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)

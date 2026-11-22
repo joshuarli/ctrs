@@ -1,0 +1,7 @@
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+WORKDIR /app
+COPY requirements.txt requirements.lock ./
+RUN pip install --disable-pip-version-check --no-cache-dir --no-compile --only-binary=:all: --require-hashes -r requirements.lock
+COPY app.py .
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]

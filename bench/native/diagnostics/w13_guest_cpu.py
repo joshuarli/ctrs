@@ -96,7 +96,7 @@ def main() -> int:
             if name == "ctrs" and engine.proc is None:
                 raise RuntimeError("refusing to adopt a running ctrs daemon")
             image = next(line.split()[1] for line in engine.sh(["images", "--format", "{{.Repository}} {{.ID}}"]).stdout.splitlines()
-                         if line.split() and line.split()[0].endswith("np-v5/api"))
+                         if line.split() and line.split()[0].endswith("np-v6/api"))
             reader = f"w13cpu-{ctx.run_id[-6:]}-{name}"
             engine.sh(["run", "-d", "--pull", "never", "--privileged", "--pid", "host", "--network", "none",
                        "--name", reader, "--label", "dev.ctrs.campaign.run=" + ctx.run_id,

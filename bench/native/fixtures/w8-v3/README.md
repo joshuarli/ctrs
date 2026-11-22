@@ -34,8 +34,8 @@ TMPDIR=$PWD/.work/tmp PYTHONPATH=bench/native python3.14 - <<'PY'
 import json
 from pathlib import Path
 from registry_variant import prepare_variant
-prepare_variant('.work/native-perf/inputs/w8-portfolio-v5/layout',
-    json.loads(Path('bench/native/fixtures/w8-v5/portfolio.json').read_text()),
+prepare_variant('.work/native-perf/inputs/w8-portfolio-v6/layout',
+    json.loads(Path('bench/native/fixtures/w8-v6/portfolio.json').read_text()),
     '.work/native-perf/inputs/w8-new-variant', b'explicit-fresh-comparison-seed')
 PY
 TMPDIR=$PWD/.work/tmp python3.14 bench/native/diagnostics/registry_variant_pilot.py \
@@ -104,7 +104,7 @@ The canonical paired pilot starts from the original pinned v2 layout:
 
 ```sh
 python3.14 bench/native/runner.py w8-baseline \
-  --layout .work/native-perf/inputs/w8-portfolio-v5/layout \
+  --layout .work/native-perf/inputs/w8-portfolio-v6/layout \
   --ctrs-binary /path/to/signed/ctrs --pairs 10
 ```
 

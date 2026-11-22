@@ -116,7 +116,7 @@ and its committed SHA-256 manifest, not from a new adapter implementation. Steps
    admission is integrated; qualification still needs the Mac evidence below.
 
 **On the Mac.** Rebuild the assets (`cargo xtask all`) and run e2e and
-the two watch tests. Restore the [pinned common portfolio](../bench/native/fixtures/w8-v5/README.md)
+the two watch tests. Restore the [pinned common portfolio](../bench/native/fixtures/w8-v6/README.md)
 and prepare [W12](../bench/native/fixtures/w12/README.md) before their
 cohorts. Run the installed-default cohorts through
 `bench/native/pyramid.py run --name <cell>:cohort` and refresh the ranked
@@ -172,8 +172,8 @@ archived artifact if available. A rebuild that changes an image pin
 requires a new fixture version and fresh results for its consumers.
 
 W6 and W7 completed independently of the common portfolio.
-Once the pinned common inputs are restored or replaced with verified
-versioned fixtures, run `w13-overlap:cohort`,
+The replacement v6 portfolio passed its functional proof below. Run
+`w13-overlap:cohort`,
 `w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
 `reporting.py --match <run>`. Use Python 3.11 or later. On this host
 the supported interpreter is `/opt/homebrew/bin/python3`.
@@ -256,6 +256,26 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
+
+### Rebuilt W8 common portfolio
+
+The [v6 recipe and lock](../bench/native/fixtures/w8-v6/README.md) replace
+the lost v5 API and Marked images. PostgreSQL and Redis were recovered by
+their unchanged manifest digests. Two independent uncached builds per
+private image matched, and a separate run of the tracked prepare script
+recreated the canonical archive with SHA-256
+`8c2d09449cbc4002735068c825eb23a51ed3dd4f0fd44e7b9a12ff8291fb1cd7`.
+All four images loaded into an empty dedicated ctrs store and matched
+the ARM64 image IDs and ordered DiffIDs.
+
+Both engines passed registry deployment in `w8-common-20261122T072209-1171`.
+Each completed 688 reads and 312 writes, verified every stored payload,
+read the committed database/cache value after restart, and produced the
+pinned Marked artifact. ctrs and OrbStack `result.json` SHA-256s were
+`39d2878bfc08b3169100207cae8ee4903106459cf4da1e4b23008c2bba812418` and
+`900a8d3ebe891c22518de1c4975fe897819eea17b0b542563f123bd4b3709b34`.
+The images are installed on the campaign Mac. The W8 timing cohort and
+fresh comparative results for portfolio consumers remain open.
 
 ## Linux lane pilot (amd64) — 2026-11-21
 

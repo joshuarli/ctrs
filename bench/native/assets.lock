@@ -5,7 +5,7 @@
 [freeze]
 date = "2026-11-18"
 status = "pilot — refreshed for the new macOS host; versions below are observed, not yet locked"
-note = "2026-11-17 late: host replaced via fresh clone; raw results and VM assets unrecoverable. Host, tool and fixture pins refreshed 2026-11-18; common images re-pinned as w8-v5 (postgres/redis bit-identical, api/marked rebuilt). Never pool w8-v5 with w8-v2 history."
+note = "The 2026-11-22 common portfolio v6 pins rebuildable API and Marked images. PostgreSQL and Redis retain the v5 identities. Use fresh baselines for the new portfolio."
 
 [host]
 model = "MacBook Pro (Apple M1 Max)"
@@ -40,7 +40,7 @@ socket = "unix://$HOME/.orbstack/run/docker.sock"
 postgres = "postgres:17-alpine@sha256:93f3c32bafb7d4d20965c4df530899ae40923f0ccd63deede2f36681fa0aeceb"
 redis = "redis:7-alpine@sha256:52d1ea8a654b10f06af3ecda4e9dbcd035c7868b5c49ee7975de917f81de13db"
 api_base = "python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
-common_portfolio = "bench/native/fixtures/w8-v5/portfolio.json (w8-v5-common-portfolio; refreshed 2026-11-18)"
+common_portfolio = "bench/native/fixtures/w8-v6/portfolio.json (w8-v6-common-portfolio; refreshed 2026-11-22)"
 fixture_api = "np-fixture-api:<content-hash tag; see runner.py api_tag()>"
 
 [fixture_pins]

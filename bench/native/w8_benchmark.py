@@ -116,13 +116,13 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     prepare = prepare or registry_variant.prepare_variant
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
-    contract = json.loads((runner.FIXTURES / 'w8-v5/portfolio.json').read_text())
+    contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
     source = registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
     ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load,
                            'comparison_lane': 'resource-matched-resident-control', 'ctrs_idle_seconds': 0}
-    ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v5/portfolio.json'),
+    ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v6/portfolio.json'),
                            'w8_driver_sha256': runner.sha256_file(Path(__file__)),
                            'w8_pilot_sha256': runner.sha256_file(Path(pilot.__file__))})
     outputs = ctx.provenance.get('build_outputs', {})

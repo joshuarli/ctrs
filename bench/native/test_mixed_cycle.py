@@ -87,7 +87,7 @@ class DurationAdmission(unittest.TestCase):
                     out = ids[args[-1]]
                 elif args[:2] == ['image', 'inspect']:
                     name = next(k for k, v in refs.items() if v == args[-1])
-                    pin = mixed_cycle.WORKER['worker'] if name == 'worker' else mixed_cycle.PIN['images']['np-v5/' + name]
+                    pin = mixed_cycle.WORKER['worker'] if name == 'worker' else mixed_cycle.PIN['images']['np-v6/' + name]
                     out = json.dumps([{'Architecture': 'arm64', 'RepoDigests': [args[-1]], 'RootFS': {'Layers': pin['diff_ids']}}])
                 elif args[:2] == ['volume', 'inspect']:
                     out = '[{"identity":"volume"}]'
