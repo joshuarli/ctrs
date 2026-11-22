@@ -1568,3 +1568,161 @@ reads, so individual attribution of all five remains unproven; strict ownership
 was not weakened. Raw data/binaries live under
 `~/ctrs-evidence/linux-httpie-20261122/` with a committed SHA-256 manifest.
 This Linux optimization closes no macOS gate; their status is unchanged.
+
+## Linux checkpoint and finite Mac handoff (amd64), 2026-11-22
+
+[Current slice evidence](evidence/linux-checkpoint-2026-11-22.md) and
+[manifest](evidence/linux-checkpoint-2026-11-22.sha256) preserve the CI audit,
+W13 ceiling controls and incremental W1/W3 pilots. Native Linux x86_64,
+Ubuntu 22.04.5, kernel `6.8.0-1060-aws`, cgroup v2; Docker 29.9.2
+(`0367cbe`), containerd 2.4.2 and runc 1.5.2 remain frozen. Engine source
+includes landed H3; no further product change was made in this slice.
+
+### Recoverable baseline and current compatibility
+
+- Historical baseline: `~/ctrs-evidence/linux-amd64-v1/` contains
+  `baseline.tar`, frozen `images.tar`, source bundle, binary identities,
+  commands, all raw records/traces and the historical analysis. Verify with
+  `docs/evidence/linux-amd64-v1.sha256`; extract and verify
+  `baseline-members.sha256` before using it. Unknown SHAs and invalid receipts
+  stay unchanged. [Retrieval instructions](evidence/linux-amd64-checkpoint-2026-11-22.md)
+  include source recovery without the original worktree.
+- **Use the corrected independent restoration**, not the historical incomplete
+  isolation attempt: [integrated runtime evidence](evidence/linux-integrated-runtime-2026-11-22.md),
+  `~/ctrs-evidence/linux-integrated-20261122/restore-owned.sh` and its log.
+  Launch owned Docker in a private netns with private containerd address/root/
+  state, private Docker socket/data/exec roots and unique bridge or bridge none;
+  never attach a disposable daemon to default host sockets. Inside its private
+  mount namespace bind only its socket to the harness endpoint and run:
+  `python3 bench/native/runner.py --lane linux-amd64 prepare --linux-archive ~/ctrs-evidence/linux-amd64-v1/images.tar`.
+  Preserve the committed lock. Recorded proof: `INDEPENDENT_OWNED_RESTORE_EXIT=0`
+  and `FROZEN_LOCK_UNCHANGED`. This was an independent image-store restore,
+  not an entirely empty Docker build-cache or off-host disaster-recovery test.
+  This slice additionally loaded that archive into a fresh owned H3 ctrs store
+  and verified all twenty W1/W3 trials, without modifying Docker's portfolio.
+- Integrated compatibility remains **ctrs 482 pass / 1 fail / 26 skip**;
+  isolated Docker **471 / 2 / 30**. Both exit 1: missing host VRF module
+  affects both; Docker's SYS_ADMIN mount is denied by its default AppArmor
+  profile (unconfined control passes). Earlier Docker cp ownership differs
+  for UID-1000 sources; root-owned current sources pass. All 74 historical
+  printed ctrs FAIL labels were reconciled, with the historical 73-summary
+  discrepancy retained. No new full-e2e rerun is claimed here.
+- During-operation IPv4 proof retained the preexisting non-ctrs DROP while
+  allowing ctrs networking, proved denial removal as a positive control, denied
+  unsolicited non-ctrs→ctrs traffic, then restored rules exactly on stop.
+  Independent IPv6 packet-policy proof remains unperformed. The earlier host
+  docker0 repair needed no dockerd restart; its disappearance's cause remains
+  unconfirmed. Logs/manifests preserve the incident rather than hiding it.
+
+### Profile → decisions → measured improvement
+
+- **W2:** 50,000 operations/concurrency 8, two AB/BA observer pairs per mode.
+  Periodic C/D completion/p99 1.026/.997 versus boundary 1.119/1.215 does not
+  establish ownership-discovery bias. Six real-path controls show app/database
+  CPU dominates; relay bypass removes daemon work but not a consistent deficit.
+  Storage-wait attribution is limited by disabled task delay accounting. Native
+  seccomp-dispatch H1 and relay H2 failed the declared p99 upper-bound gate
+  (1.535 and 1.034 versus ≤.95); both reverted. 60/60 correct/admitted,
+  58/60 resource-valid, all 20 B/C pairs valid. [Evidence](evidence/linux-w2-2026-11-22.md)
+  and `~/ctrs-evidence/linux-w2-20261122/` retain patches and traces.
+- **HTTPie H3:** materialization before create is the dominant native deficit.
+  Separate overlap-only and zlib-rs-only attempts failed the strict gate; the
+  predeclared combined candidate wins against baseline: C/B **.773
+  [.707,.786]**, medians .492/.649s. Docker .428s; C/D **1.164
+  [1.036,1.180]**, still slower. All 90 trials correct/resource-valid/admitted;
+  no build/load timing claim. Sampled CPU B/C/D .554/.445/.248s; active
+  anon+kernel peaks 33.23/24.16/797.93MiB, with idle 1.46/1.46/778.40MiB
+  and retained increments 6.36/6.34/2.43MiB. Host/agent sizes rise .23%/.60%;
+  no broad memory or build-time claim. Correctness: host tests 155 passed,
+  2 ignored; layer tests 13 passed; create/run/rootfs e2e subset 135 passed,
+  17 skipped. [Evidence](evidence/linux-httpie-2026-11-22.md) preserves traced
+  nested phase bounds and profiler corrections, not falsely exclusive timings.
+- **Ownership:** strict rejection remains. Five old invalid receipts are
+  unchanged. Live PID/start-tick/cgroup transitions reproduce short-lived runc
+  ancestry gaps, including correct W2 work; a matching W13 diagnostic did not.
+  Old failing-instant offending-PID reads are unavailable, so all five individual
+  causes are not proven. Structural BuildKit naming and its collision limitation
+  remain documented. Retired counters are retained; CPU is machine-marked
+  incomplete/sampled-lower-bound, not promoted to complete accounting.
+
+### New coverage and W13 stopping decision
+
+W13's unchanged, byte-verifying host-loopback tool, CPUs 0–7, five admitted
+1-GiB one-stream uploads: median **3.352 GB/s [2.556,3.405]**, range
+2.470–3.451. Historical engine maximum 2.633 GB/s; required 2× control
+headroom is 5.267 GB/s. The necessary host-only gate fails; container-side
+headroom is also unproven. **No W13 engine rerun or cohort.** No threshold
+relaxation or receiver rewrite. W13 remains tool-limited/inconclusive.
+
+Existing W1 verified DB/cache recovery and W3 synchronous-transaction volume
+work now run in the Linux lane, selecting the unchanged frozen native images.
+Five alternating AB/BA pairs each (the contract's three-pair pilot floor is
+exceeded), **20/20 correct/admitted/resource-valid**, no replacements:
+
+| Primary metric | ctrs median [Q1,Q3], s | Docker median [Q1,Q3], s | Paired C/D [95% CI] |
+| --- | ---: | ---: | ---: |
+| W1 restart→exact reads/new acknowledged write | .578 [.576,.578] | .742 [.738,.742] | .776 [.768,.802] |
+| W3 300 synchronous transactions, full exec | .0765 [.0764,.0785] | .1569 [.1525,.1580] | .484 [.454,.506] |
+
+W1 total-work ratio .974 [.841,1.301] is inconclusive, including the retained
+lazy-agent/first-materialization trial (not uniformly warm agent/cache state).
+W3 COMMIT p95 ratio .843 [.741,.866], restart-ready
+1.021 [.568,1.114]. These short SQL/CLI and application-restart pilots establish
+coverage, not disk throughput, engine restart or power-loss recovery. Window
+CPU medians C/D: W1 1.533/2.469s, W3 .159/.398s, sampled lower bounds.
+Observed window anon+kernel peak increments: W1 62.33/80.59MiB, W3
+9.58/20.25MiB; retained .51/2.22 and .29/−.44MiB. Windows differ from the
+primary operations; sub-200ms memory peaks may be missed. Idle/peak/retained
+values and negative deltas remain separate in the linked evidence, not a broad
+memory-efficiency claim. Raw data and exact current binaries are under
+`~/ctrs-evidence/linux-checkpoint-20261122/`.
+
+Requested-head CI audit: five checked heads (`d75f876`, `75491e7`, `cd9800e`,
+`2910f31`, `65b7bbd`) each **5 passed / 0 failed / 0 pending**. Intermediate
+`c5b8f0d`, `11e4967`, `215b8db` return no checks, not green results; their
+checked descendants cover unchanged runtime/Cargo/e2e inputs. Nothing red
+required a fix-forward. Exact refs are in the preserved audit receipt.
+
+### Next exact Linux experiment (not started)
+
+Extend only the existing **W3-v4** native database selection, then predeclare
+ten alternating pairs: scale 50, shared_buffers=128MB, clients 8, threads 2,
+2,000 transactions/client (16,000 total), random seed 42, CPUs 0–7. Verify
+native pgbench availability before scheduling; if absent, stop for an explicitly
+frozen common fixture, not a download during timing. Show equal fsync,
+synchronous_commit, full_page_writes and mount/flush contracts before any
+storage claim; retain complete transaction receipts and exact state after
+restart. Primary transaction completion, companion p95/CPU/storage/recovery,
+same immutable-input/ownership/admission rules. This tests a longer existing
+workflow; it does not assume the short W3 exec ratio scales.
+
+### Finite Mac handoff; no gate closes from Linux
+
+Linux containers share the **host kernel**; macOS ctrs has a **VM boundary**.
+Neither equal isolation nor identical resource baselines is implied. All full
+macOS coverage, parity, leadership, reliability and reproducibility gates remain
+**open**; the active Mac coordinator owns its existing campaign independently.
+
+1. At one recorded main SHA, rebuild **combined kernel/agent/watch assets and
+   host binary** (`cargo xtask all`); record all asset/config hashes. Run the
+   existing workspace tests, kernel-feature and create/run/rootfs/network e2e
+   checks against that combined build, including gzip concatenation/truncation
+   and cleanup/error paths. Do not combine receipts from separate builds.
+2. On that build run existing **W5 and W12-watch**, both bind and volume, at
+   their declared edit counts with exact event/output and watcher-identity
+   checks; report tails and resources. These are the combined kernel/watch
+   checks still requiring real native ARM64 macOS, not Linux substitutes.
+3. Measure **H3/new-default HTTPie first use** versus frozen OrbStack with ten
+   alternating pairs, identical frozen native ARM64 image bytes, explicit CPU/
+   resource policy, build/load excluded, and create/run/rootfs correctness.
+   H3's streamed-host branch is Linux-gated; the gzip backend also affects the
+   Mac guest and needs its own measured comparison. Do not import Linux pins
+   or infer a Mac speedup from the .773 ratio.
+4. Freeze the outstanding cells of the existing acceptance matrix at that SHA
+   and complete their **new-default** comparisons (minimum ten alternating
+   pairs; W11's existing 12h/engine reliability contract). Keep installed-default,
+   resource-matched and identical-builder controls separate, prove W13 tool
+   headroom on that host first, and report every unresolved correctness,
+   durability, resource or tail cell. No new workload/framework is handed off.
+
+Linux work does not wait for this list and cannot satisfy it by proxy.
