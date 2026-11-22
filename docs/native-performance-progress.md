@@ -430,6 +430,28 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
 
+#### Frozen HTTPie first-use input
+
+Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
+the 3.2.4 sdist from `assets.lock`, and the note from pair 10's incremental
+OrbStack probe above. Build once on OrbStack and save one platform using
+`docker image save --platform linux/arm64`. Give the image a unique campaign
+tag. Archive the BuildKit metadata and the Dockerfile, sdist and note hashes.
+Use `httpie_first_use.archive_identity` to record the archive digest, config
+digest and ordered rootfs DiffIDs. After loading the same archive into each
+engine, require its inspected native platform and ordered DiffIDs to match.
+Preserve engine-specific IDs alongside the common bytes. A fresh build may
+resolve dependencies, so the resulting archive starts a new cohort.
+
+The comparison measures `docker run --rm --pull=never IMAGE http --version`
+with the engine already ready and image import outside the timed boundary.
+Verify the exact `3.2.4` output and the frozen incremental note. Retain the
+import duration and any first-create layer materialization in separate
+receipts. Use fresh private ctrs stores to restore the imported-but-unrun
+condition across pairs. OrbStack's materialization during import is part of
+its preparation. Keep both installed defaults and report the measured
+allocations, ten alternating pairs and sampled resources.
+
 ### Installed-default W2 fixed-work cohort
 
 Run `base-20261122T081048-91d4` used clean source `7eb4859`, the same
