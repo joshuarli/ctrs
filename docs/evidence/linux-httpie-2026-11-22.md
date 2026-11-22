@@ -98,6 +98,12 @@ whole-pair draws, seed 7. Win requires upper bound ≤0.95 and ten complete,
 correct/resource-valid/admitted B/C pairs. Docker is frozen context, not a
 parity prerequisite. Do not pool attempts or reinterpret this as p99.
 
+There is one completion per trial, not a W2-style request-latency series.
+Completion is both the primary and completion guardrail: H3's upper bound
+0.786 also satisfies the ≤1.03 completion limit. No within-trial p99 is
+claimed. Historical 0.840/0.585s pilot values are context, not paired inputs
+or evidence of a 0.840→0.649s engine improvement.
+
 1. **H1:** queue native streamed installs before waiting; preserve dedup,
    layer lock, four-worker cap, FIFO barrier, durability and existing fallback.
    Neutral; product reverted.
@@ -115,7 +121,8 @@ system/C dependency, format, wire or runtime configuration is introduced.
 Features unify with the host when host/agent build together; the agent gzip
 backend also affects guest builds, whose macOS performance is unqualified.
 Binary sizes: host 11,085,984 → 11,110,992 bytes (+0.226%); agent
-4,203,336 → 4,228,480 (+0.598%). No build-speed claim.
+4,203,336 → 4,228,480 (+0.598%). Engine build-time impact was not isolated;
+build logs are preparation/correctness evidence, not a build-speed claim.
 
 Median [Q1,Q3], seconds; intervals describe the paired median ratio:
 
@@ -249,20 +256,22 @@ Docker daemon must follow the integrated-runtime private netns/containerd
 isolation instructions, never adopt default sockets.
 
 The performance gate's status subcommand has a GNU awk `load` identifier
-error; its `-1` admission mode worked before and after every scored trial.
+error; ordinary admission exited 0 before, and `-1` exited 0 immediately
+after, every scored trial.
 No global tool/environment change was made. Final cleanup, rebase/runtime
 identity audit and integration checks are preserved in the final audit logs.
 
 ### Final integration
 
-Rebased onto `ea35cab849d74e289fc8a5b71778673553be796c`. Incoming changes
+Rebased onto `50c827da241f9fd172ae7d80fd83c63ca18a77f2`. Incoming changes
 do not alter crates, e2e assertions or the Linux sampler/adapter; runner
-changes add W3 metadata only. Measured runtime inputs are unchanged. Final
+changes concern W1/W3/W9 metrics and macOS profiling, not this first-use
+controller. Measured runtime inputs are unchanged. Final
 host daemon tests include the three restored reply cases:
 
 ```text
 test result: ok. 155 passed; 0 failed; 2 ignored
-Ran 489 tests
+Ran 497 tests
 OK (skipped=15)
 FIVE_OLD_RECEIPTS_STILL_IDENTICAL_TO_ORIGINAL_SOURCE_LINES
 WORKLOAD_DIAGNOSTICS [('create', 2), ('W2', 1), ('W13', 0)]
