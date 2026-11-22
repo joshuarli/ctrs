@@ -15,6 +15,7 @@ import collect
 import ci_jobs
 import counter_specs
 import diagnostic_signals
+import macos_counters
 import ownership
 import perf_counts
 import cpu_profile
@@ -23,6 +24,7 @@ import w2_peer
 import sched_trace
 from resource_pilot import host_snapshot
 from w2_scheduler_app import parse_api_cpus
+from w2_observer_report import OUTSIDE_CPU_ADMISSION
 
 PIN = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
 TOOLS_SHA = '475ad5495772fa311084f9e15335c18aeffce3e8cb138c3d11e3f9a12b06883b'
@@ -230,10 +232,14 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         result['effective_api_cpus']['before'] = task_affinities(before['tasks'], api_cpus)
         cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
+        if profile_kind == 'cpu-leaf':
+            ticks_before, harness_before = macos_counters.host_cpu_ticks(), runner.harness_cpu_seconds()
         started = time.monotonic()
         summary = load(engine, client_location, client, base, directory, 'work', operations, .3,
                        concurrency=concurrency, seed=seed)
         ended = time.monotonic()
+        if profile_kind == 'cpu-leaf':
+            ticks_after, harness_after = macos_counters.host_cpu_ticks(), runner.harness_cpu_seconds()
         host_after = collect.cpu_boundary(identity)
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()
         after = frame(phase, 'done'); save(directory / 'phase-after.json', after)
@@ -249,6 +255,9 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         host_cpu = collect.cpu_delta(host_before, host_after)
         if host_cpu['errors']:
             raise ValueError('host CPU coverage invalid: ' + repr(host_cpu['errors']))
+        if profile_kind == 'cpu-leaf':
+            host_cpu.update(runner.foreign_cpu(ticks_before, ticks_after, harness_before, harness_after,
+                                               host_cpu['cpu_seconds'], ended - started))
         save(directory / 'host-cpu.json', host_cpu)
         result.update(application_cpu=delta, host_cpu=host_cpu, successful_operations=operations,
             application_cpu_seconds_per_success=delta['cpu_seconds'] / operations,
@@ -402,7 +411,8 @@ def main():
         'cpu': 'separate per-API-thread cpu-clock sampling with native DWARF stacks; no syscall probes; zero loss required',
         'cpu-leaf': 'per-API-thread cpu-clock leaf PCs without stacks; every API thread sampled; zero loss required',
     }
-    save(root / 'plan.json', {'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': version,
+    admission = {'host_admission': OUTSIDE_CPU_ADMISSION} if args.profile_kind == 'cpu-leaf' else {}
+    save(root / 'plan.json', {**admission, 'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': version,
         'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
         'profile_identity': identity_label,
         'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind in CPU_PROFILES else None,

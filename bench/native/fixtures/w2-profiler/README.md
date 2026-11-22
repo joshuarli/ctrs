@@ -53,8 +53,20 @@ block's receipt directory in the shell array `block_dirs` in run order.
 python3 bench/native/diagnostics/w2_observer_report.py "${block_dirs[@]}"
 ```
 
-The report checks fixed inputs, verified work, sample coverage and both
-host gates per leg. It applies the 5% budget to the paired median interval
-with CPU counter quantization included. Exit zero means all four numerical
-checks passed. Review the saved process, power and thermal snapshots before
+The report checks fixed inputs, verified work, sample coverage and host
+admission per leg. With `outside-engine-workload-cpu-v1`, work measured
+outside the engine and harness must stay at or below two host cores
+during each timed workload. The global gates still record busy hosts for
+review. Older receipts require both global gates to pass. Start and finish
+the batch with a quiet host outside the engine runs.
+
+The report applies the 5% budget to the paired median interval with CPU
+counter quantization included. Exit zero means all four numerical checks
+passed. Review the saved process, power and thermal snapshots before
 accepting the observer for attribution.
+
+The original confirmation's block 2, `w2-guest-client-cpu-leaf-20261122T094748-52c1`,
+failed the ctrs profiler-off post-workload gate. The gate flagged PID
+74836 as hot. The same PID and kernel start identity appear in the owned
+VM receipt and the workload CPU counters. The block remains invalid
+under its original plan.

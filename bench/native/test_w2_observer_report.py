@@ -69,3 +69,28 @@ class ObserverReportTests(unittest.TestCase):
         self.assertEqual(report["accepted_blocks"], 0)
         self.assertIn("orders must alternate", report["rejected_blocks"][0]["reason"])
         self.assertEqual(report["rejected_blocks"][1]["reason"], "duplicate block directory")
+
+    def test_new_host_admission_requires_aligned_outside_cpu(self):
+        block = self.blocks[0]
+        gate = block / "ctrs/off/after-gate.json"
+        save(gate, {"exit": 75})
+        self.assertEqual(observer.assess([block])["accepted_blocks"], 0)
+
+        file = block / "plan.json"
+        plan = observer.read_object(file)
+        plan["host_admission"] = observer.OUTSIDE_CPU_ADMISSION
+        save(file, plan)
+        self.assertEqual(observer.assess([block])["accepted_blocks"], 0)
+        for engine in observer.ENGINES:
+            for mode in observer.MODES:
+                file = block / engine / mode / "result.json"
+                row = observer.read_object(file)
+                row["host_cpu"] = {"errors": [], "foreign_cpu_cores": .5}
+                save(file, row)
+        self.assertEqual(observer.assess([block])["accepted_blocks"], 1)
+
+        row["host_cpu"]["foreign_cpu_cores"] = 2.01
+        save(file, row)
+        result = observer.assess([block])
+        self.assertEqual(result["accepted_blocks"], 0)
+        self.assertIn("outside-engine CPU receipt", result["rejected_blocks"][0]["reason"])

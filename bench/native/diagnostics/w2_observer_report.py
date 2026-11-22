@@ -8,12 +8,13 @@ import statistics
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from reporting import bootstrap_ci
+from reporting import FOREIGN_CORES, bootstrap_ci
 
 ENGINES = ("ctrs", "orbstack")
 MODES = ("off", "on")
 METRICS = {"application_cpu": "application_cpu_relative", "workload_wall": "workload_wall_relative"}
 BLOCKS = 10
+OUTSIDE_CPU_ADMISSION = "outside-engine-workload-cpu-v1"
 
 
 def read_object(path):
@@ -36,9 +37,16 @@ def measurements(directory, mode, plan):
                 "fixture_version", "profile_kind", "profile_identity", "client_image_sha256",
                 "client_source_sha256", "concurrency", "seed"))):
         raise ValueError(f"{directory} has invalid workload or cleanup evidence")
+    outside_cpu_admission = plan.get("host_admission") == OUTSIDE_CPU_ADMISSION
+    expected_gate_status = (0, 75) if outside_cpu_admission else (0,)
     for boundary in ("before", "after"):
-        if read_object(directory / f"{boundary}-gate.json").get("exit") != 0:
+        if read_object(directory / f"{boundary}-gate.json").get("exit") not in expected_gate_status:
             raise ValueError(f"{directory} failed its {boundary} host gate")
+    if outside_cpu_admission:
+        host_cpu = row.get("host_cpu") or {}
+        outside = host_cpu.get("foreign_cpu_cores")
+        if host_cpu.get("errors") != [] or not number(outside) or outside > FOREIGN_CORES:
+            raise ValueError(f"{directory} lacks a valid outside-engine CPU receipt within {FOREIGN_CORES} cores")
     if mode == "on":
         profile = row.get("cpu_profile") or {}
         if profile.get("status") != "ok" or profile.get("raw_event_coverage_checked") is not True:
@@ -66,6 +74,7 @@ def block_ratios(directory, index, expected_plan):
         raise ValueError("engine and mode orders must alternate from the declared opening block")
     if (plan.get("profile_kind") != "cpu-leaf" or plan.get("operations") != 50000
             or plan.get("requested_client_location") != "guest" or plan.get("concurrency") != 8
+            or plan.get("host_admission") not in (None, OUTSIDE_CPU_ADMISSION)
             or any(plan["observer_confirmation_budget"][key] != .05 for key in METRICS.values())):
         raise ValueError("expected the declared 50k guest leaf workload and 5% budgets")
     if expected_plan is not None and plan != expected_plan:
