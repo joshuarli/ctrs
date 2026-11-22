@@ -1148,6 +1148,26 @@ on both engines and the corresponding in-guest controls. Raw
 `host.jsonl` SHA-256
 `826585c7c0dda12be32023dbbb9e1c4757886b7d90e2c442b82cd5855c89a77f`.
 
+Use the signed `99db1aa` release, the pinned v6 API image and harness
+`8c1c25d` to carry the same controls into the engine trials. Run one
+installed-default admission pair for each of the twelve cells, with
+three verified 1 GiB transfers in every leg. Vary the three supported
+paths, both directions and one or four streams. Each leg must also
+verify the same byte count and digest on host and guest loopback.
+
+```sh
+python3 bench/native/runner.py baseline --case W13 --transfer-path "$transport" \
+  --direction "$direction" --streams "$streams" --size-bytes 1073741824 \
+  --repeats 3 --a ctrs --b orbstack --resource-lane installed-default \
+  --pairs 1 --pair-quiet-load 4 --max-pairs 2
+```
+
+For a ten-pair comparison, require every measured transfer in the
+admission pair to be at or below half the slower loopback capacity at
+the endpoints the path uses. Retain failed or contended trials and
+tool-limited results with their path and controls. The queue uses
+separate cohort invocations with `--pairs 10 --max-pairs 16` after admission.
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
