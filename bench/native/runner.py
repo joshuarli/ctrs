@@ -4338,9 +4338,11 @@ def main() -> int:
     p.add_argument("--lifecycle-clients", type=int, default=32)
     p.add_argument("--idle-seconds", type=float, default=30)
 
-    p = sub.add_parser("w8-baseline", description="Resource-matched resident W8 control using one derived artifact per pair. The owned ctrs daemon uses CTRS_IDLE_SECS=0; product defaults are unchanged.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v6/layout --ctrs-binary /path/to/signed/ctrs --pairs 10")
+    p = sub.add_parser("w8-baseline", description="Paired W8 pull and deploy using one shared derived artifact per pair.", epilog="Example: runner.py w8-baseline --layout /path/to/w8-portfolio-v6/layout --ctrs-binary /path/to/signed/ctrs --resource-lane installed-default --pairs 10")
     p.add_argument("--layout", type=Path, required=True, help="original pinned W8 v6 OCI source layout")
     p.add_argument("--ctrs-binary", type=Path, required=True, help="signed candidate ctrs binary")
+    p.add_argument("--resource-lane", choices=RESOURCE_LANES, default="matched",
+                   help="installed defaults or the matched resident control (default: matched, ctrs idle timeout disabled)")
     p.add_argument("--pairs", type=int, default=10, help="number of pairs (1 to 100)")
     p.add_argument("--under-load", action="store_true", help="run fixed background application work during pulls")
     p.add_argument("--seed", type=int, default=1, help="integer incorporated into unique per-pair seeds")
@@ -4429,6 +4431,8 @@ def main() -> int:
             ap.error("--pairs must be between 1 and 100")
         if args.cmd == "w8-baseline" and args.orbstack_storage_file and not args.diagnostic:
             ap.error("--orbstack-storage-file requires --diagnostic")
+        if args.cmd == "w8-baseline" and args.resource_lane == "installed-default" and "CTRS_IDLE_SECS" in os.environ:
+            ap.error("--resource-lane installed-default requires the default CTRS_IDLE_SECS environment")
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
             ap.error(f"{args.cmd} requires native ARM64 macOS")
         global CTRS_BIN

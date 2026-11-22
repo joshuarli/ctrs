@@ -389,7 +389,9 @@ from qualifying. This control uses matched resources and keeps the
 engines resident.
 
 Run the no-load and concurrent API controls as `w8-pull:cohort` and
-`w8-pull-under-load:cohort`.
+`w8-pull-under-load:cohort`. The installed-default counterparts are
+`w8-pull-installed-default:cohort` and
+`w8-pull-under-load-installed-default:cohort`.
 
 ### Rebuilt W12 workspace fixture
 

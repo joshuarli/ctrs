@@ -20,11 +20,12 @@ FIXTURE = reporting.W8_PAIRED_FIXTURE
 SCOPE = 'w8-whole-workflow-v1'
 
 
-def _warm_identity(result):
+def _warm_identity(result, *, allow_vm_rotation):
     processes = result.get('resources', {}).get('ownership', {}).get('required_processes', [])
-    owned = [p for p in processes if p['role'] != 'fixture-coordinator']
+    excluded = {'fixture-coordinator', 'vm'} if allow_vm_rotation else {'fixture-coordinator'}
+    owned = [p for p in processes if p['role'] not in excluded]
     if not owned:
-        raise ValueError('missing resident engine identity')
+        raise ValueError('missing warm engine identity')
     return sorted((p['pid'], p['role'], p['kernel_start_identity']) for p in owned)
 
 
@@ -119,12 +120,15 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     prepare = prepare or registry_variant.prepare_variant
     serve = serve or registry_portfolio.serve
     gate_fn = gate_fn or gate
+    resident = args.resource_lane == 'matched'
     contract = json.loads((runner.FIXTURES / 'w8-v6/portfolio.json').read_text())
     source = registry_portfolio.prepare_pinned_portfolio(args.layout, contract)
     run = 'w8-paired-' + secrets.token_hex(6)
     ctx = runner.RunContext(run)
-    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE, 'under_load': args.under_load,
-                           'comparison_lane': 'resource-matched-resident-control', 'ctrs_idle_seconds': 0}
+    ctx.workload_params = {'fixture_version': FIXTURE, 'resource_scope': SCOPE,
+                           'under_load': args.under_load, 'resource_lane': args.resource_lane}
+    if resident:
+        ctx.workload_params.update(comparison_lane='resource-matched-resident-control', ctrs_idle_seconds=0)
     ctx.provenance.update({'w8_source_contract_sha256': runner.sha256_file(runner.FIXTURES / 'w8-v6/portfolio.json'),
                            'w8_driver_sha256': runner.sha256_file(Path(__file__)),
                            'w8_pilot_sha256': runner.sha256_file(Path(pilot.__file__))})
@@ -133,7 +137,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
         'guest_initramfs_sha256', 'guest_data_sha256') if key in outputs})
     pilot.save(ctx.results_dir / 'plan.json', {'pairs': args.pairs, 'seed': args.seed,
         'under_load': args.under_load, 'diagnostic': args.diagnostic, 'fixture_version': FIXTURE,
-        'resource_scope': SCOPE, 'source_layout': str(args.layout), 'provenance': ctx.provenance,
+        'resource_scope': SCOPE, 'resource_lane': args.resource_lane,
+        'source_layout': str(args.layout), 'provenance': ctx.provenance,
         'orbstack_storage_files': [str(path.absolute()) for path in storage_files],
         'order': 'AB/BA', 'qualification_eligible': False})
     print(f'results: {ctx.jsonl}', flush=True)
@@ -141,13 +146,14 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
     identities = {}
     previous_digests, previous_diff_ids = set(), set()
     previous_idle = os.environ.get('CTRS_IDLE_SECS')
-    os.environ['CTRS_IDLE_SECS'] = '0'
+    if resident:
+        os.environ['CTRS_IDLE_SECS'] = '0'
     failed = False
     completed = 0
     finished = False
     stopped_reason = None
     try:
-        engines = {name: engine_factory(name, run) for name in ('ctrs', 'orbstack')}
+        engines = {name: engine_factory(name, run, resource_lane=args.resource_lane) for name in ('ctrs', 'orbstack')}
         for pair in range(1, args.pairs + 1):
             seed = hashlib.sha256(f'{run}:{args.seed}:{pair}'.encode()).digest()
             layout = ctx.results_dir / f'pair-{pair}-layout'
@@ -174,7 +180,7 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                             raise RuntimeError('initial host gate busy; scored trial refused')
                         result = measure(engine, directory, f'{run}-p{pair:03d}', contract, portfolio, receipt, layout, server, args.under_load)
                         if name == 'ctrs' and engine.proc is None:
-                            raise ValueError('resident control requires an owned daemon with verified idle policy')
+                            raise ValueError('W8 comparison requires an owned ctrs daemon with verified launch settings')
                         rec['engine_server_version'] = runner.safe_version(engine)
                         info = runner.safe_engine_info(engine)
                         rec['resources'] = resource_metrics(result)
@@ -190,9 +196,10 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                         if storage_files:
                             ok = ok and rec['resources']['allocation'].get('status') == 'ok'
                         if ok:
-                            current = _warm_identity(result)
+                            current = (_warm_identity(result, allow_vm_rotation=name == 'ctrs' and not resident),
+                                       info['ncpu'], info['mem_total_bytes'])
                             if identities.setdefault(name, current) != current:
-                                raise ValueError('resident engine identity changed between trials')
+                                raise ValueError('warm engine identity changed or resource budget drifted between trials')
                         rec['correctness'] = {'ok': ok, 'checks': {'workload_and_resources': ok}}
                         rec['validation_errors'].extend(result.get('errors', []))
                         if ok:
@@ -253,7 +260,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                     'cleanup_error': cleanup_error,
                     'timing_eligible': finished and not failed and not args.diagnostic, 'qualification_eligible': False})
             finally:
-                if previous_idle is None:
-                    os.environ.pop('CTRS_IDLE_SECS', None)
-                else:
-                    os.environ['CTRS_IDLE_SECS'] = previous_idle
+                if resident:
+                    if previous_idle is None:
+                        os.environ.pop('CTRS_IDLE_SECS', None)
+                    else:
+                        os.environ['CTRS_IDLE_SECS'] = previous_idle

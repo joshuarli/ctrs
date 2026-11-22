@@ -232,7 +232,12 @@ def registry(lane='macos-arm64') -> list[Workload]:
           for name, purpose, flags in (
               ("w8-pull:cohort", "pinned portfolio pull and deploy from a local registry", ()),
               ("w8-pull-under-load:cohort", "pinned portfolio pull and deploy with concurrent API work",
-               ("--under-load",)))),
+               ("--under-load",)),
+              ("w8-pull-installed-default:cohort", "pull and deploy using installed engine defaults",
+               ("--resource-lane", "installed-default")),
+              ("w8-pull-under-load-installed-default:cohort",
+               "pull and deploy with concurrent API work using installed engine defaults",
+               ("--resource-lane", "installed-default", "--under-load")))),
         Workload("holdout", "full", "holdout", "Gitea + Postgres app never tuned against",
                  600, 2, "estimated", ENGINES,
                  argv=(sys.executable, str(RUNNER), "holdout", "--engines", "ctrs,orbstack"), report=False),

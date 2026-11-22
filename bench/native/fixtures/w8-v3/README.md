@@ -117,10 +117,11 @@ The sampled footprint is not a continuous peak; CLI and sampler resources,
 active storage allocation, metadata qualification and the full matrix remain
 open. This is a pilot, not qualification.
 
-This is a resource-matched resident control. Only the owned ctrs benchmark daemon
-uses `CTRS_IDLE_SECS=0`, preventing the normal 60-second idle shutdown between
-pairs. The caller's environment is restored, adopted daemons with unknown idle
-policy are refused, and changed engine process identities invalidate the batch.
-Product idle defaults, the installed-default lane, and idle/wake/reclaim cells
-remain separate. Diagnostic batches return zero for correct functional work;
-their report still rejects all timings. Legacy W8 records remain historical only.
+The default `--resource-lane matched` uses the resident control. The owned
+ctrs daemon uses `CTRS_IDLE_SECS=0`, keeping the VM resident between pairs.
+Set `--resource-lane installed-default` to compare the normal resource and idle
+settings. Each leg primes the VM before sampling. A ctrs VM may exit between
+legs in this lane. Sampling verifies process identity throughout each leg,
+and both engines must retain the same daemon identity and resource budget
+across the cohort. Diagnostic batches return zero for correct functional work
+and have invalid timings. Legacy W8 records remain historical only.

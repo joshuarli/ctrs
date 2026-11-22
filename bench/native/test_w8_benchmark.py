@@ -1,6 +1,9 @@
 import json
 import hashlib
 import copy
+import contextlib
+import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,7 +105,7 @@ class PairedBatch(unittest.TestCase):
                           {'pid': 1, 'role': 'daemon', 'kernel_start_identity': 2}]}}}
             measure = mock.Mock(return_value=result)
             server = mock.Mock()
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=True)
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=True, resource_lane='matched')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.runner, 'FIXTURES', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
@@ -110,7 +113,7 @@ class PairedBatch(unittest.TestCase):
                  mock.patch.object(w8.runner, 'safe_version', return_value='v'), \
                  mock.patch.object(w8.runner, 'safe_engine_info', return_value={'ncpu': 1, 'mem_total_bytes': 1}), \
                  mock.patch.object(w8, 'validate_receipt', wraps=w8.validate_receipt) as validate:
-                self.assertEqual(w8.run_batch(args, engine_factory=lambda *a: engine, prepare=prepare_fake,
+                self.assertEqual(w8.run_batch(args, engine_factory=lambda *a, **kw: engine, prepare=prepare_fake,
                     measure=measure, serve=lambda *a: server, gate_fn=lambda *a: True), 0)
             validate.assert_called_once()
             self.assertEqual(len(validate.call_args.args[0]['layers']), 1)
@@ -125,12 +128,12 @@ class PairedBatch(unittest.TestCase):
                 receipt = prepare_fake(source, contract, dest, seed)
                 receipt['layers'].pop()
                 return receipt
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False)
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout') as prepare_layout:
                 with self.assertRaisesRegex(ValueError, 'incomplete receipt'):
-                    w8.run_batch(args, engine_factory=lambda *a: engine, prepare=invalid, measure=measure)
+                    w8.run_batch(args, engine_factory=lambda *a, **kw: engine, prepare=invalid, measure=measure)
             measure.assert_not_called()
             prepare_layout.assert_not_called()
             status = json.loads(next(root.glob('*/status.json')).read_text())
@@ -155,14 +158,24 @@ class PairedBatch(unittest.TestCase):
                 self.assertEqual(runner.main(), 0)
             install.assert_called_once_with()
 
+    def test_installed_default_refuses_an_idle_override_before_launch(self):
+        argv = ['runner.py', 'w8-baseline', '--layout', '/unused', '--ctrs-binary', '/unused',
+                '--resource-lane', 'installed-default']
+        with mock.patch.object(sys, 'argv', argv), mock.patch.dict(w8.os.environ, CTRS_IDLE_SECS='0'), \
+                contextlib.redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit) as exit_info:
+            w8.runner.main()
+        self.assertEqual(exit_info.exception.code, 2)
+        self.assertIn('default CTRS_IDLE_SECS', stderr.getvalue())
+
     def test_shared_inputs_order_retention_and_reporting(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             engines = {}
             calls = []
             class Engine:
-                def __init__(self, name, run):
+                def __init__(self, name, run, *, resource_lane):
                     self.name = name
+                    self.resource_lane = resource_lane
                     self.stops = 0
                     self.proc = object()
                     engines[name] = self
@@ -195,7 +208,8 @@ class PairedBatch(unittest.TestCase):
             def prepare(source, contract, dest, seed):
                 return prepare_fake(source, contract, dest, seed)
             def measure(engine, directory, run, contract, portfolio, receipt, layout, server, under_load):
-                self.assertEqual(w8.os.environ['CTRS_IDLE_SECS'], '0')
+                self.assertEqual(w8.os.environ.get('CTRS_IDLE_SECS'),
+                                 '0' if engine.resource_lane == 'matched' else None)
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
                 processes = [{'pid': 1 if engine.name == 'ctrs' else 2,
                               'role': 'daemon', 'kernel_start_identity': 100}]
@@ -206,7 +220,7 @@ class PairedBatch(unittest.TestCase):
                                 'counter_methods': ['proc_pid_rusage'],
                                 'footprint_method': 'rusage_info_v0.ri_phys_footprint',
                                 'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
-            args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False)
+            args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False, resource_lane='matched')
             with mock.patch.object(w8.runner, 'RunContext', Context), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
@@ -271,12 +285,39 @@ class PairedBatch(unittest.TestCase):
             self.assertIn('identity changed', ''.join(contexts[-1].rows[-1]['validation_errors']))
             self.assertEqual(w8.os.environ.get('CTRS_IDLE_SECS'), previous_idle)
 
+            def rotating_vm(*arguments):
+                result = measure(*arguments)
+                if arguments[0].name == 'ctrs':
+                    result['resources']['ownership']['required_processes'].append(
+                        {'pid': 10 + len(calls), 'role': 'vm', 'kernel_start_identity': 200 + len(calls)})
+                return result
+
+            args.resource_lane, args.diagnostic = 'installed-default', False
+            with (
+                mock.patch.dict(w8.os.environ),
+                mock.patch.object(w8.runner, 'RunContext', Context),
+                mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio',
+                                  side_effect=lambda layout, contract: source_for(contract)),
+                mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()),
+                mock.patch.object(w8.runner, 'safe_version', return_value='v'),
+                mock.patch.object(w8.runner, 'safe_engine_info', side_effect=lambda engine:
+                                  {'ncpu': 4, 'mem_total_bytes': 100 if engine.name == 'ctrs' else 1000}),
+            ):
+                w8.os.environ.pop('CTRS_IDLE_SECS', None)
+                code = w8.run_batch(args, engine_factory=Engine, measure=rotating_vm, prepare=prepare,
+                                    serve=lambda *a: Server(), gate_fn=lambda *a: True)
+            self.assertEqual(code, 0)
+            installed = contexts[-1].rows
+            self.assertTrue(all(r['workload_params']['resource_lane'] == 'installed-default' for r in installed))
+            self.assertTrue(all('ctrs_idle_seconds' not in r['workload_params'] for r in installed))
+            self.assertEqual(reporting.analyze(installed)['cohorts'][0]['valid_pairs'], 2)
+
     def test_failed_leg_is_retained_and_ctrs_is_stopped(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             instances = {}
             class Engine:
-                def __init__(self, name, run):
+                def __init__(self, name, run, *, resource_lane):
                     self.name, self.stops = name, 0
                     self.proc = object()
                     instances[name] = self
@@ -285,7 +326,7 @@ class PairedBatch(unittest.TestCase):
                 def serve_forever(self, **kwargs): pass
                 def shutdown(self): pass
                 def server_close(self): pass
-            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False)
+            args = SimpleNamespace(layout=root, seed=1, pairs=1, under_load=False, diagnostic=False, resource_lane='matched')
             with mock.patch.object(w8.runner, 'RESULTS', root), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_layout', return_value=object()), \
