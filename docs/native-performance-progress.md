@@ -1694,6 +1694,20 @@ allocation change. Total allocation rose at every boundary and grew by
 and free extents on this private disk after cleanup, then test whether
 guest trim reclaims the host bytes.
 
+#### W11 guest storage attribution
+
+Use the signed `99db1aa` release and the `ae96711` mixed pilot with a
+six-minute work window per engine and 32 seconds of post-cleanup observation.
+Take read-only samples immediately before and after exact row cleanup.
+Record `pg_database_size`, the items heap and total relation sizes,
+`pg_stat_wal.wal_bytes`, and the live and dead tuple estimates. Read
+`df -Pk "$PGDATA"`, `du -sk "$PGDATA"` and `du -sk "$PGDATA/pg_wal"`
+inside the owned database container. Verify the ctrs mount resolves to
+`/dev/vda` and retain guest device and mount identity in both legs.
+Match at least six exact cycles to the host backing observations by cycle
+index. The samples add work to cleanup and serve as diagnostic evidence.
+The trial leaves the existing trim, database, and durability policies in use.
+
 Use a stopped APFS clone of that private store for trim. Mount a new probe
 volume and verify its ext4 mount resolves to the guest data disk `/dev/vda`.
 Use `storage_trim_guest.py` to fsync a sentinel, sample guest usage and issue
