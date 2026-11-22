@@ -47,8 +47,10 @@ OrbStack's). Never pool lanes.
 W12 v2 full-bind completed ten installed-default pairs on 2026-11-22.
 The workflow ratio was 1.2999 [1.2883, 1.3223], with measured CPU at
 1.1630 [1.1593, 1.1725] and sampled physical footprint at 0.3606
-[0.3455, 0.3871]. The v2 mixed, all-volume and watch comparisons remain
-open. The table below retains W12 timing history from the previous fixture.
+[0.3455, 0.3871]. The v2 mixed and all-volume workflow comparisons remain
+open. The bind watch cohort is complete, and the named-volume watch
+cohort is pending. The table retains W12 timing history from the previous
+workspace fixture.
 [Current cohort](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 
 | ID | Workflow | Spec | Impl | Functional | Compared | Notes |
@@ -96,33 +98,46 @@ Mbps only. It is not reusable as a verified-transfer metric.
 
 ## Ranked OrbStack deficits (this host)
 
-Current ranking (2026-11-20, guest `e217587c…`): [Ranked measured
-deficits](evidence/native-w12-w13-2026-11-18.md#ranked-measured-deficits).
-States are kept apart: a **loss**, **inconclusive**, **tool-limited**
-(the transfer tool, not the engine, may bound the result), **incomplete**
-(a metric that omits part of the engine's cost, such as host-kernel NAT
-networking) and **qualified** (none yet).
+The November 22 installed-default cohorts identify these losses. The
+ordering gives priority to user-visible time, then build memory and engine
+CPU. See the workload rows for the paired intervals, other metrics and
+qualification gaps.
 
-1. W12 v2 full-bind workflow 1.300× and measured CPU 1.163×. The Mac
-   share's offline install and verification walk account for about 71%
-   of the workflow gap. [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
-2. W13-overlap CPU loss 1.097× at the 9-vCPU default. W2 p99 and request
-   rate are inconclusive in the current cohort.
-   [Evidence](native-performance-progress.md#installed-default-w13-overlap-cohort)
-3. CPU-only losses: W12-watch 1.07×, published-port upload CPU/GiB 1.08×,
-   W14 fresh ~1.02–1.15×; NAT-path CPU is incomplete.
-4. Guest→host bulk transfer: the 5–7× losses are closed to the tool's
-   ceiling (0.72–0.94, tool-limited); container→Mac download 1.06
-   inconclusive.
-5. W6 sampled peak physical footprint 1.36× loss in the resumed
-   installed-default cohort. The VZ helper retained the allocation
-   across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
-6. W7 sampled peak physical footprint is inconclusive and CPU accounting
-   is incomplete. The offline W7 fixtures and the W4 and W8 cohorts still
-   need native evidence. W5 has ten admitted pairs, with bind and volume
-   p95 each required for frozen qualification. W10 has API, database
-   and queue pairs, with whole-engine parity pending on an isolated
-   OrbStack target.
+1. **W12 full-bind workflow.** Median paired workflow time was 1.300×
+   and measured engine CPU was 1.163×. The offline install and verification
+   walk account for about 71% of the workflow time gap. The mixed and
+   all-volume cohorts and inode-cap probe will test the bind mount's cost.
+   [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
+2. **W10 API recovery.** Time to the first exact read was 1.239×. The
+   gap accrued after the start command returned. Trace the
+   refusal cache before attributing the delay to it.
+   [Evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
+3. **W6 uncached build memory.** Sampled peak physical footprint was
+   1.364×. The VZ helper retained the allocation across builds. Guest
+   active, cache and balloon counters can test the source of the retention.
+   [Evidence](native-performance-progress.md#installed-default-w6-cohort)
+4. **W12 bind watch and guest-direct W2 CPU.** Whole-trial watch CPU was
+   1.186×, with the excess concentrated in setup. W2 CPU per verified
+   request was 1.131× on the guest-direct path. Both cohorts had zero ctrs
+   host NAT connections. The watch setup breakdown and W2 observer
+   overhead check are pending.
+   [W12 evidence](native-performance-progress.md#installed-default-w12-bind-watch-cohort)
+   [W2 evidence](native-performance-progress.md#installed-default-w2-container-to-container-fixed-work-cohort)
+5. **CPU losses with incomplete host accounting.** Measured engine CPU
+   per successful operation was 1.302× for W10 database recovery, 1.250×
+   for W2 published-port fixed work and 1.167× for W10 API recovery.
+   Total measured engine CPU was 1.097× for W13 overlap. These counters
+   omit ctrs host NAT CPU.
+   [W10 database evidence](native-performance-progress.md#installed-default-w10-database-recovery-cohort)
+   [W2 published-port evidence](native-performance-progress.md#installed-default-w2-fixed-work-cohort)
+   [W10 API evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
+   [W13 evidence](native-performance-progress.md#installed-default-w13-overlap-cohort)
+
+W11 exceeded the short resource-growth budgets on both engines. The
+12-hour reliability gate remains open. W7 peak footprint is inconclusive,
+and earlier guest-to-host bulk transfer was tool-limited. The
+[November 20 observations](evidence/native-w12-w13-2026-11-18.md#ranked-measured-deficits)
+retain the previous workload versions and their limitations.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.
