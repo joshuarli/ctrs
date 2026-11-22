@@ -2375,13 +2375,36 @@ def trial_w4(ctx, engine: Engine, state: str,
     timed = fixture_version == W4_LATENCY_VERSION
     if queue_interruption is not None and (not timed or len(workers) != 1):
         raise ValueError("queue interruption requires one timed W4 worker condition")
+    if queue_interruption is not None:
+        rec["workload_params"]["pinned_recovery_inputs"] = True
     image = image_ref or (W4_LATENCY_IMAGE if timed else "np-w4-events:v2")
     label = f"dev.ctrs.campaign.run={ctx.run_id}"
     sampler = trace = None
     owned_containers, owned_volumes = [], []
     try:
         engine.ensure_up()
-        engine.sh(["image", "inspect", image])
+        if queue_interruption is None:
+            engine.sh(["image", "inspect", image])
+        else:
+            if engine.sh(["image", "inspect", redis_ref], timeout=30, check=False).returncode:
+                engine.sh(["pull", redis_ref], timeout=180)
+            images = json.loads(engine.sh(["image", "inspect", image, redis_ref], timeout=30).stdout)
+            worker, redis = images
+            inputs = {}
+            for role, item in (("worker", worker), ("redis", redis)):
+                layers = item["RootFS"]["Layers"]
+                if (item.get("Os") != "linux" or item.get("Architecture") != "arm64"
+                        or not re.fullmatch(r"sha256:[a-f0-9]{64}", item.get("Id", ""))
+                        or not isinstance(layers, list) or not layers
+                        or not all(isinstance(layer, str) and re.fullmatch(r"sha256:[a-f0-9]{64}", layer)
+                                   for layer in layers)):
+                    raise ValueError(f"W10 queue {role} image identity is incomplete")
+                config = item["Config"]
+                inputs[role] = {"diff_ids": layers, "config": {
+                    **{key: config.get(key) or [] for key in ("Entrypoint", "Cmd", "Env")},
+                    **{key: config.get(key) or "" for key in ("User", "WorkingDir")}}}
+            rec["paired_inputs"] = {"images": inputs, "redis_reference": redis_ref}
+            image, redis_ref = worker["Id"], redis["Id"]
         engine.sh(["network", "create", "--label", label, net])
         mounts = []
         persistence = ["--appendonly", "no"]
@@ -2883,6 +2906,7 @@ def trial_w10(ctx, engine: Engine, state: str,
     override = trial_dir / "pinned-compose.json"
     checks = rec["correctness"]["checks"]
     rec["metrics"].update(fixture_version=fixture_version, interrupt_service=interrupt_service)
+    rec["workload_params"]["pinned_recovery_inputs"] = True
     sampler = trace = None
     stop = threading.Event()
     attempts, probes, timeline = [], [], {}
@@ -2936,6 +2960,7 @@ def trial_w10(ctx, engine: Engine, state: str,
             raise ValueError("initial recovery daemon was not launched by this run")
         layout = WORK / "inputs/w8-portfolio-v6/layout" if crash_engine else None
         _, rec["inputs"] = prepare_pinned_stack(engine, override, layout=layout)
+        rec["paired_inputs"] = {key: rec["inputs"][key] for key in ("portfolio_sha256", "seed_sha256")}
         stack_owned = True
         if not crash_engine:
             sampler, trace = start_sampler(engine, trial_dir)

@@ -122,8 +122,9 @@ class PersistentProbeTests(unittest.TestCase):
 
                 engine.sh.side_effect = effects
                 identities = [({'daemon': {'pid': 1}}, (1, 2)), ({'daemon': {'pid': 2}}, (1, 2))]
+                inputs = {'portfolio_sha256': 'portfolio', 'seed_sha256': 'seed'}
                 with patch.object(runner, 'free_port', return_value=server.server_port), \
-                        patch.object(runner, 'prepare_pinned_stack', return_value=({}, {'images': {}})) as provision, \
+                        patch.object(runner, 'prepare_pinned_stack', return_value=({}, inputs)) as provision, \
                         patch.object(runner, 'wait_health', return_value=(0, {})), \
                         patch.object(runner, 'start_sampler', return_value=(None, None)), \
                         patch.object(runner, 'resource_phase', return_value=nullcontext()), \
@@ -134,6 +135,7 @@ class PersistentProbeTests(unittest.TestCase):
                     rec = runner.trial_w10(FixtureContext(tmp), engine, 'warm', duration=1.4, concurrency=2,
                                            write_ratio=.5, kill_at=.4, down_for=.2, interrupt_service=interrupt_service)
                 self.assertTrue(rec['correctness']['ok'], rec)
+                self.assertEqual(rec['paired_inputs'], inputs)
                 self.assertEqual(provision.call_args.kwargs['layout'],
                                  runner.WORK / 'inputs/w8-portfolio-v6/layout' if interrupt_service == 'engine' else None)
                 for call in engine.compose.call_args_list:

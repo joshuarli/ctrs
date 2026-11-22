@@ -40,6 +40,7 @@ trial's Compose project. Both conditions use the preinstalled common
 portfolio and the same persistent read and write workload. Compose uses
 the verified image IDs with builds and pulls disabled. Use `--duration`
 greater than the planned outage and warmup.
+The reporter checks the portfolio and SQL seed receipts on both legs.
 
 ```sh
 python3.14 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
@@ -97,6 +98,9 @@ Run `prepare` to build the W4 v4 image. Queue mode uses `--concurrency`
 workers. Here `--duration` is the restart verification deadline in seconds
 and the planned Redis downtime is three seconds. The API/database workload
 mix options apply to those two conditions.
+The queue legs launch the inspected local image IDs. The reporter requires
+the same ordered worker and Redis DiffIDs and launch defaults for both
+engines.
 
 ```sh
 python3.14 bench/native/pyramid.py run --name w10-recovery:cohort \

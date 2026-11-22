@@ -25,7 +25,7 @@ class Context:
 
     def new_record(self, *args):
         return {'metrics': {}, 'correctness': {'ok': True, 'checks': {}},
-                'resources': {}, 'validation_errors': []}
+                'resources': {}, 'workload_params': {}, 'validation_errors': []}
 
 
 class Engine:
@@ -61,6 +61,11 @@ class W4References(unittest.TestCase):
     def test_w10_queue_verifies_recovered_backlog_before_workers_and_measures_fresh_work(self):
         queue_id = "a" * 64
         pending = [{"job": i, "clock": "guest", "enqueued_ns": i} for i in range(200)]
+        images = [
+            {"Id": "sha256:" + digit * 64, "Os": "linux", "Architecture": "arm64",
+             "RootFS": {"Layers": ["sha256:" + layer * 64]}, "Config": {"Cmd": [role]}}
+            for digit, layer, role in (("b", "d", "worker"), ("c", "e", "redis-server"))
+        ]
 
         class PersistentQueue(Engine):
             def __init__(self, lose_backlog=False):
@@ -72,6 +77,8 @@ class W4References(unittest.TestCase):
 
             def sh(self, args, **kwargs):
                 self.calls.append(args)
+                if args[:2] == ["image", "inspect"]:
+                    return Result(json.dumps(images if len(args) == 4 else [images[1]]))
                 if args[:2] == ["run", "-d"] and "redis-server" in args:
                     self.owned[args[args.index("--name") + 1]] = "container"
                     return Result(queue_id)
@@ -114,12 +121,16 @@ class W4References(unittest.TestCase):
             self.assertEqual(outcome["metrics"]["retries_until_recovery"], 1)
             self.assertEqual(outcome["metrics"]["queue_p99_ms_at_backlog"], 50)
             self.assertEqual(outcome["metrics"]["recovered_p99_ms"], 1)
+            self.assertTrue(outcome["workload_params"]["pinned_recovery_inputs"])
+            self.assertEqual(outcome["paired_inputs"]["images"]["worker"]["diff_ids"],
+                             images[0]["RootFS"]["Layers"])
             self.assertEqual(lost.snapshots, 2)
             self.assertFalse(wrong["correctness"]["ok"])
             self.assertNotIn("recovered_p99_ms", wrong["metrics"])
             self.assertFalse(any(cmd[0] == "run" and "worker" in cmd for cmd in lost.calls))
             for queue_engine in (engine, lost):
                 redis = next(cmd for cmd in queue_engine.calls if "redis-server" in cmd)
+                self.assertIn(images[1]["Id"], redis)
                 self.assertIn("--appendfsync", redis)
                 self.assertEqual(redis[redis.index("--appendfsync") + 1], "always")
                 volume = redis[redis.index("-v") + 1].removesuffix(":/data")

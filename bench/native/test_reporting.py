@@ -505,6 +505,17 @@ class ReportingTests(unittest.TestCase):
         metrics = reporting.analyze(records)["cohorts"][0]["metrics"]
         self.assertNotIn("load_rps", [m["metric"] for m in metrics])
 
+    def test_recovery_compares_only_matching_input_receipts(self):
+        records = pair(case="W10", metric="recovery_s")
+        for record in records:
+            record["workload_params"]["pinned_recovery_inputs"] = True
+            record["paired_inputs"] = {"images": {"worker": {"diff_ids": ["same"]}}}
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 1)
+        records[1]["paired_inputs"]["images"]["worker"]["diff_ids"] = ["different"]
+        cohort = reporting.analyze(records)["cohorts"][0]
+        self.assertEqual(cohort["valid_pairs"], 0)
+        self.assertEqual(cohort["rejections"][0]["reason"], "paired inputs differ or are missing")
+
     def test_recovery_cpu_is_phase_cost_per_verified_completion(self):
         for target in ("api", "db", "queue"):
             with self.subTest(target=target):
