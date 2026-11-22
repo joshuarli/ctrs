@@ -58,6 +58,26 @@ def metric_result(report, metric="wall_seconds", cohort=0):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_fixed_rate_report_attributes_late_slots_even_on_rejected_trials(self):
+        records = pair(case="W2")
+        for record in records:
+            record["workload_params"].update(request_rate=250, concurrency=2, operations=5)
+            record["metrics"].update(fixture_version="w2-v3.2-fixed-rate", request_rate=250,
+                                     schedule_lag_budget_ms=10, late_requests=2,
+                                     slots=[{"slot": index, "start_lag_ms": start,
+                                             "scheduled_latency_ms": completion}
+                                            for index, (start, completion) in enumerate(
+                                                ((0, 21), (0, 2), (13, 14), (11, 12), (6, 7)))])
+        records[1]["correctness"]["ok"] = False
+        report = reporting.analyze(records)
+        cohort = report["cohorts"][0]
+        self.assertEqual(cohort["valid_pairs"], 0)
+        self.assertEqual(cohort["fixed_rate_lateness"][1]["counts"], {"late": 2, "blocked": 1, "other": 1})
+        self.assertIn("| 1 | orbstack | 2 | 1 | 1 |", reporting.render_markdown(report))
+        records[1]["metrics"]["slots"][2]["slot"] = 1
+        cohort = reporting.analyze(records)["cohorts"][0]
+        self.assertIsNone(cohort["fixed_rate_lateness"][1]["counts"])
+
     def test_pinned_w2_requires_matching_input_receipts(self):
         records = pair(case="W2")
         for record in records:

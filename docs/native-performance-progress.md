@@ -382,8 +382,7 @@ loss persists with zero ctrs host NAT connections. Median workload-phase
 engine CPU was 39.19 s on ctrs and 34.54 s on OrbStack, including the
 in-guest client on both engines. The API cgroup recorded medians of 24.10 s
 and 19.98 s including counter-reader execution. These process totals
-leave the CPU contribution of each transport unresolved. The paired
-fixed-offered-rate conditions remain pending.
+leave the CPU contribution of each transport unresolved.
 
 ```sh
 export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
@@ -393,6 +392,52 @@ python3 bench/native/reporting.py --match base-20261122T091635-df7a
 
 `trials.jsonl` SHA-256
 `2ddff2311be62f118080899d69f8c798d90babb77a849000101e0abd3b744899`.
+
+### Installed-default W2 published-port fixed offered rate
+
+Run `base-20261122T093101-7063` used the same clean source and artifacts
+as the guest-direct fixed-work cohort. The pinned v3.2 client scheduled
+10,000 operations at 500 requests/s across four serial HTTP connections.
+All four legs completed the exact work with zero request errors and
+verified every persisted write. The two ctrs legs met the 10 ms start-lag
+budget. OrbStack had 53 late slots in pair 1 and 41 in pair 2. The runner
+stopped at the predeclared two-consecutive-invalid-pair rule, leaving zero
+valid pairs and no paired latency, CPU or footprint estimate.
+
+In the two OrbStack legs, 51 of 53 and 38 of 41 late slots had an in-flight
+predecessor on the same connection when the slot's lateness budget expired.
+Each connection receives a slot every 8 ms. The breakdown locates backlog
+at the connection and leaves the source of the initiating delays open.
+The maximum outside-engine CPU during load was 0.76 core.
+
+```sh
+python3 bench/native/pyramid.py run --name w2-published-port-fixed-offered-rate:cohort
+python3 bench/native/reporting.py --match base-20261122T093101-7063
+```
+
+`trials.jsonl` SHA-256
+`036489f606816c399d038af754d2dd220313cd840fcecc3116bd396f4d3df7ec`.
+
+### Installed-default W2 container-to-container fixed offered rate
+
+Run `base-20261122T093306-1b10` used the same pinned workload, schedule
+and artifacts through an owned peer on the application network. All four
+legs completed all 10,000 operations, verified the exact persisted writes
+and recorded zero request errors. There were zero ctrs host NAT connections.
+The maximum outside-engine CPU during the workload was 0.64 core.
+
+OrbStack had 8 and 19 late slots, and ctrs had 0 and 1, in pairs 1 and 2
+respectively. The previous request on the same worker was still in flight
+at the lateness deadline for all 28 late slots. The stop rule fired after
+pair 2. The cohort has zero valid pairs and no paired performance estimate.
+
+```sh
+python3 bench/native/pyramid.py run --name w2-container-to-container-fixed-offered-rate:cohort
+python3 bench/native/reporting.py --match base-20261122T093306-1b10
+```
+
+`trials.jsonl` SHA-256
+`231f577b8eeb6bdaf972c8479bb0e3b95813d49569ce4cacde4eca62289982a1`.
 
 ### Installed-default W13 overlap cohort
 

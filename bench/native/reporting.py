@@ -326,6 +326,36 @@ def candidate_configuration_issue(current: dict, candidate: dict) -> str | None:
     return "memory candidate did not apply the requested VM ceiling at fixed vCPU count"
 
 
+def _fixed_rate_lateness(record: dict) -> dict | None:
+    params = record.get("workload_params", {})
+    metrics = record.get("metrics", {})
+    rate = params.get("request_rate")
+    concurrency = params.get("concurrency")
+    operations = params.get("operations")
+    budget = metrics.get("schedule_lag_budget_ms")
+    slots = metrics.get("slots")
+    if (metrics.get("fixture_version") != "w2-v3.2-fixed-rate"
+            or not _number(rate) or rate <= 0 or rate != metrics.get("request_rate")
+            or type(concurrency) is not int or concurrency < 1
+            or type(operations) is not int or operations < 1
+            or not _number(budget) or budget <= 0
+            or not isinstance(slots, list) or len(slots) != operations):
+        return None
+    for index, slot in enumerate(slots):
+        if (not isinstance(slot, dict) or type(slot.get("slot")) is not int or slot["slot"] != index
+                or not _number(start := slot.get("start_lag_ms")) or start < 0
+                or not _number(completion := slot.get("scheduled_latency_ms")) or completion < start):
+            return None
+    worker_interval_ms = 1000 * concurrency / rate
+    late = [index for index, slot in enumerate(slots) if slot["start_lag_ms"] > budget]
+    if type(metrics.get("late_requests")) is not int or len(late) != metrics["late_requests"]:
+        return None
+    blocked = sum(index >= concurrency
+                  and slots[index - concurrency]["scheduled_latency_ms"] > worker_interval_ms + budget
+                  for index in late)
+    return {"late": len(late), "blocked": blocked, "other": len(late) - blocked}
+
+
 def _analyze_cohort(identity: dict, records: list[dict],
                     sides: tuple[str, str] = ("ctrs", "orbstack"),
                     side_of=None,
@@ -347,6 +377,11 @@ def _analyze_cohort(identity: dict, records: list[dict],
               "metrics": [], "metadata_gaps": []}
     if identity['case'] in ('W13', 'W14') and not verified_transfer:
         result["metadata_gaps"].append("paired_inputs (historical: image chosen by repository name, not verified)")
+    if identity["case"] == "W2" and isinstance(params, dict) and params.get("request_rate") is not None:
+        result["fixed_rate_lateness"] = [
+            {"pair_id": row.get("pair_id"), "engine": side_of(row), "counts": _fixed_rate_lateness(row)}
+            for row in records
+        ]
     for side in sides:
         rows = [r for r in records if side_of(r) == side]
         result["engines"][side] = {
@@ -686,6 +721,16 @@ def render_markdown(report: dict) -> str:
         if cohort["rejections"]:
             lines += ["", "Rejected observations (visible, never successes):", ""]
             lines += [f"- Pair {item['pair_id']}: {item['reason']}." for item in cohort["rejections"]]
+        if cohort.get("fixed_rate_lateness"):
+            lines += ["", "Fixed-rate lateness includes all trials. A slot was blocked when the same",
+                      "worker's previous request was still in flight at the slot's lateness deadline.", "",
+                      "| Pair | Engine | Late slots | Blocked | Other late slots |",
+                      "| ---: | --- | ---: | ---: | ---: |"]
+            for row in cohort["fixed_rate_lateness"]:
+                counts = row["counts"]
+                values = (f"{counts['late']} | {counts['blocked']} | {counts['other']}"
+                          if counts is not None else "unavailable | unavailable | unavailable")
+                lines.append(f"| {row['pair_id']} | {row['engine']} | {values} |")
         if cohort.get("note"):
             lines += ["", cohort["note"]]
         if cohort["metrics"]:
