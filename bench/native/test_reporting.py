@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import reporting
 
@@ -482,6 +483,38 @@ class ReportingTests(unittest.TestCase):
             record.pop("config_overrides", None)
         report = reporting.analyze_noise(records, design="candidate")
         self.assertIn("config_overrides", report["input_issues"][0])
+
+    def test_memory_candidate_scores_only_the_requested_ceiling_at_fixed_cpus(self):
+        records = self.candidate_records(1.0, 0.8)
+        for record in records:
+            candidate = record["slot"] == "b"
+            budget = record["resources"]["engine"]
+            budget["ncpu"] = 9
+            budget["vm_memory_ceiling_bytes"] = (6144 if candidate else 8192) << 20
+            if candidate:
+                record["config_overrides"] = {"CTRS_MEMORY_MIB": "6144"}
+        report = reporting.analyze_noise(records, design="candidate")
+        self.assertEqual(report["cohorts"][0]["valid_pairs"], 10)
+        budget = records[1]["resources"]["engine"]
+        for changes in ({"vm_memory_ceiling_bytes": 8192 << 20}, {"ncpu": 8},
+                        {"vm_memory_ceiling_bytes": None}, {"vm_memory_ceiling_bytes": (6144 << 20) + 1}):
+            with self.subTest(changes=changes), patch.dict(budget, changes):
+                cohort = reporting.analyze_noise(records, design="candidate")["cohorts"][0]
+                self.assertEqual(cohort["valid_pairs"], 9)
+                self.assertIn("memory candidate did not apply", cohort["rejections"][0]["reason"])
+
+    def test_partial_cpu_counter_cannot_decide_same_engine_candidate(self):
+        records = self.candidate_records(1.0, 0.8)
+        for record in records:
+            candidate = record["slot"] == "b"
+            record["resources"].update(ownership_verified=True, resource_errors=[], cpu_counters_complete=True,
+                                       cpu_seconds_est=1.2 if candidate else 1.0)
+            record["cpu_accounting"] = {"complete": candidate}
+        report = reporting.analyze_noise(records, design="candidate")
+        metric = metric_result(report, "cpu_seconds_est")
+        self.assertEqual(metric["assessment"], "incomplete")
+        self.assertEqual(metric["cpu_accounting_incomplete_trials"], 10)
+        self.assertIn("10 slot trials have incomplete CPU accounting.", reporting.render_noise_markdown(report))
 
     def test_noise_pair_requires_both_slots_and_one_engine(self):
         records = noise_pair()

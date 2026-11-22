@@ -686,34 +686,36 @@ class Engine:
                      timeout=30)
         return cp.stdout.strip()
 
-    def system_df(self) -> dict | None:
-        """Raw-byte `GET /system/df` snapshot for allocated-storage
-        accounting. Fields the engine does not report stay absent;
-        callers must treat missing keys as unknown, not zero."""
+    def docker_json(self, endpoint: str, *, background: bool = False) -> dict | None:
+        import http.client
+
+        class _UnixHTTP(http.client.HTTPConnection):
+            def connect(self):
+                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.sock.settimeout(30)
+                self.sock.connect(path)
+
+        path = self.socket.removeprefix("unix://")
+        conn = _UnixHTTP("localhost")
         try:
-            import http.client
-            import json as _json
-            import socket as _socket
-
-            class _UnixHTTP(http.client.HTTPConnection):
-                def __init__(self, path: str):
-                    super().__init__("localhost")
-                    self._path = path
-
-                def connect(self):
-                    self.sock = _socket.socket(
-                        _socket.AF_UNIX, _socket.SOCK_STREAM)
-                    self.sock.settimeout(30)
-                    self.sock.connect(self._path)
-
-            path = self.socket.removeprefix("unix://")
-            conn = _UnixHTTP(path)
-            conn.request("GET", "/system/df")
+            headers = {"X-Ctrs-Background": "1"} if background else {}
+            conn.request("GET", endpoint, headers=headers)
             resp = conn.getresponse()
             if resp.status != 200:
                 return None
-            data = _json.loads(resp.read())
+            data = json.loads(resp.read())
+            return data if isinstance(data, dict) else None
+        except (OSError, http.client.HTTPException, ValueError):
+            return None
+        finally:
             conn.close()
+
+    def system_df(self) -> dict | None:
+        """Return allocated-storage counters that the engine actually reports."""
+        data = self.docker_json("/system/df")
+        if data is None:
+            return None
+        try:
             out = {}
             if isinstance(data.get("LayersSize"), int):
                 out["layers_size_bytes"] = data["LayersSize"]
@@ -3485,9 +3487,18 @@ def tool_provenance(engine: Engine) -> dict:
     return result
 
 
-def safe_engine_info(engine: Engine) -> dict | None:
+def safe_engine_info(engine: Engine, *, memory_candidate: bool = False) -> dict | None:
     """`docker info` NCPU/MemTotal for the engine's VM/host allocation —
     recorded per trial so resource asymmetries are visible in results."""
+    if memory_candidate:
+        raw = engine.docker_json("/info", background=True)
+        if raw is None:
+            return None
+        keys = {"ncpu": "NCPU", "mem_total_bytes": "MemTotal",
+                "vm_memory_ceiling_bytes": "CtrsMemoryCeiling",
+                "vm_memory_target_bytes": "CtrsMemoryTarget",
+                "vm_memory_used_bytes": "CtrsMemoryUsed", "vm_oom_kills": "CtrsOomKills"}
+        return {name: raw[field] for name, field in keys.items() if type(raw.get(field)) is int}
     try:
         cp = engine.sh(["info", "--format", "{{.NCPU}} {{.MemTotal}}"],
                        timeout=20, check=False)
@@ -3555,7 +3566,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         engine = ctx.engines.get(key)
         if engine is None:
             engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane,
-                            fresh_dir=candidate_dir(overrides) if overrides else None,
+                            fresh_dir=candidate_dir(ctx.run_id) if overrides else None,
                             config_overrides=overrides)
             ctx.engines[key] = engine
         stop = not keep_warm and not linux_lane.enabled()
@@ -3583,7 +3594,10 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         if rec["engine_server_version"] == "unreachable":
             rec["correctness"]["ok"] = False
             rec["validation_errors"].append("engine unreachable after trial")
-        info = safe_engine_info(engine)
+        if "CTRS_MEMORY_MIB" in ctx.slot_overrides.get("b", {}):
+            info = safe_engine_info(engine, memory_candidate=True)
+        else:
+            info = safe_engine_info(engine)
         if info is not None:
             df = engine.system_df()
             if df:
@@ -3874,9 +3888,8 @@ def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, slee
         sleep(15)
 
 
-def candidate_dir(overrides: dict) -> Path:
-    return WORK / "engines" / ("ctrs-candidate-" + "-".join(
-        f"{k.lower()}{v}" for k, v in sorted(overrides.items())))
+def candidate_dir(run_id: str) -> Path:
+    return WORK / "engines" / ("ctrs-candidate-" + run_id.removeprefix("base-"))
 
 
 def clone_warm_engine(target: Path, source: Path | None = None) -> None:
@@ -3890,14 +3903,12 @@ def clone_warm_engine(target: Path, source: Path | None = None) -> None:
         pass
     else:
         raise SystemExit(f"{source} has a running daemon; stop it before cloning")
-    if target.exists():
-        shutil.rmtree(target)
     (target / "run").mkdir(parents=True)
     subprocess.run(["cp", "-c", "-R", str(source / "data"), str(target / "data")], check=True)
 
 
 def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
-                         candidate_cpus: int | None) -> None:
+                         candidate_cpus: int | None, candidate_memory_mib: int | None) -> None:
     if linux_lane.enabled():
         return
     repositories = {
@@ -3909,7 +3920,7 @@ def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
         "W13-overlap": ("api", "postgres", "redis"),
         "W14": ("api",),
     }.get(case, ())
-    if not repositories and candidate_cpus is None:
+    if not repositories and candidate_cpus is None and candidate_memory_mib is None:
         return
     from diagnostics.w8_under_pull import baseline_image_reference, require_baseline_images
 
@@ -3928,6 +3939,13 @@ def check_baseline_setup(ctx: RunContext, case: str, engines: tuple[str, str],
                 if candidate_cpus == info["ncpu"]:
                     raise ValueError(f"installed-default already uses {candidate_cpus} vCPUs; "
                                      "use the installed-default cohort against OrbStack")
+            if candidate_memory_mib is not None:
+                info = safe_engine_info(engine, memory_candidate=True)
+                ceiling = (info or {}).get("vm_memory_ceiling_bytes")
+                if not ceiling:
+                    raise ValueError("cannot observe installed-default VM memory ceiling")
+                if ceiling == (candidate_memory_mib << 20):
+                    raise ValueError(f"installed-default already uses a {candidate_memory_mib} MiB VM memory ceiling")
             if pins:
                 try:
                     refs = [baseline_image_reference(name, pin)[1] for pin in pins.values()]
@@ -3948,18 +3966,20 @@ def cmd_baseline(args) -> int:
     ctx.resource_lane = getattr(args, "resource_lane", "matched")
     a, b = args.a, args.b
     candidate_cpus = getattr(args, "candidate_cpus", None)
-    if candidate_cpus is not None:
+    candidate_memory_mib = getattr(args, "candidate_memory_mib", None)
+    if candidate_cpus is not None or candidate_memory_mib is not None:
         if (a, b) != ("ctrs", "ctrs") or ctx.resource_lane != "installed-default":
-            raise SystemExit("--candidate-cpus needs --a ctrs --b ctrs --resource-lane installed-default")
+            raise SystemExit("VM candidates need --a ctrs --b ctrs --resource-lane installed-default")
         ctx.design = "candidate"
-        ctx.slot_overrides = {"b": {"CTRS_CPUS": str(candidate_cpus)}}
+        ctx.slot_overrides = {"b": ({"CTRS_CPUS": str(candidate_cpus)} if candidate_cpus is not None
+                                     else {"CTRS_MEMORY_MIB": str(candidate_memory_mib)})}
     try:
-        check_baseline_setup(ctx, args.case, (a, b), candidate_cpus)
+        check_baseline_setup(ctx, args.case, (a, b), candidate_cpus, candidate_memory_mib)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
     if ctx.design == "candidate":
-        clone_warm_engine(candidate_dir(ctx.slot_overrides["b"]))
+        clone_warm_engine(candidate_dir(ctx.run_id))
     rng = random.Random(args.seed)
     failed = False
     try:
@@ -4030,10 +4050,11 @@ def cmd_baseline(args) -> int:
                       f"wall={wall}", flush=True)
             correct = all(r["correctness"]["ok"] and not r.get("validation_errors")
                           for r in pair_records)
-            if correct and candidate_cpus is not None:
+            if correct and ctx.design == "candidate":
                 current, candidate = sorted(pair_records, key=lambda rec: rec["slot"])
-                if reporting.cpu_candidate_mismatch(current, candidate):
-                    print("CPU candidate did not apply a different vCPU count at fixed memory", flush=True)
+                issue = reporting.candidate_configuration_issue(current, candidate)
+                if issue:
+                    print(issue, flush=True)
                     failed = True
                     break
             if correct and all(reporting.host_contended(r) is None for r in pair_records):
@@ -4212,9 +4233,14 @@ def main() -> int:
     p.add_argument("--max-pairs", type=int,
                    help="keep running pairs past --pairs until --pairs of them are admitted "
                         "(correct and uncontended) or this many have run; every pair stays in the record")
-    p.add_argument("--candidate-cpus", type=int,
+    allocation = p.add_mutually_exclusive_group()
+    allocation.add_argument("--candidate-cpus", type=int,
                    help="same-engine candidate: slot b runs ctrs with CTRS_CPUS=N in its own warm "
                         "engine dir, slot a the product default; memory and assets unchanged")
+    allocation.add_argument("--candidate-memory-mib", type=int, metavar="MIB",
+                            help="native macOS ctrs/ctrs installed-default comparison with slot b's "
+                                 "VM memory ceiling set to MIB. Example: baseline --case W6 --a ctrs "
+                                 "--b ctrs --resource-lane installed-default --candidate-memory-mib 6144")
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--pairs", type=int, default=3)
     p.add_argument("--state", default="warm", choices=["warm", "cold"])
@@ -4382,6 +4408,13 @@ def main() -> int:
         value = getattr(args, name, None)
         if value is not None and value <= 0:
             ap.error(f"--{name} must be positive")
+    if (memory_mib := getattr(args, "candidate_memory_mib", None)) is not None:
+        if args.lane != "macos-arm64" or (args.a, args.b) != ("ctrs", "ctrs") \
+                or args.resource_lane != "installed-default":
+            ap.error("--candidate-memory-mib requires the macOS ctrs/ctrs installed-default lane")
+        host_mib = (os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")) >> 20
+        if not 1024 <= memory_mib <= host_mib:
+            ap.error(f"--candidate-memory-mib must be between 1024 and {host_mib}")
     if hasattr(args, "write_ratio") and not 0 <= args.write_ratio <= 1:
         ap.error("--write-ratio must be between 0 and 1")
     if hasattr(args, "engines"):

@@ -183,6 +183,14 @@ def registry(lane='macos-arm64') -> list[Workload]:
                   "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS)),
             design="candidate"))
     items += [
+        Workload("w6-build:memory6144", "scenario", "build",
+                 "W6 uncached builds with a 6144 MiB ctrs VM ceiling at fixed vCPUs",
+                 79, 20, "observed", ENGINES + ("quiet-host",),
+                 argv=(sys.executable, str(RUNNER), "baseline", "--a", "ctrs", "--b", "ctrs",
+                       "--resource-lane", "installed-default", "--case", "W6",
+                       "--candidate-memory-mib", "6144", "--pairs", "10",
+                       "--pair-quiet-load", str(QUIET["load1"]), "--max-pairs", str(MAX_PAIRS)),
+                 design="candidate"),
         Workload("w12-full-bind-matched:cohort", "scenario", "workspace",
                  "Kutt workspace with ctrs given OrbStack's vCPUs and memory", 124, 20, "observed",
                  ENGINES + ("w12-inputs", "quiet-host"),
@@ -443,8 +451,8 @@ def _git() -> dict:
 def render(summary: dict) -> str:
     lines = [f"# Bench run {summary['utc']}", "",
              f"Source `{summary['git']['head'][:12]}`{' (dirty tree)' if summary['git']['dirty'] else ''}.",
-             "Ratios are ctrs/OrbStack paired medians; below 1 favors ctrs. Fewer than ten valid pairs",
-             "never yields a verdict; a completed one-pair run is not a performance result.", "",
+             "Ratios are paired cost medians. Below 1 favors ctrs in cross-engine runs and the",
+             "candidate in same-engine runs. A verdict requires at least ten valid pairs.", "",
              "| Workload | Tier | Status | Seconds | Valid pairs | Rejected pairs | Verdicts |",
              "| --- | --- | --- | ---: | ---: | ---: | --- |"]
     for r in summary["workloads"]:

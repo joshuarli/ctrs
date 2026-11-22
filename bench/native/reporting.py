@@ -224,6 +224,26 @@ def cpu_candidate_mismatch(current: dict, candidate: dict) -> bool:
                 and max(x, y) / min(x, y) <= resource_cells.ENGINE_MEMORY_RATIO_LIMIT)
 
 
+def candidate_configuration_issue(current: dict, candidate: dict) -> str | None:
+    if cpu_candidate_mismatch(current, candidate):
+        return "CPU candidate did not apply a different vCPU count at fixed memory"
+    overrides = candidate.get("config_overrides")
+    if not isinstance(overrides, dict) or "CTRS_MEMORY_MIB" not in overrides:
+        return None
+    a = current.get("resources", {}).get("engine") or {}
+    b = candidate.get("resources", {}).get("engine") or {}
+    if isinstance(a, dict) and isinstance(b, dict):
+        before, after = a.get("vm_memory_ceiling_bytes"), b.get("vm_memory_ceiling_bytes")
+        cpus = a.get("ncpu")
+        if (type(before) is int and type(after) is int and before > 0 and after > 0
+                and before != after and after % (1 << 20) == 0
+                and overrides["CTRS_MEMORY_MIB"] == str(after >> 20)
+                and type(cpus) is int and cpus > 0
+                and type(b.get("ncpu")) is int and b["ncpu"] == cpus):
+            return None
+    return "memory candidate did not apply the requested VM ceiling at fixed vCPU count"
+
+
 def _analyze_cohort(identity: dict, records: list[dict],
                     sides: tuple[str, str] = ("ctrs", "orbstack"),
                     side_of=None,
@@ -294,8 +314,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "failed correctness or validation"
         elif version_drift:
             reason = "engine version drift within run"
-        elif same_engine_required and sides == ("b", "a") and cpu_candidate_mismatch(b[0], a[0]):
-            reason = "CPU candidate did not apply a different vCPU count at fixed memory"
+        elif same_engine_required and sides == ("b", "a") and (
+                configuration_issue := candidate_configuration_issue(b[0], a[0])):
+            reason = configuration_issue
         elif (not isinstance(params, dict) or params.get("resource_lane") != "installed-default") \
                 and _resource_mismatch(a[0], b[0]):
             reason = "engine resource budgets differ"
@@ -375,6 +396,11 @@ def _analyze_cohort(identity: dict, records: list[dict],
             side = sides.index("ctrs") + 1
             incomplete_cpu = sum((pair[side].get("cpu_accounting") or {}).get("complete") is False for pair in valid)
             if incomplete_cpu and assessment in FAVORABLE + ("inconclusive",):
+                assessment = "incomplete"
+        elif "cpu" in metric and same_engine_required:
+            incomplete_cpu = sum((record.get("cpu_accounting") or {}).get("complete") is False
+                                 for _, a, b in valid for record in (a, b))
+            if incomplete_cpu and assessment in FAVORABLE + ("inconclusive", "loss"):
                 assessment = "incomplete"
         complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success", *LINUX_RESOURCE_METRICS)
         result["metrics"].append({
@@ -637,6 +663,8 @@ def render_noise_markdown(report: dict) -> str:
             lines.append("")
             for metric in cohort["metrics"]:
                 lines += [f"- {metric['metric']}, pair {item['pair_id']}: {item['reason']}." for item in metric["missing_reasons"]]
+                if missing_cpu := metric.get("cpu_accounting_incomplete_trials"):
+                    lines.append(f"- {metric['metric']}: {missing_cpu} slot trials have incomplete CPU accounting.")
     return "\n".join(lines) + "\n"
 
 

@@ -179,11 +179,14 @@ matched.
 
 A ctrs configuration candidate is a same-engine paired run: slot a is the
 product default, slot b the candidate in its own warm engine dir, with
-memory, binary and guest assets unchanged. Ratios are candidate/current.
+the same binary and guest assets. CPU candidates hold memory fixed.
+Memory ceiling candidates hold vCPUs fixed. The reporter verifies the
+requested VM allocation on each pair. Ratios are candidate/current.
 
 ```sh
-python3 bench/native/runner.py baseline --a ctrs --b ctrs --candidate-cpus 9 \
+python3 bench/native/runner.py baseline --a ctrs --b ctrs --candidate-cpus 5 \
   --resource-lane installed-default --pairs 10 --case W13-overlap
+python3 bench/native/pyramid.py run --name w6-build:memory6144
 python3 bench/native/reporting.py --candidate --match '<run-id>'
 ```
 

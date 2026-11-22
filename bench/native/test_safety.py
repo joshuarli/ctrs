@@ -584,6 +584,36 @@ class W6SourceTests(unittest.TestCase):
 
 
 class ExitStatusTests(unittest.TestCase):
+    def test_equal_memory_ceiling_stops_before_clone(self):
+        args = argparse.Namespace(a="ctrs", b="ctrs", case="W6",
+                                  candidate_memory_mib=6144, resource_lane="installed-default")
+        engine = Mock()
+        engine.docker_json.return_value = {"NCPU": 9, "MemTotal": 0, "CtrsMemoryCeiling": 6144 << 20}
+        err = io.StringIO()
+        with patch.object(runner, "RunContext", return_value=Mock()), \
+                patch.object(runner, "Engine", return_value=engine), \
+                patch.object(runner, "clone_warm_engine") as clone, \
+                patch.object(runner, "run_one") as trial, contextlib.redirect_stderr(err):
+            self.assertEqual(runner.cmd_baseline(args), 1)
+        engine.docker_json.assert_called_once_with("/info", background=True)
+        engine.stop.assert_called_once()
+        clone.assert_not_called()
+        trial.assert_not_called()
+        self.assertIn("installed-default already uses a 6144 MiB VM memory ceiling", err.getvalue())
+
+    def test_memory_candidate_cli_rejects_unusable_comparisons(self):
+        command = [sys.executable, str(Path(runner.__file__)), "baseline", "--case", "W6",
+                   "--a", "ctrs", "--b", "ctrs", "--resource-lane", "installed-default"]
+        for extra, error in [
+            (["--candidate-memory-mib", "512"], "must be between 1024"),
+            (["--b", "orbstack", "--candidate-memory-mib", "6144"], "requires the macOS ctrs/ctrs"),
+            (["--candidate-cpus", "5", "--candidate-memory-mib", "6144"], "not allowed with argument"),
+        ]:
+            with self.subTest(extra=extra):
+                cp = subprocess.run([*command, *extra], capture_output=True, text=True, timeout=10)
+                self.assertEqual(cp.returncode, 2, cp.stderr)
+                self.assertIn(error, cp.stderr)
+
     def test_candidate_already_at_default_stops_before_clone(self):
         args = argparse.Namespace(a="ctrs", b="ctrs", case="W6",
                                   candidate_cpus=9, resource_lane="installed-default")

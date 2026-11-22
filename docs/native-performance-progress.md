@@ -219,6 +219,18 @@ python3 bench/native/reporting.py --match base-20261122T063709-0627
 This covers uncached builds under installed defaults. Warm builds,
 complete CPU accounting and fresh confirmation remain open.
 
+Screen a 6144 MiB ceiling against the installed default with
+`pyramid.py run --name w6-build:memory6144`. The VZ helper supplied
+nearly all of the observed peak. If resident guest pages dominate that
+footprint, the lower ceiling should reduce it while preserving the
+compile and validation outputs. This test holds vCPUs, binary, guest
+assets and workspace inputs fixed. Its screen requires ten valid pairs,
+an upper 95% bound of 0.95 for peak footprint and an upper bound of 1.03
+for each build time. Inspect the VM's observed ceiling, memory used,
+target and OOM counters. The screen cannot establish CPU parity or
+choose a new default. A useful result needs next-use, W2 and W7 checks
+before a separate comparison against OrbStack.
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
