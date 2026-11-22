@@ -153,6 +153,10 @@ class PersistentProbeTests(unittest.TestCase):
                 attempts = [json.loads(line) for line in
                             (Path(tmp) / engine.name / 'W10/attempts.jsonl').read_text().splitlines()]
                 self.assertTrue(any(attempt['reused_socket'] for attempt in attempts))
+                self.assertEqual(rec['metrics']['requests_ok'], sum(
+                    attempt['scope'] == 'load' and attempt['ok'] for attempt in attempts))
+                self.assertTrue(any(attempt['scope'] == 'readiness' and attempt['ok']
+                                    for attempt in attempts))
             finally:
                 server.shutdown()
                 thread.join(timeout=2)

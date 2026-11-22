@@ -2987,7 +2987,8 @@ def trial_w10(ctx, engine: Engine, state: str,
         (trial_dir / "request-validation.json").write_text(json.dumps(failures, indent=2) + "\n")
         rec["metrics"].update(expected_outage_errors=len(failures["expected_outage_errors"]),
                               unexpected_errors=len(failures["unexpected_errors"]),
-                              retries_until_recovery=len(probes) - 1)
+                              retries_until_recovery=len(probes) - 1,
+                              requests_ok=sum(attempt["ok"] is True for attempt in attempts))
         checks["request_failures_explained"] = failures["host_client_valid"] and not failures["unexpected_errors"]
         acknowledged = [attempt["write"] for attempt in attempts if attempt["kind"] == "write" and attempt["ok"]]
         uncertain = [attempt["write"] for attempt in failures["expected_outage_errors"] if attempt["kind"] == "write"]
@@ -3024,8 +3025,10 @@ def trial_w10(ctx, engine: Engine, state: str,
                 rec["validation_errors"].append(f"{label}: {exc}")
         (trial_dir / "timeline.json").write_text(json.dumps(timeline, indent=2) + "\n")
         with (trial_dir / "attempts.jsonl").open("w") as output:
-            for attempt in sorted([*attempts, *probes], key=lambda value: value["started_ns"]):
-                output.write(json.dumps(attempt) + "\n")
+            records = [(attempt, "load") for attempt in attempts]
+            records.extend((probe, "readiness") for probe in probes)
+            for attempt, scope in sorted(records, key=lambda item: item[0]["started_ns"]):
+                output.write(json.dumps({**attempt, "scope": scope}) + "\n")
         rec["resources"].update(summarize_trace(trace) if trace else {})
         if trace:
             rec["resources"]["trace"] = _trace_ref(trace)

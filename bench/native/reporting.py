@@ -37,7 +37,7 @@ CASE_METRICS = {
            for metric in (f"fixed16_at_{concurrency}_s", f"{W9_THROUGHPUT}{concurrency}",
                           f"job_completion_p95_ms_at_{concurrency}")],
     # Legacy load_rps counts failed attempts during downtime, not useful work.
-    "W10": ["recovery_s", "recovered_p99_ms"],
+    "W10": ["recovery_s", "recovered_p99_ms", "engine_cpu_per_success"],
     # Soak windows/requests/churn counts are reliability observations.
     "W11": [],
     "W12": ["workflow_seconds", "install_seconds", "build_seconds", "typecheck_seconds",
@@ -159,8 +159,34 @@ def _number(value: object) -> bool:
             and math.isfinite(value))
 
 
+def _recovery_cpu_per_success(record: dict):
+    metrics = record.get("metrics", {})
+    target = metrics.get("interrupt_service")
+    if target in ("api", "db"):
+        count, names = metrics.get("requests_ok"), ("recovery_workload",)
+    elif target == "queue":
+        count, names = metrics.get("jobs"), ("workers_backlog", "workers_recovered")
+    else:
+        return None, "W10 target has no continuous resource phase"
+    if type(count) is not int or count <= 0:
+        return None, "missing verified W10 success count"
+    phases = record.get("resources", {}).get("phases")
+    cpu = []
+    for name in names:
+        phase = phases.get(name) if isinstance(phases, dict) else None
+        if not isinstance(phase, dict) or phase.get("errors") != []:
+            return None, f"missing or invalid W10 CPU phase {name}"
+        value = phase.get("cpu_seconds")
+        if not _number(value) or value <= 0:
+            return None, f"invalid W10 CPU seconds for {name}"
+        cpu.append(value)
+    return sum(cpu) / count, None
+
+
 def _metric(record: dict, name: str):
     resources = record.get("resources", {})
+    if name == "engine_cpu_per_success" and record.get("case") == "W10":
+        return _recovery_cpu_per_success(record)
     if name in ("peak_phys_footprint_bytes", "cpu_seconds_est", *LINUX_RESOURCE_METRICS):
         if resources.get("ownership_verified") is not True:
             return None, "ownership not verified: " + str(resources.get("resource_errors", "missing resource errors"))
@@ -402,7 +428,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
                                  for _, a, b in valid for record in (a, b))
             if incomplete_cpu and assessment in FAVORABLE + ("inconclusive", "loss"):
                 assessment = "incomplete"
-        complete_resource = not missing or metric not in ("peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success", *LINUX_RESOURCE_METRICS)
+        complete_resource = not missing or metric not in (
+            "peak_phys_footprint_bytes", "cpu_seconds_est", "cpu_seconds_per_success",
+            "engine_cpu_per_success", *LINUX_RESOURCE_METRICS)
         result["metrics"].append({
             "metric": metric, "valid_pairs": len(ratios),
             "missing_pairs": missing, "missing_reasons": missing_reasons, "assessment": assessment,

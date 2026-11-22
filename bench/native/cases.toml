@@ -165,6 +165,7 @@ fixture = "fixtures/w1 + recovery_client.py for API/database; fixtures/w4 for qu
 fixture_version = "w10-v4-recovery"
 status = "implemented"
 metrics = ["recovery_s", "recovered_p99_ms", "recovered_requests_ok", "retries_until_recovery",
+           "requests_ok", "engine_cpu_per_success",
            "expected_outage_errors", "unexpected_errors", "acknowledged_writes", "persisted_uncertain_writes"]
 states = ["warm"]
 params = { duration_s = 20, concurrency = 8, write_ratio = 0.3, kill_at_s = 6, down_for_s = 3, interrupt_service = ["api", "db", "queue", "engine"] }

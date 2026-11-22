@@ -59,6 +59,12 @@ exact read. Only successful load requests started after that read enter
 the recovered p99. Read and write coverage is required on both sides when
 the configured workload includes both.
 
+Engine CPU per success uses the recovery workload's boundary counters.
+The denominator counts successful load responses and excludes readiness
+probes and outage failures. For queue recovery it counts both batches'
+verified jobs and sums the two measured worker phases. Missing boundary
+counters leave this metric unmeasured.
+
 Run `PYTHONPATH=bench/native python3.14 -m unittest test_recovery_client
 test_recovery_trace test_safety test_reporting`. All 64 tests passed,
 including a local HTTP server with simulated database interruption and

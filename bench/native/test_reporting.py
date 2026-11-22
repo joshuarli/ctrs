@@ -385,6 +385,30 @@ class ReportingTests(unittest.TestCase):
         metrics = reporting.analyze(records)["cohorts"][0]["metrics"]
         self.assertNotIn("load_rps", [m["metric"] for m in metrics])
 
+    def test_recovery_cpu_is_phase_cost_per_verified_completion(self):
+        for target in ("api", "db", "queue"):
+            with self.subTest(target=target):
+                records = pair(case="W10", metric="recovery_s")
+                for record in records:
+                    ctrs = record["engine"] == "ctrs"
+                    if target == "queue":
+                        record["metrics"]["jobs"] = 400
+                        phases = {"workers_backlog": {"cpu_seconds": 3 if ctrs else 6, "errors": []},
+                                  "workers_recovered": {"cpu_seconds": 2 if ctrs else 4, "errors": []}}
+                    else:
+                        record["metrics"]["requests_ok"] = 200 if ctrs else 100
+                        phases = {"recovery_workload": {"cpu_seconds": 5, "errors": []}}
+                    record["metrics"]["interrupt_service"] = target
+                    record["metrics"]["expected_outage_errors"] = 10000
+                    record["resources"]["phases"] = phases
+                report = reporting.analyze(records)
+                self.assertAlmostEqual(metric_result(report, "engine_cpu_per_success")["ratio_median"], .5)
+                next(iter(records[0]["resources"]["phases"].values()))["errors"] = ["identity changed"]
+                report = reporting.analyze(records)
+                metric = metric_result(report, "engine_cpu_per_success")
+                self.assertIsNone(metric["ratio_median"])
+                self.assertIn("invalid W10 CPU phase", metric["missing_reasons"][0]["reason"])
+
     def test_empty_cache_history_not_equated_with_uncached_build(self):
         records = pair(case="W7", metric="build_empty_s")
         report = reporting.analyze(records)
