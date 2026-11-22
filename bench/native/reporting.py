@@ -208,6 +208,22 @@ def _resource_mismatch(a: dict, b: dict) -> bool:
                 and max(x, y) / min(x, y) > resource_cells.ENGINE_MEMORY_RATIO_LIMIT)
 
 
+def cpu_candidate_mismatch(current: dict, candidate: dict) -> bool:
+    overrides = candidate.get("config_overrides")
+    if not isinstance(overrides, dict) or "CTRS_CPUS" not in overrides:
+        return False
+    a = current.get("resources", {}).get("engine") or {}
+    b = candidate.get("resources", {}).get("engine") or {}
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return True
+    before, after = a.get("ncpu"), b.get("ncpu")
+    x, y = a.get("mem_total_bytes"), b.get("mem_total_bytes")
+    return not (type(before) is int and before > 0 and type(after) is int and after > 0
+                and before != after and overrides["CTRS_CPUS"] == str(after)
+                and _number(x) and _number(y) and x > 0 and y > 0
+                and max(x, y) / min(x, y) <= resource_cells.ENGINE_MEMORY_RATIO_LIMIT)
+
+
 def _analyze_cohort(identity: dict, records: list[dict],
                     sides: tuple[str, str] = ("ctrs", "orbstack"),
                     side_of=None,
@@ -278,6 +294,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "failed correctness or validation"
         elif version_drift:
             reason = "engine version drift within run"
+        elif same_engine_required and sides == ("b", "a") and cpu_candidate_mismatch(b[0], a[0]):
+            reason = "CPU candidate did not apply a different vCPU count at fixed memory"
         elif (not isinstance(params, dict) or params.get("resource_lane") != "installed-default") \
                 and _resource_mismatch(a[0], b[0]):
             reason = "engine resource budgets differ"

@@ -108,12 +108,12 @@ and its committed SHA-256 manifest, not from a new adapter implementation. Steps
 5. Offline harness work (`make test-bench`) runs anywhere. W11 frozen
    admission is integrated; qualification still needs the Mac evidence below.
 
-**On the Mac.** Rebuild the assets (`cargo xtask all`) and the fixtures
-(`bench/native/runner.py prepare`, `bench/native/fixtures/w12/prepare.py`
-for W12). Run e2e and the two watch tests. Then queue the q7 cohorts
-above through `bench/native/pyramid.py run --name <cell>:cohort` and
-refresh the ranked deficits. After that, the first open item is W12
-full-bind.
+**On the Mac.** Rebuild the assets (`cargo xtask all`) and run e2e and
+the two watch tests. Restore the [pinned common portfolio](../bench/native/fixtures/w8-v5/README.md)
+and prepare [W12](../bench/native/fixtures/w12/README.md) before their
+cohorts. Run the installed-default cohorts through
+`bench/native/pyramid.py run --name <cell>:cohort` and refresh the ranked
+deficits. The first optimization target is W12 full-bind.
 
 ## macOS resume setup — 2026-11-22
 
@@ -137,7 +137,7 @@ oneshot cases); `tests/fuse-inode-bound.sh` exit 0 (150,000-file walk, peak
 65,575 descriptors under the 73,728 limit, recovery to 57); `tests/e2e.sh`
 507 pass / 2 fail, where both failures are Docker Hub 429 rate limits on the
 optional Rosetta pulls (`amd64/alpine:3.22`, `node:22-alpine`), not engine
-results. No measured cohort has run on this build.
+results. These setup checks preceded the resumed cohorts.
 
 `bench/native/runner.py prepare` succeeded on both engines. W12's
 `fixtures/w12/prepare.py` fails closed: the source archive and lock match
@@ -149,11 +149,27 @@ passes for `w13-overlap:cpus9`, `w2-api:cpus9`, `w14-idle-resume:cpus9`,
 `w6-build:cpus9`, `w6-build:cohort` and `w7-buildx:cohort` (320 GB free, no
 foreign daemon); W12 cells fail on the missing `w12-image.tar`.
 
-Next action: queue `python3 bench/native/pyramid.py run --name w13-overlap:cpus9`
-(37 min estimate) as the first vCPU-default decision test, then `w2-api:cpus9`
-and `w14-idle-resume:cpus9`, then `w6-build:cpus9` (W12 stays blocked), then
-`w6-build:cohort` and `w7-buildx:cohort`. Report each with
-`reporting.py --candidate --match <run>` or `reporting.py --match <run>`.
+The signed binary already uses the adopted all-but-one CPU default
+(`b663920`). The resumed W6 run observed 9 vCPUs on each engine. The old
+`:cpus9` queue targeted a 5-vCPU incumbent. Use the `:cohort` jobs for
+the installed-default comparison on this build.
+
+The first resumed overlap launch (`base-20261122T063600-88f3`) stopped
+after two failed pairs. The default and cloned ctrs stores lacked the
+pinned API and PostgreSQL IDs. Plain `prepare` had installed the old
+floating-tag pilot inputs. The OrbStack store also lacked the pinned API.
+The pinned PostgreSQL and Redis manifests remain available from their
+upstream digest references. The old common layout and W12 image archive
+were lost with scratch. Recover their exact private-built images from an
+archived artifact if available. A rebuild that changes an image pin
+requires a new fixture version and fresh results for its consumers.
+
+Run independent `w6-build:cohort` and `w7-buildx:cohort` while the
+portfolio is unavailable. Once the pinned common inputs are restored or
+replaced with verified versioned fixtures, run `w13-overlap:cohort`,
+`w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
+`reporting.py --match <run>`. Use Python 3.11 or later. On this host
+the supported interpreter is `/opt/homebrew/bin/python3`.
 For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
 stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.

@@ -451,6 +451,22 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("CTRS_CPUS", reporting.render_noise_markdown(report))
         self.assertEqual(reporting.analyze_noise(self.candidate_records(1.0, 0.8))["cohorts"], [])
 
+    def test_cpu_candidate_requires_observed_vcpu_change_at_fixed_memory(self):
+        for slot, budgets in [
+            ("a", {"ncpu": 9, "mem_total_bytes": 8 << 30}),
+            ("b", {"ncpu": 8, "mem_total_bytes": 8 << 30}),
+            ("b", {"ncpu": 9, "mem_total_bytes": 16 << 30}),
+            ("b", {"ncpu": 9}),
+        ]:
+            with self.subTest(slot=slot, budgets=budgets):
+                records = self.candidate_records(1.0, 0.8)
+                next(r for r in records if r["slot"] == slot)["resources"]["engine"] = budgets
+                report = reporting.analyze_noise(records, design="candidate")
+                cohort = report["cohorts"][0]
+                self.assertEqual(cohort["valid_pairs"], 9)
+                self.assertIn("CPU candidate did not apply", cohort["rejections"][0]["reason"])
+                self.assertEqual(metric_result(report)["assessment"], "invalid")
+
     def test_candidate_without_overrides_is_an_input_issue(self):
         records = self.candidate_records(1.0, 1.0)
         for record in records:
