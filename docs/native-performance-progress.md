@@ -303,8 +303,13 @@ Lower ratios favor ctrs. All ten ctrs legs used host NAT (81 connections).
 The host kernel's NAT CPU is outside the engine counters. The median
 workload-phase engine CPU was 48.87 s on ctrs and 39.03 s on OrbStack.
 The API cgroup recorded medians of 26.61 s and 21.06 s respectively,
-including counter-reader execution. The guest-direct and fixed-rate
-conditions are needed to distinguish application CPU from transport costs.
+including counter-reader execution. On the host, the ctrs VM helper used
+46.68 s and the ctrs daemon used 2.17 s. OrbStack's helper used 39.03 s.
+The process split puts most of the measured gap in the VM helper. It
+does not attribute that time to guest scheduling, transport, or app code.
+Run the eight-client guest-direct cohort and the paired fixed-rate
+conditions next. Guest-direct engine CPU includes the in-guest load client,
+so compare its engine totals within that placement.
 
 ```sh
 export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
