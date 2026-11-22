@@ -197,11 +197,15 @@ class PairedBatch(unittest.TestCase):
             def measure(engine, directory, run, contract, portfolio, receipt, layout, server, under_load):
                 self.assertEqual(w8.os.environ['CTRS_IDLE_SECS'], '0')
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
+                processes = [{'pid': 1 if engine.name == 'ctrs' else 2,
+                              'role': 'daemon', 'kernel_start_identity': 100}]
                 return {'correctness': True, 'pull_to_health_s': 1, 'errors': [],
-                        'resources': {'status': 'ok', 'ownership': {'required_processes': [{
-                            'pid': 1 if engine.name == 'ctrs' else 2, 'role': 'daemon', 'kernel_start_identity': 100}]},
-                            'phase_summaries': {'whole_workflow':
-                            {'status': 'ok', 'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
+                        'resources': {'status': 'ok', 'ownership': {'required_processes': processes},
+                            'phase_summaries': {'whole_workflow': {
+                                'status': 'ok', 'errors': [], 'required_processes': processes,
+                                'counter_methods': ['proc_pid_rusage'],
+                                'footprint_method': 'rusage_info_v0.ri_phys_footprint',
+                                'cpu_seconds': 2, 'peak_phys_footprint_bytes': 3}}}}
             args = SimpleNamespace(layout=root, seed=7, pairs=2, under_load=False, diagnostic=False)
             with mock.patch.object(w8.runner, 'RunContext', Context), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \
@@ -218,7 +222,11 @@ class PairedBatch(unittest.TestCase):
             self.assertEqual(calls[0][1], calls[3][1])
             self.assertEqual((engines['ctrs'].stops, engines['orbstack'].stops), (1, 0))
             rows = contexts[0].rows
-            self.assertEqual(reporting.analyze(rows)['cohorts'][0]['valid_pairs'], 2)
+            cohort = reporting.analyze(rows)['cohorts'][0]
+            self.assertEqual(cohort['valid_pairs'], 2)
+            metrics = {m['metric']: m for m in cohort['metrics']}
+            self.assertEqual(metrics['peak_phys_footprint_bytes']['valid_pairs'], 2)
+            self.assertEqual(metrics['cpu_seconds_est']['cpu_accounting_incomplete_trials'], 2)
             for change in ('mismatch', 'failed', 'diagnostic', 'duplicate'):
                 altered = json.loads(json.dumps(rows))
                 if change == 'mismatch': altered[0]['paired_inputs']['seed_hex'] = 'other'
@@ -359,12 +367,19 @@ class PairedBatch(unittest.TestCase):
                 self.assertFalse(w8.gate(directory, 'before'))
 
     def test_whole_scope_does_not_sum_or_invent(self):
-        result = {'resources': {'phase_summaries': {'whole_workflow': {'status': 'ok', 'cpu_seconds': 4,
-                   'peak_phys_footprint_bytes': 10}, 'nested': {'status': 'ok', 'cpu_seconds': 3,
-                   'peak_phys_footprint_bytes': 9}}}}
-        self.assertEqual(w8.resource_metrics(result), {'cpu_seconds_est': 4, 'peak_phys_footprint_bytes': 10})
-        result['resources']['phase_summaries']['whole_workflow'] = {'status': 'unknown'}
-        self.assertEqual(w8.resource_metrics(result), {})
+        cell = {'status': 'ok', 'errors': [], 'required_processes': [{'pid': 1}],
+                'counter_methods': ['proc_pid_rusage'],
+                'footprint_method': 'rusage_info_v0.ri_phys_footprint',
+                'cpu_seconds': 4, 'peak_phys_footprint_bytes': 10}
+        phases = {'whole_workflow': cell, 'nested': cell | {'cpu_seconds': 3, 'peak_phys_footprint_bytes': 9}}
+        result = {'resources': {'phase_summaries': phases}}
+        resources = {'resources': w8.resource_metrics(result)}
+        self.assertEqual(reporting._metric(resources, 'cpu_seconds_est'), (4, None))
+        self.assertEqual(reporting._metric(resources, 'peak_phys_footprint_bytes'), (10, None))
+        for invalid in ({'status': 'unknown'}, {'errors': ['sample missing']},
+                        {'required_processes': []}, {'counter_methods': []}, {'footprint_method': 'RSS'}):
+            phases['whole_workflow'] = cell | invalid
+            self.assertEqual(w8.resource_metrics(result), {})
 
     def test_allocation_receipt_requires_three_snapshots_of_the_same_backing_file(self):
         def sample(allocated, inode=23, status='ok'):

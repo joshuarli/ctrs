@@ -36,10 +36,13 @@ def gate(directory, label):
 
 def resource_metrics(result):
     cell = result.get('resources', {}).get('phase_summaries', {}).get('whole_workflow', {})
-    if cell.get('status') != 'ok':
+    if (cell.get('status') != 'ok' or cell.get('errors') != [] or not cell.get('required_processes')
+            or not cell.get('counter_methods') or cell.get('footprint_method') != 'rusage_info_v0.ri_phys_footprint'):
         return {}
     return {'cpu_seconds_est': cell.get('cpu_seconds'),
-            'peak_phys_footprint_bytes': cell.get('peak_phys_footprint_bytes')}
+            'peak_phys_footprint_bytes': cell.get('peak_phys_footprint_bytes'),
+            'ownership_verified': True, 'resource_errors': [],
+            'cpu_counters_complete': True, 'footprint_field': 'phys_footprint'}
 
 
 def completion_metrics(directory, intervals):
@@ -175,6 +178,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                         rec['engine_server_version'] = runner.safe_version(engine)
                         info = runner.safe_engine_info(engine)
                         rec['resources'] = resource_metrics(result)
+                        if name == 'ctrs':
+                            rec['cpu_accounting'] = result.get('cpu_accounting', {})
                         rec['resources']['engine'] = info or {}
                         rec['resources']['detail'] = result.get('resources', {})
                         if storage_files:

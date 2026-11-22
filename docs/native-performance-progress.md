@@ -289,6 +289,13 @@ pinned Marked artifact. ctrs and OrbStack `result.json` SHA-256s were
 The images are installed on the campaign Mac. The W8 timing cohort and
 fresh comparative results for portfolio consumers remain open.
 
+The paired W8 control reports the whole-workflow CPU delta and sampled
+physical footprint for the verified engine processes and fixture
+registry coordinator. It takes ctrs relay snapshots around that interval.
+An observed NAT relay or missing accounting keeps favorable CPU results
+from qualifying. This control uses matched resources and keeps the
+engines resident.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild

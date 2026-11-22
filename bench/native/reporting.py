@@ -420,7 +420,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
         incomplete_cpu = None
         if "cpu" in metric and "ctrs" in sides:
             side = sides.index("ctrs") + 1
-            incomplete_cpu = sum((pair[side].get("cpu_accounting") or {}).get("complete") is False for pair in valid)
+            accounting = [(pair[side].get("cpu_accounting") or {}).get("complete") for pair in valid]
+            incomplete_cpu = sum(value is not True for value in accounting) if paired_w8 else sum(
+                value is False for value in accounting)
             if incomplete_cpu and assessment in FAVORABLE + ("inconclusive",):
                 assessment = "incomplete"
         elif "cpu" in metric and same_engine_required:

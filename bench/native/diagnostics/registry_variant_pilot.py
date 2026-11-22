@@ -237,6 +237,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                     snapshot('before_app_cleanup')
         else:
             deployment_phase = phase
+        relays_before = runner.relay_counts(engine)
         with phase('whole_workflow'):
             refs = {}
             with phase('pre_pull_setup'):
@@ -314,6 +315,9 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 save(directory / 'retained-after.json', retained_after)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_after)
             result['correctness'] = True
+        if engine.name == 'ctrs':
+            result['cpu_accounting'] = runner.cpu_accounting(
+                relays_before, runner.relay_counts(engine) if relays_before is not None else None)
     except BaseException as exc:
         result['errors'].append(traceback.format_exc())
         if not isinstance(exc, Exception):
