@@ -1049,6 +1049,44 @@ same revision and with the same assets. Report run
 `base-20261122T105526-a8d2` separately. Its `trials.jsonl` SHA-256 is
 `dc8af48b2d10eaa7f54cbbb3f34c0c31e4b582ee3674657a87126ba430bd77f5`.
 
+### Installed-default W10 queue recovery cohort
+
+Run `base-20261122T110531-9992` admitted all ten alternating pairs at
+`ca24add`. Both engines used a common v4 worker archive and the pinned
+Redis image with AOF and `appendfsync always` in an owned volume. Four
+workers verified 200 recovered backlog jobs and 200 fresh jobs per trial.
+The raw before-and-after snapshots matched all 200 FIFO entries in every
+trial, and each backlog output carried its original clock and enqueue
+time. All twenty trials verified all 800 artifacts and owned teardown.
+Both engines reported 9 vCPUs. Maximum measured outside-engine CPU was
+1.33 cores, and ctrs recorded zero NAT connections in all ten trials.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired ratio and 95% CI |
+| --- | ---: | ---: | --- |
+| Start command to exact backlog recovery | 174.2 ms | 387.7 ms | 0.4508 [0.4376, 0.4592] |
+| Fresh batch queue p99 after recovery | 423 ms | 1,372 ms | 0.3192 [0.2780, 0.3356] |
+| Measured engine CPU per verified job | 7.01 ms | 13.42 ms | 0.5210 [0.5128, 0.5527] |
+| Sampled peak physical footprint | 2.26 GB | 5.35 GB | 0.4247 [0.4185, 0.4306] |
+
+The CPU interval includes both verified worker batches. The fresh-batch tail
+starts with enqueue preparation and ends after both artifacts close. Freeze
+and whole-engine interruption on an isolated OrbStack remain open.
+
+```sh
+python3 bench/native/runner.py baseline --case W10 --a ctrs --b orbstack \
+  --resource-lane installed-default --interrupt-service queue --concurrency 4 \
+  --pairs 10 --pair-quiet-load 4 --max-pairs 16
+python3 bench/native/reporting.py --match base-20261122T110531-9992
+```
+
+The common worker archive SHA-256 is
+`de1778215fc772400d03eb365fbdde325a04a676d03a03fc04eeab700872fd1b`.
+The `trials.jsonl` SHA-256 is
+`d5df9d32bdd99631047d13c0517c4a432d74904bc14765984d62e58d5660b1ec`.
+Main reuses the W4 image verifier for the queue input contract. The focused
+integration suite passed 135 tests and the reports reproduced on the
+integrated analyzer.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
