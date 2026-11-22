@@ -1,0 +1,12 @@
+FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS build
+COPY hyperfine-2.0.0.tar.gz /tmp/
+RUN mkdir -p /src && tar xzf /tmp/hyperfine-2.0.0.tar.gz -C /src --strip-components=1
+WORKDIR /src
+COPY w7-hyperfine-vendor.tar.gz /tmp/
+RUN tar xzf /tmp/w7-hyperfine-vendor.tar.gz
+RUN cargo build --release --frozen
+COPY stamp/ /stamp/
+RUN mkdir -p /out && cat /stamp/note.txt > /out/note.txt
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+COPY --from=build /src/target/release/hyperfine /usr/local/bin/hyperfine
+COPY --from=build /out/note.txt /out/note.txt

@@ -41,6 +41,7 @@ import overlap
 from lifecycle import trial_w14
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
+from fixtures.w7.hyperfine import prepare_vendor
 from fixtures.w7.httpie import prepare_wheels
 from contextlib import contextmanager, nullcontext
 import base64
@@ -1958,6 +1959,8 @@ def build_args(engine: Engine, driver: str, extra: list[str]) -> list[str]:
 # the default or dc builder, then run probes.
 W7_FIXTURE_VERSION = "w7-v3-cache-first-use"
 W7_OFFLINE_HTTPIE_VERSION = "w7-v4-offline-httpie"
+W7_OFFLINE_VERSION = "w7-v5-offline-builds"
+W7_OFFLINE_HYPERFINE_COMPILE = "RUN cargo build --release --frozen"
 W7_OFFLINE_HTTPIE_COMPILE = (
     "RUN python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation"
     " -w /wheels /tmp/httpie-3.2.4.tar.gz"
@@ -2017,20 +2020,26 @@ def trial_w7(ctx, engine: Engine, state: str,
     tags = []
     verified_tags = {app: [] for app in W7_APPS}
     try:
-        offline_httpie = fixture_version == W7_OFFLINE_HTTPIE_VERSION
-        if (fixture_version not in (W7_FIXTURE_VERSION, W7_OFFLINE_HTTPIE_VERSION)
-                or (offline_httpie and linux_lane.enabled())):
+        if (fixture_version not in (W7_FIXTURE_VERSION, W7_OFFLINE_HTTPIE_VERSION, W7_OFFLINE_VERSION)
+                or (fixture_version != W7_FIXTURE_VERSION and linux_lane.enabled())):
             raise ValueError("W7 fixture version mismatch")
+        offline_httpie = fixture_version != W7_FIXTURE_VERSION
+        offline_hyperfine = fixture_version == W7_OFFLINE_VERSION
+        sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
+                   for name, spec in W7_APPS.items()}
         if offline_httpie:
             wheelhouse = prepare_wheels.prepare(REPO / prepare_wheels.WHEELHOUSE)
             rec['workload_params']['httpie_wheel_lock_sha256'] = wheelhouse['lock_sha256']
+        if offline_hyperfine:
+            vendor = REPO / prepare_vendor.VENDOR_ARCHIVE
+            if sha256_file(vendor) != prepare_vendor.VENDOR_SHA256:
+                prepare_vendor.prepare(sources['hyperfine'], vendor)
+            rec['workload_params']['hyperfine_vendor_sha256'] = prepare_vendor.VENDOR_SHA256
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
         rec["metrics"]["builder_driver"] = driver
         rec["metrics"]["fixture_version"] = fixture_version
-        sources = {name: ensure_pinned_source(spec["source"], W7_DIR)
-                   for name, spec in W7_APPS.items()}
         if linux_lane.enabled():
             rec['inputs'] = {'linux_build_images': linux_lane.build_images(engine, ('rust', 'debian', 'python'))}
         else:
@@ -2059,6 +2068,11 @@ def trial_w7(ctx, engine: Engine, state: str,
                 destination.mkdir()
                 for filename in wheelhouse['files']:
                     shutil.copy(Path(wheelhouse['path']) / filename, destination)
+            if offline_hyperfine and name == 'hyperfine':
+                dockerfile = dockerfile.with_name('Dockerfile.offline')
+                compile_step = W7_OFFLINE_HYPERFINE_COMPILE
+                build_flags = ['--network=none']
+                shutil.copy(vendor, ctx_dir / vendor.name)
             shutil.copy(dockerfile, ctx_dir / "Dockerfile")
             shutil.copy(sources[name],
                         ctx_dir / spec["source"]["file"])
@@ -3717,7 +3731,7 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     if case_id == "W4":
         kw.setdefault("fixture_version", W4_LATENCY_VERSION)
     if case_id == 'W7' and not linux_lane.enabled():
-        kw.setdefault('fixture_version', W7_OFFLINE_HTTPIE_VERSION)
+        kw.setdefault('fixture_version', W7_OFFLINE_VERSION)
     if case_id == "W1" and cold:
         state = "cold"
     if case_id == "W2" and pair_id is not None:

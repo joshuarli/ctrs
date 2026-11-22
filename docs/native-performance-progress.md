@@ -557,7 +557,7 @@ wheelhouse is for Linux ARM64 and CPython 3.13. A clean restore verified all
 Setuptools 84.2.1 is the recorded runtime version and the pinned build
 backend for the new fixture. [PyPI JSON API](https://docs.pypi.org/api/json/)
 
-`w7-v4-offline-httpie` is the macOS W7 fixture. It copies the verified wheels
+`w7-v4-offline-httpie` was the first offline revision. It copies the verified wheels
 into the HTTPie context and runs its BuildKit steps with `--network=none`.
 The Dockerfile installs the pinned build tools, builds the sdist without
 build isolation, installs exactly the local wheels and runs `pip check`.
@@ -579,6 +579,13 @@ from the vendored directory. Cargo 1.99.1 and the repository's Cargo
 `46ac26bd0205449fff0f866be91cb730bd27ae05d4708964f5f2afc79c129e7e`.
 Native offline Hyperfine builds and cache-state admission remain open.
 [Cargo vendor command](https://doc.rust-lang.org/cargo/commands/cargo-vendor.html)
+
+`w7-v5-offline-builds` uses this archive in the Hyperfine context and compiles
+with `cargo build --release --frozen`. Both build commands use
+`--network=none`. Base image pulls remain part of untimed preparation.
+The runner records the Cargo vendor and wheel lock digests and verifies
+both apps across the three cache states. Use `w7-buildx:cohort` after a
+native pair admits both builds. The changed contexts require a new cohort.
 
 #### Frozen HTTPie first-use input
 

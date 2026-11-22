@@ -119,9 +119,9 @@ note = "Pinned upstream hyperfine 2.0.0 and zlib 1.3.1 sources are fetched on de
 id = "W7"
 family = "native-image-build"
 title = "default buildx -> loaded runnable images for two real apps: hyperfine 2.0.0 (Rust) and httpie 3.2.4 (Python); uncached/warm/incremental per app"
-fixture = "fixtures/w7 (Hyperfine and HTTPie Dockerfiles, ARM64 HTTPie wheel lock, SHA-256 pinned source archives)"
+fixture = "fixtures/w7 (Hyperfine and HTTPie Dockerfiles, Cargo vendor archive, ARM64 HTTPie wheel lock, SHA-256 pinned source archives)"
 status = "implemented"
-fixture_version = "w7-v4-offline-httpie"
+fixture_version = "w7-v5-offline-builds"
 metrics = ["hyperfine_uncached_s", "hyperfine_warm_s", "hyperfine_incr_s",
            "httpie_uncached_s", "httpie_warm_s", "httpie_incr_s",
            "hyperfine_uncached_first_use_s", "hyperfine_warm_first_use_s", "hyperfine_incr_first_use_s",
@@ -129,7 +129,7 @@ metrics = ["hyperfine_uncached_s", "hyperfine_warm_s", "hyperfine_incr_s",
 states = ["warm"]
 params = { driver = ["default", "dc"] }
 correctness = ["all builds load an owned tag", "compile and note cache state proved in raw BuildKit progress", "exact version output and note in every cache state", "macOS legs match runtime receipts across engines and cache states and match the HTTPie wheel lock", "owned output tags cleaned up"]
-note = "The macOS fixture builds Linux ARM64 HTTPie from a pinned PyPI sdist and exact wheels with build networking disabled. Hyperfine uses cargo build --release --locked. Linux amd64 retains revision 3 with network resolution for both builds. --no-cache bypasses reuse while retaining the engine and base-image stores. Warm repeats the context. Incremental changes stamp/note.txt after compilation so only tail layers rerun. --load includes image-store import."
+note = "The macOS fixture builds both Linux ARM64 apps with build networking disabled. HTTPie uses a pinned PyPI sdist and exact wheels. Hyperfine uses cargo build --release --frozen with the pinned vendor archive. Linux amd64 retains revision 3 with network resolution for both builds. --no-cache bypasses reuse while retaining the engine and base-image stores. Warm repeats the context. Incremental changes stamp/note.txt after compilation so only tail layers rerun. --load includes image-store import."
 
 [[case]]
 id = "W8"

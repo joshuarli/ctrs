@@ -385,11 +385,15 @@ class WorkloadSafetyTests(unittest.TestCase):
                 (fixture / app).mkdir(parents=True)
                 shutil.copy(runner.W7_DIR / app / "Dockerfile",
                             fixture / app / "Dockerfile")
-            shutil.copy(runner.W7_DIR / 'httpie/Dockerfile.offline', fixture / 'httpie')
+                shutil.copy(runner.W7_DIR / app / 'Dockerfile.offline', fixture / app)
             wheelhouse = Path(tmp) / 'wheels'
             wheelhouse.mkdir()
             wheel = wheelhouse / 'pip-26.3-py3-none-any.whl'
             wheel.write_bytes(b'pinned wheel')
+            vendor = Path(tmp) / runner.prepare_vendor.VENDOR_ARCHIVE
+            vendor.parent.mkdir(parents=True)
+            vendor.write_bytes(b'pinned vendor archive')
+            vendor_sha = runner.sha256_file(vendor)
             rust = b"rust asset"
             httpie = b"httpie asset"
             rust_pin = dict(runner.W6_RUST_SOURCE)
@@ -406,6 +410,7 @@ class WorkloadSafetyTests(unittest.TestCase):
             lost_ownership = False
             runtime_changed = False
             offline = False
+            offline_hyperfine = False
             lock_version = '26.3'
 
             def respond(args, **kw):
@@ -417,11 +422,16 @@ class WorkloadSafetyTests(unittest.TestCase):
                     notes.append(loaded[tag][1])
                     app = "hyperfine" if "hyperfine" in tag else "httpie"
                     offline_build = offline and app == 'httpie'
-                    self.assertEqual('--network=none' in args, offline_build)
+                    frozen_hyperfine = offline_hyperfine and app == 'hyperfine'
+                    self.assertEqual('--network=none' in args, offline_build or frozen_hyperfine)
                     compile_step = apps[app]['compile_step']
                     if offline_build:
                         self.assertEqual((context / 'wheelhouse' / wheel.name).read_bytes(), b'pinned wheel')
                         compile_step = runner.W7_OFFLINE_HTTPIE_COMPILE
+                        self.assertIn(compile_step, (context / 'Dockerfile').read_text())
+                    if frozen_hyperfine:
+                        self.assertEqual((context / vendor.name).read_bytes(), b'pinned vendor archive')
+                        compile_step = runner.W7_OFFLINE_HYPERFINE_COMPILE
                         self.assertIn(compile_step, (context / 'Dockerfile').read_text())
                     compile_cached = not tag.endswith("-uncached")
                     if miscached and app == "hyperfine" and tag.endswith("-incr"):
@@ -502,6 +512,14 @@ class WorkloadSafetyTests(unittest.TestCase):
                                                   fixture_version=runner.W7_OFFLINE_HTTPIE_VERSION)
                     self.assertTrue(offline_rec['correctness']['ok'], offline_rec['validation_errors'])
                     self.assertEqual(offline_rec['workload_params']['httpie_wheel_lock_sha256'], 'e' * 64)
+                    offline_hyperfine = True
+                    with patch.object(runner, 'REPO', Path(tmp)), \
+                            patch.object(runner.prepare_vendor, 'VENDOR_SHA256', vendor_sha):
+                        both = runner.trial_w7(FixtureContext(Path(tmp) / 'both-offline'), engine, 'warm',
+                                               fixture_version=runner.W7_OFFLINE_VERSION)
+                    self.assertTrue(both['correctness']['ok'], both['validation_errors'])
+                    self.assertEqual(both['workload_params']['hyperfine_vendor_sha256'], vendor_sha)
+                    offline_hyperfine = False
                     lock_version = '26.2'
                     wrong_lock = runner.trial_w7(FixtureContext(Path(tmp) / 'wrong-lock'), engine, 'warm',
                                                 fixture_version=runner.W7_OFFLINE_HTTPIE_VERSION)
