@@ -1357,7 +1357,6 @@ The same ctrs backing file returned private allocation in all 12 observations.
 Its private bytes grew by 105,103,360 from first to last, matching the total
 allocation change. Inspect guest live data and free extents on this private
 disk after cleanup, then test whether guest trim reclaims the host bytes.
-The OrbStack growth leg follows separately.
 
 Use a stopped APFS clone of that private store for trim. Mount a new probe
 volume and verify its ext4 mount resolves to the guest data disk `/dev/vda`.
@@ -1373,6 +1372,48 @@ so the clone's `st_blocks` delta measures the change in backing references.
 | --- | --- |
 | `trials.jsonl` | `a2df9e0330b4296060cf02e10cc1fcca1dcaea03a602fd9243d3570282ed6676` |
 | `plan.json` | `0a51db19315e20977eadb3e600724f5d1a47850a499998885991727a3098ba0f` |
+| `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+
+#### W11 ctrs guest trim diagnostic
+
+The signed `99db1aa` release booted a stopped APFS clone of the W11 store.
+A new volume mounted at `/probe` resolved to ext4 on `/dev/vda`. A 10-second
+idle control increased the clone's backing allocation by 32,768 bytes.
+The guest then submitted 1,080,030,900,224 bytes of free extents through
+`FITRIM`. Guest used space stayed at 1,068,244,992 bytes. Ten seconds after
+trim, the clone's backing allocation had fallen from 1,471,102,976 to
+1,211,015,168 bytes, a reduction of 260,087,808 bytes.
+
+The stopped source retained 1,470,971,904 bytes of backing allocation.
+Its private allocation rose by 258,141,056 bytes as the clone dropped
+shared extents. The clone's private allocation rose by 69,632 bytes.
+The sentinel checksum and the fixture image's config and layer identities
+matched after restarting the clone's daemon. Receipt SHA-256:
+`875731cffbc6e855682642a737e82cec08c295f273c9b727d7787bd2eb887367`.
+Physical reclaim needs a follow-up on a fresh unshared backing file with
+the same workload.
+
+#### W11 short OrbStack growth result
+
+`w11-mixed-20261122T122344-a9fc` ran the same source and fixture. All 11
+cycles verified 55,000 API operations, stable service identities and owned
+cleanup. Every post-cleanup interval met the observation minimum.
+
+| Resource | Post-warmup increase | Final change from first observation | Budget |
+| --- | ---: | ---: | --- |
+| Sampled physical footprint | 49,796,472 bytes | −304,411,504 bytes | Failed 16 MiB growth |
+| Owned active backing allocation | 17,661,952 bytes | 18,006,016 bytes | Failed 16 MiB |
+| Owned descriptors | 0 | 0 | Passed 16 descriptors |
+
+macOS returned `EPERM` when opening the owned `data.img.raw` and `swap.img`
+files for the private allocation probe. Their ordinary allocation receipts
+passed the ownership checks. Both engines missed growth budgets in the
+short run, and both 12-hour legs remain open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `trials.jsonl` | `b4e684c256ca6eaaedc64cf054ffb2901699a0ae42e4f2dd0d495636bd46f947` |
+| `plan.json` | `69fa21643125255e0f4b3efaa2f1536d9d1528504b82c0957a4328e1d2331e59` |
 | `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
 
 The 12-hour check now requires the API, DB and cache container IDs, guest
