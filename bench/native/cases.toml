@@ -205,11 +205,11 @@ fixture_version = "w12-v2"
 status = "implemented"
 metrics = ["workflow_seconds", "install_seconds", "build_seconds", "typecheck_seconds",
            "test_discovery_seconds", "warm_rebuild_seconds", "multi_file_change_seconds",
-           "branch_switch_seconds"]
+           "branch_switch_seconds", "install_verification_seconds"]
 states = ["warm"]
 params = { layout = "full-bind" }
 correctness = ["source, lock and image DiffIDs pinned", "network none during install", "server tree, client manifest and runtime receipts exact", "sorted Jest test list exact", "mount identities match the declared layout", "owned cleanup"]
-note = "Layouts full-bind, bind-source-volume-deps and all-volume are separate cohorts via workload_params. Setup and cleanup are recorded, not scored."
+note = "Layouts full-bind, bind-source-volume-deps and all-volume are separate cohorts via workload_params. Timing revision 2 measures npm ci and the verification walk separately and retains both in workflow_seconds. Setup and cleanup are recorded, not scored."
 
 [[case]]
 id = "W12-watch"

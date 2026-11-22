@@ -15,6 +15,7 @@ from pathlib import Path
 
 import ci_jobs
 from watch_loop import RECEIPT_VERSION as W5_RECEIPT_VERSION
+from workspace import INSTALL_TIMING_REVISION
 
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
@@ -97,6 +98,8 @@ def case_metrics(case: str, params) -> list[str]:
         return [*W14_MODE_METRICS[mode], "cleanup_latency_ms", "successes"]
     if case == "W5" and isinstance(params, dict) and params.get("fixture_version") == W5_RECEIPT_VERSION:
         return [*CASE_METRICS["W5"], "bind_setup_s", "volume_setup_s", *W5_RESOURCE_METRICS]
+    if case == "W12" and isinstance(params, dict) and params.get("timing_revision") == INSTALL_TIMING_REVISION:
+        return [*CASE_METRICS["W12"], "install_verification_seconds"]
     return CASE_METRICS.get(case, [])
 
 

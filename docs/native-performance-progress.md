@@ -53,10 +53,10 @@ Decisions, including the vCPU default and kernel patch 0017, are in
   wrote it and were not run again here.
 - Linux development bootstrap: `scripts/setup-dev`, documented under
   "Linux development setup" in [development.md](development.md).
-- Abandoned at wind-down: the two-virtiofs-device probe
-  (`exp/fs-devices`, `CTRS_EXP_SHARE_DEVICES`). It got one noisy run at
-  1.2–2.5× files/s and was never repeated in a quiet window. Its one
-  commit is pushed to `origin/exp/fs-devices`.
+- Rejected: splitting a bind mount across two virtiofs devices. Three
+  interleaved rounds for each writer count showed limited aggregate gains
+  across separate mounts. A single mount uses one device's inode IDs.
+  [Two-device evidence](evidence/native-w12-w13-2026-11-18.md#two-virtiofs-devices-on-one-share-2026-11-20)
 - Never ran: queue q7 (`w13-overlap`, `w2-api`, `w6-build`, `w7-buildx`
   and `w14-idle-resume` cohorts at the 9-vCPU default against OrbStack).
 
@@ -1143,11 +1143,11 @@ Next, in order:
    `cargo xtask all`) only after the measurement queue drains, then
    re-run W12-watch (a rescan now raises one event per uncached
    retained name; review note D3) and record the asset change.
-3. Full-bind boundary: a two-virtiofs-device probe
-   (`exp/fs-devices`, `CTRS_EXP_SHARE_DEVICES=2`, a noisy first run
-   showed 1.2–2.5× more files/s split across two devices) tests whether
-   the Virtualization.framework server serializes per device. Rerun in a
-   quiet window before drawing a conclusion.
+3. Full-bind boundary: the completed
+   [two-device probe](evidence/native-w12-w13-2026-11-18.md#two-virtiofs-devices-on-one-share-2026-11-20)
+   rejected sharding a single mount. Rebaseline the v2 workspace with the
+   install command and verification walk timed separately before selecting
+   the next filesystem candidate.
 4. W6/W7 D-lane cohorts reported (2026-11-20, source `0536435`): no
    build phase loses. W6 `base-20261120T143829-8345`: Rust 0.953×
    non-inferior, zlib 0.641× win. W7 `base-20261120T150445-1408`: the

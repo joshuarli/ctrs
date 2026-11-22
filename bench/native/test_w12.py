@@ -66,11 +66,12 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_phase_metrics_cover_scored_workflow(self):
         phases = {name: {'operation_wall_seconds': float(i + 1)}
-                  for i, name in enumerate(('setup',) + workspace.BUILD_PHASES + ('cleanup',))}
+                  for i, name in enumerate(('setup',) + workspace.BUILD_PHASES + ('verify-install', 'cleanup'))}
         metrics = workspace.phase_metrics(phases)
         self.assertEqual(metrics['install_seconds'], 2.0)
         self.assertEqual(metrics['branch_switch_seconds'], 8.0)
-        self.assertEqual(metrics['workflow_seconds'], sum(range(2, 9)))
+        self.assertEqual(metrics['install_verification_seconds'], 9.0)
+        self.assertEqual(metrics['workflow_seconds'], sum(range(2, 10)))
         with self.assertRaises(KeyError):
             workspace.phase_metrics({'install': {'operation_wall_seconds': 1.0}})
 

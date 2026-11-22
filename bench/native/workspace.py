@@ -11,6 +11,8 @@ INPUTS = Path(__file__).resolve().parents[2] / '.work' / 'tmp'
 WATCH_DEADLINE_SECONDS = 10.0
 BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild',
                 'multi-file-change', 'branch-switch')
+INSTALL_VERIFICATION = 'verify-install'
+INSTALL_TIMING_REVISION = 2
 
 
 def source_contract():
@@ -59,7 +61,8 @@ def observed_stale(actual, expected, previous, diagnostic_ok):
 def phase_metrics(phases):
     walls = {name: phases[name]['operation_wall_seconds'] for name in BUILD_PHASES}
     metrics = {name.replace('-', '_') + '_seconds': value for name, value in walls.items()}
-    metrics['workflow_seconds'] = sum(walls.values())
+    metrics['install_verification_seconds'] = phases[INSTALL_VERIFICATION]['operation_wall_seconds']
+    metrics['workflow_seconds'] = sum(walls.values()) + metrics['install_verification_seconds']
     return metrics
 
 
@@ -140,6 +143,7 @@ def trial_w12(ctx, engine, state, layout='full-bind'):
     trial_dir = ctx.trial_dir(engine.name, 'W12', state)
     rec = ctx.new_record(engine, 'W12', state, trial_dir)
     rec['metrics'].update(fixture_version='w12-v2', layout=layout)
+    rec['workload_params']['timing_revision'] = INSTALL_TIMING_REVISION
     rec['inputs'] = {}
     spec = source_contract()
     label = 'dev.ctrs.campaign.run=' + ctx.run_id
@@ -246,6 +250,7 @@ fs.writeFileSync(p,next)}'''
                 raise ValueError('W12 tool version mismatch')
         with phase('install'):
             run(['npm', 'ci', '--offline', '--legacy-peer-deps', '--cache', '/fixture/npm-cache', '--no-audit', '--no-fund'])
+        with phase(INSTALL_VERIFICATION):
             rec['metrics'].update(filesystem_counts(run))
         with phase('build'):
             build()

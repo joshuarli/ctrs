@@ -61,3 +61,9 @@ ordered DiffIDs, source archive and both lockfile hashes on each engine.
 The proof driver uses the pinned signed ctrs binary and a fresh private engine.
 It writes complete records under `.work/native-perf/results/` and prints one
 summary per condition. These runs are functional checks, not comparisons.
+
+In timing revision 2, `install_seconds` measures the `npm ci` command.
+`install_verification_seconds` measures the subsequent walk used to verify
+the dependency count and record file and byte counts. Both contribute to
+`workflow_seconds`, and the walk still runs before the build. Earlier
+install timings include the walk in the command interval.
