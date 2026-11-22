@@ -462,6 +462,28 @@ Run the no-load and concurrent API controls as `w8-pull:cohort` and
 `w8-pull-under-load-installed-default:cohort`. Add `-retained` before
 `:cohort` to select the corresponding retained-layer condition.
 
+### Rebuilt W11 worker fixture
+
+The historical worker's manifest and config IDs were absent from OrbStack
+and the dedicated ctrs store. Two uncached native ARM64 builds reproduced
+the same new manifest, config and DiffIDs from the pinned W4 Dockerfile
+and unchanged application bytes. The canonical archive SHA-256 is
+`b775e9bdf8c029026d4e2e53c0ebab2e0e0920c223d28df37380ba42c79b0dd7`.
+See the [worker recipe and pin](../bench/native/fixtures/w11-v2/README.md).
+
+Both engines passed the two-cycle functional proof
+`w11-mixed-20261122T085837-51e2` on source `68f70ee` with the v5 worker
+and v6 portfolio. Each cycle verified 5,000 API operations, 200 queue
+jobs, 12,800 queue events, 400 artifacts, 16 build jobs, and all 500
+retained seed rows. Owned cleanup completed without errors.
+The continuous 12-hour legs and post-cleanup resource growth gates remain
+open. The functional proof used the bounded-working-set workload.
+
+`trials.jsonl` SHA-256
+`b7bf0a89e172a4f74d710cf3e8f7d4dbce2c13ae95f4d5e7143c742bf08d0926`.
+`plan.json` SHA-256
+`ae60b1e3bbdf0c5e32f01f24a1ccaa4bb08fea26b28b518efab26726cf1593bb`.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
