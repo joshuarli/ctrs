@@ -308,6 +308,14 @@ pins. The new fixture and CPU allocation prevent attributing the difference
 to the vCPU change alone. Independent confirmation and the matched-resource
 comparison remain open.
 
+The process counters localize the measured CPU difference to the overlap
+workload phase. Across the ten ctrs trials, the median was 117.5 CPU seconds
+in the Virtualization.framework VM helper and 15.4 in the daemon, with
+15.2 of the daemon seconds charged as system CPU. OrbStack's helper median
+was 118.7 seconds. These process totals include both the API and bulk
+work. The next diagnostic is to measure the upload and API separately,
+then attribute the daemon's system CPU during upload.
+
 ```sh
 export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
 python3 bench/native/pyramid.py run --name w13-overlap:cohort

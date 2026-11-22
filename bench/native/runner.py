@@ -910,7 +910,7 @@ def relay_delta(before: dict | None, after: dict | None, group: str) -> dict | N
     return {path: after[group][path] - before[group].get(path, 0) for path in after[group]}
 
 
-NAT_PATHS = ("nat", "nat_leg")
+NAT_PATHS = ("nat", "nat_leg", "vmnet")
 
 
 def cpu_accounting(before: dict | None, after: dict | None) -> dict:

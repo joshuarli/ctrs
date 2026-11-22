@@ -76,3 +76,10 @@ class CpuAccounting(unittest.TestCase):
         self.assertFalse(runner.cpu_accounting(before, after)["complete"])
         self.assertTrue(runner.cpu_accounting(after, after)["complete"])
         self.assertIsNone(runner.cpu_accounting(before, None)["complete"])
+
+    def test_opt_in_vmnet_marks_published_port_cpu_incomplete(self):
+        before = {"published": {"nat_leg": 2, "vmnet": 3, "vsock": 5}}
+        after = {"published": {"nat_leg": 2, "vmnet": 5, "vsock": 6}}
+        accounting = runner.cpu_accounting(before, after)
+        self.assertFalse(accounting["complete"])
+        self.assertEqual(accounting["nat_connections"], 2)
