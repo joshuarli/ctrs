@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import copy
 import io
 import json
@@ -6,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import urllib.request
@@ -67,6 +69,44 @@ class RegistryTests(unittest.TestCase):
         connection = Connection(f'{method} {path} HTTP/1.1\r\nHost: localhost\r\n\r\n'.encode())
         portfolio.handler()(connection, ('127.0.0.1', 1234), Server())
         return connection.output.getvalue().split(b'\r\n\r\n', 1)
+
+    def test_restore_requires_the_exact_worker_blob_bytes(self):
+        path = Path(__file__).parent / 'fixtures/w11-v2/restore.py'
+        spec = importlib.util.spec_from_file_location('w11_restore', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        archive = self.root / 'worker.tar'
+        output = self.root / 'restored'
+        pin = {'manifest': self.manifest['digest'], 'config': self.config['digest'],
+               'diff_ids': self.diff_ids, 'layout_reference': 'v2', 'repository': 'np-w11/events'}
+        layer = self.root / 'blobs/sha256' / self.layers[0]['digest'][7:]
+        first = layer.read_bytes()
+
+        def save():
+            with tarfile.open(archive, mode='w') as stream:
+                stream.add(self.root / 'blobs', arcname='blobs')
+
+        layer.write_bytes(b'x' * len(first))
+        save()
+        with self.assertRaisesRegex(ValueError, 'OCI blob integrity failure'):
+            module.restore(archive, output, pin)
+        self.assertFalse(output.exists())
+
+        layer.unlink()
+        layer.symlink_to(self.root / 'index.json')
+        save()
+        with self.assertRaisesRegex(ValueError, 'invalid worker archive entry'):
+            module.restore(archive, output, pin)
+        self.assertFalse(output.exists())
+
+        layer.unlink()
+        layer.write_bytes(first)
+        save()
+        layout = module.restore(archive, output, pin)
+        worker = registry.prepare_layout(layout, {pin['repository']: 'v2'})
+        self.assertEqual(worker.manifests, {pin['repository']: pin['manifest']})
+        with self.assertRaises(FileExistsError):
+            module.restore(archive, output, pin)
 
     def test_both_repositories_serve_identical_verified_manifest_and_blobs(self):
         portfolio = registry.prepare_layout(self.root, {'ctrs/app': 'app', 'orb/app': 'app'})

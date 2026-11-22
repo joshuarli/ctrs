@@ -5,12 +5,21 @@ is a read-only export of the verified W4 image. `worker-pin.json` records its
 manifest, config, diff IDs and application hash. Preparation preserves both
 engines' existing images and shared daemons.
 
-If scratch was deleted, `worker-pin.json` retains the exact `source_image_id`.
-Export that image from the shared store under a new owned tag whose suffix is
-the recorded `layout_reference`. Extract its OCI archive with the data filter.
-`registry_portfolio.prepare_layout(layout, {repository: layout_reference})` must
-recover the pinned worker manifest, config and DiffIDs before a run. Missing
-source bytes remain a preparation blocker or require a new version and baselines.
+If scratch was deleted, restore from the original OCI archive or export
+the pinned `source_image_id` from OrbStack while the benchmark host is idle:
+
+```sh
+mkdir -p .work/tmp .work/native-perf/inputs
+worker=$(jaq -er '.source_image_id' bench/native/fixtures/w11-v2/worker-pin.json)
+docker -H "unix://$HOME/.orbstack/run/docker.sock" image save --platform linux/arm64 \
+  -o .work/tmp/w11-worker.tar "$worker"
+python3 bench/native/fixtures/w11-v2/restore.py .work/tmp/w11-worker.tar
+```
+
+The restore command extracts only regular files referenced by the pinned
+manifest, checks their digests and publishes a fresh `w11-worker-v1/layout`.
+It refuses an existing destination. An export missing the pinned blobs requires
+the original archive or a new worker fixture version and baselines.
 
 ```sh
 TMPDIR=$PWD/.work/tmp CTRS_CPUS=2 CTRS_MEMORY_MIB=4096 \
