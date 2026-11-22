@@ -1797,7 +1797,7 @@ state, and host-side helper allocations still need separate measurements.
 The derived `observations.jsonl` SHA-256 is
 `8a3153923d264a43adde0e076e6d59eefeaf53aedcc1654a5806eb4869369365`.
 
-#### W11 guest storage attribution
+#### W11 guest storage and memory attribution
 
 Use the signed `99db1aa` release and the `ae96711` mixed pilot with a
 six-minute work window per engine and 32 seconds of post-cleanup observation.
@@ -1807,9 +1807,15 @@ Record `pg_database_size`, the items heap and total relation sizes,
 `df -Pk "$PGDATA"`, `du -sk "$PGDATA"` and `du -sk "$PGDATA/pg_wal"`
 inside the owned database container. Verify the ctrs mount resolves to
 `/dev/vda` and retain guest device and mount identity in both legs.
-Match at least six exact cycles to the host backing observations by cycle
-index. The samples add work to cleanup and serve as diagnostic evidence.
-Use the current trim, database, and durability policies.
+
+Read `/proc/meminfo` at both cleanup boundaries and immediately after
+each post-cleanup observation. Retain available memory, file cache,
+reclaimable slab, anonymous pages, and the ctrs guest's balloon pages.
+Use background `GET /info` on the private ctrs daemon to retain the
+ceiling, target, used, stall, and OOM counters. Match at least six
+exact cycles to their valid host backing and footprint observations.
+Use these samples for attribution under the current trim, database,
+memory, and durability policies.
 
 The 12-hour check now requires the API, DB and cache container IDs, guest
 PIDs, start times and restart counters to match from setup through every
