@@ -1019,6 +1019,36 @@ attempt's wall-clock receipt to align the first exact response with the
 cache events for the owned API target. Keep the diagnostic separate from
 the scored pair observations.
 
+### Installed-default W10 database recovery cohort
+
+Run `base-20261122T105526-a8d2` admitted all ten alternating pairs at
+`ca24add` with the same resources and inputs as the API cohort. The trial
+interrupted the owned PostgreSQL container while the API and Redis remained
+up. All twenty exact-state checks passed with zero unexpected errors. ctrs
+verified 94,451 acknowledged writes and 384 exact rows with interrupted
+acknowledgements. OrbStack verified 68,546 acknowledged writes and 450
+exact uncertain rows. The maximum measured outside-engine load was 0.72 cores.
+
+| Metric | ctrs median | OrbStack median | ctrs / OrbStack paired ratio and 95% CI |
+| --- | ---: | ---: | --- |
+| Start command to first exact read | 178.6 ms | 517.2 ms | 0.3421 [0.3007, 0.4148] |
+| Recovered request p99 | 7.04 ms | 11.61 ms | 0.6078 [0.5962, 0.6156] |
+| Measured engine CPU per successful response | 1,171 µs | 898 µs | 1.3017 [1.2930, 1.3364] |
+| Sampled peak physical footprint | 2.46 GB | 5.99 GB | 0.4087 [0.4028, 0.4155] |
+
+The database start command took a median 30.4 ms on ctrs and 213.0 ms on
+OrbStack. The interval from command return to the first exact read was
+151.8 ms and 301.6 ms, respectively. The measured per-response CPU loss
+remains, and the counter omits host NAT CPU. The live application had
+121–133 expected outage errors per ctrs trial and 138–149 per OrbStack
+trial. The separate API interruption stops the published application
+endpoint and produces a different failure load.
+
+Repeat the API cohort reproduction with `--interrupt-service db` at the
+same revision and with the same assets. Report run
+`base-20261122T105526-a8d2` separately. Its `trials.jsonl` SHA-256 is
+`dc8af48b2d10eaa7f54cbbb3f34c0c31e4b582ee3674657a87126ba430bd77f5`.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
