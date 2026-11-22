@@ -1046,6 +1046,32 @@ python3 bench/native/reporting.py --match base-20261122T082410-0094
 `trials.jsonl` SHA-256
 `8bb607932e787f79531a644b4c416081a5682bede314429e70b4813f8734d0ce`.
 
+#### W14 idle-resume with buffered frames
+
+`base-20261122T124324-6b62` used `w14-v4-buffered-frames` from
+`ce50555` and the signed `99db1aa` release. All ten alternating pairs
+passed. Both engines verified 32 responses after the 30-second idle
+period in each leg, with no leaked sessions or cleanup errors. Outside
+CPU was at most 0.62 cores. The published-port path used 192 ctrs NAT
+connections, leaving host-kernel CPU outside the measured scope.
+
+| Metric | ctrs / OrbStack paired median | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Resume p50 | 1.4584 | 1.0259–2.2510 | Inconclusive |
+| Resume p95 | 0.8787 | 0.7668–1.3071 | Inconclusive |
+| Resume p99 | 0.8009 | 0.6472–1.1554 | Inconclusive |
+| Cleanup latency | 0.9276 | 0.7705–0.9788 | Non-inferior |
+| Sampled peak physical footprint | 0.0673 | 0.0603–0.0853 | Strict win |
+| Measured engine CPU | 0.2539 | 0.2286–0.3754 | Incomplete |
+
+The median trial p50 was 14.87 ms on ctrs and 9.48 ms on OrbStack. The
+timer includes the published-port path and both endpoints' application
+scheduling. These receipts do not isolate the source of the gap. Repeat
+the idle-resume command above from `ce50555` with the signed release and
+installed-default resources. Keep the v3 and v4 cohorts separate.
+Raw trials SHA-256
+`aaea59cf5cc691fd2a359302a202606ef5aad01f80c99644283925e7eed44c2c`.
+
 ### Rebuilt W8 common portfolio
 
 The [v6 recipe and lock](../bench/native/fixtures/w8-v6/README.md) replace
