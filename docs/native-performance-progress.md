@@ -164,15 +164,55 @@ were lost with scratch. Recover their exact private-built images from an
 archived artifact if available. A rebuild that changes an image pin
 requires a new fixture version and fresh results for its consumers.
 
-Run independent `w6-build:cohort` and `w7-buildx:cohort` while the
-portfolio is unavailable. Once the pinned common inputs are restored or
-replaced with verified versioned fixtures, run `w13-overlap:cohort`,
+W6 completed and W7 started independently of the common portfolio.
+Once the pinned common inputs are restored or replaced with verified
+versioned fixtures, run `w13-overlap:cohort`,
 `w2-api:cohort` and `w14-idle-resume:cohort`. Report them with
 `reporting.py --match <run>`. Use Python 3.11 or later. On this host
 the supported interpreter is `/opt/homebrew/bin/python3`.
 For hand-run watch tests, use a gate path with no extension so the daemon
 derives `<gate>.overflow`, point `CTRS_DAEMON_LOG` at the daemon's readable
 stderr capture, and include `/usr/sbin` in PATH for `lsof` in the inode test.
+
+### Installed-default W6 cohort
+
+Run `base-20261122T063709-0627` used harness source `2910f31` and the signed
+binary and guest hashes above. The default drivers retained base images
+and compiled and tested Hyperfine 2.0.0 and zlib 1.3.1 with `--no-cache`.
+All 10 alternating pairs verified the compile steps and both artifact
+hashes. There were zero failures, rejections or missing footprint samples.
+Both engines observed 9 vCPUs. Guest MemTotal was 8,407,957,504 bytes on
+ctrs and 63,157,620,736 on OrbStack. The maximum measured outside-engine
+CPU in any build phase was 0.77 cores.
+
+| Metric | ctrs / OrbStack paired median | 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Sampled peak physical footprint | 1.3642 | 1.1823–1.4851 | Loss |
+| Summed peak RSS | 1.6781 | 1.5020–1.7506 | Loss |
+| Rust build | 0.9439 | 0.9320–0.9507 | Non-inferior |
+| zlib build | 0.5242 | 0.5126–0.6433 | Strict win |
+| Engine CPU | 0.9549 | 0.9447–0.9696 | Incomplete host NAT accounting in all ctrs trials |
+
+The physical-footprint medians were 8.64 GB and 6.33 GB. At every ctrs
+peak, the VZ helper accounted for over 99.8% of the sample. The first
+build started at 0.41 GB and reached 8.62 GB. The following nine trials
+already started just above 8.62 GB. The trace localizes the retained
+memory to the VM helper. Guest active, cache and balloon counters are
+needed to explain the retention. Measure those alongside host footprint
+with the next-use check before changing reclaim policy.
+
+```sh
+export PATH="/opt/homebrew/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+python3 bench/native/pyramid.py run --name w6-build:cohort
+python3 bench/native/reporting.py --match base-20261122T063709-0627
+```
+
+`trials.jsonl` SHA-256
+`d1fe8a523db792ebf118804489839db138f0af704d8be8858d9700a71aa9203e`.
+This covers uncached builds under installed defaults. Warm builds,
+complete CPU accounting and fresh confirmation remain open.
+W7 started from the same harness and assets in run
+`base-20261122T065539-5b0c`.
 
 ## Linux lane pilot (amd64) — 2026-11-21
 
