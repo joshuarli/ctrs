@@ -142,6 +142,28 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(metric_result(report, duration)["ratio_median"], .5)
         self.assertEqual(metric_result(report, rate)["ratio_median"], .5)
 
+    def test_w3_cpu_uses_the_verified_transaction_phase_and_paired_sql(self):
+        records = pair(case="W3", metric="tx_tps")
+        for record, cpu in zip(records, (9, 12), strict=True):
+            record["metrics"]["verified_transactions"] = 300
+            record["correctness"]["checks"].update(txmix=True, verify_rows=True)
+            record["resources"]["phases"] = {"transactions": {"errors": [], "cpu_seconds": cpu}}
+            record["paired_inputs"] = {"transactions_sha256": "shared"}
+        result = reporting.analyze(records)
+        metric = metric_result(result, "engine_cpu_per_success")
+        self.assertEqual(metric["ratio_median"], .75)
+
+        records[0]["metrics"]["verified_transactions"] = 299
+        result = reporting.analyze(records)
+        self.assertIsNone(metric_result(result, "engine_cpu_per_success")["ratio_median"])
+        records[0]["metrics"]["verified_transactions"] = 300
+        records[0]["resources"]["phases"]["transactions"]["errors"] = ["incomplete sample"]
+        result = reporting.analyze(records)
+        self.assertIsNone(metric_result(result, "engine_cpu_per_success")["ratio_median"])
+
+        records[0]["paired_inputs"]["transactions_sha256"] = "different"
+        self.assertEqual(reporting.analyze(records)["cohorts"][0]["valid_pairs"], 0)
+
     def test_w3_v4_rate_and_latency_directions(self):
         records = pair(case="W3-v4", metric="rw_p99_ms", ratio=.5)
         for metric in ("rw_tps", "ro_tps"):
