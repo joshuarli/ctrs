@@ -2359,10 +2359,29 @@ def _recover_queue(engine, queue_id, queue, app, directory, outage):
     return before, {"recovery_s": elapsed, "retries_until_recovery": retries}
 
 
+def pipeline_image_inputs(engine, worker_ref, redis_ref):
+    worker, redis = json.loads(engine.sh(['image', 'inspect', worker_ref, redis_ref], timeout=30).stdout)
+    inputs = {}
+    for role, image in (('worker', worker), ('redis', redis)):
+        layers = image['RootFS']['Layers']
+        if (image.get('Os') != 'linux' or image.get('Architecture') != 'arm64'
+                or not re.fullmatch(r'sha256:[a-f0-9]{64}', image.get('Id', ''))
+                or not isinstance(layers, list) or not layers
+                or not all(isinstance(layer, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', layer)
+                           for layer in layers)):
+            raise ValueError(f'W4 {role} image identity is incomplete')
+        config = image['Config']
+        inputs[role] = {'diff_ids': layers, 'config': {
+            **{key: config.get(key) or [] for key in ('Entrypoint', 'Cmd', 'Env')},
+            **{key: config.get(key) or '' for key in ('User', 'WorkingDir')}}}
+    return worker['Id'], redis['Id'], {'images': inputs, 'redis_reference': redis_ref}
+
+
 def trial_w4(ctx, engine: Engine, state: str,
              workers: tuple = (1, 4, 16), fixture_version: str = "w4-v2-events", *,
              image_ref: str | None = None, redis_ref: str = W4_IMAGE,
-             cleanup_command=None, queue_interruption: QueueInterruption | None = None) -> dict:
+             cleanup_command=None, queue_interruption: QueueInterruption | None = None,
+             pinned_pipeline_inputs: bool = False) -> dict:
     """HTTP ingest through Redis to workers producing exact filesystem artifacts."""
     case_id = "W10" if queue_interruption is not None else "W4"
     trial_dir = ctx.trial_dir(engine.name, case_id, state)
@@ -2381,7 +2400,11 @@ def trial_w4(ctx, engine: Engine, state: str,
     owned_containers, owned_volumes = [], []
     try:
         engine.ensure_up()
-        engine.sh(["image", "inspect", image])
+        if pinned_pipeline_inputs:
+            image, redis_ref, rec['paired_inputs'] = pipeline_image_inputs(engine, image, redis_ref)
+            rec['inputs'] = {'worker_image_id': image, 'redis_image_id': redis_ref}
+        else:
+            engine.sh(["image", "inspect", image])
         engine.sh(["network", "create", "--label", label, net])
         mounts = []
         persistence = ["--appendonly", "no"]
@@ -4080,6 +4103,8 @@ def cmd_baseline(args) -> int:
                           "seed": args.seed + pair * 10}
                 if args.case == "W9":
                     kw["image_ref"] = args.image_ref
+                if args.case == "W4":
+                    kw["pinned_pipeline_inputs"] = True
                 if args.case == "W5" and getattr(args, "watch_edits", None) is not None:
                     kw["iters"] = args.watch_edits
                 if args.case == "W2":

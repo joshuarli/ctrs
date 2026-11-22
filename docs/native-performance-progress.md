@@ -291,6 +291,25 @@ OrbStack's corresponding host guarantee remains unknown. Obtain its explicit
 contract or separately qualify acknowledged commits across host failure on a
 disposable setup before claiming a comparative durability-qualified result.
 
+### W4 pipeline comparison with common images
+
+Prepare one Linux ARM64 v4 worker image from the pinned W4 latency
+Dockerfile on OrbStack. Save `np-w4-events:v4` and verify the archive hash
+before loading it into the private ctrs store with the signed Mac release.
+Preload the pinned Redis reference on each engine. In each trial, verify the
+ordered layers and launch configuration of both images and run by the
+inspected IDs. The reporter rejects pairs whose input receipts differ.
+
+Run one native admission pair before the ten-pair installed-default cohort.
+Each leg must verify all 200 jobs and 400 artifacts at 1, 4 and 16 workers.
+Check queue p95 and p99 and the CPU and sampled footprint receipts for each
+condition. Image preparation stays outside the measured pipeline interval.
+
+```sh
+python3 bench/native/runner.py baseline --case W4 --a ctrs --b orbstack \
+  --resource-lane installed-default --pairs 10 --pair-quiet-load 4 --max-pairs 16
+```
+
 ### Installed-default W6 cohort
 
 Run `base-20261122T063709-0627` used harness source `2910f31` and the signed

@@ -58,6 +58,24 @@ class Engine:
 
 
 class W4References(unittest.TestCase):
+    def test_pipeline_image_receipt_uses_immutable_ids_and_ordered_layers(self):
+        def image(digit, arch='arm64'):
+            return {'Os': 'linux', 'Architecture': arch, 'Id': 'sha256:' + digit * 64,
+                    'RootFS': {'Layers': ['sha256:' + 'a' * 64, 'sha256:' + digit * 64]},
+                    'Config': {'Entrypoint': None, 'WorkingDir': '/app', 'Env': ['A=1', 'B=2']}}
+
+        engine = Engine()
+        worker, redis = image('b'), image('c')
+        with patch.object(engine, 'sh', return_value=Result(json.dumps([worker, redis]))):
+            worker_id, redis_id, receipt = runner.pipeline_image_inputs(engine, 'worker:owned', 'redis@pinned')
+        self.assertEqual((worker_id, redis_id), (worker['Id'], redis['Id']))
+        self.assertEqual(receipt['images']['worker']['diff_ids'], worker['RootFS']['Layers'])
+        self.assertEqual(receipt['images']['worker']['config']['Entrypoint'], [])
+        self.assertEqual(receipt['images']['redis']['config']['Env'], ['A=1', 'B=2'])
+        with patch.object(engine, 'sh', return_value=Result(json.dumps([worker, image('c', 'amd64')]))):
+            with self.assertRaisesRegex(ValueError, 'W4 redis image identity is incomplete'):
+                runner.pipeline_image_inputs(engine, 'worker:owned', 'redis@pinned')
+
     def test_w10_queue_verifies_recovered_backlog_before_workers_and_measures_fresh_work(self):
         queue_id = "a" * 64
         pending = [{"job": i, "clock": "guest", "enqueued_ns": i} for i in range(200)]

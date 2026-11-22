@@ -264,6 +264,15 @@ class ReportingTests(unittest.TestCase):
         records[0]['paired_inputs'] = {'archive_sha256': 'different'}
         self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
 
+    def test_w4_pair_requires_matching_pipeline_inputs(self):
+        records = pair(case='W4', metric='workers_1_s', ratio=.8)
+        for record in records:
+            record['workload_params']['pinned_pipeline_inputs'] = True
+            record['paired_inputs'] = {'images': {'worker': {'diff_ids': ['common']}}}
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+        records[1]['paired_inputs']['images']['worker']['diff_ids'] = ['different']
+        self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 0)
+
     def test_overlap_metric_directions_and_paired_inputs(self):
         records = pair(case="W13-overlap", metric="w2_latency_p99_ms", ratio=.5)
         for record in records:
