@@ -678,6 +678,24 @@ ctrs used host NAT. Each check supplies one valid pair.
 
 Add `--under-load` to the one-pair command to reproduce these checks.
 
+#### Mac release check after the shared layer-install change
+
+Source `83e9c15` changes the gzip decoder compiled into the Linux guest
+and shares the streaming reply path with macOS. Verify on a fresh signed
+host binary and rebuilt initramfs. The current check pins `99db1aa` and
+uses a fresh ctrs data root with the existing kernel and sparse disk
+template. The earlier Mac cohorts used the prior signed artifacts.
+
+In an isolated checkout, copy the existing `Image` and `data.img` into
+`guest/out` with an APFS clone for the disk. Build with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask all` and verify the signature with
+`codesign --verify --strict --verbose=2 target/release/ctrs`. Run the W8
+registry pilot with `--engines ctrs` to seed and verify the four pinned
+services. Then run `w8-cancel --engine ctrs --resource-lane installed-default`
+for both `--content retained` and `--content derived`, using the same
+binary, v6 layout and private store. Record the binary and boot asset
+hashes with the pull, cancellation and retry receipts.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
