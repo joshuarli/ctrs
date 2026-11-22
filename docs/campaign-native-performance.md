@@ -58,6 +58,9 @@ container and volume. W3 uses the frozen native database from that same lock
 for 300 synchronous transactions, CHECKPOINT, restart and exact persisted-row
 verification. They retain the existing workload versions and SQL; Linux W3
 records ordered DiffIDs rather than the macOS portfolio's ARM64 manifest.
+W3-v4 uses that same native database for the existing scale-50 pgbench
+read/write and read-only phases, with native-tool and host-filesystem flush
+receipts required before storage interpretation. Linux results remain pilots.
 
 Sampler `2-linux-cgroup-v2-memory-stat` reads `cpu.stat usage_usec`,
 `memory.current`, optional `memory.peak` and `memory.stat` every 200 ms. Dockerd

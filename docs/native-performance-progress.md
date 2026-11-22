@@ -1931,6 +1931,38 @@ restart. Primary transaction completion, companion p95/CPU/storage/recovery,
 same immutable-input/ownership/admission rules. This tests a longer existing
 workflow; it does not assume the short W3 exec ratio scales.
 
+### W3-v4 Linux follow-up, 2026-11-22
+
+The named next experiment is now complete. [Native pgbench evidence](evidence/linux-w3v4-2026-11-22.md)
+preserves ten alternating AB/BA pairs, native-tool hashes, actual successful
+WAL fdatasync traces, matching host ext4 data-mount/flush contracts, complete
+transaction logs, profiles and analysis. Scale 50, 8 clients, 2 threads,
+2,000 transactions/client/phase and seed 42 remain unchanged. Both engines
+use native PostgreSQL/pgbench 17.12 and CPUs 0–7. All 20 trials are correct,
+host-admitted and resource-valid, with no replacements.
+
+The primary RW p99 is **inconclusive**: paired C/D **1.040 [.830,1.958]**;
+medians 1.894 versus 1.818 ms. RW throughput **loses**, C/D
+**.902 [.797,.999]**, 8267 versus 9181 TPS. RO p99/TPS ratios are
+.965 [.910,1.061] / 1.003 [.942,1.051]. Restart-ready remains slower,
+1.100 [1.025,1.142], .264 versus .240 seconds. No disk-throughput or
+physical power-loss claim follows from this page-cache-fitting pilot.
+
+The separate full-input profiles reverse the throughput ordering and show
+substantial overlapping PostgreSQL WAL-sync work. An extra-CHECKPOINT
+counter-control also changes full-page-image/WAL volume and cannot serve as
+a pure phase subtraction. Neither a background-checkpoint explanation nor a
+ctrs-engine-specific cause is established. No unsupported engine candidate is
+invented; the original deficits remain visible, not declared parity.
+
+Full-window sampled CPU medians are 13.565/13.830 seconds, still explicitly
+incomplete. Idle anon+kernel is 53.96/738.60 MiB; observed peaks are
+173.22/859.15 MiB; peak-minus-idle 119.30/120.31 MiB; retained-minus-idle
+.14/.69 MiB. These are not isolated transaction peaks or broad efficiency
+claims. The first initialization and negative retained deltas are retained.
+The current queue proceeds to residual HTTPie materialization/create profiling,
+then the complete W1–W13 Linux admissibility survey. Mac gates stay open.
+
 ### Finite Mac handoff; no gate closes from Linux
 
 Linux containers share the **host kernel**; macOS ctrs has a **VM boundary**.

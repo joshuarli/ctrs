@@ -108,13 +108,19 @@ def trial_w3_v4(ctx, engine, state):
     try:
         if any(type(x) is not int or x <= 0 for x in (scale, clients, threads, transactions, seed)) or threads > clients:
             raise ValueError("invalid pgbench parameters")
-        pin_path = runner.FIXTURES / "w8-v6/portfolio.json"
-        pin = json.loads(pin_path.read_text())["images"]["np-v6/postgres"]
-        image = baseline_image_reference(engine.name, pin)[1]
         engine.ensure_up()
-        inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
-        rec["inputs"] = {"images": require_baseline_images(engine.name, {"db": pin}, inspected),
-                         "portfolio_sha256": runner.sha256_file(pin_path)}
+        if runner.linux_lane.enabled():
+            image, identity = runner.linux_lane.image(engine, 'db')
+            rec["inputs"] = {**identity, "portfolio_sha256": runner.sha256_file(runner.linux_lane.LOCK)}
+            rec["paired_inputs"] = {"postgres_diff_ids": identity["image_diff_ids"],
+                                    "portfolio_sha256": rec["inputs"]["portfolio_sha256"]}
+        else:
+            pin_path = runner.FIXTURES / "w8-v6/portfolio.json"
+            pin = json.loads(pin_path.read_text())["images"]["np-v6/postgres"]
+            image = baseline_image_reference(engine.name, pin)[1]
+            inspected = json.loads(engine.sh(["image", "inspect", image], timeout=30).stdout)
+            rec["inputs"] = {"images": require_baseline_images(engine.name, {"db": pin}, inspected),
+                             "portfolio_sha256": runner.sha256_file(pin_path)}
         engine.sh(["volume", "create", "--label", owner_label, volume], timeout=30)
         created = True
         volume_owner()

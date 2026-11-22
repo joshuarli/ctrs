@@ -10,7 +10,7 @@ import linux_cgroups
 
 VERSION = 'linux-amd64-v1'
 ENGINES = ('ctrs', 'orbstack', 'dockerd')
-CASES = ('W1', 'W2', 'W3', 'W6', 'W7', 'W13')
+CASES = ('W1', 'W2', 'W3', 'W3-v4', 'W6', 'W7', 'W13')
 HERE = Path(__file__).resolve().parent
 LOCK = HERE / 'linux' / 'fixtures.lock.json'
 

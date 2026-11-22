@@ -73,6 +73,20 @@ class FakeContext:
 
 
 class StorageTests(unittest.TestCase):
+    def test_linux_pin_preserves_receipts_and_durability_rejection(self):
+        with patch.object(runner.linux_lane, "enabled", return_value=True), \
+             patch.object(runner.linux_lane, "image", return_value=("native-image", {"image_diff_ids": ["native-layer"]})) as image:
+            rec, engine, _ = self.run_trial()
+            self.assertTrue(rec["correctness"]["ok"], rec["validation_errors"])
+            self.assertEqual(rec["paired_inputs"], {"postgres_diff_ids": ["native-layer"],
+                "portfolio_sha256": runner.sha256_file(runner.linux_lane.LOCK)})
+            self.assertFalse(any(call[:2] == ["image", "inspect"] for call in engine.calls))
+            self.test_metrics_receipts_and_owned_cleanup()
+            self.test_durability_failure_still_cleans_owned_resources()
+            self.test_volume_ownership_mismatch_never_removes_volume()
+        self.assertEqual(image.call_count, 4)
+        self.assertTrue(all(call.args[1] == "db" for call in image.call_args_list))
+
     def test_latency_receipts_and_nearest_rank(self):
         log = "".join(f"0 {i} {i * 1000} 0 1\n" for i in range(1, 101))
         self.assertEqual(storage.latency_metrics([log], 100, "rw"),
