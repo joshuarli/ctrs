@@ -40,6 +40,10 @@ class Readiness(unittest.TestCase):
         versions = gate.fixture_versions()
         contract = {key: {'fixture_version': versions[cell['workload']], **cell}
                     for key, cell in gate.W1_W10_CELLS.items()}
+        for workload in gate.CASES[:-1]:
+            cell = next(cell for cell in contract.values()
+                        if cell['workload'] == workload and cell['dimension'] in ('application', 'recovery'))
+            cell['primary_performance'] = True
         contract.update(copy.deepcopy(gate.W11_CELLS))
         contract['extra'] = {**contract[EDIT_CELL], 'metric': 'extra_metric'}
         contract_digest = hashlib.sha256(
@@ -131,6 +135,30 @@ class Readiness(unittest.TestCase):
             json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         path.write_text(json.dumps(review))
         proof['evidence'] = durable_job.receipt(path)
+        with self.assertRaisesRegex(gate.ReadinessError, 'cell contract differs from assets.lock'):
+            self.check()
+
+    def test_primary_selection_covers_every_performance_family(self):
+        contract = self.doc['cell_contract']
+        selected = next(cell for cell in contract.values()
+                        if cell['workload'] == 'W1' and cell.get('primary_performance'))
+        del selected['primary_performance']
+        with self.assertRaisesRegex(gate.ReadinessError, 'primary performance cells for every W1 through W10'):
+            self.check()
+        for value in (True, False, None):
+            with self.subTest(value=value):
+                contract[CORRECTNESS_CELL]['primary_performance'] = value
+                with self.assertRaisesRegex(gate.ReadinessError, 'invalid primary performance cell'):
+                    self.check()
+
+    def test_primary_selection_is_bound_to_the_frozen_digest(self):
+        contract = self.doc['cell_contract']
+        w1_performance = [cell for cell in contract.values()
+                          if cell['workload'] == 'W1' and cell['dimension'] == 'application']
+        selected = next(cell for cell in w1_performance if cell.get('primary_performance'))
+        replacement = next(cell for cell in w1_performance if 'primary_performance' not in cell)
+        del selected['primary_performance']
+        replacement['primary_performance'] = True
         with self.assertRaisesRegex(gate.ReadinessError, 'cell contract differs from assets.lock'):
             self.check()
 

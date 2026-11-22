@@ -103,7 +103,9 @@ The diagnostic duration is limited to fifteen minutes.
 
 For qualification, `mixed_job.py --qualification --readiness <reviewed-json>`
 validates the frozen readiness declaration and `assets.lock` before launching
-one engine. Include input receipts for the W6 Rust and zlib Dockerfiles,
+one engine. The cell contract must mark the selected application or
+recovery cells for each W1–W10 family with `"primary_performance": true`.
+Include input receipts for the W6 Rust and zlib Dockerfiles,
 the W7 Hyperfine and HTTPie Dockerfiles for both build modes, and the W7
 HTTPie ARM64 wheel lock. Set `CTRS_GUEST_DIR` to the frozen boot directory
 and provide a duration covering setup plus twelve hours of work. The OrbStack leg also

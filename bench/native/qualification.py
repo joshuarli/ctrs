@@ -218,13 +218,18 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
         if comparison['label'] == 'resource-matched-default-driver' and not runner.resource_cells.engine_budget_matches(envelopes['ctrs'], envelopes['orbstack']):
             raise ReadinessError('resource-matched comparison has unequal resource envelopes')
         contract = _object(doc.get('cell_contract'), 'cell_contract')
-        workloads, dimensions, identities = set(), set(), set()
+        workloads, dimensions, identities, primary_workloads = set(), set(), set(), set()
         for name, specification in contract.items():
             _text(name, 'cell id')
             specification = _object(specification, 'cell_contract.' + name)
             workload, dimension = specification.get('workload'), specification.get('dimension')
             if workload not in CASES or dimension not in DIMENSIONS:
                 raise ReadinessError('unknown workload or dimension in cell: ' + name)
+            if 'primary_performance' in specification:
+                if (specification['primary_performance'] is not True or workload == 'W11'
+                        or dimension not in ('application', 'recovery')):
+                    raise ReadinessError('invalid primary performance cell: ' + name)
+                primary_workloads.add(workload)
             version = W1_W10_CELLS.get(name, {}).get('fixture_version', expected_versions[workload])
             if specification.get('fixture_version') != version:
                 raise ReadinessError('cell fixture version differs: ' + name)
@@ -244,6 +249,8 @@ def require_readiness(path, *, required_paths, assets_path, sparse_paths=(), adm
                 raise ReadinessError('missing or changed required W11 cell: ' + name)
         if workloads != set(CASES) or dimensions != set(DIMENSIONS):
             raise ReadinessError('cell contract omits a required workload or dimension')
+        if primary_workloads != set(CASES[:-1]):
+            raise ReadinessError('cell contract must select primary performance cells for every W1 through W10 family')
         review_path = prerequisites['complete_cell_contract']['evidence']['path']
         review = _object(json.loads(Path(review_path).read_text(), object_pairs_hook=_unique), 'cell contract review')
         digest = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

@@ -278,8 +278,11 @@ idle/reclamation/storage/growth budgets before candidate selection.
   to show significance is not proof of parity. W11 has a separate
   reliability gate, not an ordinary ten-pair speed requirement.
 - **No selection bias.** Freeze counts, invalidation rules, primary
-  metrics and equal family weights before tuning. Confirm selected
-  changes with fresh independent batches. For family/aggregate CIs,
+  metrics and equal family weights before tuning. In the reviewed
+  `cell_contract`, mark the selected application or recovery cells with
+  `"primary_performance": true` for each W1–W10 family. The frozen digest
+  covers the markers. Confirm selected changes with fresh independent
+  batches. For family/aggregate CIs,
   resample whole paired batches, preserving related-metric dependence.
   Never average away a loss. If a holdout failure guides tuning, retire
   it as a holdout and freeze a fresh independent case for confirmation.
