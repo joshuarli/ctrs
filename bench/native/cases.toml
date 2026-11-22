@@ -119,17 +119,17 @@ note = "Pinned upstream hyperfine 2.0.0 and zlib 1.3.1 sources are fetched on de
 id = "W7"
 family = "native-image-build"
 title = "default buildx -> loaded runnable images for two real apps: hyperfine 2.0.0 (Rust) and httpie 3.2.4 (Python); uncached/warm/incremental per app"
-fixture = "fixtures/w7 (hyperfine/Dockerfile + httpie/Dockerfile; pinned source archives via ensure_pinned_source)"
+fixture = "fixtures/w7 (Hyperfine and HTTPie Dockerfiles, ARM64 HTTPie wheel lock, SHA-256 pinned source archives)"
 status = "implemented"
-fixture_version = "w7-v3-cache-first-use"
+fixture_version = "w7-v4-offline-httpie"
 metrics = ["hyperfine_uncached_s", "hyperfine_warm_s", "hyperfine_incr_s",
            "httpie_uncached_s", "httpie_warm_s", "httpie_incr_s",
            "hyperfine_uncached_first_use_s", "hyperfine_warm_first_use_s", "hyperfine_incr_first_use_s",
            "httpie_uncached_first_use_s", "httpie_warm_first_use_s", "httpie_incr_first_use_s"]
 states = ["warm"]
 params = { driver = ["default", "dc"] }
-correctness = ["all builds load an owned tag", "compile and note cache state proved in raw BuildKit progress", "exact version output and note in every cache state", "owned output tags cleaned up"]
-note = "Real pinned upstream apps in multi-stage Dockerfiles: rust:1.100.0-bookworm cargo build --release --locked -> debian:bookworm-slim, python:3.13-slim PyPI sdist -> pip wheel -> offline wheel install -> python:3.13-slim. Sources are sha256-pinned archives (codeload / PyPI digest) fetched on demand. --no-cache bypasses reuse for the first build without pruning the shared builder; engine/base-image stores remain warm. Warm repeats the identical context; incremental bumps stamp/note.txt after the compile/package stage so only tail layers rerun. --load includes image-store import; run probes verify the loaded image executes. Old synthetic compileall/urandom metrics are not comparable."
+correctness = ["all builds load an owned tag", "compile and note cache state proved in raw BuildKit progress", "exact version output and note in every cache state", "macOS legs match runtime receipts across engines and cache states and match the HTTPie wheel lock", "owned output tags cleaned up"]
+note = "The macOS fixture builds Linux ARM64 HTTPie from a pinned PyPI sdist and exact wheels with build networking disabled. Hyperfine uses cargo build --release --locked. Linux amd64 retains revision 3 with network resolution for both builds. --no-cache bypasses reuse while retaining the engine and base-image stores. Warm repeats the context. Incremental changes stamp/note.txt after compilation so only tail layers rerun. --load includes image-store import."
 
 [[case]]
 id = "W8"

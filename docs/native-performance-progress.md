@@ -534,10 +534,18 @@ Restore and verify them with
 wheelhouse is for Linux ARM64 and CPython 3.13. A clean restore verified all
 15 wheel hashes. The lock SHA-256 is
 `321ffcf392383c35e0c3101516233a0e26c684a1a5749a967bbeea4e379d52ec`.
-Setuptools 84.2.1 is the
-recorded runtime version and the candidate build backend. A clean offline
-build and runtime admission are still required before timing this variant.
-[PyPI JSON API](https://docs.pypi.org/api/json/)
+Setuptools 84.2.1 is the recorded runtime version and the pinned build
+backend for the new fixture. [PyPI JSON API](https://docs.pypi.org/api/json/)
+
+`w7-v4-offline-httpie` is the macOS W7 fixture. It copies the verified wheels
+into the HTTPie context and runs its BuildKit steps with `--network=none`.
+The Dockerfile installs the pinned build tools, builds the sdist without
+build isolation, installs exactly the local wheels and runs `pip check`.
+Each trial records the wheel lock digest and compares the installed package
+set with the lock. The Hyperfine recipe still uses the network with
+`cargo build --release --locked`. Admit one pair before running a ten-pair
+cohort. Revision 3 remains the archived network-resolved comparison and
+the Linux amd64 workload.
 
 #### Frozen HTTPie first-use input
 

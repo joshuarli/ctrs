@@ -385,6 +385,11 @@ class WorkloadSafetyTests(unittest.TestCase):
                 (fixture / app).mkdir(parents=True)
                 shutil.copy(runner.W7_DIR / app / "Dockerfile",
                             fixture / app / "Dockerfile")
+            shutil.copy(runner.W7_DIR / 'httpie/Dockerfile.offline', fixture / 'httpie')
+            wheelhouse = Path(tmp) / 'wheels'
+            wheelhouse.mkdir()
+            wheel = wheelhouse / 'pip-26.3-py3-none-any.whl'
+            wheel.write_bytes(b'pinned wheel')
             rust = b"rust asset"
             httpie = b"httpie asset"
             rust_pin = dict(runner.W6_RUST_SOURCE)
@@ -400,6 +405,8 @@ class WorkloadSafetyTests(unittest.TestCase):
             miscached = False
             lost_ownership = False
             runtime_changed = False
+            offline = False
+            lock_version = '26.3'
 
             def respond(args, **kw):
                 if args[:2] == ["buildx", "build"]:
@@ -409,6 +416,13 @@ class WorkloadSafetyTests(unittest.TestCase):
                     loaded[tag] = owner, (context / "stamp/note.txt").read_text()
                     notes.append(loaded[tag][1])
                     app = "hyperfine" if "hyperfine" in tag else "httpie"
+                    offline_build = offline and app == 'httpie'
+                    self.assertEqual('--network=none' in args, offline_build)
+                    compile_step = apps[app]['compile_step']
+                    if offline_build:
+                        self.assertEqual((context / 'wheelhouse' / wheel.name).read_bytes(), b'pinned wheel')
+                        compile_step = runner.W7_OFFLINE_HTTPIE_COMPILE
+                        self.assertIn(compile_step, (context / 'Dockerfile').read_text())
                     compile_cached = not tag.endswith("-uncached")
                     if miscached and app == "hyperfine" and tag.endswith("-incr"):
                         compile_cached = False
@@ -416,7 +430,7 @@ class WorkloadSafetyTests(unittest.TestCase):
                         {"name": instruction, "digest": "sha256:" + digit * 64, "cached": cached,
                          "started": "2026-11-17T12:00:00Z", "completed": "2026-11-17T12:00:02Z"}
                         for instruction, digit, cached in (
-                            (apps[app]["compile_step"], "a", compile_cached),
+                            (compile_step, "a", compile_cached),
                             (runner.W7_NOTE_STEP, "b", tag.endswith("-warm")))]}
                     result = completed()
                     result.stderr = json.dumps(progress)
@@ -431,7 +445,10 @@ class WorkloadSafetyTests(unittest.TestCase):
                         return completed('a' * 64 + '  /usr/local/bin/hyperfine\n')
                     if args[4:6] == ['python', '-c']:
                         digest = 'b' if runtime_changed and tag.endswith('-incr') else 'c'
-                        return completed(json.dumps({'httpie': {'version': '3.2.4', 'runtime_sha256': digest * 64}}))
+                        packages = {'httpie': {'version': '3.2.4', 'runtime_sha256': digest * 64}}
+                        if offline:
+                            packages['pip'] = {'version': lock_version, 'runtime_sha256': 'd' * 64}
+                        return completed(json.dumps(packages))
                     if corrupt_warm and "hyperfine" in tag and tag.endswith("-warm"):
                         note = "wrong incremental-0\n"
                     return completed(note)
@@ -476,6 +493,21 @@ class WorkloadSafetyTests(unittest.TestCase):
                 self.assertIn("did not prove cached=True", bad_cache["validation_errors"][0])
                 self.assertNotIn("hyperfine_incr_first_use_s", bad_cache["metrics"])
                 miscached = False
+                offline = True
+                with patch.object(runner.prepare_wheels, 'prepare', return_value={
+                    'path': str(wheelhouse), 'lock_sha256': 'e' * 64,
+                    'files': [wheel.name], 'versions': {'pip': '26.3'},
+                }):
+                    offline_rec = runner.trial_w7(FixtureContext(Path(tmp) / 'offline'), engine, 'warm',
+                                                  fixture_version=runner.W7_OFFLINE_HTTPIE_VERSION)
+                    self.assertTrue(offline_rec['correctness']['ok'], offline_rec['validation_errors'])
+                    self.assertEqual(offline_rec['workload_params']['httpie_wheel_lock_sha256'], 'e' * 64)
+                    lock_version = '26.2'
+                    wrong_lock = runner.trial_w7(FixtureContext(Path(tmp) / 'wrong-lock'), engine, 'warm',
+                                                fixture_version=runner.W7_OFFLINE_HTTPIE_VERSION)
+                    self.assertFalse(wrong_lock['correctness']['ok'])
+                    self.assertIn('runtime differs from the wheel lock', wrong_lock['validation_errors'][0])
+                offline = False
                 corrupt_warm = lost_ownership = True
                 bad = runner.trial_w7(FixtureContext(tmp), engine, "warm")
             self.assertTrue(rec["correctness"]["ok"], rec)

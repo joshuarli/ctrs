@@ -41,6 +41,7 @@ import overlap
 from lifecycle import trial_w14
 from fixtures.w4 import app as w4_fixture, latency as w4_latency
 from fixtures.w2.v3 import planned_span
+from fixtures.w7.httpie import prepare_wheels
 from contextlib import contextmanager, nullcontext
 import base64
 import concurrent.futures
@@ -1956,6 +1957,11 @@ def build_args(engine: Engine, driver: str, extra: list[str]) -> list[str]:
 # version probe argv. Each gets uncached/warm/incremental builds through
 # the default or dc builder, then run probes.
 W7_FIXTURE_VERSION = "w7-v3-cache-first-use"
+W7_OFFLINE_HTTPIE_VERSION = "w7-v4-offline-httpie"
+W7_OFFLINE_HTTPIE_COMPILE = (
+    "RUN python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation"
+    " -w /wheels /tmp/httpie-3.2.4.tar.gz"
+)
 W7_NOTE_STEP = "RUN mkdir -p /out && cat /stamp/note.txt > /out/note.txt"
 W7_APPS = {
     "hyperfine": {
@@ -2011,8 +2017,13 @@ def trial_w7(ctx, engine: Engine, state: str,
     tags = []
     verified_tags = {app: [] for app in W7_APPS}
     try:
-        if fixture_version != W7_FIXTURE_VERSION:
+        offline_httpie = fixture_version == W7_OFFLINE_HTTPIE_VERSION
+        if (fixture_version not in (W7_FIXTURE_VERSION, W7_OFFLINE_HTTPIE_VERSION)
+                or (offline_httpie and linux_lane.enabled())):
             raise ValueError("W7 fixture version mismatch")
+        if offline_httpie:
+            wheelhouse = prepare_wheels.prepare(REPO / prepare_wheels.WHEELHOUSE)
+            rec['workload_params']['httpie_wheel_lock_sha256'] = wheelhouse['lock_sha256']
         engine.ensure_up()
         if driver == "dc":
             ensure_dc_builder(engine)
@@ -2038,7 +2049,17 @@ def trial_w7(ctx, engine: Engine, state: str,
         for name, spec in W7_APPS.items():
             ctx_dir = trial_dir / f"ctx-{name}"
             ctx_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(spec["dockerfile"], ctx_dir / "Dockerfile")
+            dockerfile, compile_step = spec['dockerfile'], spec['compile_step']
+            build_flags = []
+            if offline_httpie and name == 'httpie':
+                dockerfile = dockerfile.with_name('Dockerfile.offline')
+                compile_step = W7_OFFLINE_HTTPIE_COMPILE
+                build_flags = ['--network=none']
+                destination = ctx_dir / 'wheelhouse'
+                destination.mkdir()
+                for filename in wheelhouse['files']:
+                    shutil.copy(Path(wheelhouse['path']) / filename, destination)
+            shutil.copy(dockerfile, ctx_dir / "Dockerfile")
             shutil.copy(sources[name],
                         ctx_dir / spec["source"]["file"])
             (ctx_dir / "stamp").mkdir(exist_ok=True)
@@ -2052,7 +2073,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                 flags = ["--no-cache"] if condition == "uncached" else []
                 with resource_phase(engine, rec, f"{cell}_build"):
                     build = engine.sh(build_args(engine, driver, [
-                        *flags, "--progress=rawjson", "--platform", "linux/amd64" if linux_lane.enabled() else "linux/arm64", "--label", f"{label}={label_value}",
+                        *flags, *build_flags, "--progress=rawjson", "--platform", "linux/amd64" if linux_lane.enabled() else "linux/arm64", "--label", f"{label}={label_value}",
                         "-t", tag, "-f", str(ctx_dir / "Dockerfile"), str(ctx_dir),
                     ]), timeout=1800, check=False)
                 rec["metrics"][f"{cell}_s"] = rec["resources"]["phases"][f"{cell}_build"]["operation_wall_seconds"]
@@ -2063,7 +2084,7 @@ def trial_w7(ctx, engine: Engine, state: str,
                     break
                 try:
                     cache = {
-                        "compile": _buildkit_vertex(build.stderr, spec["compile_step"], cached=condition != "uncached"),
+                        "compile": _buildkit_vertex(build.stderr, compile_step, cached=condition != "uncached"),
                         "note": _buildkit_vertex(build.stderr, W7_NOTE_STEP, cached=condition == "warm"),
                     }
                 except ValueError as exc:
@@ -2100,6 +2121,10 @@ def trial_w7(ctx, engine: Engine, state: str,
             for app, states in receipts.items():
                 if len(states) != 3 or any(state != states[0] for state in states[1:]):
                     raise ValueError(f'W7 {app} runtime differs across build cache states')
+            if offline_httpie:
+                versions = {name: package['version'] for name, package in receipts['httpie'][0].items()}
+                if versions != {'httpie': W7_APPS['httpie']['expect'], **wheelhouse['versions']}:
+                    raise ValueError(f'W7 offline HTTPie runtime differs from the wheel lock: {versions}')
             rec['paired_inputs'] = {app: states[0] for app, states in receipts.items()}
             checks['runtime_same_across_cache_states'] = True
         rec["correctness"]["ok"] = all(checks.values())
@@ -3691,6 +3716,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
     trial = trials[case_id]
     if case_id == "W4":
         kw.setdefault("fixture_version", W4_LATENCY_VERSION)
+    if case_id == 'W7' and not linux_lane.enabled():
+        kw.setdefault('fixture_version', W7_OFFLINE_HTTPIE_VERSION)
     if case_id == "W1" and cold:
         state = "cold"
     if case_id == "W2" and pair_id is not None:

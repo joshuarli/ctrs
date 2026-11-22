@@ -1,0 +1,13 @@
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
+COPY wheelhouse/ /wheels/
+RUN python -m pip install --no-cache-dir --no-index --no-deps /wheels/pip-*.whl /wheels/setuptools-*.whl
+COPY httpie-3.2.4.tar.gz /tmp/
+RUN python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation -w /wheels /tmp/httpie-3.2.4.tar.gz
+COPY stamp/ /stamp/
+RUN mkdir -p /out && cat /stamp/note.txt > /out/note.txt
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+COPY --from=build /wheels/ /tmp/wheels/
+RUN python -m pip install --no-cache-dir --no-index --no-deps /tmp/wheels/*.whl \
+    && python -m pip check \
+    && rm -rf /tmp/wheels
+COPY --from=build /out/note.txt /out/note.txt

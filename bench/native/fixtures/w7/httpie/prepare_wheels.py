@@ -6,21 +6,23 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-import runner
-
-
 LOCK = Path(__file__).with_name('wheels-arm64.json')
+WHEELHOUSE = '.work/tmp/w7-httpie-wheelhouse'
 
 
 def prepare(destination):
+    import runner
+
+    if runner.linux_lane.enabled():
+        raise ValueError('run without the Linux amd64 campaign lane enabled')
     lock = json.loads(LOCK.read_text())
     if (lock['schema'], lock['platform'], lock['python_abi']) != (1, 'linux/arm64', 'cp313'):
         raise ValueError('unexpected HTTPie wheel lock identity')
     wheels = lock['wheels']
     names = {wheel['file'] for wheel in wheels}
-    if not names or len(names) != len(wheels):
-        raise ValueError('HTTPie wheel lock is empty or has duplicate files')
+    versions = {wheel['project']: wheel['version'] for wheel in wheels}
+    if not names or len(names) != len(wheels) or len(versions) != len(wheels):
+        raise ValueError('HTTPie wheel lock is empty or has duplicate files or projects')
     for wheel in wheels:
         name = wheel['file']
         url = urlsplit(wheel['url'])
@@ -39,10 +41,12 @@ def prepare(destination):
             continue
         with tempfile.TemporaryDirectory(prefix='download-', dir=destination) as directory:
             runner.ensure_pinned_source(wheel, Path(directory)).replace(target)
-    return {'path': str(destination), 'lock_sha256': runner.sha256_file(LOCK), 'wheel_count': len(wheels)}
+    return {'path': str(destination), 'lock_sha256': runner.sha256_file(LOCK),
+            'files': sorted(names), 'versions': versions}
 
 
 if __name__ == '__main__':
-    if runner.linux_lane.enabled():
-        sys.exit('run without the Linux amd64 campaign lane enabled')
-    print(json.dumps(prepare(runner.REPO / '.work/tmp/w7-httpie-wheelhouse'), indent=2))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    import runner
+
+    print(json.dumps(prepare(runner.REPO / WHEELHOUSE), indent=2))
