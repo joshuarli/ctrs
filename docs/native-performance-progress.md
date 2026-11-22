@@ -1529,8 +1529,10 @@ at least 32 seconds. The driver reported zero cleanup errors.
 
 The same ctrs backing file returned private allocation in all 12 observations.
 Its private bytes grew by 105,103,360 from first to last, matching the total
-allocation change. Inspect guest live data and free extents on this private
-disk after cleanup, then test whether guest trim reclaims the host bytes.
+allocation change. Total allocation rose at every boundary and grew by
+30,572,544 bytes over the final five intervals. Inspect guest live data
+and free extents on this private disk after cleanup, then test whether
+guest trim reclaims the host bytes.
 
 Use a stopped APFS clone of that private store for trim. Mount a new probe
 volume and verify its ext4 mount resolves to the guest data disk `/dev/vda`.
@@ -1586,6 +1588,12 @@ macOS returned `EPERM` when opening the owned `data.img.raw` and `swap.img`
 files for the private allocation probe. Their ordinary allocation receipts
 passed the ownership checks. Both engines missed growth budgets in the
 short run, and both 12-hour legs remain open.
+
+The interval ending at cycle 8 added 16,613,376 bytes to
+`data.img.raw`. The remaining intervals added 1,392,640 bytes net.
+`swap.img` stayed at 4,096 allocated bytes throughout. A repeat
+diagnostic uses the same 420-second work window and 32-second observation
+intervals to check whether the jump recurs in ordinary and private bytes.
 
 A later `getattrlist` metadata check returned private allocation for both
 OrbStack files with the same device and inode IDs as the W11 receipt. The
