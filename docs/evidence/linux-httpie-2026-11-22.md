@@ -283,3 +283,10 @@ The first post-rebase offline run failed because sudo preparation owned the
 two scratch result-parent directories. Correcting ownership of those two
 owned directories, without changing records or tests, resolved it. Both logs
 are retained. All scored trials and the original five receipts stay untouched.
+
+The final cleanup helper was rerun with the provisioned Python 3.15 PATH after
+sudo's system Python 3.10 rejected the runner import. The Docker-save evidence
+file was made readable by its ubuntu owner, without changing bytes. The final
+unprivileged manifest verification covers **1,055 files**; cleanup receipts
+confirm no owned engine process/cgroup/link/firewall/network/container residue
+and unchanged Docker/containerd PIDs and start timestamps.
