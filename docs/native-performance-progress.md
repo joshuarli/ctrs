@@ -747,6 +747,16 @@ ctrs used host NAT. Each check supplies one valid pair.
 
 Add `--under-load` to the one-pair command to reproduce these checks.
 
+The first allocation attempt, `w8-paired-1efa95ef1e7d`, stopped at
+admission on both engines. The inventory found the legacy
+`npw8-reg-ctrs` and `npw8-reg-orbstack` containers. The retained and
+derived no-load diagnostics returned no allocation snapshots. The retry
+uses the fresh ctrs release store. On OrbStack, check the archived full
+container ID, registry image, localhost port, restart policy and named
+volume before temporarily stopping its legacy campaign registry.
+Restore its original running state after the diagnostic. Any unrelated
+running container still prevents allocation admission.
+
 #### Mac release check after the shared layer-install change
 
 Source `83e9c15` changes the gzip decoder compiled into the Linux guest
