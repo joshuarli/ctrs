@@ -82,6 +82,26 @@ targets `w8-cancel-ctrs-retained`, `w8-cancel-ctrs-derived`,
 select installed engine defaults and record server versions, run input
 hashes, and the verified running engine identity in each `result.json`.
 
+### v6 cancellation replay on the campaign Mac
+
+All four installed-default checks passed on source `1c78508` in queue
+`20261122T165425Z`. Each interrupted transfer delivered exactly 65,536
+bytes before peer closure. Each retry fully delivered the selected blob,
+verified the installed image and marker, preserved the original pins,
+and removed the owned image references. ctrs verified the signed binary
+and guest kernel/initramfs against the W6 build hashes. OrbStack's server
+reported Docker 29.8.2.
+
+| Engine | Content | Run | Retry bytes | `result.json` SHA-256 |
+| --- | --- | --- | ---: | --- |
+| ctrs | retained | `w8-cancel-d767ee6613b5` | 58,602,025 | `7dad2d02287539658c7130f69262cf47f4a472be1f65a58567c2a51649b723be` |
+| ctrs | derived | `w8-cancel-9c3fc0723674` | 58,602,021 | `b94af0155af854bb052ffb841081e1f0ff8f1836beaae44d08396ab4a30b5bc7` |
+| OrbStack | retained | `w8-cancel-c7cd668cd55e` | 58,602,020 | `be0ef1ef7d6ac5466c948bc5ae427dc905bad2da0b87b281f20cc962ab92a212` |
+| OrbStack | derived | `w8-cancel-467f2a17e2d9` | 58,602,020 | `83b71a0c0cab738386a6c6318486d229deb1f440e252f68eebec38469ac632fc` |
+
+These are functional cancellation and retry checks. W8 deployment timing
+and comparable backing-allocation evidence remain open.
+
 The W8 component suite passed 74 tests with zero skips. It includes a real
 loopback transfer interrupted through an owned process and a completed retry.
 
