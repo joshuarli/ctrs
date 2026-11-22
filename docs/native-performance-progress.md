@@ -1351,6 +1351,10 @@ their exact output paths, and the same guest watcher PID and process start
 ticks across the edit phase. Use the signed Mac release and verified v2
 fixture archives for both mount conditions.
 
+The reporter verifies that each watcher kept its PID and start ticks, and
+checks the edited paths and compiled output hashes of each result. The two
+engines must agree on the fixture inputs and the ordered edit receipts.
+
 ```sh
 for mount in bind volume; do
   python3 bench/native/runner.py baseline --case W12-watch --watch-mount "$mount" \

@@ -16,7 +16,7 @@ from pathlib import Path
 import ci_jobs
 from httpie_first_use import FIXTURE_VERSION as HTTPIE_FIRST_USE
 from watch_loop import MIN_TAIL_EDITS as W5_MIN_TAIL_EDITS, RECEIPT_VERSION as W5_RECEIPT_VERSION
-from workspace import INSTALL_TIMING_REVISION
+from workspace import INSTALL_TIMING_REVISION, WATCH_FIXTURE_VERSIONS
 
 MIN_PAIRS = 10
 W8_PAIRED_FIXTURE = 'w8-paired-v1'
@@ -409,12 +409,12 @@ def _fixed_rate_lateness(record: dict) -> dict | None:
     return {"late": len(late), "blocked": blocked, "other": len(late) - blocked}
 
 
-def _w12_build_receipt(record):
+def _w12_inputs(record, extra_fields=()):
     inputs = record.get('inputs')
     if not isinstance(inputs, dict):
         return None
     shared = {name: inputs.get(name) for name in ('source_sha256', 'dependency_lock_sha256',
-              'diff_ids', 'tools', 'phase_cache_state', 'initial_output', 'tests')}
+              'diff_ids', 'tools', 'phase_cache_state', *extra_fields)}
     if not all(shared.values()):
         return None
     metrics = record['metrics']
@@ -422,6 +422,41 @@ def _w12_build_receipt(record):
     if any(type(value) is not int or value <= 0 for value in install.values()):
         return None
     return shared | {'installed_tree': install}
+
+
+def _w12_watch_receipt(record, mount, edit_count):
+    shared = _w12_inputs(record)
+    metrics = record['metrics']
+    if (not shared or not isinstance(mount, str) or mount not in WATCH_FIXTURE_VERSIONS
+            or metrics.get('fixture_version') != WATCH_FIXTURE_VERSIONS[mount] or metrics.get('mount') != mount
+            or type(edit_count) is not int or edit_count < 60):
+        return None
+    watcher = record['inputs'].get('watcher_before')
+    if (not isinstance(watcher, dict) or watcher != record['inputs'].get('watcher_after')
+            or any(type(watcher.get(field)) is not int or watcher[field] <= 0
+                   for field in ('pid', 'start_ticks'))):
+        return None
+    edits = metrics.get('edits')
+    if (not isinstance(edits, list) or metrics.get('results') != len(edits)
+            or metrics.get('correct') != len(edits) or metrics.get('missed') != 0 or metrics.get('stale') != 0):
+        return None
+    results = []
+    for edit in edits:
+        if not isinstance(edit, dict) or edit.get('status') != 'correct':
+            return None
+        sequence, kind, path = (edit.get(field) for field in ('sequence', 'kind', 'path'))
+        output = edit.get('output')
+        if (type(sequence) is not int or not isinstance(kind, str) or not isinstance(path, str)
+                or not isinstance(output, dict) or output.get('path') != path):
+            return None
+        expected = output.get('expected')
+        if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected) or output.get('actual') != expected:
+            return None
+        results.append((sequence, kind, path, expected))
+    if ({item[0] for item in results} != set(range(edit_count))
+            or len({(sequence, path) for sequence, _, path, _ in results}) != len(results)):
+        return None
+    return shared | {'edits': results}
 
 
 def _analyze_cohort(identity: dict, records: list[dict],
@@ -439,6 +474,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
     paired_w3 = identity['case'] == 'W3' and any('paired_inputs' in record for record in records)
     verified_workspace = (identity['case'] == 'W12' and isinstance(params, dict)
                           and params.get('timing_revision') == INSTALL_TIMING_REVISION)
+    verified_workspace_watch = (identity['case'] == 'W12-watch' and isinstance(params, dict)
+                                and any(r['metrics'].get('fixture_version') in WATCH_FIXTURE_VERSIONS.values()
+                                        for r in records))
     paired_httpie = (identity['case'] == 'W7' and isinstance(params, dict)
                      and params.get('fixture_version') == HTTPIE_FIRST_USE)
     verified_transfer = identity['case'] in ('W13', 'W14') and any(r.get('paired_inputs') for r in records)
@@ -527,9 +565,13 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "executed parameters or seeds differ"
         elif require_paired_inputs and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
-        elif verified_workspace and (not (receipt := _w12_build_receipt(a[0]))
-                                     or receipt != _w12_build_receipt(b[0])):
+        elif verified_workspace and (not (receipt := _w12_inputs(a[0], ('initial_output', 'tests')))
+                                     or receipt != _w12_inputs(b[0], ('initial_output', 'tests'))):
             reason = 'paired workspace inputs or outputs differ or are missing'
+        elif verified_workspace_watch and (
+                not (receipt := _w12_watch_receipt(a[0], params.get('mount'), params.get('edits')))
+                or receipt != _w12_watch_receipt(b[0], params.get('mount'), params.get('edits'))):
+            reason = 'paired workspace watch inputs or outputs differ or are missing'
         elif a[0].get("workload_id") != b[0].get("workload_id"):
             reason = "workload identities differ"
         if not reason:

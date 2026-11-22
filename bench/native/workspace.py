@@ -13,6 +13,7 @@ BUILD_PHASES = ('install', 'build', 'typecheck', 'test-discovery', 'warm-rebuild
                 'multi-file-change', 'branch-switch')
 INSTALL_VERIFICATION = 'verify-install'
 INSTALL_TIMING_REVISION = 2
+WATCH_FIXTURE_VERSIONS = {'bind': 'w12-watch-v4', 'volume': 'w12-watch-volume-v2'}
 
 
 def source_contract():
@@ -331,7 +332,7 @@ def trial_w12_watch(ctx, engine, state, mount='bind', edits=60):
     if mount not in ('bind', 'volume'):
         raise ValueError('unknown W12 watch mount')
     watch_file = 'UseFsEvents' if mount == 'bind' else 'UseFsEventsOnParentDirectory'
-    version = 'w12-watch-v4' if mount == 'bind' else 'w12-watch-volume-v2'
+    version = WATCH_FIXTURE_VERSIONS[mount]
     trial_dir = ctx.trial_dir(engine.name, 'W12-watch', state)
     rec = ctx.new_record(engine, 'W12-watch', state, trial_dir)
     rec['metrics'].update(fixture_version=version, mount=mount, backend='fs.watch', watch_file=watch_file,

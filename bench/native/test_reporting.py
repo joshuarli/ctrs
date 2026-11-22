@@ -122,6 +122,40 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(cohort['rejections'][0]['reason'],
                              'paired workspace inputs or outputs differ or are missing')
 
+    def test_w12_watch_pairs_exact_edits_and_requires_a_persistent_watcher(self):
+        for mount, version in reporting.WATCH_FIXTURE_VERSIONS.items():
+            records = pair(case='W12-watch', metric='edit_to_result_p50_s')
+            for pid, record in enumerate(records, 2):
+                record['workload_params'].update(mount=mount, edits=60)
+                record['metrics'].update(fixture_version=version, mount=mount,
+                                         dependency_count=3, files=34, bytes=56818,
+                                         results=60, correct=60, missed=0, stale=0,
+                                         edits=[{'sequence': index, 'kind': 'save', 'path': 'fixture.ts',
+                                                 'status': 'correct', 'output': {'path': 'fixture.ts',
+                                                 'actual': 'a' * 64, 'expected': 'a' * 64}}
+                                                for index in range(60)])
+                watcher = {'pid': pid, 'start_ticks': pid * 100}
+                record['inputs'] = {'source_sha256': 'source', 'dependency_lock_sha256': 'lock',
+                                    'diff_ids': ['base'], 'tools': {'node': 'v22.15.0'},
+                                    'phase_cache_state': {'edits': 'warm'},
+                                    'watcher_before': watcher, 'watcher_after': dict(watcher)}
+            self.assertEqual(reporting.analyze(records)['cohorts'][0]['valid_pairs'], 1)
+
+            changed_watcher = copy.deepcopy(records)
+            changed_watcher[1]['inputs']['watcher_after']['start_ticks'] += 1
+            changed_output = copy.deepcopy(records)
+            output = changed_output[1]['metrics']['edits'][0]['output']
+            output.update(actual='b' * 64, expected='b' * 64)
+            stale_output = copy.deepcopy(records)
+            stale_output[1]['metrics']['edits'][0]['output']['actual'] = None
+            missing_sequence = copy.deepcopy(records)
+            missing_sequence[1]['metrics']['edits'][0]['sequence'] = 1
+            for invalid in (changed_watcher, changed_output, stale_output, missing_sequence):
+                cohort = reporting.analyze(invalid)['cohorts'][0]
+                self.assertEqual(cohort['valid_pairs'], 0)
+                self.assertEqual(cohort['rejections'][0]['reason'],
+                                 'paired workspace watch inputs or outputs differ or are missing')
+
     def test_w4_resource_metrics_use_the_verified_worker_condition(self):
         records = pair(case="W4", metric="workers_4_s")
         for record, cpu, footprint in zip(records, (8, 10), (125, 100), strict=True):
