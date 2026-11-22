@@ -869,8 +869,7 @@ gate calls exited zero for each leg. The ctrs post-run hot-process lists
 named PID 1902, which was the owned VM in both boundary receipts. The
 report admitted one of the ten blocks required for an overhead verdict.
 Independent review of host processes remains required. The previous nine
-valid 49 Hz blocks use the older admission policy and stay separate. The
-25 Hz observer has its own pending admission.
+valid 49 Hz blocks use the older admission policy and stay separate.
 
 ```sh
 python3 bench/native/diagnostics/syscall_pilot.py \
@@ -886,6 +885,27 @@ loaded by both engines. The tool archive SHA-256 is
 `990b13e40dcd7726198911b133c2ac59a7df8576f7c914b88b5f4b6527340ae4`.
 The block's `plan.json` SHA-256 is
 `bef3d2d0f196dbce83946622e1177e186a659cdc2d250461acb132a441689499`.
+
+#### 25 Hz leaf observer admission
+
+`w2-guest-client-cpu-leaf-25-20261122T124015-f6df` used candidate
+`3d0a124` on `campaign/w2-leaf-25`, the same pinned service images, and
+the 40 ms CPU-clock period. Each of four legs verified 35,140 reads and
+14,860 writes, with zero errors and clean teardown. Both profiled legs
+passed raw event validation across all nine threads. ctrs recorded 558
+samples with a minimum of 17 per thread. OrbStack recorded 450 samples
+with a minimum of 11 per thread.
+
+Both gate calls exited zero for all four legs. Outside-engine CPU was
+0.205 cores off and 0.240 on for ctrs, and 0.847 off and 0.803 on for
+OrbStack. The candidate reporter admitted the block. The 5% CPU and wall
+overhead checks require a fresh ten-block cohort and process review.
+
+Use the guest-direct command above with `--profile-kind cpu-leaf-25`.
+Alternate engine and mode order over ten blocks, starting with the default
+orders. Use the reporter from the candidate branch on those ten blocks
+in run order. Admission `plan.json` SHA-256
+`9a43c8eaf4b8802c2a3d5ddf020c0694901145bdab9b0ec62e6dadc9217fed3e`.
 
 ### W9 parallel job resource admission
 
