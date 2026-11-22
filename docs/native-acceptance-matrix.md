@@ -39,7 +39,7 @@ OrbStack's). Never pool lanes.
 | W8 | Pull-to-healthy from local registry (w8-v6 portfolio) | yes | yes | yes, both engines and content states, with and without API load | D: one valid pair in each deployment condition | Comparative cohorts, matched resource controls and backing-allocation evidence remain open. [Deployment proofs](native-performance-progress.md#rebuilt-w8-common-portfolio) |
 | W9 | Parallel fixed build/test jobs | yes | yes | yes (one-pair pilot `base-20261120T061332-4abb`, pinned Marked digest) | no | unmeasured |
 | W10 | Interrupt/recover service/DB/queue | yes | yes | yes (one-pair pilot, change tier) | no | unmeasured; engine-interruption parity needs isolated OrbStack |
-| W11 | 12 h mixed reliability | yes | yes (parked branch) | no | n/a | unqualified |
+| W11 | 12 h mixed reliability | yes | yes, v5 worker and v6 portfolio | yes, two exact cycles with resource observations on both engines | n/a | Minimum growth coverage, durability admission and both 12-hour legs remain open. [Native proof](native-performance-progress.md#rebuilt-w11-worker-fixture) |
 
 ## Filesystem and networking coverage (2026-11-18 steering)
 
