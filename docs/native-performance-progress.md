@@ -742,6 +742,21 @@ verifies each open backing identity on every observation.
 `driver-result.json` SHA-256
 `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0`.
 
+The next resource diagnostic uses duration mode with a separate
+seven-minute work deadline for each engine. Set the drain and cleanup
+deadlines three and six minutes after the work deadline. Use
+`--resource-observation-seconds 32`, the same pinned v5 worker and
+v6 portfolio, and the rebuilt signed Mac release. Keep ctrs at 9 vCPUs
+and 8,192 MiB with a new `--ctrs-root`. Use the two explicit open
+OrbStack backing files for its leg. Run the engines serially.
+
+Inspect `resources.cycle_growth` in each W11 trial record. The first
+complete observation establishes the baseline, and at least five more
+must cover 30 seconds each. Read the footprint, descriptor and active disk
+growth results alongside owned cleanup and exact-state checks. The
+diagnostic will leave the 12-hour qualification and exclusive APFS
+allocation open.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
