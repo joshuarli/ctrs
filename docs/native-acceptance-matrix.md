@@ -37,7 +37,7 @@ OrbStack's). Never pool lanes.
 | W6 | Default-builder Rust+C CI build | yes | yes | yes | D: `base-20261122T063709-0627` (10/10 pairs, source `2910f31`, both engines 9 vCPUs) | **Physical footprint loss** 1.364× [1.182, 1.485], with complete samples. Rust build 0.944× [0.932, 0.951] non-inferior and zlib build 0.524× [0.513, 0.643] strict win. CPU incomplete due to host NAT accounting. The 6,144 MiB same-engine candidate missed its footprint confidence bound. Warm-build cohort open. [Evidence and reproduction](native-performance-progress.md#installed-default-w6-cohort) |
 | W7 | Default buildx → loaded images | yes | yes | yes | D: `base-20261122T065539-5b0c` (10/10 pairs, source `2910f31`, both engines 9 vCPUs) | All 12 build/load and first-use timings cleared the strict-win threshold. Hyperfine uncached 0.886× [0.875, 0.893]; HTTPie uncached 0.783× [0.771, 0.799]. Footprint 1.088× [0.923, 1.345] inconclusive. CPU incomplete due to host NAT accounting. [Evidence and reproduction](native-performance-progress.md#installed-default-w7-cohort) |
 | W8 | Pull-to-healthy from local registry (w8-v6 portfolio) | yes | yes | yes, both engines and content states, with and without API load | D: one valid pair in each deployment condition | Comparative cohorts, matched resource controls and backing-allocation evidence remain open. [Deployment proofs](native-performance-progress.md#rebuilt-w8-common-portfolio) |
-| W9 | Parallel fixed build/test jobs | yes | yes | yes, all four concurrency levels on both engines | D: one valid resource admission pair | CPU and physical footprint receipts complete at each concurrency. Full comparative cohort open. [Evidence](native-performance-progress.md#w9-parallel-job-resource-admission) |
+| W9 | Parallel fixed build/test jobs | yes | yes | yes, all four concurrency levels on both engines | D: `base-20261122T101434-f89b` (10/10 pairs) | Batch time, p95, measured CPU per job and sampled footprint cleared the strict-win threshold at all four concurrencies. Frozen confirmation remains open. [Evidence](native-performance-progress.md#installed-default-w9-cohort) |
 | W10 | Interrupt/recover service/DB/queue | yes | yes | yes (one-pair pilot, change tier) | no | unmeasured; engine-interruption parity needs isolated OrbStack |
 | W11 | 12 h mixed reliability | yes | yes, v5 worker and v6 portfolio | yes, two exact cycles with resource observations on both engines | n/a | Minimum growth coverage, durability admission and both 12-hour legs remain open. [Native proof](native-performance-progress.md#rebuilt-w11-worker-fixture) |
 
@@ -114,7 +114,7 @@ networking) and **qualified** (none yet).
    installed-default cohort. The VZ helper retained the allocation
    across builds. [Evidence](native-performance-progress.md#installed-default-w6-cohort)
 6. W7 sampled peak physical footprint inconclusive and CPU incomplete.
-   Unscored: W1, W4, W5, W8, W9, W10 (pilots at most).
+   Comparative cohorts remain open for W4, W5, W8 and W10.
 
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.

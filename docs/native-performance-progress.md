@@ -554,9 +554,9 @@ connections.
 
 The earlier run `base-20261122T093626-994f` used an image reference from
 the isolated W11 store. The installed-default ctrs store lacked that
-reference and rejected the launch. The W9 admission repeat used the
-common deployment reference from both engines' image receipts. The full
-paired cohort remains open.
+reference and rejected the launch. The W9 admission repeat and full
+cohort used the common deployment reference from both engines' image
+receipts.
 
 ```sh
 BENCH_W9_IMAGE_REF="$common_marked_digest_ref" python3 bench/native/pyramid.py run --name w9-jobs
@@ -565,6 +565,41 @@ python3 bench/native/reporting.py --match base-20261122T094007-1ee3
 
 `trials.jsonl` SHA-256
 `e48361975e639d0f4601623517eff52ebb49524c7315cf9a18e663021884a213`.
+
+### Installed-default W9 cohort
+
+Run `base-20261122T101434-f89b` used clean source `3ad2f5b`, the same
+signed Mac binary and guest assets as W2, and the common v6 Marked
+digest. All ten alternating pairs verified 16 fresh containers' builds
+and CLI tests at each of four concurrencies. Both engines observed
+9 vCPUs with installed memory limits. Each job ran with networking off.
+ctrs recorded zero host NAT connections. The busiest measured phase
+had 1.84 cores outside the engine and harness.
+
+| Concurrency | Batch time | Job p95 | CPU per job | Sampled peak footprint |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.436 [0.430, 0.438] | 0.436 [0.430, 0.438] | 0.490 [0.487, 0.496] | 0.548 [0.532, 0.559] |
+| 4 | 0.287 [0.277, 0.301] | 0.287 [0.277, 0.301] | 0.527 [0.519, 0.532] | 0.540 [0.521, 0.547] |
+| 8 | 0.223 [0.215, 0.230] | 0.223 [0.215, 0.230] | 0.535 [0.532, 0.543] | 0.528 [0.507, 0.537] |
+| 16 | 0.222 [0.206, 0.231] | 0.222 [0.206, 0.231] | 0.557 [0.543, 0.562] | 0.521 [0.512, 0.527] |
+
+These paired median ctrs / OrbStack ratios and 95% intervals describe
+the installed-default cohort. At concurrency 16, median batch time
+was 0.480 s on ctrs and 2.190 s on OrbStack. Batch times include
+create, start, build, test and removal. With 16 observations per batch,
+nearest-rank p95 is the slowest job in that batch. The limiting component
+remains unattributed. All resource phases returned verified boundaries and
+interior samples. The shortest ctrs phases had just one interior sample,
+so transient footprint peaks may be missed. Engine CPU excludes the
+host CLI and coordinator.
+
+```sh
+BENCH_W9_IMAGE_REF="$common_marked_digest_ref" python3 bench/native/pyramid.py run --name w9-jobs:cohort
+python3 bench/native/reporting.py --match base-20261122T101434-f89b
+```
+
+`trials.jsonl` SHA-256
+`8e354c33086fa356b6d9ebe52403270adc69a04dae8195f54074345268b9e012`.
 
 ### Installed-default W13 overlap cohort
 
