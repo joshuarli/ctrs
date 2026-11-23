@@ -43,10 +43,10 @@ def require_variant_absent(engine, image, receipt_path):
 
 
 def require_layers_transferred(layers, transfers):
+    complete_gets = {(row['digest'], row['bytes']) for row in transfers
+                     if row['method'] == 'GET' and row['complete'] is True}
     for layer in layers:
-        delivered = sum(t['bytes'] for t in transfers if t['digest'] == layer['digest']
-                        and t['method'] == 'GET' and t['complete'])
-        if delivered < layer['size']:
+        if (layer['digest'], layer['size']) not in complete_gets:
             raise ValueError('layer not transferred completely: ' + layer['digest'])
 
 

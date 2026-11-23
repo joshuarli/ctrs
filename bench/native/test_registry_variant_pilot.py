@@ -115,10 +115,17 @@ class VariantTransferProof(unittest.TestCase):
 
     def test_failed_partial_and_head_requests_do_not_establish_complete_transfer(self):
         layer = {'digest': 'sha256:layer', 'size': 100}
-        for changes in ({'complete': False}, {'method': 'HEAD'}, {'bytes': 99}, {'digest': 'sha256:foreign'}):
+        for changes in ({'complete': False}, {'method': 'HEAD'}, {'bytes': 99}, {'bytes': 101},
+                        {'digest': 'sha256:foreign'}):
             row = {'digest': layer['digest'], 'bytes': 100, 'method': 'GET', 'complete': True} | changes
             with self.subTest(row=row), self.assertRaises(ValueError):
                 pilot.require_layers_transferred([layer], [row])
+
+    def test_duplicate_short_transfers_do_not_prove_complete_layer_delivery(self):
+        layer = {'digest': 'sha256:layer', 'size': 100}
+        short = {'digest': layer['digest'], 'bytes': 50, 'method': 'GET', 'complete': True}
+        with self.assertRaises(ValueError):
+            pilot.require_layers_transferred([layer], [short, short])
 
 
 class PhaseAccounting(unittest.TestCase):
