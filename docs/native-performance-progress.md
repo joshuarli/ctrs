@@ -1,5 +1,26 @@
 # macOS performance campaign: progress and continuation
 
+## Current macOS checkpoint — 2026-11-22
+
+The [acceptance matrix](native-acceptance-matrix.md) is the current
+standing. All four installed-default W8 conditions and all four matched
+controls have ten admitted pairs each. The W6 5.5 GiB repeat, the W10
+50 ms confirmation, the W12 native descriptor repeat, and the W2
+remote-wake queue probe have terminal evidence below. The tested
+candidate defaults remain unpromoted. No campaign finish gate is qualified.
+
+- W1 engine-cold and W10 whole-engine recovery still need an independent
+  OrbStack endpoint. The current shared endpoint stays available to its
+  existing users.
+- W2 offered-rate trials still miss the start-lag budget. W2 guest-direct
+  CPU and W12 full-bind workflow time still miss parity. Several other
+  CPU comparisons lack host NAT attribution.
+- W3 still lacks equivalent power-loss durability and host filesystem
+  exhaustion evidence. W11's bounded trim diagnostic exceeded the growth
+  limits. The two frozen 12-hour legs and the independent holdout remain open.
+- W13 remains tool-limited under the twofold headroom guard, including
+  after the exact mapped receiver and sendfile controls.
+
 ## Wound down 2026-11-20
 
 The owner paused the campaign on 2026-11-20. No gate in
@@ -875,14 +896,30 @@ The midpoint passed the footprint and build-time screen. Repeat from
 independent stopped-store clones with the same signed assets and gates.
 Allow at least 40 GiB before cloning for the repeat, given the roughly
 23 GB net free-space drop after accounting for retired scratch and the
-16 GiB operating floor. The configuration remains a candidate pending the
-independent repeat, wider default-workload coverage and CPU accounting.
+16 GiB operating floor.
 
-The repeat refused admission with 32,921,944,064 bytes free.
-No engine or store clone was started. It still needs the 40 GiB reserve.
+The first repeat refused admission with 32,921,944,064 bytes free
+before creating any store clone. After the completed W8 stores were
+retired, `base-20261122T231355-5652` started with 45,622,489,088 bytes
+free and completed all ten alternating pairs on independent clones.
+All legs again verified exact artifacts, nine vCPUs, the assigned
+ceilings and zero OOM kills.
 
-Trials SHA-256
-`9290841e442d1b1777a6713374f3088367782ec772f1c5278ab9fe9fe412f39f`.
+| Repeat metric | Median 5,632 / 8,192 MiB | Paired 95% CI | Screen |
+| --- | ---: | ---: | --- |
+| Sampled peak physical footprint | 0.6890 | [0.6889, 0.8648] | Met 0.95 upper bound |
+| Rust build time | 1.0045 | [0.9911, 1.0093] | Met 1.03 upper bound |
+| zlib build time | 1.0092 | [0.9837, 1.1218] | Missed 1.03 upper bound |
+| Measured engine CPU | 1.0077 | [0.9978, 1.0163] | Incomplete host NAT accounting |
+
+The repeat reproduced the footprint reduction. The zlib upper bound
+missed the required timing limit, which blocks promotion. Keep the
+8 GiB default.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Screen trials | `9290841e442d1b1777a6713374f3088367782ec772f1c5278ab9fe9fe412f39f` |
+| Repeat trials | `3de92916871bc8683bb0952d26fde317abdfcf2e53a8b1181ef6137616d436da` |
 
 ### Installed-default W7 cohort
 
