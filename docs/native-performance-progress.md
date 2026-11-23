@@ -4067,6 +4067,57 @@ Trials SHA-256 is
 The comparison JSONL SHA-256 is
 `64cf5958e7dc896bc7da4e4f5ee9b224a0ac46d96d44b231263e7ff6b1078cdc`.
 
+#### W12 install verification FUSE requests
+
+`w12-verify-trace-c7234e` ran the full-bind and mixed layouts on
+`260e70e` with the signed `99db1aa` release. Each leg verified 2,830
+packages, 92,306 files, 532,136,968 bytes and the pinned build and test
+outputs. Only the install verification walk was traced. Each
+private tracefs instance recorded zero loss. Every request had a
+matching completion on the same FUSE connection and came from
+the single Node verifier.
+
+| Requests | Full bind | Bind source with named volumes |
+| --- | ---: | ---: |
+| All FUSE operations | 178,366 | 469 |
+| `FUSE_STATX` | 91,875 | 204 |
+| `FUSE_LOOKUP` | 37,260 | 121 |
+| `FUSE_READDIRPLUS` | 12,256 | 33 |
+
+Node v22.15.0 requests birth time with the basic attributes on each
+`statSync`. Linux FUSE directory replies populate basic attributes.
+The guest requests `FUSE_STATX` when birth time is missing from that
+cache. [Pinned Node implementation](https://github.com/nodejs/node/blob/v22.15.0/deps/uv/src/unix/fs.c#L1442-L1470)
+[Pinned Linux implementation](https://github.com/gregkh/linux/blob/v6.18.58/fs/fuse/dir.c#L1252-L1299)
+[Linux directory reply handling](https://github.com/gregkh/linux/blob/v6.18.58/fs/fuse/readdir.c#L193-L226)
+
+The `w12-stat-mask-345d79` control used four fresh read-only bind
+trees in one private guest. Each tree had eight directories of 256
+files. Each file held `(index % 128) + 1` bytes. One static ARM64
+MUSL executable enumerated the directories and called `statx` with
+the default sync flags on each leaf. It alternated basic attributes
+against basic attributes plus `STATX_BTIME` in AB/BA order. All four
+legs verified 2,048 files and 132,096 bytes, with zero trace loss.
+Both basic-attribute legs issued zero `FUSE_STATX` requests. Both
+birth-time legs issued 2,048 and returned birth time for every file.
+The control changes the requested metadata. Keep Node's original
+requests in the W12 fixture and preserve birth-time behavior in
+the engine.
+
+To reproduce the W12 trace, wrap only `verify-install` in the two
+standard W12 layouts. Record `fuse/fuse_request_send` and
+`fuse/fuse_request_end` with a private `mono` tracefs instance and
+32 MiB per CPU. Use the native file-count and build receipts to
+verify both legs. Match by connection and request ID before
+counting opcodes. The traced runs are for attribution.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| W12 trials | `f95d0177ef753b4dd3fcd5901eb48442fdae9b1ba4946608890419f16492ed95` |
+| Full-bind trace | `3883eadd35b149b743ff4f10153def279eff8ec018f8a3e5ff2d0875952b4402` |
+| Mixed-layout trace | `15611a000483a4e0d3df9720461ea6f9f1d1c991c30eb3839cd19d30cc1a03d7` |
+| Attribute-mask control | `981cf27fe9a2fadb5c9a88362477d37d7f243717bf236b62da70cc0b57237aef` |
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
