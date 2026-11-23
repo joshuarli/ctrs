@@ -16,9 +16,11 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
 - W2 offered-rate trials still miss the start-lag budget. W2 guest-direct
   CPU and W12 full-bind workflow time still miss parity. Several other
   CPU comparisons lack host NAT attribution.
-- W3 still lacks equivalent power-loss durability and host filesystem
-  exhaustion evidence. W11's bounded trim diagnostic exceeded the growth
-  limits. The two frozen 12-hour legs and the independent holdout remain open.
+- Both W3 sync modes recovered from guest relation ENOSPC and from backing
+  writes failing on an exhausted private host APFS volume. Equivalent
+  power-loss durability remains open. W11's bounded trim diagnostic exceeded
+  the growth limits. The two frozen 12-hour legs and the independent holdout
+  remain open.
 - W13 remains tool-limited under the twofold headroom guard, including
   after the exact mapped receiver and sendfile controls.
 
@@ -524,8 +526,7 @@ The archive SHA-256 is
 `8c2d09449cbc4002735068c825eb23a51ed3dd4f0fd44e7b9a12ff8291fb1cd7`.
 The bounds, exact-data checks, and supervisor receipts are described in
 [the storage diagnostic](../bench/native/diagnostics/storage-space.md).
-The probe establishes recovery after guest filesystem allocation
-failure. Host filesystem exhaustion and power-loss durability remain open.
+The probe establishes recovery after guest filesystem allocation failure.
 
 | Run and receipt | SHA-256 |
 | --- | --- |
@@ -536,6 +537,89 @@ failure. Host filesystem exhaustion and power-loss durability remain open.
 | ENOSPC Fsync result | `6e1ee23bd204e23f2b6cfb8d8038f376a86f27a8442fc2d1894297692e4e2650` |
 | ENOSPC Full result | `e30cd6c42b5467030b69daa3a3a6f3b6afeac98c1bed7f59da43e9efa262f838` |
 | ENOSPC terminal status | `166d5ca0ae63aec169a5186605b733cabe6e832c1256c1c2a3bccd1889e2dafc` |
+
+#### W3 private host APFS exhaustion and recovery
+
+On the M1 Max with macOS 27.2.1, `w3host-a80f95` ran Full then Fsync
+in separate fresh ctrs stores. Each sparse VM disk lived on its own
+1 GiB APFS image mounted at the store's `data/vm`. The rest of the
+store remained on the regular host volume. Both fillers returned
+`ENOSPC` down to 4 KiB writes with fsync. The private volume still
+reported about 21 MiB available. The guest ext4 volume reported
+1,055,404,204 KiB free before the fault in each leg.
+
+In both legs the guest logged a `vda` write I/O error, aborted the
+ext4 journal and remounted read-only. PostgreSQL exited the pressure
+session with SQLSTATE `58030` during a WAL file fsync. After removing
+the filler and restarting the private daemon and the same database
+container, both legs recovered all 100 acknowledged rows and found
+the pressure table absent. Both committed 10 more exact rows and
+then completed the same two-million-row pressure statement without
+the filler. The backing file device and inode matched across restart.
+Both private volumes detached after teardown.
+
+| Sync mode | Allocated filler bytes | Private bytes reported free at ENOSPC | Private bytes free after release |
+| --- | ---: | ---: | ---: |
+| Full | 558,247,936 | 21,958,656 | 580,194,304 |
+| Fsync | 558,993,408 | 21,954,560 | 580,935,680 |
+
+An earlier Fsync run, `w3host-2e4cce`, also logged a guest block-write
+error and recovered 100 plus 10 rows. PostgreSQL returned `57P02`
+after another server process crashed. That run lacked the matching
+unpressured write and stopped before Full at its host free-space check.
+An initial 2 GiB preflight stopped before the database write because
+APFS reported 33,644,544 bytes free despite returning `ENOSPC`.
+The repeat uses the observed allocation failure as the trigger.
+
+To reproduce, use the same signed Fsync and Full builds, boot assets
+and v6 PostgreSQL portfolio as the guest ENOSPC diagnostic. The Full
+binary SHA-256 is
+`cf0b4e9ad1c22672e563798a3bc1397ff4490ffcef0a24cd22fa67fb6b20659c`.
+The sparse `data.img` template SHA-256 is
+`9ded055a953c718b93b45432714ab8e0d4bb3528e5b439f6d157525dfaa76de8`
+using the campaign's `sha256_sparse_file` helper.
+
+1. For each signed build, allocate a fresh engine root beneath
+   `.work/tmp`. Set `CTRS_DATA_DIR`, `CTRS_STATE_DIR` and `CTRS_SOCKET`
+   to that root's private paths. Allow at least 17.25 GiB available
+   on the checkout volume before starting.
+2. Use `hdiutil create -size 1g -fs APFS -type SPARSE` and attach the
+   image with `hdiutil attach -nobrowse -mountpoint <engine>/data/vm`.
+   Check the exact APFS mount, its size and a device distinct from the
+   checkout volume. Copy the template's data extents with
+   `SEEK_DATA` and `SEEK_HOLE`, preserving its logical length and holes.
+3. Start the private daemon and verify its binary and boot assets.
+   Start the pinned PostgreSQL image with `--network none` and a fresh
+   named volume. Require `fsync`, `synchronous_commit` and
+   `full_page_writes` on. Create `marker(id int PRIMARY KEY, value text)`
+   and commit exact rows 1–100 with `value = 'exact-' || id`.
+4. Write and fsync an owned filler on the verified APFS mount with
+   4 MiB, 256 KiB and then 4 KiB chunks until each size returns
+   `ENOSPC`. Stop if checkout-volume free space drops below 16 GiB.
+   Run the following statement with a 30-second limit. Capture the
+   client exit, SQLSTATE and guest console.
+
+   ```sql
+   CREATE TABLE pressure AS
+   SELECT g, md5(g::text) AS payload FROM generate_series(1, 2000000) g;
+   ```
+
+5. Remove the filler, stop the owned daemon and restart it on the
+   same backing inode. Start the same container. Check rows 1–100
+   and the absence of `pressure`. Insert rows 101–110 and check all
+   110 values. Run the statement again and require `SELECT 2000000`.
+   Stop the daemon and detach the private mount.
+
+| `w3host-a80f95` receipt | SHA-256 |
+| --- | --- |
+| Full result | `6fc57eaf2d4652b7b8650db4aa6855e9c090c89251155689cd08f267c3a5486f` |
+| Full fault console | `b7dd137e1cd13e03116135a32969049f8c5e3bdb2a71327a03d450f4eed5f409` |
+| Fsync result | `99655ff76cd6984202d6c85b8b6fe42b6965f2157414fea36f3da7abdb3b52a2` |
+| Fsync fault console | `c60bbb454bfa06613cea011a62943a68d48dc32de5b3e864d761df9d15615d4d` |
+
+This establishes ctrs recovery after backing-file allocation failure
+on a bounded APFS volume. Startup-volume exhaustion, physical
+power-loss durability and OrbStack equivalence remain open.
 
 ### W4 pipeline comparison with common images
 
