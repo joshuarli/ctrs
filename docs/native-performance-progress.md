@@ -1300,6 +1300,33 @@ python3 bench/native/reporting.py --match base-20261122T081048-91d4
 `trials.jsonl` SHA-256
 `5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
 
+#### W2 published-port fixed work at 16 clients
+
+`base-20261123T003755-d04f` ran the same signed release and pinned
+fixture as the 16-client guest-direct cohort. All ten alternating
+pairs completed 50,000 requests per leg with zero request errors
+and exact persisted writes. The portfolio, SQL seed, client and
+API file receipts matched within every pair. Both engines used
+nine vCPUs. Outside-engine CPU stayed below 0.73 core during load.
+
+| Metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.7021 | [0.6962, 0.7045] |
+| API p50 | 0.7093 | [0.7057, 0.7125] |
+| API p95 | 0.6083 | [0.6021, 0.6127] |
+| API p99 | 0.5442 | [0.5366, 0.5553] |
+| Measured engine CPU per verified request | 1.1529 | [1.1393, 1.1583] |
+| Sampled peak physical footprint | 0.1492 | [0.1484, 0.1512] |
+
+Median request rates were 1,950 and 1,362 requests/s. Each ctrs
+leg recorded 9–13 host NAT connections. The measured engine CPU
+loss exceeds the parity bound before charging host-kernel NAT CPU.
+The throughput limiter remains open.
+
+Use the guest-direct 16-client command with `--client-location host`
+and report the run separately. `trials.jsonl` SHA-256
+`882a5ab5ce017316db34208eb9017815802aa4f9d21017fca660bc0129542f15`.
+
 ### Installed-default W2 container-to-container fixed-work cohort
 
 Run `base-20261122T091635-df7a` used clean source `c26aaac` and the
@@ -1373,7 +1400,14 @@ python3 bench/native/reporting.py --match base-20261123T002330-6c79
 `trials.jsonl` SHA-256
 `14543e4233309a845de8a5a848455aeae625954c5cd2eb7a050c519fefd81b52`.
 
-#### W2 API cgroup CPU split
+The 16-client cohorts also recorded API cgroup CPU at both workload
+boundaries. In every pair, ctrs used more API system CPU. The
+median extra system CPU was 2.35 s guest-direct and 2.73 s through
+the published port. Median API user CPU gaps were 0.14 s and
+0.67 s, respectively. These cgroup counters include the counter
+reader. Guest and host counters have different accounting boundaries.
+
+#### W2 API cgroup CPU split at eight clients
 
 Both fixed-work cohorts saved API cgroup `cpu.stat` at the workload
 boundaries. For each admitted pair, subtract the before snapshot from
