@@ -1,6 +1,6 @@
 # macOS performance campaign: progress and continuation
 
-## Current macOS checkpoint — 2026-11-22
+## Current macOS checkpoint — 2026-11-23
 
 The [acceptance matrix](native-acceptance-matrix.md) is the current
 standing. All four installed-default W8 conditions and all four matched
@@ -13,9 +13,10 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
 - W1 engine-cold and W10 whole-engine recovery still need an independent
   OrbStack endpoint. The current shared endpoint stays available to its
   existing users.
-- W2 offered-rate trials still miss the start-lag budget. W2 guest-direct
-  CPU and W12 full-bind workflow time still miss parity. Several other
-  CPU comparisons lack host NAT attribution.
+- W2 missed the offered-rate start-lag budget with four and sixteen
+  connections. Timer-only controls also missed deadlines. W2 guest-direct
+  CPU and W12 full-bind workflow time still miss parity. Several other CPU
+  comparisons lack host NAT attribution.
 - Both W3 sync modes recovered from guest relation ENOSPC and from backing
   writes failing on an exhausted private host APFS volume. Equivalent
   power-loss durability remains open. W11's bounded trim diagnostic exceeded
@@ -1438,6 +1439,114 @@ python3 bench/native/reporting.py --match base-20261122T093306-1b10
 
 `trials.jsonl` SHA-256
 `231f577b8eeb6bdaf972c8479bb0e3b95813d49569ce4cacde4eca62289982a1`.
+
+### W2 fixed offered rate with sixteen connections
+
+Two alternating pairs per path used `5878dc0`, signed release `99db1aa`,
+the v6 portfolio and the unchanged v3.2 client. The diagnostic kept
+10,000 operations at 500 requests/s and the 10 ms start-lag limit.
+Sixteen serial connections receive a slot every 32 ms per connection.
+The larger pool changes which seeded operations each connection sends.
+Every pair used the same request mix and verified exact persisted writes
+on both engines. All eight legs completed 10,000 requests with zero
+request errors. Whole-phase outside-engine CPU stayed below 0.84 cores.
+The ctrs guest path recorded zero host NAT connections.
+
+| Path | Run | ctrs late slots, pairs 1 and 2 | OrbStack late slots, pairs 1 and 2 |
+| --- | --- | ---: | ---: |
+| Published port | `base-20261122T235920-8add` | 0, 0 | 117, 2 |
+| Container to container | `base-20261123T000119-b17b` | 37, 37 | 58, 34 |
+
+In the published-port OrbStack legs, the same connection's previous
+request had yet to complete at the lateness deadline for 84 of 117
+and zero of two late slots. In the guest legs this applied to zero
+of 74 ctrs late slots and 25 of 92 OrbStack late slots. The two ctrs
+guest legs peaked at 10.40 ms and 10.18 ms of start lag. Connection
+backlog explains only part of the missed starts.
+
+Neither path admitted a pair. Keep the original four-connection cells
+and the 10 ms guard. The sixteen-connection diagnostic contributes no
+comparative latency or resource estimate.
+
+Reproduce with `runner.py baseline --case W2 --a ctrs --b orbstack
+--client-location host --concurrency 16 --operations 10000
+--request-rate 500 --pairs 2 --max-pairs 2 --resource-lane
+installed-default`. Repeat with `--client-location guest`. Verify the
+signed binary, guest assets and portfolio before both paths.
+
+| Trial receipt | SHA-256 |
+| --- | --- |
+| Published port | `6dff7336164a66a2f427615a1bd8b346c1d76a1bf26a577f5827810788e57199` |
+| Container to container | `8cfd96bfd5d19ec531f642a48578f50fbe9267319b8c2e980fae0099d22f11aa` |
+
+#### W2 timer-only control
+
+`w2clock-4eb0a7` ran the unchanged v3.2 wait function without HTTP.
+Sixteen threads waited for 10,000 deadlines at 500 slots/s using
+the same stagger as the connection diagnostic. The guest runs used
+the pinned v6 API image with networking disabled. Each guest ran
+once at the inherited 50,000 ns Linux timer slack and once after
+each worker set and verified 1,000 ns through `prctl`. The host
+ran the fixture's Darwin kqueue timer with its normal settings.
+
+| Placement | Verified slack | Slots more than 10 ms late |
+| --- | ---: | ---: |
+| ctrs guest | 50,000 ns | 68 |
+| ctrs guest | 1,000 ns | 18 |
+| OrbStack guest | 50,000 ns | 163 |
+| OrbStack guest | 1,000 ns | 138 |
+| Mac host | Darwin timer flags | 8 |
+
+An unavailable HTTP connection is unnecessary to reproduce a late
+start. The reduced timer slack still missed the start-lag limit in
+both guests. These are single timer-only controls. The cause of the
+remaining delays and the relative cost of the engines remain open.
+The wait function SHA-256 was
+`0bc2b4f0d908967013d243205fc368f9c6ee693e3b206a7c1793d7fc5ba9366e`.
+The `checks.jsonl` SHA-256 was
+`6b3bff4156ccb6029e63e977bccc8ecfa83a50492b0f2c288a8f0d630e3e20cf`.
+
+Two alternating native timer-only pairs in `w2-native-clock-957994`
+used one static ARM64 MUSL executable in the same guest images.
+Every worker verified 50,000 ns timer slack and called
+`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` for its staggered
+slots. Every leg recorded all 10,000 waits. ctrs had 24 and 47 slots
+over 10 ms late. OrbStack had 65 and 120. The guest misses reproduce
+without Python. The first setup attempt, `w2-native-clock-225286`,
+failed before timing because `/proc/thread-self/timerslack_ns` was
+unavailable. The repeat read the per-thread setting with `prctl`.
+
+Executable SHA-256
+`e342f943e459d5d059ebcd4a96e19abdc2b651073e96cf98f06aeaab83ca0fc9`.
+Native `checks.jsonl` SHA-256
+`2af56345bad3cb7a716a3717dda946bfa070303053116b5745df81484dd62ae0`.
+
+Trace run `w2-trace-clock-bdf913` repeated one native leg per guest
+with the timer workers named `w2-clock`. Both private tracefs instances
+reported zero dropped events and overruns. In both guests all 10,000
+timers joined from `hrtimer_start` through expiry, `sched_waking` and
+`sched_switch`. On ctrs, 20 of 21 late observed switches were already
+late when the timer expired. On OrbStack, 98 of 104 were already late
+at expiry. The userspace check on OrbStack counted 106 late waits.
+Among the late switches the longest waking-to-switch interval was
+0.034 ms on ctrs and 0.115 ms on OrbStack.
+
+Reproduce with 16 named native threads and one shared monotonic start
+250 ms in the future. Worker `w` waits on slots `w, w+16, ...`, each
+2 ms apart on the shared schedule. After every absolute wait, read
+`CLOCK_MONOTONIC` and count starts more than 10 ms past the slot.
+Trace `timer/hrtimer_start`, `timer/hrtimer_expire_entry`,
+`sched/sched_waking` and `sched/sched_switch` in a private instance
+with the `mono` clock and a 16 MiB buffer per CPU. Require zero loss.
+Join timer events by timer address, then waking and switch by worker
+TID. Use `softexpires` as the deadline. These samples locate most of
+the delay before the guest timer callback. The reason for late expiry
+and the host-client misses remain open.
+
+| Trace | SHA-256 |
+| --- | --- |
+| ctrs | `848ac7ef8c9764aecb2dd18b4088fcd603a2c2824f03393d972a7b042bc1122e` |
+| OrbStack | `99334e1773f1687604abba2f31e36d175f187d5efb6d92d1c4cab2534a7b94bd` |
 
 ### W2 leaf observer overhead on the guest-direct workload
 
@@ -3518,6 +3627,28 @@ Trim cycle 8 recorded a private-backing identity or sharing check
 failure, which leaves the full trim leg's resource-growth summary
 unknown. Keep all 43 exact-work receipts and the failed observer
 record. The 12-hour qualification remains open.
+
+A native APFS control on macOS 27.2.1 reproduced allocation
+disagreement on a file that had never been cloned. A writer repeated
+200 truncate, append and fsync sequences on the same open file.
+During the writes, `st_blocks * 512` and `ATTR_CMNEXT_PRIVATESIZE`
+differed in 35,001 of 44,275 samples. Fetching `ATTR_FILE_ALLOCSIZE`
+and `ATTR_CMNEXT_PRIVATESIZE` in one `fgetattrlist` call still
+produced 35,059 differences. After the writer joined, both
+attributes read 5,242,880 bytes. All 20 subsequent quiescent
+post-fsync samples agreed. A separate 1 MiB APFS clone returned
+1 MiB of ordinary allocation and zero private bytes.
+
+Reproduce in an owned APFS scratch directory. Open a new empty file.
+In each writer iteration, truncate to a 1 MiB logical length, append
+4 MiB in 64 KiB writes and fsync. From a reader, sample `fstat` then
+request both allocation attributes on the same open descriptor.
+Compare the attributes again after the writer joins. This control
+shows that a live mismatch alone cannot establish extent sharing.
+The original cycle 8 sample remains unresolved. Control log SHA-256
+`c1325afc4e54a0789f12f1ba55b73e51589687dd50f4edef8fc36183a0316b0a`.
+[Apple allocation attributes](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/getattrlist.2.html)
+[XNU attribute definitions](https://github.com/apple/darwin-xnu/blob/main/bsd/vfs/vfs_attrlist.c)
 
 | Receipt | SHA-256 |
 | --- | --- |
