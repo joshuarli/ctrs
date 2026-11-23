@@ -1734,6 +1734,16 @@ Candidate source SHA-256 was
 Comparison JSONL SHA-256 is
 `30e9a49e3cbf0a96d1f277d2f488728604d510ce6647a7ef24ce7890471cc243`.
 
+The sender still uses a Python read and socket send for each buffer.
+Use a separate host-only control with `socket.sendfile` to test that
+path. Replace only the sender. Send from the start of the same regular
+artifact, wrapping if necessary, and require the returned byte count
+for every span. Keep the existing receiver and its exact verification.
+Use five alternating 1 GiB pairs per direction and stream count.
+Advance only if the host control reaches the existing twofold capacity
+requirement. This still leaves the guest control to verify.
+[Python socket.sendfile](https://docs.python.org/3/library/socket.html#socket.socket.sendfile)
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
