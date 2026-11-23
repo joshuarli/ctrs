@@ -406,7 +406,7 @@ def sha256_sparse_file(path: Path) -> str | None:
         os.close(fd)
 
 
-def guest_provenance() -> dict:
+def guest_provenance(guest: Path | None = None) -> dict:
     """Hashes of the guest kernel/initramfs/data disk — the guest-side
     identity behind `ctrs_binary_sha256`. data.img is a 1 TiB sparse
     file hashed by allocated extent (`sha256_sparse_file`), so results
@@ -420,7 +420,7 @@ def guest_provenance() -> dict:
         cache = json.loads(cache_path.read_text())
     except Exception:
         cache = {}
-    guest = REPO / os.environ.get("CTRS_GUEST_DIR", "guest/out")
+    guest = guest or REPO / os.environ.get("CTRS_GUEST_DIR", "guest/out")
     out, dirty = {}, False
     for key, name in assets.items():
         path = guest / name
@@ -594,7 +594,8 @@ class Engine:
     """One competitor engine: socket, env, and (for ctrs) daemon lifecycle."""
 
     def __init__(self, name: str, run_id: str, fresh_dir: Path | None = None,
-                 resource_lane: str = "matched", config_overrides: dict | None = None):
+                 resource_lane: str = "matched", config_overrides: dict | None = None,
+                 binary: Path | None = None):
         if name not in linux_lane.ENGINES:
             raise ValueError(f"unknown engine {name!r}")
         if name == 'dockerd' and not linux_lane.enabled():
@@ -605,6 +606,9 @@ class Engine:
         if config_overrides and name != "ctrs":
             raise ValueError("configuration candidates apply to ctrs only")
         self.config_overrides = dict(config_overrides or {})
+        if binary is not None and name != "ctrs":
+            raise ValueError("candidate binaries apply to ctrs only")
+        self.binary = binary
         self.name = name
         self.run_id = run_id
         self.proc: subprocess.Popen | None = None
@@ -818,7 +822,7 @@ class Engine:
             if self.proc is None:
                 log = open(self.dir / "daemon.log", "ab")
                 self.proc = subprocess.Popen(
-                    [str(CTRS_BIN), "daemon"], env=env,
+                    [str(self.binary or CTRS_BIN), "daemon"], env=env,
                     stdout=log, stderr=subprocess.STDOUT, cwd=REPO)
             if self.proc.poll() is not None:
                 last_tail = (self.dir / "daemon.log").read_bytes()[-2000:]
@@ -826,7 +830,7 @@ class Engine:
                     time.sleep(2.0)
                     log = open(self.dir / "daemon.log", "ab")
                     self.proc = subprocess.Popen(
-                        [str(CTRS_BIN), "daemon"], env=env,
+                        [str(self.binary or CTRS_BIN), "daemon"], env=env,
                         stdout=log, stderr=subprocess.STDOUT, cwd=REPO)
                     continue
                 raise RuntimeError(
@@ -3695,6 +3699,8 @@ class RunContext:
         self.design = "paired"
         self.resource_lane = "matched"
         self.slot_overrides: dict[str, dict] = {}
+        self.candidate_binary: Path | None = None
+        self.candidate_build_outputs: dict | None = None
 
     def trial_dir(self, engine: str, case: str, state: str) -> Path:
         self._seq += 1
@@ -3866,7 +3872,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         if engine is None:
             engine = Engine(engine_name, ctx.run_id, resource_lane=ctx.resource_lane,
                             fresh_dir=candidate_dir(ctx.run_id) if overrides else None,
-                            config_overrides=overrides)
+                            config_overrides=overrides,
+                            binary=ctx.candidate_binary if overrides else None)
             ctx.engines[key] = engine
         stop = not keep_warm and not linux_lane.enabled()
     try:
@@ -3889,6 +3896,8 @@ def run_one(ctx: RunContext, engine_name: str, case_id: str, state: str,
         rec["slot"] = slot
         if engine.config_overrides:
             rec["config_overrides"] = dict(engine.config_overrides)
+        if ctx.slot_overrides.get(slot) and ctx.candidate_binary is not None:
+            rec["candidate_build_outputs"] = dict(ctx.candidate_build_outputs)
         # The trial starts the engine. Sampling before ensure_up() records
         # a false version change on the first cold/stopped-engine trial.
         rec["engine_server_version"] = safe_version(engine)
@@ -4192,6 +4201,25 @@ def wait_for_quiet_host(load1: float, timeout: float, clock=time.monotonic, slee
         sleep(15)
 
 
+def candidate_build(checkout: Path) -> tuple[Path, Path, dict]:
+    """A separately built candidate: its signed host binary and guest
+    assets, refused unless they differ from the current build."""
+    checkout = checkout.resolve()
+    binary, guest = checkout / "target/release/ctrs", checkout / "guest/out"
+    missing = [str(path) for path in (binary, *(guest / name for name in ("Image", "initramfs.cpio", "data.img")))
+               if not path.is_file()]
+    if missing:
+        raise ValueError("candidate checkout is missing " + ", ".join(missing))
+    signed = subprocess.run(["codesign", "--verify", "--strict", str(binary)], capture_output=True, text=True)
+    if signed.returncode != 0:
+        raise ValueError(f"candidate binary is not validly signed: {signed.stderr.strip()}")
+    outputs = {"ctrs_binary_sha256": sha256_file(binary), **guest_provenance(guest)}
+    current = {"ctrs_binary_sha256": sha256_file(CTRS_BIN), **guest_provenance()}
+    if outputs == current:
+        raise ValueError("candidate build is identical to the current build")
+    return binary, guest, outputs
+
+
 def candidate_dir(run_id: str) -> Path:
     return WORK / "engines" / ("ctrs-candidate-" + run_id.removeprefix("base-"))
 
@@ -4271,7 +4299,17 @@ def cmd_baseline(args) -> int:
     a, b = args.a, args.b
     candidate_cpus = getattr(args, "candidate_cpus", None)
     candidate_memory_mib = getattr(args, "candidate_memory_mib", None)
-    if candidate_cpus is not None or candidate_memory_mib is not None:
+    if (checkout := getattr(args, "candidate_checkout", None)) is not None:
+        if (a, b) != ("ctrs", "ctrs") or ctx.resource_lane != "installed-default":
+            raise SystemExit("--candidate-checkout needs --a ctrs --b ctrs --resource-lane installed-default")
+        try:
+            ctx.candidate_binary, guest, ctx.candidate_build_outputs = candidate_build(checkout)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        ctx.design = "candidate"
+        ctx.slot_overrides = {"b": {"CTRS_GUEST_DIR": str(guest)}}
+    elif candidate_cpus is not None or candidate_memory_mib is not None:
         if (a, b) != ("ctrs", "ctrs") or ctx.resource_lane != "installed-default":
             raise SystemExit("VM candidates need --a ctrs --b ctrs --resource-lane installed-default")
         ctx.design = "candidate"
@@ -4563,6 +4601,9 @@ def main() -> int:
                             help="native macOS ctrs/ctrs installed-default comparison with slot b's "
                                  "VM memory ceiling set to MIB. Example: baseline --case W6 --a ctrs "
                                  "--b ctrs --resource-lane installed-default --candidate-memory-mib 6144")
+    allocation.add_argument("--candidate-checkout", type=Path, metavar="DIR",
+                            help="native macOS ctrs/ctrs installed-default comparison with slot b running "
+                                 "DIR's signed target/release/ctrs and guest/out assets")
     p.add_argument("--image-ref", help="W9: preinstalled pinned common Marked digest reference")
     p.add_argument("--pairs", type=int, default=3)
     p.add_argument("--state", default="warm", choices=["warm", "cold"])

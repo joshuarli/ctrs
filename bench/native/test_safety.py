@@ -726,6 +726,49 @@ class ExitStatusTests(unittest.TestCase):
                 self.assertEqual(cp.returncode, 2, cp.stderr)
                 self.assertIn(error, cp.stderr)
 
+    def test_candidate_checkout_requires_its_own_signed_build(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "missing .*target/release/ctrs"):
+                runner.candidate_build(checkout)
+            (checkout / "target/release").mkdir(parents=True)
+            (checkout / "guest/out").mkdir(parents=True)
+            for path in ("target/release/ctrs", "guest/out/Image", "guest/out/initramfs.cpio", "guest/out/data.img"):
+                (checkout / path).write_bytes(b"x")
+            with patch.object(runner.subprocess, "run", return_value=Mock(returncode=1, stderr="not signed")):
+                with self.assertRaisesRegex(ValueError, "not validly signed"):
+                    runner.candidate_build(checkout)
+            build = {"ctrs_binary_sha256": "a", "guest_kernel_sha256": "b"}
+            with patch.object(runner.subprocess, "run", return_value=Mock(returncode=0)), \
+                    patch.object(runner, "sha256_file", return_value="a"), \
+                    patch.object(runner, "guest_provenance", return_value={"guest_kernel_sha256": "b"}):
+                with self.assertRaisesRegex(ValueError, "identical to the current build"):
+                    runner.candidate_build(checkout)
+            with patch.object(runner.subprocess, "run", return_value=Mock(returncode=0)), \
+                    patch.object(runner, "sha256_file", side_effect=lambda path: "c" if str(path).startswith(str(checkout)) else "a"), \
+                    patch.object(runner, "guest_provenance", return_value={"guest_kernel_sha256": "b"}):
+                binary, guest, outputs = runner.candidate_build(checkout)
+            self.assertEqual((binary, guest), (checkout.resolve() / "target/release/ctrs", checkout.resolve() / "guest/out"))
+            self.assertEqual(outputs, {**build, "ctrs_binary_sha256": "c"})
+        with self.assertRaisesRegex(ValueError, "ctrs only"):
+            runner.Engine("orbstack", "run", binary=Path("/x"))
+
+    def test_candidate_checkout_slot_b_runs_the_candidate_build(self):
+        args = argparse.Namespace(a="ctrs", b="ctrs", case="W7", pairs=0, seed=1,
+                                  candidate_checkout=Path("/cand"), resource_lane="installed-default")
+        context = Mock(run_id="base-test", slot_overrides={}, engines={})
+        outputs = {"ctrs_binary_sha256": "c"}
+        with patch.object(runner, "RunContext", return_value=context), \
+                patch.object(runner, "candidate_build", return_value=(Path("/cand/ctrs"), Path("/cand/guest"), outputs)), \
+                patch.object(runner, "clone_warm_engine") as clone, \
+                patch.object(runner, "run_one") as trial:
+            runner.cmd_baseline(args)
+        self.assertEqual(context.design, "candidate")
+        self.assertEqual(context.slot_overrides, {"b": {"CTRS_GUEST_DIR": "/cand/guest"}})
+        self.assertEqual((context.candidate_binary, context.candidate_build_outputs), (Path("/cand/ctrs"), outputs))
+        clone.assert_called_once_with(runner.candidate_dir("base-test"))
+        trial.assert_not_called()
+
     def test_candidate_already_at_default_stops_before_clone(self):
         args = argparse.Namespace(a="ctrs", b="ctrs", case="W6",
                                   candidate_cpus=9, resource_lane="installed-default")
