@@ -1988,6 +1988,30 @@ exact guest-direct requests at nine vCPUs. Both traces were valid and
 loss-free. The trial records SHA-256 is
 `74b0903858615da57a9e05ea3fd2804cee925c2054a50120877da4e24493a764`.
 
+Recounting the hardened trace by waker and wakee identifies where
+the extra remote-idle events cluster. The table uses the trace's
+task names and classifies a remote CPU as idle when its last
+observed switch selected PID 0. The recount reproduced all four
+placement totals in both trace receipts.
+
+| Remote-idle waking events | ctrs | OrbStack |
+| --- | ---: | ---: |
+| All task names | 79,813 | 19,663 |
+| `uvicorn` waking `uvicorn` | 65,080 | 14,252 |
+| All per estimated successful request | 19.23 | 7.75 |
+| `uvicorn` waking `uvicorn` per estimated successful request | 15.68 | 5.62 |
+
+The `uvicorn` label pair accounts for about 88% of the estimated
+difference in remote-idle events per request. Normalize by each
+trace's recorded duration times its full-trial request rate. The
+record covers one two-second window per engine. Task names give
+a location for further profiling and do not establish which
+futex path initiated a wake or what the wake cost in CPU time.
+Recount `sched_waking` by the trace prefix and the wakee's
+`comm` field, using `sched_switch` to maintain the running PID
+per CPU. Derived JSONL SHA-256
+`62aadbba102573456399931ada5eb8a38d713642376ab171a8ede8364eac5345`.
+
 ##### W2 remote wake queue probe
 
 Build two Linux 6.18.58 ARM64 kernels in the same pinned Debian builder,
