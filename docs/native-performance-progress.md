@@ -2343,6 +2343,43 @@ SHA-256: `65cd55f1287288a29c4c4fc5231a962feab581e0edaed0d98bb58ce86f196ae2`.
 | `plan.json` | `69fa21643125255e0f4b3efaa2f1536d9d1528504b82c0957a4328e1d2331e59` |
 | `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
 
+#### W11 OrbStack private-backing repeat
+
+`w11-mixed-20261122T183629-cd0d` used harness `aba1516`, the v5 worker
+and v6 portfolio, and OrbStack server 29.8.2. All 11 cycles completed
+with exact state across 55,000 API operations, 16,841 acknowledged
+writes and 176 build jobs. The service processes stayed the same, each
+resource interval lasted at least 32 seconds, and owned cleanup passed.
+
+| Post-cleanup resource | Peak rise after warmup | Final delta from initial observation | Budget result |
+| --- | ---: | ---: | --- |
+| Physical footprint | 0 bytes | −302,162,304 bytes | Pass |
+| Active backing allocation | 17,207,296 bytes | 17,715,200 bytes | Fail |
+| Open descriptors | 0 | 0 | Pass |
+
+Ordinary and APFS private bytes agreed for both files at all 11
+observations on the same device and inodes as the previous run.
+`data.img.raw` grew by 16,871,424 bytes in the interval ending at cycle
+8, compared with 16,613,376 bytes at the same point in the previous
+run. `swap.img` held at 4,096 allocated bytes throughout. The active
+backing budget failed again. The footprint failure from the previous
+run did not recur. These two short observations leave the cause of the
+allocation step and 12-hour resource growth open.
+
+Repeat with the seven-minute duration recipe above using `--engines
+orbstack` and `--resource-observation-seconds 32`. Before starting, match
+both paths, devices and inodes to the previous trial's last
+`resources.cycle_growth.observations[].allocation.files` receipt and
+require the private-size probe to return both files. Inspect the
+per-file receipts alongside the growth summary and driver cleanup
+result. The shared OrbStack engine continues running between trials.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `trials.jsonl` | `f16661852b367eaf8d27cc528f2d27f73719d6f7fe672a16792b7fae4181fd1e` |
+| `plan.json` | `6dbd7ea0d37435d0599c9cd2c76323c2e8d192e8f62e19bda7579f223aa132e8` |
+| `driver-result.json` | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+
 #### W11 physical footprint attribution
 
 Recomputed the steady physical footprint for all 23 post-cleanup
