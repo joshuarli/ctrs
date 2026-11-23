@@ -1423,6 +1423,35 @@ python3 bench/native/reporting.py --match base-20261122T091635-df7a
 `trials.jsonl` SHA-256
 `2ddff2311be62f118080899d69f8c798d90babb77a849000101e0abd3b744899`.
 
+#### W2 guest-direct eight-client repeat on the common runtime
+
+`base-20261123T033422-bb7b` repeated the original eight-client
+cell on `1967b8e` with signed release `99db1aa`, the v6 portfolio
+and the current boot assets. All ten alternating pairs admitted
+with nine vCPUs per engine. Each leg completed exactly 50,000
+requests. Both engines persisted the same 150,054 acknowledged
+writes across their ten legs, with zero request errors.
+ctrs used zero host NAT connections. Outside-engine CPU stayed
+below 0.85 core during load.
+
+ctrs completed a median 2,160 requests/s (range 2,095–2,180).
+OrbStack completed a median 1,219 requests/s (range 1,203–1,228).
+Engine CPU includes the guest client on both sides.
+
+| Guest-direct metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.5652 | [0.5556, 0.5695] |
+| API p50 | 0.5798 | [0.5679, 0.5839] |
+| API p95 | 0.4688 | [0.4656, 0.4731] |
+| API p99 | 0.4428 | [0.4375, 0.4454] |
+| Measured engine CPU per verified request | 1.1162 | [1.1056, 1.1244] |
+| Sampled peak physical footprint | 0.1538 | [0.1500, 0.1554] |
+
+The CPU loss reproduced on the common runtime. Reproduce with the
+16-client fixed-work command using `--concurrency 8`. Keep the
+earlier runtime's cohort separate. `trials.jsonl` SHA-256
+`6b5abe77e1d49fe0429a8aaddbfcc78add06496b74caec9d25dbf120c92904f5`.
+
 #### W2 guest-direct fixed work at one client
 
 `base-20261123T024730-07eb` used source `b3519a1`, signed release
