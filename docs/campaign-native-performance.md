@@ -1,11 +1,17 @@
 # Campaign: beat OrbStack on macOS
 
-**Status: winding down 2026-11-23. All campaign gates remain open.** The standing at the 2026-11-20 pause and the current evidence are in [the progress file](native-performance-progress.md#macos-resume-setup--2026-11-22). This contract supersedes the previous campaign's
-Linux requirements, 30-candidate stop, and monitoring-driven closeout.
-On every resume read `AGENTS.md`, this document, and
-[`native-performance-progress.md`](native-performance-progress.md).
-The progress file is the single work queue and continuation checkpoint;
-`docs/evidence/native-performance.md` is the historical experiment log.
+## Status
+
+**Paused 2026-11-23. All macOS campaign gates remain open.**
+Resume prompt: “Resume the macOS host performance campaign from Status.”
+First run `git status --short --branch`, then read [AGENTS.md](../AGENTS.md), this contract, the [current matrix](native-acceptance-matrix.md), and the [progress file](native-performance-progress.md).
+- Last tested integration baseline `603d6d0` was synced to `origin/main`. Its code passed 206 host unit tests and its harness passed 553 benchmark tests at the respective code changes. The winddown adds local evidence and documentation commits.
+- Parked `campaign/build-mirror-vsock` at pushed `d370e8c`. Retain its checkout for the next W6/W7 attempt. Selection, forced fallback, mixed versions and saved-container restoration passed. The W1 cold-start pilot was inconclusive.
+- Next slice: rebuild the signed host and guest from the parked ref with `CARGO_ENCODED_RUSTFLAGS="" cargo xtask all` in a separate checkout. Restore the pinned W6/W7 inputs using the progress file. Admit a fresh full W7 comparison after the Mac has at least 32 GiB free, then run full W6 and the remaining candidate regression checks.
+- W1/W10 engine-cold equivalence still needs a disposable OrbStack endpoint. W3 power-loss equivalence, W11 bounded growth and the two 12-hour runs, independent holdout, and the losing or unqualified cells in the matrix remain open.
+- Historical local branches remain parked with their evidence in the progress file. Resource and input lanes are `campaign/mac-resource-evidence`, `campaign/macos-bench-admission`, `campaign/macos-portfolio`, `campaign/w1-recovery`, `campaign/w9-resources`, and `campaign/w10-recovery-inputs`. Review them only if their input or measurement work is needed.
+- Unpromoted experiment branches are `campaign/mac-w10-refusal50`, `campaign/w2-leaf-25`, `campaign/w2-leaf-macos`, `campaign/w2-observer-report`, and `campaign/w6-memory5120`. Resume only against the corresponding open cell and its existing stop rule.
+- The checkout retirement audit is incomplete. The registered candidate checkout is retained, and 47 older linked worktrees were preserved without a full audit. The resume instructions and candidate source survive removal of scratch artifacts.
 
 The owner subsequently accepts some background noise for continued experiments.
 After resume, use interleaved W2 work and observer controls with disclosed host
