@@ -103,6 +103,11 @@ transfers all exceeded half of the corresponding native loopback
 rate. [Mac controls](native-performance-progress.md#w13-native-receive-loop-and-sendfile-control)
 [Guest controls and bridge admission](native-performance-progress.md#w13-native-guest-loopback-and-bridge-admission)
 
+The separate W14 backlog-128 confirmation admitted ten fresh-connection
+pairs with no listen overflows or long stalls. p95 and p99 were 0.731×
+and 0.651×. Measured CPU per response was 1.234× [1.209, 1.247]
+before host NAT CPU. [Backlog-128 evidence](native-performance-progress.md#w14-fresh-connections-with-backlog-128)
+
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
 (`tests/e2e.sh`, `conformance/`), not performance cells. `bench/net/*.py`
 (CTRS-17) streams a repeating pattern without content hashes and reports

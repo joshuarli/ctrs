@@ -3059,6 +3059,82 @@ at backlog 128. The comparison JSONL SHA-256 is
 | Fresh | `base-20261122T182242-86e9` | `8aee79b6a755abff20c50a7f9fef0345cf171f2dd528c57a9d91f79c45a38a2a` |
 | Persistent | `base-20261122T182545-6dad` | `8eae326eb656501c8d6a62a2bf9598b93fae60cd2f3b4cf15b7668e69719783d` |
 
+##### W14 fresh connections with backlog 128
+
+`w14-backlog-8d4cc553` completed ten installed-default alternating
+pairs with the signed `99db1aa` release, pinned v6 API image and
+`request_queue_size = 128` in the W14 v4 server. Keep the original v4
+results separate. Both engines ran 32 clients, 100 fresh exchanges
+per client and 3,200 exact responses per leg. The audit checked all
+64,000 responses, per-client counts, zero leaked sessions, owned
+cleanup and identical server and image pins. Both host gate checks
+returned zero and all trial contention checks passed.
+
+| Metric | ctrs median | OrbStack median | Paired ctrs/OrbStack median [95% CI] |
+| --- | ---: | ---: | ---: |
+| Completion | 0.714 s | 0.699 s | 1.022 [1.013, 1.054] |
+| Request p50 | 6.855 ms | 6.617 ms | 1.036 [1.029, 1.131] |
+| Request p95 | 8.520 ms | 11.658 ms | 0.731 [0.699, 0.762] |
+| Request p99 | 9.501 ms | 14.731 ms | 0.651 [0.631, 0.659] |
+| Cleanup | 1.012 ms | 0.938 ms | 1.078 [1.013, 1.141] |
+| Measured CPU per verified response | 1.076 ms | 0.872 ms | 1.234 [1.209, 1.247] |
+
+The queue counters for listen overflows, drops, SYN cookies and
+timeouts stayed at zero in all 20 server namespaces. There were no
+exchanges at or above 900 ms. The measured CPU loss persists after
+removing queue saturation and before charging host NAT CPU. The
+ctrs workload-phase route counts covered all 3,200 connections in
+each leg, with 2,663–2,987 on vsock and 213–537 on NAT legs. The
+ctrs daemon reported 1.030–1.100 CPU-seconds per trial and its
+VZ helper 2.242–2.625 CPU-seconds.
+
+Reproduce using the backlog diagnostic above with backlog fixed at
+128 and ten alternating engine pairs. Sample `GET /ctrs/relays` on
+the private daemon immediately outside the workload phase and
+match each counter delta to the exact successful connections.
+Use lifecycle before and after CPU counters with verified daemon and
+VZ helper process identities. Paired receipt SHA-256
+`32bd6f4eb3a5687acb962d41fd4483cca4b12a52ca8c14cbe81f5f2899316704`
+and derived analysis SHA-256
+`933dcb83666856be14272b2d3fcfafaf44195ecd05f4f640dbecb65d8c9deebd`.
+
+##### W14 smaller initial relay buffer
+
+The fresh workload opens a new relay for each short response.
+Screen the first allocation in both copy directions. Build stock
+and candidate from `99db1aa` in the same isolated worktree with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`. Change only
+`COPY_BUF` in `crates/ctrs/src/daemon/ports.rs` from 64 KiB to
+8 KiB. Both builds keep the existing growth rule and 1 MiB maximum.
+The candidate passed all 15 focused port tests.
+
+`w14-copy-start-ce1feb3c` completed five alternating ctrs-only
+pairs with the same backlog-128 fixture and warm image store.
+Restart only the owned daemon between legs. Verify the signed
+binary and loaded boot assets per leg. All 32,000 responses
+matched, with zero leaked sessions, server queue overflows or
+cleanup errors. Each leg used 534–538 NAT legs and 2,662–2,666
+vsock connections. Both host gate checks passed.
+
+| Metric | 8 KiB / 64 KiB paired median [95% CI] |
+| --- | ---: |
+| Measured CPU per verified response | 0.986 [0.932, 1.019] |
+| Completion | 0.997 [0.900, 1.077] |
+| Request p50 | 0.997 [0.892, 1.072] |
+| Request p95 | 0.993 [0.904, 1.088] |
+| Request p99 | 0.980 [0.813, 1.120] |
+
+The CPU median fell short of the 5% advance screen, and the p50
+and p95 bounds did not meet the 1.03 limit. The comparison omits
+host NAT CPU on both sides. Keep the 64 KiB default.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed stock host | `553c8da4fa9874d30fe30f62cdd60eb5ecf37ba7011f8210d15433b9e57c7170` |
+| Signed 8 KiB candidate | `0bcbb3f65e62211240be15862feb1dde8c35971373f5f9d3c424b33eb14df7cc` |
+| Paired receipt | `effecae1024d49293e947ee24dca220e361646182b643fc89d1438d1061fe4f5` |
+| Derived analysis | `9049c6dbe73f4b5f372163c6bf3cf4bd55fdda8309d5b50f093cdccc05ea9fb4` |
+
 #### W14 streaming, cancellation and reconnect with buffered frames
 
 Each installed-default cohort passed all ten alternating pairs on
