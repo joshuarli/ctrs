@@ -2689,6 +2689,61 @@ computing endpoint differences.
 | Driver result | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
 | Joined post-cleanup observations | `ba854a23457282dd480a16cffff9bc9b4b4f60e307b897e99a09032b94753548` |
 
+#### W11 OrbStack guest attribution result
+
+`w11-mixed-20261122T191335-cf44` processed 45,000 API operations in nine
+exact cycles. Each cycle retained the original 500 seed rows, and the
+13,779 acknowledged writes matched the delete receipts. The API, DB
+and cache process identities stayed stable and cleanup passed. Both
+host backing file identities matched the earlier OrbStack receipts.
+
+`data.img.raw` added 16,793,600 ordinary allocated bytes at the eighth
+observation, with no change to `swap.img` or the measured size of the
+PostgreSQL data or WAL directories at that boundary. The WAL directory
+grew by 16 MiB at the ninth observation. The recurrent allocation step
+preceded the measured WAL directory expansion. APFS private bytes
+were outside this harness's scope.
+
+Total host backing rose by 17,289,216 bytes from first to last, with a
+17,039,360-byte post-warmup increase. Post-warmup sampled physical
+footprint rose by 202,191,864 bytes and ended 42,158,888 bytes below the
+first observation. Both post-warmup increases exceeded the 16 MiB
+budgets. The descriptor count rose by one and passed its budget.
+
+`df -Pk "$PGDATA"` returned `/dev/vdb1` with `/etc/hostname` as its
+mount label. That output leaves the actual PGDATA mount identity
+unverified. Keep the independent PostgreSQL directory readings and
+resolve the real PGDATA mount with the container's
+`/proc/self/mountinfo` before interpreting filesystem-wide guest
+capacity changes. These short legs leave 12-hour resource growth open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Trial | `bc87aa855235299a484dfab5cc4116a710c6f083fb13276fc9378d102ff04f4e` |
+| Plan | `d643b542502ab5d202de4cefa392ad0d8249259769c71a9f1310257414f5ddb6` |
+| Driver result | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+| Joined post-cleanup observations | `8f4fb7838451741499ab696ec90b492fa5c5d0492fea240d532010669b2dbbe0` |
+
+#### W11 repeated trim diagnostic
+
+Compare two private ctrs stores independently copied from the same
+signed release template. Use `aba1516`, six exact cycles per store,
+and 32 seconds of post-cleanup observation. Start with the control.
+Repeat with an explicit `FITRIM` after each cycle's exact cleanup and
+before its host observation. Keep the same isolated probe volume
+setup, fsynced sentinel and guest helper in both legs. The control
+uses the helper's read-only sample operation.
+
+Verify the same owned backing device and inode at each boundary and
+require ordinary and APFS private allocation to agree. Record both
+snapshots immediately around each intervention. Verify the sentinel
+and reread the exact 500 database seed rows after each operation.
+Require complete observations, correctness receipts and terminal
+cleanup before comparing the 16 MiB growth checks. Report backing,
+footprint and descriptors separately. The fixed-order comparison
+tests resource behavior under explicit trim. A performance or
+default-policy change needs further paired validation.
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
