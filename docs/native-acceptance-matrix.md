@@ -97,8 +97,11 @@ The table retains W12 timing history from the previous workspace fixture.
 W13 v3 admission verified exact bytes in all twelve configurations.
 Both engines missed the twofold tool-headroom requirement in every
 configuration. [Published-port evidence](native-performance-progress.md#w13-published-port-v3-admission) · [Guest and host-internal evidence](native-performance-progress.md#w13-guest-and-host-internal-v3-admission)
-The combined native receiver and sendfile control and the explicit
-socket-buffer follow-up also missed Mac headroom. [Mac control evidence](native-performance-progress.md#w13-native-receive-loop-and-sendfile-control)
+The combined native receiver, sendfile and socket-buffer controls
+also missed Mac headroom. In the guest, four-stream native bridge
+transfers all exceeded half of the corresponding native loopback
+rate. [Mac controls](native-performance-progress.md#w13-native-receive-loop-and-sendfile-control)
+[Guest controls and bridge admission](native-performance-progress.md#w13-native-guest-loopback-and-bridge-admission)
 
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
 (`tests/e2e.sh`, `conformance/`), not performance cells. `bench/net/*.py`

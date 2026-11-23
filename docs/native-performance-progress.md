@@ -2854,6 +2854,72 @@ investigated independently.
 | Transfer tool | `82296ad54741a9bb800f6c32e4237a877ac06546ef68f7eb46ed4173bcaabb96` |
 | Comparison JSONL | `60e9e5a3b99b1888ac094b6e5019e71fe0032c420e5bc4edaf7c422dd1bac52f` |
 
+#### W13 native guest loopback and bridge admission
+
+Build the same exact C receiver on Linux ARM64 with the W6 pinned
+GCC 14.2.0 Bookworm image. Use
+`gcc -D_POSIX_C_SOURCE=200809L -std=c17 -O3 -Wall -Wextra -Werror -fPIC -shared`.
+Keep the Python sendfile sender and byte-verifying native receiver
+together. Copy both the tool and shared library to the pinned v6
+API container and verify both hashes there. An in-container
+socket-pair admission check accepted cyclic data and rejected
+corruption, truncation and excess bytes. Both guests used native
+ARM64 Python 3.13.18 on nine vCPUs. ctrs used signed release
+`99db1aa` with verified boot assets. OrbStack exposed Docker
+server 29.8.2 and kernel `7.2.12-orbstack-00394-gbecdd6130068`.
+
+`w13-guest-loop-779625` ran five alternating pairs for each
+direction and stream count on each engine, with the original tool
+and the native tool. Both endpoints ran in one container on
+`127.0.0.1` with the artifact in tmpfs. Run ctrs pairs 1–2,
+OrbStack pairs 1–5, then ctrs pairs 3–5. Match the artifact
+digest across engines and variants for each stream count. All
+80 transfers verified 1 GiB and every expected stream digest.
+The initial launcher attempt used the wrong CPU receipt field
+and stopped before any transfer. The corrected run checked
+`ncpu` and completed with owned cleanup.
+
+| Engine and condition | Original median GB/s | Native median GB/s [range] | Twice prior v3 bridge maximum |
+| --- | ---: | ---: | ---: |
+| ctrs upload, one stream | 7.890 | 10.325 [9.411, 10.391] | 17.779 |
+| ctrs upload, four streams | 8.546 | 24.388 [23.597, 24.921] | 18.660 |
+| ctrs download, one stream | 7.195 | 10.232 [9.992, 10.459] | 18.103 |
+| ctrs download, four streams | 8.438 | 25.519 [24.705, 25.983] | 19.233 |
+| OrbStack upload, one stream | 6.035 | 6.883 [6.636, 8.042] | 11.601 |
+| OrbStack upload, four streams | 7.264 | 16.935 [14.899, 17.705] | 12.112 |
+| OrbStack download, one stream | 6.309 | 7.025 [6.602, 7.215] | 11.886 |
+| OrbStack download, four streams | 7.259 | 17.524 [16.365, 17.958] | 13.585 |
+
+The four-stream controls all cleared the old v3 bridge reference, so
+`w13-guest-bridge-e328fd` repeated four-stream admission with the
+same native tool on both sides of the bridge. Use two labelled
+containers on an owned bridge network, each with its own tmpfs and
+the same prepared payload. Make one native guest-loopback transfer
+and three native bridge transfers per direction and engine. The
+audit checked all 16 exact 1 GiB transfers and paired tool, library,
+artifact and image identity. Both diagnostics recorded zero for
+their before and after host gate exit codes.
+
+| Native four-stream path | Guest loopback GB/s | Bridge GB/s, observed range | Attempts above half of loopback |
+| --- | ---: | ---: | ---: |
+| ctrs upload | 28.403 | 24.133–24.398 | 3/3 |
+| ctrs download | 29.781 | 25.510–27.013 | 3/3 |
+| OrbStack upload | 20.913 | 17.258–18.151 | 3/3 |
+| OrbStack download | 22.060 | 17.526–20.128 | 3/3 |
+
+The native tool raised bridge goodput along with loopback goodput.
+All twelve bridge attempts still exceeded half the same-tool
+loopback rate. Keep the v3 fixture and twofold guard. The
+one-stream native tool also missed the prior one-stream reference
+on both engines.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Linux ARM64 receiver library | `d46d02fa1e1c0f65138bb53fd5eb011ee0e857b151159c95e7ea969ab64dbb82` |
+| Native transfer tool | `aced1376aaf6fd2437641d1f55c4fd41aa3bec5b5ddff2c6ec2e5a4bce5391ed` |
+| Loopback controls | `98446dfc79394378b487b5113c9027427eda56e32ee03f8f8494237188adcd6d` |
+| Bridge admission | `9fbc84d7c52df275b8a202f772ff3dc8115ecaa7a678211087599c2608ec5602` |
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
