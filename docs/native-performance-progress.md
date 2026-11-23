@@ -210,11 +210,20 @@ agreed before and after the native suite.
 | `tests/fuse-inode-bound.sh` | Read all 150,000 files and 64 held-open files. VZ helper descriptors peaked at 65,510 against a 73,728 limit and recovered to 58. | `d6241dd53406e726da5b453a4f2977806f3e8f25d51afb9468893666219fc86a` |
 | ARM64 guest layer tests | 13 passed, including concatenated gzip members and truncated gzip rollback | `31229da7b26c1b1d7c4e77bc2aa574fea7cffa0f463fa725d5ce4c38911918f4` |
 | `tests/e2e.sh` | 509 passed, zero failed or skipped | `f3e5cb8ef49950aaea337e0cc696653b5eef089ccd96e0343d343c80de104008` |
+| `conformance/isolation.sh` | 5 passed, zero failed | `f56c066fdfea44056469038d51acf010b28b39593cfbc9a24833f60a3731cefc` |
+| `conformance/failure.sh` | 34 passed, zero failed or skipped | `18a3fbc33d23d6ce8256296bf67e3df124acd20a0d077783789381c92eb95c86` |
 
 The workspace and guest test builds used `RUSTC_WRAPPER=""` and
 `CARGO_ENCODED_RUSTFLAGS=""`. Capture stdout separately when parsing the
-guest test build's `--message-format=json` artifact path. The standalone
-failure and isolation suites have their own queue entries.
+guest test build's `--message-format=json` artifact path. Run isolation
+from `7a34e6a` and failure conformance from `8d65680` or current source
+retaining those checks. The native runs used separate private worktree
+roots and Docker client configuration, with the signed binary in each
+checkout and `CTRS_GUEST_DIR` pointing at the verified shared guest assets.
+The failure suite verified that the owned VM restarted its policy container
+and that the sentinel engine and its container survived. It also verified
+image-store ENOSPC using a separate 64 MiB mounted volume. This covers
+image-store writes and cleanup. VM backing-file exhaustion remains open.
 
 #### Earlier asset preparation
 
@@ -785,6 +794,24 @@ builds at the end and verify the same artifacts. The diagnostic tests
 whether the target and footprint move together while guest cache and
 balloon pages change. Its fixed order and reused build store limit timing
 inference. A timing claim requires a separate paired confirmation.
+
+`w6-balloon-afcd2651e2` verified both initial uncached builds at the
+120-second grace and read the guest memory counters. The first quiet
+sample stopped in the observer before any interval was collected.
+The observer required integers for all numeric fields. The pinned
+daemon exposes `CtrsMemoryStall` as a floating-point percentage.
+A check using the pinned field format reproduced the rejection. The
+revised observer accepts numeric stall percentages in `[0, 100]`,
+validates the other counters as nonnegative integers, and still
+requires an awake VM and zero OOM kills. The offline check exercised
+zero and fractional stall, invalid values, and sleeping and OOM
+states. Repeat the entire two-leg diagnostic with the revised observer.
+
+| Initial attempt receipt | SHA-256 |
+| --- | --- |
+| Plan | `07831cec0d5fedecfd0adaedac671b6c81e78f55de29ca7028088d28f5cd055f` |
+| Initial uncached trial | `9fbd79ba381d55c12ae3c0d79d819c2845f53e2b7c4febc65450e052d87d7f9c` |
+| Initial guest counters | `2a750d070e495ba282100cf69cccdad07dff528dca9f612e5576e2947e981188` |
 
 ### Installed-default W7 cohort
 
