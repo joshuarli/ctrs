@@ -1300,6 +1300,35 @@ python3 bench/native/reporting.py --match base-20261122T081048-91d4
 `trials.jsonl` SHA-256
 `5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
 
+#### W2 published-port fixed work at four clients
+
+`base-20261123T023349-390d` used source `074bf6b` with the same
+signed release and fixture as the four-client guest-direct cohort.
+All ten alternating pairs admitted. Each leg completed 50,000
+requests with zero errors. The raw audit matched exact acknowledged
+writes, read counts and persisted rows across the engines. Each
+engine persisted 150,402 writes across the cohort. The ctrs legs
+recorded eight or nine host NAT connections each. Outside-engine
+CPU during load stayed below 1.01 cores.
+
+ctrs completed a median 1,911 requests/s (range 1,894–1,949).
+OrbStack completed a median 1,477 requests/s (range 1,470–1,500).
+
+| Published-port metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.7755 | [0.7687, 0.7782] |
+| API p50 | 0.8181 | [0.8120, 0.8214] |
+| API p95 | 0.6253 | [0.6193, 0.6318] |
+| API p99 | 0.5622 | [0.5464, 0.5736] |
+| Measured engine CPU per verified request | 1.4620 | [1.4276, 1.4726] |
+| Sampled peak physical footprint | 0.1487 | [0.1472, 0.1503] |
+
+The measured CPU loss persists before charging host-kernel NAT
+CPU. Reproduce with the 16-client fixed-work command using
+`--concurrency 4` and `--client-location host`.
+`trials.jsonl` SHA-256
+`f484b3ca7952dc4b0daeae7f92f999b30b338ea91ac34da39d2c4c32b60c458f`.
+
 #### W2 published-port fixed work at 16 clients
 
 `base-20261123T003755-d04f` ran the same signed release and pinned
@@ -1755,7 +1784,7 @@ microseconds per successful request.
 | 16 | 350 / 357 | 120 / 74 | 381 / 376 | 142 / 85 |
 
 The guest-direct system CPU gap was smallest with one client and
-largest with four. The one-client guest-direct ctrs leg had lower
+largest with four. The one-client guest-direct ctrs cohort had lower
 median user CPU and higher system CPU per request than OrbStack.
 The published-port one-client cohort had a distinct user CPU
 gap. These measurements point to different CPU profiles across
