@@ -1300,6 +1300,35 @@ python3 bench/native/reporting.py --match base-20261122T081048-91d4
 `trials.jsonl` SHA-256
 `5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
 
+#### W2 published-port fixed work at one client
+
+`base-20261123T030410-6559` ran on `a8f19db` with signed release
+`99db1aa` and the same pinned fixture as the guest-direct cell.
+All ten alternating pairs admitted. Each leg completed 50,000
+requests with zero errors. The raw audit matched exact write
+payloads and read counts within every pair. Both engines persisted
+150,457 writes across their ten legs. The ctrs legs recorded
+five or six host NAT connections each. Outside-engine CPU
+during load stayed below 0.71 core.
+
+ctrs completed a median 1,422 requests/s (range 1,395–1,467).
+OrbStack completed a median 415 requests/s (range 401–453).
+
+| Published-port metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.2883 | [0.2837, 0.3026] |
+| API p50 | 0.3554 | [0.3457, 0.3652] |
+| API p95 | 0.1630 | [0.1603, 0.1681] |
+| API p99 | 0.1388 | [0.1341, 0.1471] |
+| Measured engine CPU per verified request | 0.3915 | [0.3765, 0.4155] |
+| Sampled peak physical footprint | 0.1954 | [0.1701, 0.2019] |
+
+The CPU result remains incomplete because the host-kernel NAT
+CPU was uncharged. Reproduce with `--concurrency 1` and
+`--client-location host` on the 16-client fixed-work command.
+`trials.jsonl` SHA-256
+`7c43af64f3ca6900b51de4ee6724b1b45455c30bd2d510e576f2ba2f85161067`.
+
 #### W2 published-port fixed work at four clients
 
 `base-20261123T023349-390d` used source `074bf6b` with the same
