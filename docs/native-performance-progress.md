@@ -1263,6 +1263,50 @@ for the zlib build. The full W6 and W7 CPU cells remain open.
 | Patch | `27652e262f75aa0748d0f66531b6cbd15cf6362ded1192ba6eaaca985820861a` |
 | Routing and output checks | `bca6bee4b8158a4cc659e6a4f9e1008e175057d085a3fb4a973edc2ecec69c40` |
 
+##### W6 registry-only vsock candidate
+
+Candidate `5f75848` binds the Mac build registry before restoring
+containers and passes its actual listener port on the kernel command
+line. The guest prefers framed vsock only for that port, with NAT
+fallback if the vsock dial fails. Other destinations retain their
+existing transport order. The boot argument carries the port without
+a new message or a protocol version change. Both listeners still
+apply their existing loopback restrictions, and the registry still
+checks its secret path. [Candidate branch](https://github.com/joshuarli/ctrs/tree/campaign/build-mirror-vsock)
+
+In a separate checkout of the candidate, build the host with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host` and rebuild the
+initramfs with `CARGO_ENCODED_RUSTFLAGS="" cargo xtask guest`.
+Use the original kernel and disk template. Occupy the preferred
+mirror port 47391 on Mac loopback with a temporary HTTP control
+before starting the owned daemon. Verify the resulting non-47391
+port in the guest's boot arguments. Run the same uncached zlib
+build and verify the original archive hash. Query the relay counters
+before and after the build. Separately request the HTTP control
+from the guest and verify both its response body and NAT counter.
+
+`w6-selective-vsock-f88f21` selected ephemeral port 57754, verified
+the pinned archive, and recorded 37 build registry vsock connections
+and zero NAT connections during the build. The guest reached the
+control on 47391 with one NAT connection. Published-port counters
+stayed fixed. `w6-selective-compat-dc093a` booted both a stock host
+with the candidate guest and the candidate host with the stock
+guest. Both returned the exact ordinary-loopback response over NAT.
+The six protocol tests and 206 host unit tests passed.
+
+The candidate is parked on its branch. The native zlib test verified
+transport selection and exact work, and the mixed-version controls
+verified ordinary loopback. A full W6/W7 performance comparison,
+forced vsock-failure fallback, and cold-start timing after moving
+mirror startup remain unverified.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Candidate signed host | `5fe4e8b2a8e2f0d8a1e4ddf7092d6c7a5aba1fc09c0e6538ec63052dd73201bf` |
+| Candidate guest initramfs | `3a0beb214514dac05bfbec054d7866946b4772a90aaa968e6664dd02c127800e` |
+| Zlib and loopback routing | `8fc3bdea1c9fbd2c3b60e3663319f2be30354a1cf0aa8bcdd8ce9f98679e37b7` |
+| Mixed-version controls | `91e7beae10b73d5d44e5408ad83ed2d8fd9ec677d566c7337f1f57f5dfdf031c` |
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
