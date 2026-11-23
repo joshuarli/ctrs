@@ -6072,6 +6072,81 @@ basis to extend the negative-entry cache lifetime.
 Derived interval report SHA-256
 `fe03df0e50159127e6f727e0084e3a508135a21b7a75c8baaa53556baddc0782`.
 
+##### W12 virtiofs queue timing
+
+Trace the original signed `99db1aa` executable and pinned Linux
+6.18.58 guest on the private ctrs endpoint. Use a private `mono`
+tracefs instance and record both FUSE request tracepoints. On ARM64,
+add these kprobes. Replace `w12q` with a unique group and enable its
+events only in the private instance.
+
+```text
+p:w12q/enqueue virtio_fs_enqueue_req queue=%x0:x64 req=%x1:x64
+p:w12q/submit virtqueue_add_sgs queue=%x0:x64 req=%x4:x64
+r128:w12q/retrieve virtqueue_get_buf req=$retval:x64
+p:w12q/finish fuse_request_end req=%x0:x64
+```
+
+Join FUSE send to enqueue by thread and trace order. Join enqueue,
+submit, nonzero retrieve, and finish by the request pointer while
+it is live. Require retrieve to come from `virtio_fs_requests_done_work`.
+Match finish to the FUSE completion on the same thread and verify
+that the completion's connection and request ID match the send.
+Check for trace loss, missed probes and unmatched requests. Count
+distinct submit queues within the same boot. Remove the trace
+instance and its probes at teardown.
+
+The part from submit entry to buffer retrieval includes the virtio
+ring insertion, Virtualization.framework service, and guest
+interrupt and completion-worker dispatch. The probe boundaries
+do not timestamp the Mac's filesystem calls independently.
+[Pinned guest virtiofs driver](https://github.com/gregkh/linux/blob/v6.18.58/fs/fuse/virtio_fs.c)
+
+`w12-queue-control-28b1f9` created 256 private bind files using
+Node's `writeFileSync` with exclusive create. The Mac verified all
+262,144 bytes. All 1,539 FUSE requests joined with zero trace-buffer
+loss. The 256 creates and 256 writes used one observed request
+queue. Submit-to-retrieve p50 was 91 µs for create and 29 µs for
+write. Only this small, serial control used the 4 MiB per-CPU buffer.
+
+`w12-queue-install-461efa` used harness `5b14240` and the full-bind
+W12 v2 fixture. Enable the probes only around the offline install
+phase, with a 128 MiB buffer per CPU. Drain the trace after stopping
+the instance and compress it as it streams out of the guest. This
+run verified 2,830 dependencies, 92,306 installed files,
+532,136,968 bytes, and all pinned build and test outputs. The native
+quiet checks both returned zero. The instrumented install took
+29.34 s and was an attribution run. Observer overhead was not
+isolated in a paired control.
+
+All 655,997 FUSE requests joined with zero trace loss or reported
+probe misses. Create and write counts matched both earlier full-bind
+traces. All nine guest CPUs submitted through one observed request
+queue. No request entered the enqueue function a second time.
+
+| Stage (p50 / p95, µs) | Create (92,102) | Write (146,395) | Lookup (288,373) |
+| --- | ---: | ---: | ---: |
+| Send → enqueue entry | 0 / 1 | 0 / 1 | 0 / 1 |
+| Enqueue entry → submit entry | 0 / 1 | 0 / 1 | 0 / 1 |
+| Submit entry → used buffer retrieval | 182 / 292 | 145 / 261 | 130 / 257 |
+| Used buffer retrieval → finish entry | 10 / 19 | 9 / 18 | 6 / 17 |
+| Finish entry → FUSE end | 0 / 1 | 0 / 1 | 0 / 1 |
+| FUSE send → end | 194 / 305 | 156 / 273 | 140 / 266 |
+
+Guest preparation before submit was short and the trace shows no
+virtqueue-full retries. The longest interval leaves device service
+and guest interrupt-to-worker delay unresolved. A follow-up should
+measure those dispatch boundaries before targeting the ring or
+the host filesystem. Individual request durations overlap and
+cannot be added to obtain the install's wall time.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Control trace | `27c32e55a39a91676d7eebd4571d9382cacd55447a1cb3e3427bb2f17ac11a5d` |
+| Full install trial | `2bfa2bfe9efabba2b974a5307bd0f83af67bc2ff311dca4092775ae3e137d99b` |
+| Full install trace, gzip | `7fab7807a9b96b40f5c426fafa4dbf4eb3a5a0aa36b07cbeb4be5a89330362cb` |
+| Full install analysis | `3621522709594a6e408e318e1f5348f02ea8ae2acedacf0d436fd56cbff0a278` |
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
