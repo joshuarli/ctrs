@@ -1463,6 +1463,51 @@ Verify the stored deltas and the interrupt descriptions, divide by
 client path. Derived counter rows SHA-256
 `d139064d37026665127d566a41d7f78da0152d7c8cf94f3849f113b8fce018d5`.
 
+### Installed-default W2 saturation at sixteen clients
+
+The saturation cells use the pinned v6 portfolio, the unchanged W2
+client and 16 serial connections for 20 seconds per leg. Each leg
+verifies the writes its client actually acknowledged. Throughput
+and CPU per successful request use those completed-work counts.
+These cells have their own comparison because request counts
+differ across engines. They leave the throughput limiter open.
+
+#### Container-to-container saturation
+
+`base-20261123T005321-6ac0` ran on `315ea84` with signed release
+`99db1aa`. All ten alternating pairs passed the host, input and
+exact-data checks. Each engine used nine vCPUs. ctrs recorded zero
+host NAT connections. Maximum outside-engine CPU during load was
+0.81 core. The measured engine CPU includes the guest client on
+both sides.
+
+ctrs completed a median 2,168 requests/s across a range of
+2,124–2,180. OrbStack completed a median 1,203 requests/s across a
+range of 1,173–1,220. Both engines verified every acknowledged
+write and recorded zero request errors.
+
+| Metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.5554 | [0.5497, 0.5606] |
+| API p50 | 0.5677 | [0.5609, 0.5755] |
+| API p95 | 0.4281 | [0.4224, 0.4289] |
+| API p99 | 0.3959 | [0.3926, 0.4054] |
+| Measured engine CPU per verified request | 1.0265 | [1.0189, 1.0449] |
+| Sampled peak physical footprint | 0.1553 | [0.1529, 0.1563] |
+
+The CPU interval crosses the 1.03 parity bound. Keep the fixed-work
+CPU loss and this inconclusive saturation result as separate cells.
+
+```sh
+python3 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack \
+  --client-location guest --concurrency 16 --duration 20 \
+  --resource-lane installed-default --pairs 10 --max-pairs 16 --pair-quiet-load 4
+python3 bench/native/reporting.py --match base-20261123T005321-6ac0
+```
+
+`trials.jsonl` SHA-256
+`3f43497690f6788b8c34be8e42367a2c068b8c5e8f52093a369b7fa4b20b2e0b`.
+
 ### Installed-default W2 published-port fixed offered rate
 
 Run `base-20261122T093101-7063` used the same clean source and artifacts
