@@ -2349,6 +2349,35 @@ generated layout after the shared local registry stops. Preserve at least
 16 GiB free at cohort and trial boundaries. Keep the interrupted cohort
 separate from any retry because the guest store changed.
 
+Retained content under concurrent load completed ten alternating pairs
+in `w8-paired-c6eb18c3a5e7`, on harness `01ce2dd` with the same signed
+release. Every leg passed the workload, ownership and host checks.
+Each leg completed 1,000 deployment requests and 50,000 background
+requests with verified overlap in all four pull windows. The guests
+exposed the same nine CPUs and visible memory as the retained no-load
+control. Median time to health was 6.621 s on ctrs and 15.122 s on OrbStack.
+
+| Retained, under load | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.4409 | [0.4232, 0.4565] |
+| API completion p95 during pulls | 0.4717 | [0.4416, 0.5104] |
+| API completion p99 during pulls | 0.7266 | [0.6862, 0.7675] |
+| Sampled peak physical footprint | 0.5499 | [0.3714, 0.7232] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.7393 | [0.7263, 0.7512] |
+
+ctrs used 18–20 host NAT connections per leg. The saved report reproduced
+exactly and the driver retired all generated pair layouts. The stopped
+private guest disk allocated 8,584,888,320 bytes at teardown.
+Use the matched no-load command with `--under-load` and the fresh
+store preparation above.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Warm inputs | `1bd4af7dcbdf63b84853c3c9907f5d35bfbfa34218d6d6765e553b5b60f259bb` |
+| Plan | `e0f046c88312fdc9753e5150ab2f6c44a0a7f375917ce3b860c4a28317bacb20` |
+| Trials | `027bb3de5ab24735902a2d66d412106150dd2e3cb2b3edc6a67f65686cc8386d` |
+| Report | `903a8b4190ae5a57da68435ae9407f6fabe1e3dcd0999b743f3774bbddb7ed68` |
+
 #### W8 derived-content timing without concurrent load
 
 All ten installed-default pairs passed in `w8-paired-99ec4b7d32de`
