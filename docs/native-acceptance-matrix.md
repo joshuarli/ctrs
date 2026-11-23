@@ -19,6 +19,13 @@ Statuses are cumulative and must be stated separately:
 - **Qualified**: the campaign gates pass (frozen inputs, exclusive
   window, independent confirmation). No cell is qualified.
 
+Every cell belongs to the binary recorded with it. The 2026-11-23
+[reconciliation](evidence/main-reconciliation-2026-11-23.md) returned `main`
+to the measured defaults (Fsync disk, 250 ms refusal TTL, gzip loads, stock
+kernel options). Its H3 guest gzip backend is new on the Mac, so W1-cold, W6/W7
+load, W7 first-use and W8 cells need remeasurement before they describe the
+current build.
+
 Lanes: **D** = installed default (ctrs product defaults vs OrbStack as
 installed); **M** = resource-matched control (ctrs vCPUs/memory set to
 OrbStack's). Never pool lanes.

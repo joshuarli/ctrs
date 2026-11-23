@@ -10,6 +10,16 @@ remote-wake queue probe have terminal evidence below. The tested
 candidate defaults remain unpromoted. No campaign finish gate is qualified.
 `make test-bench` passed manifest validation and all 551 tests on the Mac.
 
+**2026-11-23 source reconciliation (Mac still paused):** the bulk merges
+had made zstd3 loads, Cached+Full, the 50 ms refusal TTL, SCHED_MC, LSE,
+uprobes, registry vsock, relay-batch, extra virtiofs devices and readiness
+logging production behavior. `b5ec34b` restores every recorded decision,
+keeps H3 and the correctness fixes, and adds the compressible-layer
+regression. The [reconciliation record](evidence/main-reconciliation-2026-11-23.md)
+has the table, the Fsync persistence contract, the build identity, the
+tests run and not run, and the cells that need remeasurement. The next
+action is unchanged: the registry-vsock W7/W6 decision, then W12 full-bind.
+
 - W1 engine-cold and W10 whole-engine recovery still need an independent
   OrbStack endpoint. The current shared endpoint stays available to its
   existing users.

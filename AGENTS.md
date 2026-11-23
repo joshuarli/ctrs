@@ -16,6 +16,9 @@ separate steps for a Linux host and a Mac. The native `linux-amd64`
 `ctrs`/`dockerd` lane already exists, with cgroup-v2 accounting and frozen
 fixtures. Resume from [the recoverable Linux checkpoint](docs/evidence/linux-amd64-checkpoint-2026-11-22.md),
 not by implementing an adapter. Linux results never close macOS-vs-OrbStack gates.
+Production defaults follow the recorded experiment decisions; merging a branch
+to retire it never promotes its production diff
+([reconciliation](docs/evidence/main-reconciliation-2026-11-23.md)).
 
 ## Commands
 
@@ -96,6 +99,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Evidence: networking/vzNAT | `docs/evidence/net.md` |
 | Evidence: registry client pilot | `docs/evidence/registry.md` |
 | Evidence: security qualification | `docs/evidence/security.md` |
+| Evidence: defaults reconciled with decisions (2026-11-23) | `docs/evidence/main-reconciliation-2026-11-23.md` |
 | Campaign closeout (Gate J, local) | `docs/evidence/closeout.md` |
 | Release prep (artifact manifest) | `docs/evidence/release.md` |
 | Experiment: smolvm-network analysis | `docs/experiments/smolvm-network.md` |
