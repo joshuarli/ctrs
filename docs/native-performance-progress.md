@@ -3102,17 +3102,17 @@ descriptor counts. Patch 0017 queues reclamation asynchronously after
 that threshold and retains in-use dentries. The separate 150,000-file
 stress test measured the host process and completed recovery.
 
-For the repeat, keep the same two alternating cap pairs and signed
-artifacts. Before applying any threshold check, persist the guest
-`live bound` pair, `kern.num_files`, `kern.maxfiles`, and
-`kern.maxfilesperproc`. Count numeric descriptors from
-`lsof -nP -a -p "$vm_pid" -F pf` after each phase, with the VM's kernel
-start identity verified before and after. Treat the live inode count as
-reclamation telemetry. Require the exact knob value, system headroom for
-two candidate thresholds and headroom for one candidate threshold
-against the kernel per-process limit. A native observer self-check
-counted its own descriptors and retained a receipt when the expected
-knob differed. The revised guest run is queued. The initial leg's
+The repeat retains both alternating cap pairs and signed artifacts. Before
+applying any threshold check, persist the guest `live bound` pair,
+`kern.num_files`, `kern.maxfiles`, and `kern.maxfilesperproc`.
+Read the per-VM descriptor count through
+`mixed_resources.fd_snapshot` using `PROC_PIDLISTFDS`, with the VM kernel
+start identity verified before and after. The first repeat's numeric-only
+`lsof -F pf` observer hit 9,999 descriptors and is insufficient to establish
+per-VM headroom. The same guest reached more than 105,000 live inodes.
+Treat the live inode count as reclamation telemetry. Require the exact
+knob value, system headroom for two candidate thresholds and headroom for
+one candidate threshold against the kernel per-process limit. The initial leg's
 `trials.jsonl` SHA-256 is
 `34f2c5fddfc1eee9bc2efbea2155d0a0590da178bf67ca8d0dcd94094805e517`.
 

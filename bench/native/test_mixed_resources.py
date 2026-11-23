@@ -109,6 +109,23 @@ class Growth(unittest.TestCase):
         self.assertEqual(len(result['processes']), 1)
         self.assertTrue(result['errors'])
 
+    def test_counts_busy_vm_above_sixty_five_thousand_descriptors(self):
+        manifest = {'engine': 'ctrs', 'required_processes': [
+            {'pid': 2, 'role': 'vm', 'kernel_start_identity': 4}]}
+        lib = MagicMock()
+        count = 105_088
+        lib.proc_pidinfo.side_effect = [count * 8, count * 8]
+        with patch.object(resources.sys, 'platform', 'darwin'), \
+             patch.object(resources.os, 'uname') as uname, \
+             patch.object(resources.ctypes, 'CDLL', return_value=lib), \
+             patch.object(resources, 'Counters') as counters:
+            uname.return_value.machine = 'arm64'
+            counters.return_value.read.return_value = {'kernel_start_identity': 4}
+            result = resources.fd_snapshot(manifest)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['total'], count)
+        self.assertGreater(lib.proc_pidinfo.call_args.args[-1], count * 8)
+
     def test_config_bounds(self):
         for config in ({'seconds': 0}, {'seconds': 3601}, {'seconds': float('nan')}, {'owned_files': []}):
             with self.assertRaises(ValueError): resources.plan(config, {})

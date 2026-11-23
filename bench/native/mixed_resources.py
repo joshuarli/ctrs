@@ -16,6 +16,7 @@ import resource_cycles
 from macos_counters import Counters
 
 VERSION = 'w11-v5-restored-worker'
+FD_LIST_MAX_BYTES = 8 * 1024 * 1024
 BUDGETS = {'warmup_cycles': 1, 'minimum_post_warmup_cycles': 5,
            'minimum_observation_seconds': 30, 'physical_footprint_bytes': 16 * 1024 * 1024,
            'file_descriptors': 16, 'active_disk_allocation_bytes': 16 * 1024 * 1024}
@@ -62,9 +63,9 @@ def fd_snapshot(manifest):
                 if counters.read(pid)['kernel_start_identity'] != proc['kernel_start_identity']:
                     raise ValueError('process start identity changed before FD sample')
                 size = lib.proc_pidinfo(pid, 1, 0, None, 0)
-                if size <= 0 or size > 8 * 65536:
+                if size <= 0 or size >= FD_LIST_MAX_BYTES:
                     raise ValueError('invalid or excessive FD buffer size')
-                capacity = min(8 * 65536, size + 8 * 256)
+                capacity = min(FD_LIST_MAX_BYTES, size + 8 * 256)
                 buf = ctypes.create_string_buffer(capacity)
                 length = lib.proc_pidinfo(pid, 1, 0, buf, capacity)
                 if length < 0 or length >= capacity or length % 8 or (length == 0 and size):
