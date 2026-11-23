@@ -1481,7 +1481,7 @@ resource accounting.
 | Raw trials | `a8df6c4fa048e19d36a2d7854fdca699bcdce4b27fba4888d664410fdcca07cf` |
 | Report | `03fa7dbbafd1091286a780b1e931cd0f0cbdaf7fdb757e59d5d0dcc714766658` |
 
-#### W8 concurrent-load resource sampler rejection
+#### W8 retained-content timing with concurrent load
 
 The first OrbStack leg in `w8-paired-5527bdad376c` completed the 50,000
 background API operations with overlap in all four pulls. It also passed
@@ -1498,6 +1498,49 @@ The original leg remains rejected in its run records. New W8 trial
 records preserve separate workload and resource checks. The report
 identifies resource rejection after a successful workload, and both
 checks are required for timing admission.
+
+The installed-default cohort on harness `ce50555` and signed release
+`99db1aa` finished all 20 legs, with nine pairs admitted by the original
+reporter. The corrected phase replay
+recovers the first OrbStack leg for descriptive comparison. Replay
+also verified all 50,000 background operations per leg, their persisted
+writes, completion overlap in every pull window, changed-layer
+delivery, deployment outputs and stable engine identities and budgets.
+The no-load trial replay reproduced all 420 phase summaries exactly.
+
+| Metric | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.5062 | [0.4980, 0.5216] |
+| API completion p95 during pulls | 0.5436 | [0.4656, 0.6384] |
+| API completion p99 during pulls | 0.7386 | [0.7052, 0.8993] |
+| Sampled peak physical footprint | 0.1813 | [0.1762, 0.2504] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.9042 | [0.8972, 0.9126] |
+
+Median first-pull-to-health time was 6.592 s (6.521–7.028 s) on ctrs
+and 13.102 s (12.641–13.488 s) on OrbStack. The paired median gap
+was 6.46 s overall and 6.12 s before the stack-health phase. The
+background client used four workers with fixed work. The latency samples
+are completions inside the actual pull intervals, with 485–546 per ctrs
+leg and 5,237–5,507 per OrbStack leg. Every pull window had at least 73
+completions. ctrs had 18–20 host NAT connections per leg. A new
+ten-pair installed-default run on the corrected harness is queued.
+
+To reproduce the diagnostic replay, use
+`resource_cycles.phase_summary` from `1e4fa49` or later with the saved
+`result.json` ownership and `under_pull_cleanup` boundaries and the
+same leg's `resources.jsonl`. Use the corrected phase with the existing
+whole-workflow resource summary, the saved `pull_to_health_s` and
+`w8_benchmark.completion_metrics` over the saved completions and pull
+intervals. Recheck the workload and host receipts before supplying
+that row to `reporting.analyze` with the other 19 rows. Keep the original
+failed status and exclude the replay from qualification.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `d0fa82eec0b6bc1ee49998986d1d5737737fccf10b7381b8f21523a3310d377d` |
+| Original trials | `46b97f86593b3a1e4eb8aebb16d42970488ca7fffb73fc56947a5c45e547516f` |
+| Original report | `9361292dfd2981058ef9888dc2f556a8e1eb7363d79ec04a64ac88524f17977f` |
+| Rejected leg result | `49a7880c155d023d7c2104ffd4c73e79f98524916016d68d2e2c3ddc93e1dc25` |
 
 #### Mac release check after the shared layer-install change
 
