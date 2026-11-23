@@ -2125,6 +2125,42 @@ store in place. Repeat the idle control, trim and restart checks on the
 same device and inode. Require ordinary and private allocation to match
 at the stopped and trim boundaries before claiming physical reclaim.
 
+#### W11 private-disk trim and resource growth
+
+Run `w11-mixed-20261122T174436-f74e` used harness `aba1516`, signed
+release `99db1aa` and a fresh sparse disk with independently copied
+extents. The startup copy verified the template's logical contents,
+with 25,247,744 bytes of both ordinary and private allocation. The
+420-second work window completed 12 exact mixed cycles, preserved
+service identities, and passed owned cleanup. The 32-second resource
+observations still exceeded the bounded-growth checks.
+
+| Post-cleanup resource | Peak rise after warmup | Final delta from initial observation | Budget result |
+| --- | ---: | ---: | --- |
+| Physical footprint | 41,123,864 bytes | 73,400,368 bytes | Fail |
+| Ordinary backing allocation | 90,030,080 bytes | 109,232,128 bytes | Fail |
+| Open descriptors | 0 | 0 | Pass |
+
+The private and ordinary allocation receipts matched at all 12
+observations. On the same device and inode after the run, the
+10-second idle control added 32,768 bytes. `FITRIM` on ext4 `/dev/vda`
+then submitted 1,080,030,904,320 bytes of free extents. After ten
+seconds, ordinary and private allocation each fell from 1,454,817,280
+to 1,212,649,472 bytes, reclaiming 242,167,808 bytes from the owned
+file. Guest used space remained 1,068,240,896 bytes. The sentinel
+checksum and pinned image identity matched after a further restart.
+
+The trim ran after the growth observations. The result verifies one
+explicit reclaim operation on a private backing file. The footprint
+failure and both 12-hour qualifications remain open.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Sparse copy receipt | `c1fa946f787c88fc857429f669ef8ab9f6eedbee80af564436c5e89c5e0d19d0` |
+| Growth plan | `b1d059d489c9ce6de09ab5b35cd5dcfdd522326b98e9747fedcff42c868bfae6` |
+| Growth trials | `a4f9c820a82c5fd6673073fe4d6c17211a274bbf526fcfbb54cc77950905fb99` |
+| Trim receipt | `96c735afbcfa8a5da07567a15f2b1b1faf8d245de2c675e65c51c1f05c84a077` |
+
 #### W11 short OrbStack growth result
 
 `w11-mixed-20261122T122344-a9fc` ran the same source and fixture. All 11
