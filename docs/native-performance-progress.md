@@ -1338,6 +1338,41 @@ python3 bench/native/reporting.py --match base-20261122T091635-df7a
 `trials.jsonl` SHA-256
 `2ddff2311be62f118080899d69f8c798d90babb77a849000101e0abd3b744899`.
 
+#### W2 guest-direct fixed work at 16 clients
+
+`base-20261123T002330-6c79` ran the declared 16-client cell at
+installed defaults. All ten alternating pairs completed 50,000 exact
+requests per leg and verified every persisted write. All request
+error counts were zero. The pinned portfolio, SQL seed, client
+and API file receipts matched within each pair. The ctrs daemon
+and boot assets matched signed release `99db1aa`. Both engines used
+nine vCPUs. Each ctrs leg had zero host NAT connections, and
+outside-engine CPU stayed below 0.82 core during load.
+
+| Metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.5694 | [0.5593, 0.5742] |
+| API p50 | 0.5848 | [0.5720, 0.5912] |
+| API p95 | 0.4358 | [0.4337, 0.4434] |
+| API p99 | 0.4020 | [0.3979, 0.4063] |
+| Measured engine CPU per verified request | 1.0560 | [1.0517, 1.0628] |
+| Sampled peak physical footprint | 0.1522 | [0.1503, 0.1535] |
+
+Median request rates were 2,168 and 1,226 requests/s. The measured
+CPU loss persists without ctrs host NAT. The guest load client is
+included in engine CPU on both sides. The results describe fixed
+work at the installed defaults. The throughput limiter remains open.
+
+```sh
+python3 bench/native/runner.py baseline --case W2 --a ctrs --b orbstack \
+  --client-location guest --concurrency 16 --operations 50000 \
+  --resource-lane installed-default --pairs 10 --max-pairs 16 --pair-quiet-load 4
+python3 bench/native/reporting.py --match base-20261123T002330-6c79
+```
+
+`trials.jsonl` SHA-256
+`14543e4233309a845de8a5a848455aeae625954c5cd2eb7a050c519fefd81b52`.
+
 #### W2 API cgroup CPU split
 
 Both fixed-work cohorts saved API cgroup `cpu.stat` at the workload
