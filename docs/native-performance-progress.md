@@ -3187,6 +3187,59 @@ does not change the existing OrbStack comparison.
 | Trials | `3cf5716f5a7caba9e39b446055db7f27e1422a9efbcf7532142af9faccc36a3e` |
 | Joined session receipts | `980c114b775e9be9cb2d4de6f4334a2f420ebaef987f5adf813eb74dbc391818` |
 
+##### W14 idle-resume socket timeline
+
+`w14-idle-timeline-ce06f038` repeated the 32-client v4 workload
+with the same server and 30-second idle phase. Use a private
+signed host from `99db1aa` with the route probe above. Wrap the
+client socket read, guest socket write and read, and client socket
+write in `ports::relay` and `relay_leg`. Record `CLOCK_MONOTONIC`
+and the byte count after each successful I/O, and log the sampled
+events when the connection closes. On the client record the same
+clock before the resumed send, after the send returns and after
+decoding the reply. Transmit the original JSON frames.
+
+Join on source port and route. Recover the resume timestamp for each
+stage by summing bytes to the end of the second exchange. Check the
+two exact frames per direction, include four-byte guest framing
+headers and allow the final empty frame on the guest read. Verify
+the host stage ordering. The daemon's client-socket read can complete before
+the sending thread records send return, so retain those negative
+differences. The host had no permission to capture on `lo0`. These
+are user-space I/O times and each interval includes scheduling at
+its boundaries.
+
+All five trials verified all 160 resumed replies, with no leaked
+sessions, validation errors or cleanup errors. Each had both routes,
+with 90 NAT-leg and 70 vsock-only sessions across the five trials.
+The host quiet checks passed before and after. The table takes
+medians over resumed exchanges lasting at least 10 ms. Trial 1 had
+no exchanges in that range. Stage medians are computed separately.
+
+| Trial | Exchanges ≥10 ms | End to end | Client send return to daemon read | Guest exchange | Daemon write return to client decode |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2 | 14 | 11.49 ms | 3.73 ms | 4.00 ms | 3.92 ms |
+| 3 | 32 | 18.61 ms | 5.89 ms | 6.16 ms | 4.47 ms |
+| 4 | 14 | 10.41 ms | 3.04 ms | 3.27 ms | 3.33 ms |
+| 5 | 26 | 14.30 ms | 4.48 ms | 4.60 ms | 4.66 ms |
+
+The guest exchange spans the completed guest write to the completed
+guest read and includes transport and server work. None of the 86
+slow exchanges spent half of its time inside that interval. Their
+median share outside it was 66.7%. The two host relay copy intervals
+from read completion to write completion summed to a median 0.122 ms
+per slow exchange, with a maximum of 1.70 ms. This locates the bulk of
+the observed delay away from the relay copy loops. The diagnostic
+leaves socket queueing and process wakeup time combined. Observer
+overhead is unmeasured.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed diagnostic host | `95acf3592cf4611e42661c96a8158f1334d4eb3ecd1d4b6de3d8e4655a72a098` |
+| Instrumentation patch | `2a5ea9c2188f0aa7778428a5bf39a753e0c6510ffa7c3e539632a2fced510c9c` |
+| Trials | `f1e001c9ad6d9fa68ac24f34199300b62c364ceb44739c9473c029751cbdbcb9` |
+| Joined socket and client timestamps | `b2a8f41574ad399732b5efbf819435ccfc15dad61a5f65bfc962ad4b012d0aa5` |
+
 #### W14 fresh and persistent connections with buffered frames
 
 All ten installed-default pairs in each mode passed on harness
