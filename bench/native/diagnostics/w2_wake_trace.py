@@ -2,8 +2,8 @@
 
 Runs one normal pinned W2 trial per engine. A fixed delay after the workload
 phase starts, the trial's privileged counter reader enables ipi and sched
-tracepoints through tracefs for a fixed window, then restores the guest's
-tracing state. Ring-buffer overruns invalidate the window. Timings from a
+tracepoints in a private tracefs instance for a fixed window, then removes
+the instance. Ring-buffer overruns invalidate the window. Timings from a
 traced trial are diagnostic only; the observer perturbs the workload.
 """
 import argparse
@@ -11,6 +11,7 @@ import collections
 import contextlib
 import json
 import re
+import secrets
 import sys
 import threading
 import time
@@ -29,15 +30,23 @@ FIELD = re.compile(r"(\w+)=(\S+)")
 TRACE_SCRIPT = r"""set -eu
 T=/sys/kernel/tracing
 [ -d "$T/events" ] || mount -t tracefs nodev "$T"
-cd "$T"
-[ "$(cat current_tracer)" = nop ] || { echo "tracer already in use" >&2; exit 3; }
-[ -z "$(cat set_event)" ] || { echo "events already enabled" >&2; exit 3; }
-original=$(cat buffer_size_kb | cut -d' ' -f1)
-was_on=$(cat tracing_on)
-restore() { echo 0 > tracing_on; for e in EVENTS; do echo 0 > "events/$e/enable"; done; echo > trace; echo "$original" > buffer_size_kb; echo "$was_on" > tracing_on; }
-trap restore EXIT
+instance="$T/instances/INSTANCE"
+mkdir "$instance"
+cleanup() {
+    status=$?
+    cd "$T"
+    if ! rmdir "$instance" && [ "$status" -eq 0 ]; then
+        status=1
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cd "$instance"
 echo 0 > tracing_on
-echo > trace
+echo mono > trace_clock
 echo BUFFER > buffer_size_kb
 for e in EVENTS; do echo 1 > "events/$e/enable"; done
 echo 1 > tracing_on
@@ -50,6 +59,7 @@ cat trace
 
 def trace_script(window: float) -> str:
     return (TRACE_SCRIPT.replace("EVENTS", " ".join(EVENTS))
+            .replace("INSTANCE", f"ctrs-w2-{secrets.token_hex(8)}")
             .replace("BUFFER", str(TRACE_BUFFER_KB)).replace("WINDOW", f"{window:g}"))
 
 

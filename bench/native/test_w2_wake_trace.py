@@ -1,4 +1,7 @@
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,11 +39,42 @@ class WakeTraceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             w2_wake_trace.analyze(TRACE.replace("LOST 0\n", ""))
 
-    def test_script_restores_original_tracing_state(self):
-        script = w2_wake_trace.trace_script(2.0)
-        self.assertIn('echo "$was_on" > tracing_on', script)
-        self.assertIn("sleep 2\n", script)
-        self.assertNotIn("EVENTS", script)
+    def test_script_uses_and_removes_only_its_instance(self):
+        for missing_event in (False, True):
+            with self.subTest(missing_event=missing_event), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "tracefs"
+                (root / "instances").mkdir(parents=True)
+                (root / "events").mkdir()
+                global_trace = root / "trace"
+                global_trace.write_text("another reader's trace\n")
+                template = Path(tmp) / "template"
+                (template / "per_cpu/cpu0").mkdir(parents=True)
+                (template / "per_cpu/cpu0/stats").write_text("overrun: 0\ndropped events: 0\n")
+                (template / "trace").write_text(TRACE[7:])
+                events = w2_wake_trace.EVENTS[:-1] if missing_event else w2_wake_trace.EVENTS
+                for event in events:
+                    enable = template / "events" / event / "enable"
+                    enable.parent.mkdir(parents=True)
+                    enable.write_text("0\n")
+                audit = Path(tmp) / "removed"
+                script = w2_wake_trace.trace_script(2.0).replace(
+                    "T=/sys/kernel/tracing", 'T="$TRACE_ROOT"')
+                shell = """mkdir() { cp -R "$TRACE_TEMPLATE" "$1"; }
+rmdir() { mv "$1" "$TRACE_AUDIT"; }
+sleep() { [ "$1" = 2 ]; }
+"""
+                result = subprocess.run(
+                    ["sh", "-c", shell + script], capture_output=True, text=True,
+                    env=dict(os.environ, TRACE_ROOT=str(root), TRACE_TEMPLATE=str(template),
+                             TRACE_AUDIT=str(audit)),
+                )
+                self.assertEqual(result.returncode == 0, not missing_event, result.stderr)
+                self.assertEqual(list((root / "instances").iterdir()), [])
+                self.assertEqual(global_trace.read_text(), "another reader's trace\n")
+                self.assertEqual((audit / "trace_clock").read_text(), "mono\n")
+                self.assertEqual((audit / "tracing_on").read_text(), "0\n")
+                if not missing_event:
+                    self.assertTrue(w2_wake_trace.analyze(result.stdout)["valid"])
 
 
 if __name__ == "__main__":

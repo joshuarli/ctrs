@@ -4,11 +4,11 @@
 after the workload phase starts, the trial's privileged counter reader enables
 the `ipi:ipi_send_cpu`, `ipi:ipi_send_cpumask`, `sched:sched_waking`,
 `sched:sched_wakeup`, `sched:sched_switch` and
-`sched:sched_wake_idle_without_ipi` tracepoints through tracefs for a fixed
-window (default 2 s). It then restores the guest's original buffer size and
-`tracing_on`. It refuses to run if the guest already has a tracer or
-enabled events. No extra tool is installed. The script uses the pinned API
-image's shell and the guest's tracefs.
+`sched:sched_wake_idle_without_ipi` tracepoints in a private tracefs instance
+for a fixed window (default 2 s). The instance uses the monotonic trace clock
+to order events across CPUs. The reader removes the instance when its shell
+exits. The script uses the pinned API image's shell and requires tracefs
+instance support and all six tracepoints in the guest.
 
 ```sh
 TMPDIR=$PWD/.work/tmp python3 bench/native/diagnostics/w2_wake_trace.py \
