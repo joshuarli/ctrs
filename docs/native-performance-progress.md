@@ -1300,6 +1300,35 @@ python3 bench/native/reporting.py --match base-20261122T081048-91d4
 `trials.jsonl` SHA-256
 `5aefe93dc8901170f7191adfbd2710abea89ff69628f8c9118f53327e2d0cb67`.
 
+#### W2 published-port eight-client repeat on the common runtime
+
+`base-20261123T034853-15d4` ran on `3ea0685` with signed release
+`99db1aa`, the v6 portfolio and the current boot assets. All ten
+alternating pairs admitted. Each leg completed 50,000 requests
+with zero errors. The raw audit matched the read counts and exact
+write payloads in each pair. Each engine persisted 150,054 writes
+across its ten legs. Outside-engine CPU stayed below 0.75 core
+during load. Each ctrs leg recorded eight or nine host NAT
+connections.
+
+ctrs completed a median 1,938 requests/s (range 1,923–1,948).
+OrbStack completed a median 1,455 requests/s (range 1,445–1,477).
+
+| Published-port metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.7510 | [0.7469, 0.7571] |
+| API p50 | 0.7507 | [0.7459, 0.7570] |
+| API p95 | 0.6732 | [0.6673, 0.6787] |
+| API p99 | 0.6264 | [0.6183, 0.6338] |
+| Measured engine CPU per verified request | 1.2881 | [1.2701, 1.2956] |
+| Sampled peak physical footprint | 0.1461 | [0.1449, 0.1486] |
+
+The CPU loss reproduced before charging host-kernel NAT CPU.
+Reproduce with the 16-client fixed-work command using
+`--concurrency 8` and `--client-location host`. Keep the earlier
+runtime's cohort separate. `trials.jsonl` SHA-256
+`f87553b820a9c71d93336af514a2abbe046a9fbccd5c9ba64bf4b348a727caa3`.
+
 #### W2 published-port fixed work at one client
 
 `base-20261123T030410-6559` ran on `a8f19db` with signed release
@@ -2064,6 +2093,29 @@ rule. This affinity change still admitted zero pairs.
 | Pinned timer controls | `0b05bd099a5cc28b44abff4660dcc64a3b3292b09127394dc8712e74b903d2bc` |
 | HTTP client variant | `22a2e1c32d60b734db087c0355f2fe82e63e26fc0f58ccf56a25fdd2c78c5c58` |
 | HTTP trials | `5a427bd2daf580026774a3f9fd2960ed6ccc85f6686a4611fcbcb833fb0eda6d` |
+
+#### W2 guest timer waiter count
+
+`w2-clock-waiters-3a8013` ran two alternating pairs per engine
+using one or four native waiters. It kept the same 10,000 absolute
+deadlines at 500 slots/s, default 50,000 ns timer slack and 10 ms
+guard as the earlier timer-only controls. The four waiters divided
+the same slots by index modulo four. One waiter handled every slot.
+The pinned ARM64 guest containers ran with networking disabled.
+
+| Guest | Four waiters, late slots by pair | One waiter, late slots by pair |
+| --- | ---: | ---: |
+| ctrs | 3, 3 | 1, 0 |
+| OrbStack | 2, 3 | 2, 0 |
+
+A single waiter still missed deadlines in one leg on each engine
+without HTTP traffic. This control leaves the fixed offered-rate
+fixture and guard in place. It does not supply admitted API trials
+or a comparative timing verdict. Reproduce with the earlier native
+clock control and change only the number of waiters. Executable
+SHA-256 `fa250cf1ac0b709a49cc3062fa9be13d7dff95a9bf6d7a647c3804161e4eef91`
+and `checks.jsonl` SHA-256
+`b5418f4abbc2692f13ff8ab4db048510873051c863a788f7c37e0c35171c2d68`.
 
 ### W2 leaf observer overhead on the guest-direct workload
 
