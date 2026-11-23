@@ -53,8 +53,16 @@ OrbStack's). Never pool lanes.
 The installed-default W2 saturation grid has ten admitted pairs at each of
 1, 4, 8 and 16 clients on both paths. The independent raw audit matched
 1,504,565 acknowledged writes to persisted rows across 5,009,975
-successful requests. Fixed work at one client through the published port and both fixed
-offered-rate cells still need admitted cohorts.
+successful requests. Fixed work at one client through the published port
+and both fixed offered-rate cells still need admitted cohorts.
+
+The eight-client fixed-work cohorts used the earlier signed
+`5cac40d` runtime (`d59eff1a…`) and initramfs (`fbed2ff9…`).
+The one-, four- and sixteen-client cohorts above use `99db1aa`
+with binary `10667e6d…` and initramfs `fb0f832b…`. The seven
+completed cohorts all passed the raw equal-work audit. Repeat both
+eight-client cells on `99db1aa` before using the grid as evidence
+for a common runtime. Keep the older measurements as separate evidence.
 
 ## Filesystem and networking coverage (2026-11-18 steering)
 
