@@ -395,7 +395,7 @@ The public OrbStack volume documentation identifies where named-volume data
 lives and how to back it up. The host flush guarantee remains unspecified
 there. [OrbStack volume documentation](https://docs.orbstack.dev/docker/file-sharing)
 
-The next ctrs-only diagnostic measures the stronger Full attachment with
+The ctrs-only diagnostic measures the stronger Full attachment with
 the existing eight-client W3-v4 pgbench fixture. Earlier Full probes used
 one writer. Use a detached checkout of signed release source `99db1aa` and
 cherry-pick `f536b6e` to change only the disk attachment mode. Build the
@@ -416,6 +416,51 @@ Require a stable statistics reset marker and positive count and time deltas.
 The counters are PostgreSQL cluster totals over that interval. They can include
 background WAL activity and pgbench preparation work.
 [PostgreSQL WAL statistics](https://www.postgresql.org/docs/17/monitoring-stats.html#MONITORING-PG-STAT-WAL-VIEW)
+
+#### W3-v4 group commit on Fsync and Full
+
+All three ctrs-only pairs in `w3v4-sync-z4EWsp` completed on harness
+`dd74021`. The signed builds used release `99db1aa` for Fsync and the
+one-mode patch `8a233fe` for Full. Each leg used native PostgreSQL 17.12
+from the same v6 portfolio, 5 million accounts at scale 50, 128 MiB
+shared buffers, eight clients and two pgbench threads. All six legs
+verified 16,000 committed transactions and the matching account balance
+after an orderly restart. PostgreSQL durability settings matched before
+and after restart. The raw WAL counter deltas matched every recorded
+measurement, with zero ctrs host NAT connections and no host rejections.
+
+| Pair | Fsync WAL syncs | Full WAL syncs | Fsync mean WAL sync (ms) | Full mean WAL sync (ms) | Fsync write tx/s | Full write tx/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 8,413 | 4,345 | 0.1613 | 6.3876 | 9,475 | 559 |
+| 2 | 8,508 | 4,363 | 0.1568 | 6.1625 | 9,647 | 576 |
+| 3 | 8,498 | 4,352 | 0.1639 | 6.1501 | 9,404 | 580 |
+
+The paired median Full/Fsync ratio was 39.30 for mean WAL sync time,
+20.16 for time spent in all WAL syncs and 0.0598 for write throughput.
+Per-trial write p95 ranged from 0.970 to 1.020 ms under Fsync and
+23.658 to 26.800 ms under Full. The Full legs issued about half as many
+syncs, consistent with group commit absorbing some of the cost. The
+remaining gap is concentrated in the WAL sync interval. These three
+pairs measure the cost of different Apple disk synchronization contracts.
+Full remains experimental. OrbStack's host commit guarantee remains
+unverified. [Apple Full](https://developer.apple.com/documentation/virtualization/vzdiskimagesynchronizationmode/full.md)
+[Apple Fsync](https://developer.apple.com/documentation/virtualization/vzdiskimagesynchronizationmode/fsync.md)
+
+Signed Fsync SHA-256
+`10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17`.
+Signed Full SHA-256
+`cf0b4e9ad1c22672e563798a3bc1397ff4490ffcef0a24cd22fa67fb6b20659c`.
+Derived comparison SHA-256
+`a88778def312d9753f77ae692de88727ad20c91c54eb8d7dfa1f3a16876d0c69`.
+
+| Run suffix | Raw trials SHA-256 |
+| --- | --- |
+| `1-fsync` | `f96f16ab0f538d4ecee83e850c4a0da682cd3d0d90c115f5c27c4e91a998b468` |
+| `1-full` | `6aa194cfe21f45841c95a9da661759400b8bb4494f9568548b92e98a80380f8b` |
+| `2-fsync` | `c1da4f4fe97f1f13bca6b049d50a0762dd37974632c17bf9fee07dd8687d47c9` |
+| `2-full` | `ae608beda1652627ec8b6552c33b0b630ca092bac598f6e33f066ad8de9e6076` |
+| `3-fsync` | `623545bd6bc9d2b14d01405252be92bd6e7cf2b682640511173cfafc067eac62` |
+| `3-full` | `eeae468b483b4c3b63d26c7519bb167afc6f463a995069b792988a42520757b8` |
 
 ### W4 pipeline comparison with common images
 
