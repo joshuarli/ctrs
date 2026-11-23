@@ -1499,6 +1499,56 @@ cohort.
 | Fresh | `base-20261122T182242-86e9` | `8aee79b6a755abff20c50a7f9fef0345cf171f2dd528c57a9d91f79c45a38a2a` |
 | Persistent | `base-20261122T182545-6dad` | `8eae326eb656501c8d6a62a2bf9598b93fae60cd2f3b4cf15b7668e69719783d` |
 
+#### W14 streaming, cancellation and reconnect with buffered frames
+
+Each installed-default cohort passed all ten alternating pairs on
+`ce50555` with the signed `99db1aa` release. Streaming verified 640
+streams and all 32,000 chunks. Cancellation verified the first chunk
+on each of 640 cancelled streams, zero leaked sessions and a successful
+new connection and response in every leg. Reconnect verified 640 exact
+responses from a new server instance. Refused, reset, timeout, and
+previous-instance responses occurred inside the restart window. All
+60 legs verified owned cleanup and shared paired input receipts within
+their respective modes.
+
+| Mode and metric | Median ctrs/OrbStack | Paired 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| Streaming chunk lateness p99 | 1.3930 | [1.2604, 1.5414] | Loss |
+| Streaming cleanup | 1.1209 | [0.8029, 1.4302] | Inconclusive |
+| Streaming sampled physical footprint | 0.3670 | [0.3639, 0.3689] | Strict win |
+| Cancellation first response after cleanup | 0.4222 | [0.3110, 0.6170] | Strict win |
+| Cancellation first-chunk lateness p99 | 0.3957 | [0.1616, 0.6095] | Strict win |
+| Cancellation cleanup | 1.0106 | [0.9070, 1.2145] | Inconclusive |
+| Cancellation sampled physical footprint | 0.3688 | [0.3635, 0.3694] | Strict win |
+| Reconnect p99 | 1.1339 | [0.8617, 1.2644] | Inconclusive |
+| Reconnect cleanup | 0.9733 | [0.8223, 1.4058] | Inconclusive |
+| Reconnect sampled physical footprint | 0.3651 | [0.3620, 0.3688] | Strict win |
+
+Median streaming trial p99 was 222.9 ms on ctrs and 165.7 ms on OrbStack.
+Client-side median lateness grew from 2.0 to 205.2 ms from chunk 1 to
+chunk 50 on ctrs, and 4.4 to 135.0 ms on OrbStack, taking the median
+within each trial first. The fixture sleeps for 20 ms before each
+server send, while the client compares arrival against a fixed 20 ms
+cadence. The observed drift combines server pacing, send costs and
+transport. The larger late-stream gap needs server-side send timestamps
+before attributing it to transport.
+
+Median post-cancel response time was 1.32 ms versus 3.32 ms. Median
+trial reconnect p99 was 1.549 s versus 1.324 s, measured from the
+restart barrier to an exact response from the new instance. Streaming
+and reconnect measured CPU ratios favor ctrs descriptively, with
+uncharged host NAT work. Seven cancellation pairs also lacked complete
+periodic CPU samples.
+
+Use the pinned harness and release with the same W14 baseline command,
+selecting each mode with `--lifecycle-mode`.
+
+| Mode | Run | Raw trials SHA-256 |
+| --- | --- | --- |
+| Streaming | `base-20261122T182813-e2d1` | `c2f038d2814ec6b8abcbabf5d3d026d70c8f7e440fb1803a742364788d7c52fc` |
+| Cancellation | `base-20261122T183059-142d` | `94a4717438a0e3330959c47364e80eaa554c6dd7d3450ca555c23600d64d0ba9` |
+| Reconnect | `base-20261122T183324-29cd` | `6e74944ca3b79fa906d2c017d064792a9a71307233cdf92e0eefe2eb1b580421` |
+
 ### Rebuilt W8 common portfolio
 
 The [v6 recipe and lock](../bench/native/fixtures/w8-v6/README.md) replace
