@@ -37,8 +37,6 @@ pub struct BootOptions {
     pub memory_mib: Option<u64>,
     /// The VM's CPUs; 2 if not set.
     pub cpus: Option<usize>,
-    #[cfg(target_os = "macos")]
-    pub build_mirror_port: Option<u16>,
 }
 
 #[derive(Debug)]
@@ -92,10 +90,6 @@ impl Guest {
         // swiotlb=noforce: the VM's virtio devices address all of memory, so
         // the kernel's 64 MB bounce buffer would sit there unused.
         let mut cmdline = String::from("console=hvc0 rdinit=/init panic=-1 rcupdate.rcu_expedited=1 swiotlb=noforce");
-        if let Some(port) = opts.build_mirror_port {
-            use std::fmt::Write as _;
-            let _ = write!(cmdline, " {}{port}", ctrs_proto::BUILD_MIRROR_PORT_BOOT_ARG);
-        }
         if !opts.console && opts.console_file.is_none() {
             cmdline.push_str(" quiet loglevel=0");
         }

@@ -40,8 +40,6 @@ const PINNED: &str = "moby/buildkit@sha256:aa632b921ef07411d2cb77292cd34213d4f7b
 const PINNED_VERSION: &str = "v0.35.0";
 const PINNED_EMULATOR: &str = "QEMU 10.2.3";
 
-pub(super) const LOAD_COMPRESSION: &[(&str, &str)] = &[("compression", "zstd"), ("compression-level", "3")];
-
 struct ManagedIdentity {
     os_arch: &'static str,
     index: &'static str,
@@ -823,10 +821,7 @@ pub fn create_for_buildx(engine: &Engine, name: Option<&str>) -> Option<Result<V
 /// endpoints (buildgrpc.rs). Same pin and lifecycle gates as classic
 /// builds; the caller reaches buildkitd's TCP listener itself.
 pub(crate) fn ensure_for_driver(engine: &Engine) -> Result<String, Error> {
-    let began = Instant::now();
-    let result = ensure_running(engine, &mut |_| {});
-    crate::diag::info!("builder driver readiness profile", elapsed_us = began.elapsed().as_micros() as u64, success = result.is_ok());
-    result
+    ensure_running(engine, &mut |_| {})
 }
 
 /// The builder, made if need be, started and answering. `say` hears what
@@ -869,7 +864,6 @@ fn ensure_running(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, 
 /// the fresh-create and matching paths.
 fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: &mut Option<Incarnation>) -> Result<String, Error> {
     if reuse(proof, current_incarnation(engine, id)) {
-        crate::diag::info!("builder readiness audit reused");
         LAST_USE.store(now_secs(), Ordering::Relaxed);
         return Ok(id.to_owned());
     }
@@ -884,15 +878,10 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: 
     let id = id.to_owned();
     LAST_USE.store(now_secs(), Ordering::Relaxed);
     let deadline = Instant::now() + Duration::from_secs(30);
-    let readiness_began = Instant::now();
-    let mut probes = 0_u64;
     loop {
-        probes += 1;
         let before = current_incarnation(engine, &id);
-        crate::diag::info!("builder readiness audit probe");
         let succeeded = matches!(engine.exec_capture(&id, &["buildctl", "debug", "workers"]), Ok((0, _)));
         retain_proof(proof, before, current_incarnation(engine, &id), succeeded);
-        crate::diag::info!("builder worker readiness profile", elapsed_us = readiness_began.elapsed().as_micros() as u64, probes = probes, needs_start = needs_start);
         if succeeded {
             return Ok(id);
         }
@@ -913,7 +902,6 @@ fn idle_expired(now: u64, last_use: u64, idle: u64) -> bool {
 /// Pauses the builder once it has been idle [`idle_secs`]: no build here,
 /// no exec in it (buildx's dial-stdio while it builds). Never wakes the VM.
 pub fn watch(engine: Arc<Engine>) {
-    #[cfg(not(target_os = "macos"))]
     super::mirror::start(&engine);
     let me = Arc::downgrade(&engine);
     drop(engine);
@@ -1235,16 +1223,7 @@ impl Options {
         // way, since there may be several.
         a.push("--output".into());
         a.push(match push {
-            Some(r) => {
-                let mut output = format!("type=image,\"name={r}\",push=true");
-                for (key, value) in LOAD_COMPRESSION {
-                    output.push(',');
-                    output.push_str(key);
-                    output.push('=');
-                    output.push_str(value);
-                }
-                output
-            },
+            Some(r) => format!("type=image,\"name={r}\",push=true"),
             None if self.tags.is_empty() => "type=docker,dest=-".into(),
             None => format!("type=docker,\"name={}\",dest=-", self.tags.join(",")),
         });
@@ -1842,11 +1821,11 @@ mod tests {
     }
 
     #[test]
-    fn mirror_build_uses_default_load_compression() {
+    fn mirror_build_keeps_buildkit_layer_compression() {
         let options = Options::parse(&req(&[("t", "app")])).unwrap();
         let args = options.argv("/tmp/ctrs-build/x", Some("mirror.local/push/build:latest"));
         let output = args.windows(2).find(|pair| pair[0] == "--output").unwrap();
-        assert_eq!(output[1], "type=image,\"name=mirror.local/push/build:latest\",push=true,compression=zstd,compression-level=3");
+        assert_eq!(output[1], "type=image,\"name=mirror.local/push/build:latest\",push=true");
     }
 
     #[test]

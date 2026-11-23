@@ -33,8 +33,6 @@ pub const MAX_OUTPUT_CHUNK: usize = 512 * 1024;
 /// for a process that is not reading; the host blocks the client instead.
 pub const INPUT_WINDOW: usize = 4 << 20;
 
-pub const BUILD_MIRROR_PORT_BOOT_ARG: &str = "ctrs.build_mirror_port=";
-
 /// The wire version. The host refuses an agent with another one: 3 added
 /// `InputConsumed`, which the host waits on, so an older agent would leave
 /// a client's stdin blocked after `INPUT_WINDOW` bytes. 4 added

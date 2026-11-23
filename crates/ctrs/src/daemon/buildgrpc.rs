@@ -718,11 +718,6 @@ fn mirror_exporter(push_ref: &str, attrs: &[(String, String)]) -> Vec<u8> {
             put_attr(k, v, &mut am);
         }
     }
-    if !attrs.iter().any(|(key, _)| matches!(key.as_str(), "compression" | "compression-level" | "force-compression" | "oci-mediatypes")) {
-        for (key, value) in super::builder::LOAD_COMPRESSION {
-            put_attr(key, value, &mut am);
-        }
-    }
     em.extend_from_slice(&am);
     em
 }
@@ -1415,15 +1410,13 @@ mod tests {
     }
 
     #[test]
-    fn default_load_uses_zstd_without_recompressing_shared_layers() {
-        let (kind, attrs) = exporter(&[("name", "app:latest"), ("rewrite-timestamp", "true")]);
+    fn default_load_keeps_buildkit_layer_compression() {
+        let (kind, attrs) = exporter(&[("name", "app:latest"), ("rewrite-timestamp", "true"), ("prefer-image-digest", "true")]);
         assert_eq!(kind, "image");
         assert_eq!(attrs, vec![
             ("name".into(), "mirror.local/push/build:latest".into()),
             ("push".into(), "true".into()),
             ("rewrite-timestamp".into(), "true".into()),
-            ("compression".into(), "zstd".into()),
-            ("compression-level".into(), "3".into()),
         ]);
     }
 

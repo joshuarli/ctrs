@@ -629,8 +629,6 @@ impl Engine {
         let _ = engine.me.set(Arc::downgrade(&engine));
         #[cfg(target_os = "macos")]
         let _ = engine.fs_events.set(super::fsevents::Watcher::start(Arc::downgrade(&engine)));
-        #[cfg(target_os = "macos")]
-        super::mirror::start(&engine);
         engine.load()?;
         engine.start_balloon();
         engine.start_cpu_meter();
@@ -658,8 +656,6 @@ impl Engine {
             memory_mib: Some(ceiling >> 20),
             cpus: Some(cpus),
             console_file: Some(console_file),
-            #[cfg(target_os = "macos")]
-            build_mirror_port: super::mirror::port(),
             ..Default::default()
         })
         .inspect_err(|e| crate::diag::error!("VM did not boot", error = e))?;

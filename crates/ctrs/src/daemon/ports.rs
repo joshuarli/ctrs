@@ -1030,7 +1030,7 @@ enum RefusalLookup {
 }
 
 static REFUSED: Mutex<Option<HashMap<RefusalTarget, RefusalEntry>>> = Mutex::new(None);
-const REFUSED_TTL: Duration = Duration::from_millis(50);
+const REFUSED_TTL: Duration = Duration::from_millis(250);
 const REFUSED_LIMIT: usize = 8192;
 
 fn refusal_lookup(map: &mut HashMap<RefusalTarget, RefusalEntry>, target: RefusalTarget, now: Instant) -> RefusalLookup {
@@ -1608,18 +1608,18 @@ mod tests {
         let mut map = HashMap::new();
         let target = ([10, 0, 0, 1], 8080);
         let start = Instant::now();
-        assert_eq!(REFUSED_TTL, Duration::from_millis(50));
+        assert_eq!(REFUSED_TTL, Duration::from_millis(250));
         assert_eq!(refusal_lookup(&mut map, target, start), RefusalLookup::Missing);
         assert!(refusal_insert(&mut map, target, || start).is_empty());
-        assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL / 2), RefusalLookup::Hit { first: true });
-        assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL - Duration::from_millis(1)), RefusalLookup::Hit { first: false });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(100)), RefusalLookup::Hit { first: true });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(249)), RefusalLookup::Hit { first: false });
         assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Expired { hits: 2, age: REFUSED_TTL });
         assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Missing);
         assert!(refusal_insert(&mut map, target, || start + REFUSED_TTL).is_empty());
         assert_eq!(refusal_lookup(&mut map, target, start + REFUSED_TTL), RefusalLookup::Hit { first: true });
         assert!(refusal_insert(&mut map, target, || start + Duration::from_millis(300)).is_empty());
-        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(300) + REFUSED_TTL - Duration::from_millis(1)), RefusalLookup::Hit { first: true });
-        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(300) + REFUSED_TTL), RefusalLookup::Expired { hits: 1, age: REFUSED_TTL });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(549)), RefusalLookup::Hit { first: true });
+        assert_eq!(refusal_lookup(&mut map, target, start + Duration::from_millis(550)), RefusalLookup::Expired { hits: 1, age: REFUSED_TTL });
     }
 
     #[test]

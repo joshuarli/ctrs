@@ -205,17 +205,23 @@ impl<R: Read> Read for Capped<R> {
 }
 
 fn unpack(blob: &mut impl Read, media_type: &str, dest: &Path, compressed: u64) -> io::Result<u64> {
+    untar(decoded(blob, media_type, compressed)?, dest)
+}
+
+/// The layer's tar stream, failing once it passes [`expansion_cap`].
+fn decoded<'a>(blob: &'a mut impl Read, media_type: &str, compressed: u64) -> io::Result<Capped<Box<dyn Read + 'a>>> {
     let buffered = BufReader::with_capacity(256 * 1024, blob);
-    let left = expansion_cap(compressed);
-    if media_type.ends_with("gzip") {
-        untar(Capped { inner: flate2::read::MultiGzDecoder::new(buffered), left }, dest)
+    let inner: Box<dyn Read + 'a> = if media_type.ends_with("gzip") {
+        Box::new(flate2::read::MultiGzDecoder::new(buffered))
     } else if media_type.ends_with("zstd") {
-        let decoder = ruzstd::decoding::StreamingDecoder::new(buffered)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("zstd: {e}")))?;
-        untar(Capped { inner: decoder, left }, dest)
+        Box::new(
+            ruzstd::decoding::StreamingDecoder::new(buffered)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("zstd: {e}")))?,
+        )
     } else {
-        untar(Capped { inner: buffered, left }, dest)
-    }
+        Box::new(buffered)
+    };
+    Ok(Capped { inner, left: expansion_cap(compressed) })
 }
 
 /// Unpacks a layer tarball, translating OCI whiteouts into the form overlayfs
@@ -723,5 +729,156 @@ mod tests {
         let _ = fs::remove_dir_all(&fresh);
         assert_eq!(expansion_cap(1), 1 << 30);
         assert_eq!(expansion_cap(1 << 40), 64 << 30);
+    }
+
+    const GZIP: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
+    const ZSTD: &str = "application/vnd.oci.image.layer.v1.tar+zstd";
+    const BLOCK: usize = 64 << 10;
+    const BLOCKS: u64 = 32768;
+
+    /// A deterministic equivalent of the W6 compatibility fixture, rebuilt
+    /// from its documented construction because the original artifacts were
+    /// deleted: one 64 KiB high-entropy block repeated 32,768 times (2 GiB)
+    /// as the single file of a layer tarball.
+    fn repeated_block() -> Vec<u8> {
+        let mut x = 0x9E37_79B9_7F4A_7C15_u64;
+        (0..BLOCK)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x as u8
+            })
+            .collect()
+    }
+
+    fn payload_header() -> tar::Header {
+        let mut h = header(BLOCKS * BLOCK as u64, 0o644);
+        h.set_path("payload").unwrap();
+        h.set_cksum();
+        h
+    }
+
+    /// The layer tarball, streamed: header, payload, end-of-archive blocks.
+    struct RepeatedLayer {
+        head: Vec<u8>,
+        block: Vec<u8>,
+        offset: u64,
+    }
+
+    impl RepeatedLayer {
+        fn new() -> Self {
+            Self { head: payload_header().as_bytes().to_vec(), block: repeated_block(), offset: 0 }
+        }
+        fn len() -> u64 {
+            512 + BLOCKS * BLOCK as u64 + 1024
+        }
+    }
+
+    impl Read for RepeatedLayer {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let payload_end = 512 + BLOCKS * BLOCK as u64;
+            let n = if self.offset < 512 {
+                let at = self.offset as usize;
+                let n = buf.len().min(512 - at);
+                buf[..n].copy_from_slice(&self.head[at..at + n]);
+                n
+            } else if self.offset < payload_end {
+                let at = ((self.offset - 512) % BLOCK as u64) as usize;
+                let n = buf.len().min(BLOCK - at).min((payload_end - self.offset) as usize);
+                buf[..n].copy_from_slice(&self.block[at..at + n]);
+                n
+            } else {
+                let n = buf.len().min((Self::len() - self.offset) as usize);
+                buf[..n].fill(0);
+                n
+            };
+            self.offset += n as u64;
+            Ok(n)
+        }
+    }
+
+    /// The same layer as one zstd frame: a raw block holding the tar header
+    /// and the first payload block, then blocks that each copy the previous
+    /// 64 KiB, as a long-window zstd encoder (BuildKit's level 3) emits.
+    fn repeated_layer_zstd() -> Vec<u8> {
+        fn block_header(out: &mut Vec<u8>, kind: u32, size: u32, last: bool) {
+            out.extend_from_slice(&((size << 3) | (kind << 1) | u32::from(last)).to_le_bytes()[..3]);
+        }
+        fn copy_previous_block(out: &mut Vec<u8>, length: u32) {
+            let (ml_code, ml_bits, ml_base) = if length > 65538 { (52u8, 16, 65539) } else { (51u8, 15, 32771) };
+            let of_extra = 3u64;
+            let bits = (u64::from(length - ml_base)) | (of_extra << ml_bits) | (1 << (ml_bits + 16));
+            let stream = &bits.to_le_bytes()[..(ml_bits as usize + 16) / 8 + 1];
+            let body = [&[0x00, 0x01, 0x54, 0x00, 16, ml_code][..], stream].concat();
+            block_header(out, 2, body.len() as u32, false);
+            out.extend_from_slice(&body);
+        }
+        let mut out = vec![0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x38];
+        let first = [payload_header().as_bytes(), &repeated_block()[..]].concat();
+        block_header(&mut out, 0, first.len() as u32, false);
+        out.extend_from_slice(&first);
+        for _ in 0..(BLOCKS - 1) / 2 {
+            copy_previous_block(&mut out, 2 * BLOCK as u32);
+        }
+        copy_previous_block(&mut out, BLOCK as u32);
+        block_header(&mut out, 1, 1024, true);
+        out.push(0);
+        out
+    }
+
+    fn same_bytes(mut got: impl Read, mut want: impl Read) -> io::Result<u64> {
+        let (mut a, mut b) = (vec![0; 1 << 20], vec![0; 1 << 20]);
+        let mut total = 0;
+        loop {
+            let n = got.read(&mut a)?;
+            want.read_exact(&mut b[..n])?;
+            assert!(a[..n] == b[..n], "decoded layer differs at byte {total}");
+            if n == 0 {
+                assert_eq!(want.read(&mut b)?, 0, "decoded layer ends early at byte {total}");
+                return Ok(total);
+            }
+            total += n as u64;
+        }
+    }
+
+    /// The compressed size that made a zstd default reject a valid layer:
+    /// the frame decodes to the exact tarball, but its 256x expansion
+    /// allowance is the 1 GiB floor, below the 2 GiB payload.
+    #[test]
+    fn highly_compressible_zstd_layer_exceeds_the_expansion_cap() {
+        let blob = repeated_layer_zstd();
+        assert!(expansion_cap(blob.len() as u64) < RepeatedLayer::len());
+        let decoder = ruzstd::decoding::StreamingDecoder::new(&blob[..]).unwrap();
+        assert_eq!(same_bytes(decoder, RepeatedLayer::new()).unwrap(), RepeatedLayer::len());
+
+        let err = same_bytes(decoded(&mut &blob[..], ZSTD, blob.len() as u64).unwrap(), RepeatedLayer::new()).unwrap_err();
+        assert_eq!(err.to_string(), "stream exceeds the allowed size");
+    }
+
+    #[test]
+    fn rejected_zstd_layer_leaves_no_partial_layer() {
+        let root = scratch("zstd-cap");
+        let blob = repeated_layer_zstd();
+        let begin = LayerBegin { digest: D1, media_type: ZSTD, size: blob.len() as u64 };
+        let err = receive(&mut &blob[..], &begin, &root).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(format!("{err:?}").contains("stream exceeds the allowed size"), "{err:?}");
+        assert!(!present(&root, D1));
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Deflate's 32 KiB window cannot reach a 64 KiB repeat, so a gzip layer
+    /// of this payload stays about its own size (BuildKit's default gzip
+    /// layer was 2,148,142,839 bytes) and keeps the 64 GiB allowance. Stored
+    /// deflate blocks stand in for that encoder here.
+    #[test]
+    fn same_layer_as_gzip_decodes_exactly_within_the_cap() {
+        let mut encoder = flate2::read::GzEncoder::new(RepeatedLayer::new(), flate2::Compression::none());
+        let gzip_len = io::copy(&mut encoder, &mut io::sink()).unwrap();
+        assert!(expansion_cap(gzip_len) > RepeatedLayer::len());
+        let mut blob = flate2::read::GzEncoder::new(RepeatedLayer::new(), flate2::Compression::none());
+        assert_eq!(same_bytes(decoded(&mut blob, GZIP, gzip_len).unwrap(), RepeatedLayer::new()).unwrap(), RepeatedLayer::len());
     }
 }
