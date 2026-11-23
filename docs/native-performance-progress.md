@@ -2373,11 +2373,33 @@ Test inode-pruning cost in two alternating pairs of private ctrs guests at
 `/proc/ctrs/fuse_inodes` bounds of 65,536 and 98,304. Use the signed
 `99db1aa` release and W12 timing revision 2 full-bind fixture. Read the
 default bound before setting the test value. Record live inodes and host
-file-table headroom after setup, install, the verification walk, discovery
-and branch restore. Take each extra sample outside its timed phase. Require
-the existing exact W12 receipts for both variants. This diagnostic tests
-whether the inode cap contributes to the gap and whether a larger ceiling
-merits the full descriptor, watcher and comparative gates.
+file-table headroom after setup, install, the verification walk, discovery,
+branch restore and cleanup. Take each extra sample outside its timed
+phase. Require the existing exact W12 receipts for both variants. This
+diagnostic tests whether the inode cap contributes to the gap and whether
+a larger ceiling merits the full descriptor, watcher and comparative gates.
+
+The first leg, `w12-inode-cap-1AdS00-1-65536` on harness `fa72716`,
+stopped immediately after the 26.12 s install. The guest reported
+103,959 live inodes with the knob still at 65,536. The observer rejected
+counts more than 16,384 above the knob before collecting any host
+descriptor counts. Patch 0017 queues reclamation asynchronously after
+that threshold and retains in-use dentries. The separate 150,000-file
+stress test measured the host process and completed recovery.
+
+For the repeat, keep the same two alternating cap pairs and signed
+artifacts. Before applying any threshold check, persist the guest
+`live bound` pair, `kern.num_files`, `kern.maxfiles`, and
+`kern.maxfilesperproc`. Count numeric descriptors from
+`lsof -nP -a -p "$vm_pid" -F pf` after each phase, with the VM's kernel
+start identity verified before and after. Treat the live inode count as
+reclamation telemetry. Require the exact knob value, system headroom for
+two candidate thresholds and headroom for one candidate threshold
+against the kernel per-process limit. A native observer self-check
+counted its own descriptors and retained a receipt when the expected
+knob differed. The revised guest run is queued. The initial leg's
+`trials.jsonl` SHA-256 is
+`34f2c5fddfc1eee9bc2efbea2155d0a0590da178bf67ca8d0dcd94094805e517`.
 
 ```sh
 for layout in full-bind bind-source-volume-deps all-volume; do
