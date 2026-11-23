@@ -462,6 +462,50 @@ Derived comparison SHA-256
 | `3-fsync` | `623545bd6bc9d2b14d01405252be92bd6e7cf2b682640511173cfafc067eac62` |
 | `3-full` | `eeae468b483b4c3b63d26c7519bb167afc6f463a995069b792988a42520757b8` |
 
+#### W3 guest relation ENOSPC and recovery
+
+The owned storage diagnostic at `734f867` used the signed Fsync
+`99db1aa` and Full `8a233fe` binaries above, the same guest boot
+assets, and the pinned v6 portfolio. It used a fresh private ctrs
+store for each mode and stage. Both modes passed the 64 MiB preflight
+with one unwritten extent, zero growth in allocated host backing
+bytes during reservation, and 100 exact database records after release.
+
+The full reservation left 8 MiB available to guest non-root processes.
+FIEMAP confirmed unwritten extents. PostgreSQL returned SQLSTATE
+`53100` during relation extension in `mdzeroextend` with `fsync`,
+`synchronous_commit`, and `full_page_writes` enabled. Both legs
+released the reservation, recovered the original 100 acknowledged
+records, and committed and verified 10 more. The filesystem, fill
+volume, and database volume identities were stable within each leg.
+The finite supervisor and the workload each recorded successful cleanup.
+
+| Mode | Guest reservation | Ordinary host backing growth during reservation | Available guest bytes after release |
+| --- | ---: | ---: | ---: |
+| Fsync | 1,080,483,278,848 bytes | 32,260,096 bytes | 1,080,491,659,264 bytes |
+| Full | 1,080,483,278,848 bytes | 24,870,912 bytes | 1,080,491,659,264 bytes |
+
+Reproduce in that order with `storage_space_pilot.py` using
+`--stage allocation` and then `--stage enospc`. Pass the signed binaries
+with `--fsync-binary` and `--full-binary`, set `CTRS_GUEST_DIR` to their
+common guest assets, and pass the v6 archive with `--portfolio-archive`.
+The archive SHA-256 is
+`8c2d09449cbc4002735068c825eb23a51ed3dd4f0fd44e7b9a12ff8291fb1cd7`.
+The bounds, exact-data checks, and supervisor receipts are described in
+[the storage diagnostic](../bench/native/diagnostics/storage-space.md).
+The probe establishes recovery after guest filesystem allocation
+failure. Host filesystem exhaustion and power-loss durability remain open.
+
+| Run and receipt | SHA-256 |
+| --- | --- |
+| `space-7d828b55` preflight plan | `ed3550d45718cb7490697e89a5381342c1717b97d80a3b61fe6d28879b82527e` |
+| Preflight result, both modes | `58785f64d5e3c495de91654fca1b853b70f0e1429fee3c8e80cc500d19fa38e0` |
+| Preflight terminal status | `89f614953a6b9831b5a6f7661f74a3968d7bb15dd907d6179b31fdd7f481508a` |
+| `space-32992a61` ENOSPC plan | `d52953d1b8ef0f3c9414ea08c1f3ddccf48f69cfe8016b8a838d213ae8dcff8a` |
+| ENOSPC Fsync result | `6e1ee23bd204e23f2b6cfb8d8038f376a86f27a8442fc2d1894297692e4e2650` |
+| ENOSPC Full result | `e30cd6c42b5467030b69daa3a3a6f3b6afeac98c1bed7f59da43e9efa262f838` |
+| ENOSPC terminal status | `166d5ca0ae63aec169a5186605b733cabe6e832c1256c1c2a3bccd1889e2dafc` |
+
 ### W4 pipeline comparison with common images
 
 Prepare one Linux ARM64 v4 worker image from the pinned W4 latency
