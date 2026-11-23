@@ -180,9 +180,11 @@ qualification gaps.
    [W13 evidence](native-performance-progress.md#installed-default-w13-overlap-cohort)
 
 W11 exceeded the short resource-growth budgets on both engines. Online
-discard reduced ctrs backing growth in an eight-cycle screen and still
-missed the backing and physical-footprint limits. The 12-hour reliability
-gate remains open. [Online discard evidence](native-performance-progress.md#w11-ext4-online-discard-screen)
+discard reduced ctrs backing growth in an eight-cycle screen. Both
+online discard and uncached VZ disk backing still missed the backing
+and physical-footprint limits. The 12-hour reliability gate remains
+open. [Online discard](native-performance-progress.md#w11-ext4-online-discard-screen)
+[VZ disk cache](native-performance-progress.md#w11-virtualizationframework-disk-image-cache-screen)
 
 W7 peak footprint is inconclusive,
 and earlier guest-to-host bulk transfer was tool-limited. The

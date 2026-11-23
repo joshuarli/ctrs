@@ -20,8 +20,9 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
 - Both W3 sync modes recovered from guest relation ENOSPC and from backing
   writes failing on an exhausted private host APFS volume. Equivalent
   power-loss durability remains open. W11 exceeded its growth limits
-  with stock settings, explicit trim and online discard. The two frozen
-  12-hour legs and the independent holdout remain open.
+  with stock settings, explicit trim, online discard and uncached VZ
+  disk backing. The two frozen 12-hour legs and the independent
+  holdout remain open.
 - W13 remains tool-limited under the twofold headroom guard, including
   after the exact mapped receiver and sendfile controls.
 
@@ -4425,6 +4426,71 @@ exhaust the reclaimable space. Both 12-hour legs remain open.
 | --- | --- |
 | Stock | `1aa1c8d5df295a61754e8deec5bab3a6ee8714d188704d3eeb91ece62b00b6f9` |
 | Online discard | `ac4d2f3ed2adc16c770a9c7ee7b01443ca49af31ba1a66eed8ee8916b047c3d6` |
+
+#### W11 Virtualization.framework disk-image cache screen
+
+Previous balloon tests changed guest memory without observing
+sustained host footprint reclaim. This screen checks a different
+boundary. Build two signed host binaries from `99db1aa` with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`. In the second binary,
+change the data disk's `VZDiskImageCachingMode::Cached` to
+`Uncached` in `crates/ctrs-vmm/src/apple.rs`. Both builds use
+`VZDiskImageSynchronizationMode::Fsync` and the same guest kernel,
+initramfs and sparse disk template.
+[Apple disk-image caching modes](https://developer.apple.com/documentation/virtualization/vzdiskimagecachingmode)
+
+Use the unchanged W11 mixed pilot with the v6 portfolio and v5
+worker. Start cached first. Give each private guest nine vCPUs,
+8,192 MiB, an independently copied sparse template, 290 seconds
+for work, 75 seconds for drain, 75 seconds for final cleanup, and
+32 seconds of observation per cycle. Require exact work and
+service identities, the loaded boot assets, and the correct
+signed daemon in both legs. Compare the first six complete
+cycles, then retain the full growth receipts and mixed-work
+CPU and time. The screen tests resource growth in a single
+fixed-order comparison.
+
+`w11-mixed-20261123T043757-31c5` (cached) and
+`w11-mixed-20261123T044301-fdb0` (uncached) each completed eight
+cycles. The audit matched 80,000 API successes and 24,496 exact
+persisted and deleted writes. It also checked 3,200 queue jobs,
+6,400 artifacts and 256 build jobs. The signed daemon, guest
+assets and service process identities matched their receipts.
+Both drivers finished with clean teardown.
+
+| Metric | Cached, first six | Uncached, first six | Cached, all eight | Uncached, all eight |
+| --- | ---: | ---: | ---: | ---: |
+| Post-warmup backing growth | 50,515,968 B | 51,228,672 B | 66,899,968 B | 68,067,328 B |
+| Final backing increase from cycle 0 | 63,799,296 B | 67,985,408 B | 80,183,296 B | 84,824,064 B |
+| Post-warmup physical-footprint growth | 47,759,384 B | 16,646,144 B | 50,315,288 B | 18,251,776 B |
+| Final physical-footprint increase from cycle 0 | 69,877,808 B | 54,198,296 B | 72,433,712 B | 55,803,928 B |
+| Peak descriptor increase | 0 | 0 | 0 | 0 |
+| Mixed-work wall time, median excluding cycle 0 | 3.319 s | 3.307 s | 3.319 s | 3.309 s |
+| Mixed-work CPU, median excluding cycle 0 | 11.034 s | 11.182 s | 11.034 s | 11.155 s |
+
+Both full legs missed the 16 MiB backing and footprint limits.
+The uncached helper gained 58,654,744 bytes from cycle 0 to
+cycle 7, while its daemon's footprint fell by 2,850,816 bytes.
+Even without caching, most of this increase remains in the
+VM helper. Match process ID, kernel start identity and executable
+path for each sample, sort by total sample footprint, and retain the
+per-process contributions at the median. Their sum reproduced
+all 16 exact footprint observations. Cached private and ordinary
+backing counts differed by up to 114,688 bytes early in the run
+and agreed at the final observation. The uncached counts agreed
+throughout. The table uses ordinary allocation.
+
+Keep the existing cached mode. The uncached screen missed the
+resource limits and its fixed-order timing observations do not
+establish a speed result. Both 12-hour legs remain open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed cached host | `553c8da4fa9874d30fe30f62cdd60eb5ecf37ba7011f8210d15433b9e57c7170` |
+| Signed uncached host | `74dad6a03b91dff789f8a209a476f5c427e161f45793097644c71eb2198d0116` |
+| Cached trials | `286d10b1703b9a02a33d7b5dc0d297a7d7d20b10b3b64c0eb6b2801aca70e1bc` |
+| Uncached trials | `93fdf970ca72e0af143961cecfced0cc80ee338bd790fa7b76d9ac50d7722b55` |
+| Raw work and resource audit | `1a9889044c928e0a82a2ddd09ace89b19222911ef262916b18885842ed418aa3` |
 
 A native APFS control on macOS 27.2.1 reproduced allocation
 disagreement on a file that had never been cloned. A writer repeated
