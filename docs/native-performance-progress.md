@@ -1350,6 +1350,43 @@ candidate reporter in order, with prefix
 | Host process audit | `187230c4991ea395a7a5e7c653af3d685bf97d59047737cd4901594a960ad332` |
 | Batch log | `f007d611f5c31868772203f45105145a4cec573e1e128383a74a29f2d33e23b9` |
 
+#### W2 25 Hz leaf locations
+
+Summing the saved per-thread leaf counts across the ten profiled
+legs per engine reproduced every profile's raw event count. All
+profiles passed the raw-event checks, sampled all nine API threads
+and covered 50,000 exact guest-direct requests. The guest kernel
+labels accounted for 22.3% of ctrs samples and 12.3% of OrbStack
+samples. The most frequent kernel leaf on both engines was
+`wake_up_q`. Its count ranged from 44 to 63 per ctrs profile
+and from 9 to 28 per OrbStack profile.
+
+| Engine | Total samples | Kernel-labelled leaves | `wake_up_q` leaves | Unresolved symbol leaves |
+| --- | ---: | ---: | ---: | ---: |
+| ctrs | 5,587 | 1,245 | 553 | 1,697 |
+| OrbStack | 4,557 | 561 | 189 | 1,684 |
+
+Of the 553 ctrs `wake_up_q` leaves, 549 landed at
+`ffff800080078fe4`. All ten owned VM receipts identified
+kernel `19657ca4…`. At Image offset `0x78fe0`, its bytes
+`017c5f882200144b02fc0388a3ffff35` match the earlier decoded
+`ldxr` / `sub` / `stlxr` / `cbnz` sequence. This places
+the sampled PC at the exclusive store in the task refcount
+decrement. The OrbStack kernel labels support the symbol
+count, with its instruction mapping still unverified.
+[Earlier instruction mapping](../bench/native/diagnostics/w2-counters.md#sample-on-cpu-work-separately)
+
+These profiles locate on-CPU samples. The OrbStack CPU observer
+budget remains inconclusive. Wakeup frequency, retries and CPU cost
+per wakeup require separate measurements to explain the verified
+guest-direct API system CPU gap.
+
+Recompute from the exact ten blocks above. Sum `per_thread.*.leaf_counts`
+by symbol and DSO, require the sum to equal `sample_count` for every
+profile, and count raw `cpu.txt` IPs labelled `wake_up_q`.
+Derived count rows SHA-256
+`2a7ab7b0a03b248a1a4f77157b454250f322ea4edd583ca7660057f919db1cd8`.
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
