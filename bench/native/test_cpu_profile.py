@@ -37,6 +37,17 @@ class CPUProfile(unittest.TestCase):
         self.assertEqual(thread['inclusive_counts']['caller (/lib/libpython.so)'], 1)
         self.assertAlmostEqual(thread['cost_per_success_estimates']['take_gil+0x8 (/lib/libpython.so)'], .001)
 
+    def test_profile_records_the_actual_fixed_sample_period(self):
+        text = f'{TAG} 1/1 [000] 1.1: cpu-clock: 1234 leaf (/lib/libc.so)\n'
+        default = self.analyze(text)
+        lower = self.analyze(text, frequency=19)
+        self.assertEqual(default['fixed_cpu_clock_period_ns'], 20408163)
+        self.assertEqual(lower['nominal_sampling_hz'], 19)
+        self.assertEqual(lower['fixed_cpu_clock_period_ns'], 52631579)
+        for invalid in (True, 0, 50):
+            with self.assertRaisesRegex(ValueError, 'sample frequency'):
+                self.analyze(text, frequency=invalid)
+
     def test_native_multi_thread_dwarf_trace(self):
         text = (Path(__file__).parent / 'fixtures/diagnostics/w2-cpu-native-v1.txt').read_text()
         tag = text.split()[0]

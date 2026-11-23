@@ -34,9 +34,10 @@ HELPER = Path(__file__).with_name('w2_counter_guest.py')
 BOOTSTRAP = Path(__file__).with_name('w2_scheduler_app.py')
 
 
-def cpu_record_args(profile_kind, tasks):
+def cpu_record_args(profile_kind, tasks, period_ns=None):
+    period = cpu_profile.period_ns(profile_kind) if period_ns is None else period_ns
     args = ['/tmp/np-tools/usr/bin/perf', 'record', '--no-inherit', '-t', ','.join(tasks),
-            '-e', 'cpu-clock', '-c', str(cpu_profile.period_ns(profile_kind))]
+            '-e', 'cpu-clock', '-c', str(period)]
     if profile_kind == 'cpu':
         args += ['--call-graph', 'dwarf,16384']
     return args + ['--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
@@ -135,7 +136,10 @@ def cleanup_project(engine, compose, project):
 
 
 def trial(engine, refs, archive, root, mode, operations, run, profile_kind='counters', api_cpus=None,
-          client_location='host', *, concurrency=4, seed=7):
+          client_location='host', *, concurrency=4, seed=7, cpu_frequency=cpu_profile.FREQUENCY):
+    if profile_kind != 'cpu' and cpu_frequency != cpu_profile.FREQUENCY:
+        raise ValueError('custom sample frequency requires the CPU profiler')
+    cpu_period = cpu_profile.period_for_frequency(cpu_frequency) if profile_kind == 'cpu' else None
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -153,6 +157,10 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     version, identity_label = profile_identity(profile_kind, api_cpus, client_location)
     result = {'fixture_version': version, 'profile_kind': profile_kind, 'profile_identity': identity_label, 'mode': mode, 'qualification_eligible': False, 'errors': [], 'cleanup_errors': [], 'requested_api_cpus': list(api_cpus) if api_cpus is not None else None, 'effective_api_cpus': {}, 'requested_client_location': client_location, 'effective_client_location': None, 'client_image': refs['api'] if client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if client_location == 'guest' else None, 'client_source_sha256': runner.sha256_file(root.parent / 'source' / runner.LOAD_PY.name)}
     result.update(concurrency=concurrency, seed=seed)
+    if cpu_period is not None:
+        result.update(nominal_sampling_hz=cpu_frequency, fixed_cpu_clock_period_ns=cpu_period)
+        if cpu_frequency != cpu_profile.FREQUENCY:
+            result['profile_identity'] += f'-{cpu_frequency}hz'
     def helper(action, *extra, check=True):
         cp = engine.sh(['exec', '--privileged', api, 'python', '/diagnostics/w2_counter_guest.py', action, tag, *extra], timeout=15, check=False)
         (directory / (action + '.stdout')).write_text(cp.stdout)
@@ -209,7 +217,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             raise ValueError('adopted daemon differs from requested binary')
         if mode == 'on':
             if profile_kind in cpu_profile.PROFILES:
-                args = cpu_record_args(profile_kind, tasks)
+                args = cpu_record_args(profile_kind, tasks, cpu_period)
             else:
                 helper('probes')
                 args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
@@ -288,7 +296,8 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                 profile = cpu_profile.analyze(script.stdout, tag=tag, tasks_before=before['tasks'], tasks_after=after['tasks'],
                     application_cpu=delta, successful_operations=operations,
                     diagnostics=(directory / 'profiler.log').read_text() + script.stderr + raw.stderr,
-                    raw_events=raw.stdout, profile_kind=profile_kind)
+                    raw_events=raw.stdout, profile_kind=profile_kind,
+                    frequency=cpu_frequency if profile_kind == 'cpu' else None)
                 save(directory / 'cpu-profile.json', profile)
                 if profile['status'] != 'ok':
                     raise ValueError('CPU profile coverage invalid: ' + repr(profile['errors']))

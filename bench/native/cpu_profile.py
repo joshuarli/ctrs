@@ -10,8 +10,18 @@ LEAF_VERSION = 'w2-cpu-v1-native-leaf'
 LEAF_PROFILES = {'cpu-leaf': (LEAF_VERSION, 49),
                  'cpu-leaf-25': ('w2-cpu-v1-native-leaf-25hz', 25)}
 PROFILES = {'cpu': (VERSION, 49), **LEAF_PROFILES}
+FREQUENCY = PROFILES['cpu'][1]
 HEADER = re.compile(r'^\s*(\S+)\s+(\d+)/(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+cpu-clock:\s*(.*)$')
 FRAME = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+?)\s+\((.*)\)\s*$')
+
+
+def period_for_frequency(frequency):
+    if type(frequency) is not int or not 1 <= frequency <= FREQUENCY:
+        raise ValueError(f'sample frequency must be an integer between 1 and {FREQUENCY} Hz')
+    return round(1_000_000_000 / frequency)
+
+
+PERIOD_NS = period_for_frequency(FREQUENCY)
 
 
 def check_attachment(attached_tasks, phase_tasks, clock_ticks):
@@ -25,9 +35,11 @@ def period_ns(kind):
 
 
 def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful_operations,
-            diagnostics='', raw_events='', profile_kind='cpu'):
-    version, frequency = PROFILES[profile_kind]
+            diagnostics='', raw_events='', profile_kind='cpu', frequency=None):
+    version, profile_frequency = PROFILES[profile_kind]
     leaf_only = profile_kind in LEAF_PROFILES
+    hz = frequency if frequency is not None else profile_frequency
+    period = period_for_frequency(hz)
     errors, samples = [], []
     current = None
     if re.search(r'lost|throttl', diagnostics, re.IGNORECASE):
@@ -98,8 +110,8 @@ def analyze(text, *, tag, tasks_before, tasks_after, application_cpu, successful
         if not leaf_only:
             per_thread[tid]['inclusive_counts'] = dict(inclusive.most_common())
     return {'status': 'unknown' if errors else 'ok', 'errors': errors,
-        'fixture_version': version, 'sample_count': len(samples), 'nominal_sampling_hz': frequency,
-        'fixed_cpu_clock_period_ns': period_ns(profile_kind), 'raw_event_coverage_checked': bool(raw_events),
+        'fixture_version': version, 'sample_count': len(samples), 'nominal_sampling_hz': hz,
+        'fixed_cpu_clock_period_ns': period, 'raw_event_coverage_checked': bool(raw_events),
         'successful_operations': successful_operations, 'application_cpu': application_cpu,
         'per_thread': None if errors else per_thread,
         'qualification_eligible': False,
