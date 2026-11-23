@@ -3824,6 +3824,34 @@ include host virtualization and guest work outside the container's
 cgroup. Keep these observations separate from the installed-default
 timing cohort.
 
+The first attempt `w12-container-cpu-e74154fcc2` recorded one exact
+ctrs leg and then stopped when the comparison script looked for an
+absent `status` key. The rerun checked the host phase's `errors` list.
+`w12-container-cpu-adbf19af53` used `2bfd632` and
+signed release `99db1aa`. All four legs matched the dependency, file,
+byte, build and Jest receipts.
+
+| CPU seconds, range across two legs | ctrs | OrbStack |
+| --- | ---: | ---: |
+| Install, whole engine | 52.25–52.89 | 33.91–38.11 |
+| Install, container total | 20.20–20.27 | 35.58–40.58 |
+| Install, container user mode | 13.95–14.08 | 13.51–15.24 |
+| Install, container kernel mode | 6.19–6.25 | 22.06–25.33 |
+| Verify install, whole engine | 6.93–6.96 | 1.63–1.73 |
+| Verify install, container total | 1.72 | 1.59–1.60 |
+
+OrbStack's install cgroup charge exceeded its measured host engine
+CPU by 1.67 and 2.47 CPU-seconds. The guest samples bracketed the host
+phase, with the post-phase stats request starting within 42 ms.
+The counters cannot support an additive guest/host CPU split across
+engines. The verification walk had similar container CPU while the
+ctrs host engine used 5.20–5.34 more CPU-seconds per pair.
+
+Trials SHA-256 is
+`8f6b2632709ff113bdbf002a97abb3931ced3412b88c93218e75a792e0b46114`.
+The comparison JSONL SHA-256 is
+`64cf5958e7dc896bc7da4e4f5ee9b224a0ac46d96d44b231263e7ff6b1078cdc`.
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
