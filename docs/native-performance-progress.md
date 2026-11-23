@@ -1548,6 +1548,31 @@ and the host-client misses remain open.
 | ctrs | `848ac7ef8c9764aecb2dd18b4088fcd603a2c2824f03393d972a7b042bc1122e` |
 | OrbStack | `99334e1773f1687604abba2f31e36d175f187d5efb6d92d1c4cab2534a7b94bd` |
 
+#### W2 guest CPU placement control
+
+`w2-pinned-clock-d806e9` pinned all 16 native wait threads to
+ctrs guest CPU 0. The two alternating pairs compared the ordinary
+waits against the same waits with a continuously runnable thread on
+that CPU. All four legs recorded 10,000 waits with 50,000 ns timer
+slack. The ordinary legs had two and one late starts. Both busy
+legs had zero. Keeping the CPU occupied can mask the lateness in
+this control. It changes CPU consumption and stays outside W2.
+
+`base-20261123T002015-8856` pinned only the guest HTTP client to CPU 0
+before creating its 16 workers, using the lowest allowed CPU from
+`sched_getaffinity`. It added no runnable thread. The diagnostic
+retained 10,000 requests at 500/s and the 10 ms guard. All four legs
+verified exact persisted writes and zero request errors. A single
+late start rejected pair 1 on ctrs and pair 2 on OrbStack. The other
+two legs had zero late starts. Keep the frozen fixture and admission
+rule. This affinity change still admitted zero pairs.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Pinned timer controls | `0b05bd099a5cc28b44abff4660dcc64a3b3292b09127394dc8712e74b903d2bc` |
+| HTTP client variant | `22a2e1c32d60b734db087c0355f2fe82e63e26fc0f58ccf56a25fdd2c78c5c58` |
+| HTTP trials | `5a427bd2daf580026774a3f9fd2960ed6ccc85f6686a4611fcbcb833fb0eda6d` |
+
 ### W2 leaf observer overhead on the guest-direct workload
 
 The 49 Hz confirmation at `44e542f` ran all ten alternating blocks.
