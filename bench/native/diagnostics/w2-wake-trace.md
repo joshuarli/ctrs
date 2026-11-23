@@ -20,7 +20,8 @@ Each `sched_waking` is classified by the waker's CPU and the target CPU's
 running task. The task is reconstructed from `sched_switch`; a CPU not yet
 seen in the window is `remote-unknown`. IPIs are counted by sending call site.
 Per-success values divide window counts by the trial's rps × window
-length, which is an estimate. Any ring-buffer overrun or dropped event
+length, which is an estimate. Every CPU's stats must report both an
+overrun count and a dropped-event count. Any overrun or dropped event
 invalidates the window. A traced trial's timings are perturbed and never
 scored. Raw `*-trace.txt` and `*-wake.json` files stay in the run's
 results directory.

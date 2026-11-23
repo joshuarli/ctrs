@@ -52,7 +52,19 @@ for e in EVENTS; do echo 1 > "events/$e/enable"; done
 echo 1 > tracing_on
 sleep WINDOW
 echo 0 > tracing_on
-cat per_cpu/cpu*/stats | grep -E '^(overrun|dropped events):' | awk '{s+=$NF} END {print "LOST", s+0}'
+awk '
+/^(overrun|dropped events):/ {
+    if ($NF !~ /^[0-9]+$/) invalid = 1
+    total += $NF
+    fields[FILENAME, $1]++
+}
+END {
+    for (i = 1; i < ARGC; i++)
+        if (fields[ARGV[i], "overrun:"] != 1 || fields[ARGV[i], "dropped"] != 1)
+            invalid = 1
+    if (invalid) exit 1
+    printf "LOST %.0f\n", total
+}' per_cpu/cpu*/stats
 cat trace
 """
 

@@ -40,8 +40,8 @@ class WakeTraceTests(unittest.TestCase):
             w2_wake_trace.analyze(TRACE.replace("LOST 0\n", ""))
 
     def test_script_uses_and_removes_only_its_instance(self):
-        for missing_event in (False, True):
-            with self.subTest(missing_event=missing_event), tempfile.TemporaryDirectory() as tmp:
+        for missing in (None, "event", "cpu loss counter"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp) / "tracefs"
                 (root / "instances").mkdir(parents=True)
                 (root / "events").mkdir()
@@ -50,8 +50,11 @@ class WakeTraceTests(unittest.TestCase):
                 template = Path(tmp) / "template"
                 (template / "per_cpu/cpu0").mkdir(parents=True)
                 (template / "per_cpu/cpu0/stats").write_text("overrun: 0\ndropped events: 0\n")
+                if missing == "cpu loss counter":
+                    (template / "per_cpu/cpu1").mkdir()
+                    (template / "per_cpu/cpu1/stats").write_text("overrun: 0\n")
                 (template / "trace").write_text(TRACE[7:])
-                events = w2_wake_trace.EVENTS[:-1] if missing_event else w2_wake_trace.EVENTS
+                events = w2_wake_trace.EVENTS[:-1] if missing == "event" else w2_wake_trace.EVENTS
                 for event in events:
                     enable = template / "events" / event / "enable"
                     enable.parent.mkdir(parents=True)
@@ -68,13 +71,15 @@ sleep() { [ "$1" = 2 ]; }
                     env=dict(os.environ, TRACE_ROOT=str(root), TRACE_TEMPLATE=str(template),
                              TRACE_AUDIT=str(audit)),
                 )
-                self.assertEqual(result.returncode == 0, not missing_event, result.stderr)
+                self.assertEqual(result.returncode == 0, missing is None, result.stderr)
                 self.assertEqual(list((root / "instances").iterdir()), [])
                 self.assertEqual(global_trace.read_text(), "another reader's trace\n")
                 self.assertEqual((audit / "trace_clock").read_text(), "mono\n")
                 self.assertEqual((audit / "tracing_on").read_text(), "0\n")
-                if not missing_event:
+                if missing is None:
                     self.assertTrue(w2_wake_trace.analyze(result.stdout)["valid"])
+                else:
+                    self.assertNotIn("LOST", result.stdout)
 
 
 if __name__ == "__main__":
