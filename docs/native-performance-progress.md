@@ -2151,8 +2151,7 @@ OrbStack. Median time to health was 8.033 s and 15.756 s respectively.
 
 Each ctrs leg used 11–12 NAT connections with host-kernel CPU uncharged.
 Use the corrected installed-default command with `--resource-lane matched`
-and omit `--under-load`. The retained-under-load and both derived controls
-are still pending.
+and omit `--under-load`.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -2160,6 +2159,31 @@ are still pending.
 | Trials | `5480a96aef367e8b8fca02c20ba24b25602f103e1303774b5feae03ba293b709` |
 | Report | `9a4d8333940bd2bdcd297dd7392ef56185e371df8ce17a542f2956486d84ac1c` |
 | Terminal status | `88a018fcb99709c3bd34ca3ad507b7b5414a8294cdbc9ae013d9c4bc1c48beeb` |
+
+The subsequent retained-under-load control `w8-paired-4e9242122f72`
+was stopped with SIGTERM at 4,785,344,512 bytes of host free space.
+The first ctrs leg was exact. The first OrbStack leg was interrupted.
+The driver recorded clean teardown and restored the verified legacy
+OrbStack registry. No pair is eligible for analysis from this run.
+Its trials SHA-256 is
+`f267410874239df635847a63d1e9a41bf32b69a223d0bc7d21b22f8d35d1cda7`
+and its terminal status SHA-256 is
+`085ad698a8eb4506da49c226facb151ae0d31a5727945e92fe30f1aeabb54faf`.
+
+The owned private guest disk had grown to 67 GiB of allocated blocks.
+Retiring it after teardown raised available space to 77,333,307,392 bytes.
+The queued diagnostics received a newly seeded store at the same endpoint.
+Preparing the v6 API, PostgreSQL and Redis pins and running the pinned API
+file verification left 282,689,536 bytes allocated in the replacement guest.
+The reseed receipt SHA-256 is
+`bc6698812fe1d668f631746653b7742f439bc05e42b52e5187495a92c5f40acb`.
+The pending retained-under-load and derived controls use one fresh,
+independently warmed store per cohort. Before each cohort, import all four
+v6 images from the pinned layout and verify the config IDs, ordered DiffIDs
+and API file hashes. Use `044d6a1` or later to retire each admitted pair's
+generated layout after the shared local registry stops. Preserve at least
+16 GiB free at cohort and trial boundaries. Keep the interrupted cohort
+separate from any retry because the guest store changed.
 
 #### W8 derived-content timing without concurrent load
 
