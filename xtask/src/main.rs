@@ -424,6 +424,17 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Options whose guest experiments were rejected or kept private
+    /// (docs/decisions.md); enabling one needs a new recorded decision.
+    #[test]
+    fn guest_kernel_leaves_out_unpromoted_options() {
+        let config = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../guest/kernel/ctrs.config")).unwrap();
+        for option in ["CONFIG_SCHED_MC", "CONFIG_ARM64_USE_LSE_ATOMICS", "CONFIG_UPROBE_EVENTS", "CONFIG_PREEMPT", "CONFIG_HZ_1000"] {
+            assert!(!config.lines().any(|l| l.trim() == format!("{option}=y")), "{option} is enabled");
+        }
+        assert!(config.lines().any(|l| l.trim() == "CONFIG_PREEMPT_VOLUNTARY=y"));
+    }
+
     #[test]
     fn arch_aliases() {
         for (given, want) in [

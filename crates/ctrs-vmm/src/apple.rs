@@ -368,6 +368,13 @@ fn url(path: &std::path::Path) -> io::Result<Retained<NSURL>> {
 }
 
 /// Runs on the VM's queue.
+/// The data disk's host persistence contract: a guest flush returns after
+/// the host fsync(2), which does not force the drive's internal cache to
+/// permanent storage. `Full` (F_FULLFSYNC) is the stronger, unpromoted
+/// candidate; changing this changes what every storage measurement means.
+const DATA_DISK_SYNC: VZDiskImageSynchronizationMode = VZDiskImageSynchronizationMode::Fsync;
+const DATA_DISK_CACHING: VZDiskImageCachingMode = VZDiskImageCachingMode::Cached;
+
 fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Result<Inner> {
     // SAFETY: plain configuration calls on objects created here, on the queue
     // that will own the VM.
@@ -411,13 +418,12 @@ fn build(cfg: Config, queue: &DispatchQueue, events: Sender<Event>) -> io::Resul
 
         if let Some(disk) = &cfg.disk {
             let disk_url = url(disk)?;
-            // Fsync does not guarantee that the drive's internal cache reaches permanent storage.
             let attachment = VZDiskImageStorageDeviceAttachment::initWithURL_readOnly_cachingMode_synchronizationMode_error(
                 VZDiskImageStorageDeviceAttachment::alloc(),
                 &disk_url,
                 false,
-                VZDiskImageCachingMode::Cached,
-                VZDiskImageSynchronizationMode::Fsync,
+                DATA_DISK_CACHING,
+                DATA_DISK_SYNC,
             )
             .map_err(|e| io::Error::other(format!("data disk: {}", describe(&e))))?;
             let block = VZVirtioBlockDeviceConfiguration::initWithAttachment(
@@ -615,5 +621,16 @@ impl ListenerDelegate {
         let this = Self::alloc().set_ivars(ListenerIvars { events, connections: RefCell::new(Vec::new()) });
         // SAFETY: NSObject's init on a freshly allocated object.
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_disk_keeps_the_recorded_persistence_contract() {
+        assert_eq!(DATA_DISK_SYNC, VZDiskImageSynchronizationMode::Fsync);
+        assert_eq!(DATA_DISK_CACHING, VZDiskImageCachingMode::Cached);
     }
 }
