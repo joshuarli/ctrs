@@ -816,9 +816,14 @@ The Dockerfile installs the pinned build tools, builds the sdist without
 build isolation, installs exactly the local wheels and runs `pip check`.
 Each trial records the wheel lock digest and compares the installed package
 set with the lock. The Hyperfine recipe still uses the network with
-`cargo build --release --locked`. Admit one pair before running a ten-pair
-cohort. Revision 3 remains the archived network-resolved comparison and
-the Linux amd64 workload.
+`cargo build --release --locked`. Both engines passed the single admission
+pair `base-20261122T172144-cf67` on harness `535cccf`. The two native runtime
+receipt files shared SHA-256
+`c7bfedd667c46386bb9336fb96d09004e636f6440b1668caa0ba203950ef6b66`.
+Against revision 3, the Hyperfine executable hash matched. The HTTPie
+receipt recorded pip 26.3 in place of 26.2.2 and changed file hashes
+for five other distributions at the same versions. Revision 3 remains the
+network-resolved comparison and the Linux amd64 workload.
 
 The pinned Hyperfine source contains 134 crates.io packages in `Cargo.lock`
 with no Git dependencies. Run
@@ -830,15 +835,51 @@ empty Cargo home. All 104 registry crates in the filtered graph resolved
 from the vendored directory. Cargo 1.99.1 and the repository's Cargo
 1.102.0 nightly independently produced archive SHA-256
 `46ac26bd0205449fff0f866be91cb730bd27ae05d4708964f5f2afc79c129e7e`.
-Native offline Hyperfine builds and cache-state admission remain open.
 [Cargo vendor command](https://doc.rust-lang.org/cargo/commands/cargo-vendor.html)
 
 `w7-v5-offline-builds` uses this archive in the Hyperfine context and compiles
 with `cargo build --release --frozen`. Both build commands use
 `--network=none`. Base image pulls remain part of untimed preparation.
 The runner records the Cargo vendor and wheel lock digests and verifies
-both apps across the three cache states. Use `w7-buildx:cohort` after a
-native pair admits both builds. The changed contexts require a new cohort.
+both apps across the three cache states.
+
+#### W7 offline build cohort
+
+Admission `base-20261122T172318-a5f4` and all ten installed-default
+pairs in `base-20261122T172448-ffd0` passed on harness `e8b6e4e` with
+signed release `99db1aa`. All 20 cohort legs used the pinned archives
+above and passed all 25 correctness and cache checks. All runtime
+receipts, including admission, shared SHA-256
+`0c7da05f53ededa3eafc9e993ce5e5434ad59b08a92668f5479e55d56057c587`.
+HTTPie reproduced the revision 4 distribution receipts. The vendored
+Hyperfine build produced executable SHA-256
+`50106869518edd39f5a0c6efed87b848a6f8b523134dc2cc414db901417d6cec`
+in all cache states on both engines. The changed build contexts and
+runtime receipts define a separate comparison from revision 3.
+
+| Application and state | Build and load | First use |
+| --- | ---: | ---: |
+| Hyperfine uncached | 0.8834 [0.8666, 0.8966] | 0.0834 [0.0759, 0.0856] |
+| Hyperfine warm | 0.4193 [0.3073, 0.4788] | 0.0457 [0.0436, 0.0471] |
+| Hyperfine incremental | 0.3230 [0.3111, 0.3340] | 0.0557 [0.0519, 0.0568] |
+| HTTPie uncached | 0.7933 [0.7792, 0.8037] | 0.4863 [0.4736, 0.5129] |
+| HTTPie warm | 0.5176 [0.4453, 0.5555] | 0.2350 [0.2319, 0.2381] |
+| HTTPie incremental | 0.3902 [0.3714, 0.4075] | 0.2480 [0.2374, 0.2538] |
+
+The entries are paired median ctrs / OrbStack ratios with 95% confidence
+intervals. Median uncached build and load was 16.011 s on ctrs and
+18.249 s on OrbStack for Hyperfine, and 6.133 s and 7.752 s for HTTPie.
+Sampled peak physical footprint was 0.5986 [0.5633, 0.6125]. Measured CPU
+was 0.6112 [0.6094, 0.6174]. ctrs still recorded 130 or 133 host NAT
+connections per leg with build-step networking disabled, leaving CPU
+accounting incomplete. Use the pinned harness and release with
+`python3 bench/native/pyramid.py run --name w7-buildx:cohort` to reproduce.
+
+| Run | Raw trials SHA-256 |
+| --- | --- |
+| Revision 4 admission | `8e19caaed7e1b992eee7f7c5e7f4ffc5def0181d0bc315a12cb256c87c3b1ce0` |
+| Revision 5 admission | `e0d8932086d05570b0b15b58247ee8deb6715a202f679b3b2313984b2dfdc9ff` |
+| Revision 5 cohort | `dd2af3cc24e1effb74ec517ee1a803dbeccef0b969eb2739bf3fb783508745b6` |
 
 #### Frozen HTTPie first-use input
 
