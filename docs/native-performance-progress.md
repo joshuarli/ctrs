@@ -1027,6 +1027,47 @@ CTRS_GUEST_DIR="$release/guest/out" python3 bench/native/runner.py httpie-first-
   --ctrs-binary "$release/target/release/ctrs" --pairs 10
 ```
 
+#### Frozen HTTPie first-use result
+
+`httpie-first-use-514fe7d24fa1` used harness `baa21e2` and the signed
+`99db1aa` release with its verified guest kernel and initramfs.
+The admission pair and all ten cohort pairs passed. Every leg loaded
+the same ARM64 archive and verified the config and seven ordered DiffIDs,
+HTTPie 3.2.4, and the exact incremental note. Both engines used 9 vCPUs.
+Guest memory was 8.41 GB on ctrs and 63.16 GB on OrbStack 29.8.2.
+Every ctrs leg recorded zero host NAT connections. Measured outside CPU
+in the first-use intervals stayed below 1.45 cores. The maximum endpoint
+one-minute load was 4.71 on the ten-core host.
+
+| First-use metric | ctrs median | OrbStack median | Paired ctrs/OrbStack median and 95% CI |
+| --- | ---: | ---: | --- |
+| Command wall time | 0.489 s | 0.580 s | 0.8478 [0.8268, 0.8759] |
+| Engine CPU | 0.941 CPU-s | 1.748 CPU-s | 0.5395 [0.5265, 0.5472] |
+| Sampled engine peak footprint | 0.626 GB | 12.299 GB | 0.0508 [0.0504, 0.0511] |
+
+Each ctrs leg used a new private store. OrbStack reloaded the campaign
+image on its running shared engine, so its previously imported layers
+and engine footprint could carry between legs. The footprint is the
+observed whole-engine peak. Import and boot were outside the first
+`docker run --rm` interval, which includes container creation through
+command completion. Imports were recorded separately with different
+store histories. The timing and CPU intervals favor ctrs descriptively
+under these conditions. Build-and-load parity remains a separate result.
+
+Archive SHA-256
+`7854cc5ac3981587b364d26a20d2599cade17d6fc5a507ed62178581b820ba98`.
+Config SHA-256
+`7d9eda4301895a102430d115dfa3793229983378765db56490028d7db06ff852`.
+OrbStack inspected image ID
+`sha256:e15f670ba8c3881b8c5a747e69e789cad554cef34797756c2dfde3cd099cdfd6`.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Frozen input | `149354906de350a72d6029f7576e8878f31428879132b667a42eaf2d7ff0fcf6` |
+| BuildKit metadata | `8ac7bf8e3b0273ac35282d550923bbf06de5ab0947e0dc1ad9bd9aeee0ddd4c4` |
+| Admission trials | `d57feebfb7988ca5147d8b6c89cef9a1e0fbbcf9bef503f1bc111274978ff402` |
+| Cohort trials | `93e06b140c10e40a9cbbd431c42715f05f69ed5f7e0f1fa591f9d85922ffc76d` |
+
 ### Installed-default W2 fixed-work cohort
 
 Run `base-20261122T081048-91d4` used clean source `7eb4859`, the same
@@ -2109,6 +2150,12 @@ pairs with a readiness-time upper 95% bound of 0.95 and a post-recovery
 p99 and measured CPU per success upper bound of 1.03. Retain outage
 errors and host NAT coverage. Confirm a passing candidate against
 OrbStack separately before changing the default.
+
+The first candidate preparation stopped before compilation because the
+test command selected a library target from the binary-only `ctrs` package.
+Use `cargo test -p ctrs --bin ctrs refusal` before signing with
+`cargo xtask host`. No W10 trial ran in that attempt. The corrected run
+keeps the same release source, thresholds and pair counts.
 
 | Receipt | SHA-256 |
 | --- | --- |
