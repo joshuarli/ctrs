@@ -867,6 +867,7 @@ fn ensure_running(engine: &Engine, say: &mut dyn FnMut(&str)) -> Result<String, 
 /// the fresh-create and matching paths.
 fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: &mut Option<Incarnation>) -> Result<String, Error> {
     if reuse(proof, current_incarnation(engine, id)) {
+        crate::diag::info!("builder readiness audit reused");
         LAST_USE.store(now_secs(), Ordering::Relaxed);
         return Ok(id.to_owned());
     }
@@ -886,6 +887,7 @@ fn start_or_resume(engine: &Engine, id: &str, say: &mut dyn FnMut(&str), proof: 
     loop {
         probes += 1;
         let before = current_incarnation(engine, &id);
+        crate::diag::info!("builder readiness audit probe");
         let succeeded = matches!(engine.exec_capture(&id, &["buildctl", "debug", "workers"]), Ok((0, _)));
         retain_proof(proof, before, current_incarnation(engine, &id), succeeded);
         crate::diag::info!("builder worker readiness profile", elapsed_us = readiness_began.elapsed().as_micros() as u64, probes = probes, needs_start = needs_start);
