@@ -3116,6 +3116,24 @@ one candidate threshold against the kernel per-process limit. The initial leg's
 `trials.jsonl` SHA-256 is
 `34f2c5fddfc1eee9bc2efbea2155d0a0590da178bf67ca8d0dcd94094805e517`.
 
+The first repeat `w12-inode-cap-YiKH6J` ran both alternating pairs on
+`fa72716`. All four legs verified 2,830 dependencies, 92,306 files
+and 532,136,968 bytes, with exact build outputs and no host contention
+flag. Both bounds finished install with 103,959 live inodes. At cleanup
+the four guests had 105,036–105,088 live inodes and the system reported
+110,933–110,972 open files out of 491,520. At 98,304, observed install
+times were 0.12 s and 0.24 s shorter and whole-workflow times were
+0.12 s and 0.18 s shorter across the two pairs. Timing and per-VM headroom
+remain unqualified. Keep the default 65,536 while the proc-based repeat
+is pending.
+
+| Trial suffix | `trials.jsonl` SHA-256 |
+| --- | --- |
+| `1-65536` | `b27dc106d2bcecf92a15e2e2b5a1166b9099a9d391854ebb3337e573e59d5f6c` |
+| `1-98304` | `179c99b157f9267d4c003f5df8b5951a9f384973d08914223b65b9a7e1733194` |
+| `2-98304` | `49285858e4785aaec27e7de3891a5ab0d4526948d96a1743b722c0889e1ad744` |
+| `2-65536` | `3ced81a5750bb2c06839c41efda3578baa1ec8efd965e98d24927a8b9f00241f` |
+
 ```sh
 for layout in full-bind bind-source-volume-deps all-volume; do
   python3 bench/native/runner.py baseline --case W12 --workspace-layout "$layout" \
