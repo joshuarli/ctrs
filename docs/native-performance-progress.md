@@ -1537,6 +1537,72 @@ with fresh disk and CPU receipts remains open.
 | Original host cache response | `706b2e8753d0be6dc1a2e70334294c47bc40a5af5ca5c19417ab32b907edcefb` |
 | Fixed host cache response | `aa34cf1124de4a4726cfc47fcffb821e2ba52a79d888d9d8ff0de53de8508fee` |
 
+##### W7 warm-store backing reclaim
+
+`w7-warm-trim-64e12e` used signed host `cd00a03` and the original
+W7 guest assets. The pinned BuildKit worker reported an active
+20 GiB maximum and 5 GiB reserve in its broad GC rules. It reported
+939 cache records totaling 21,448,738,869 bytes before the trim.
+The cap applies to BuildKit's cache accounting. APFS allocation
+also includes guest filesystem and application data.
+
+Use the campaign-owned `ctrs-warm` store and verify the signed host,
+backing device and inode, and managed BuildKit image before issuing
+any command. Read the effective rules with
+`buildctl debug workers --verbose`. Stop the owned builder during
+the trim, and run `storage_trim_guest.py` with `seed`, `trim` and
+`sample` against a new owned volume mounted at `/probe`. The helper
+rejects any mount outside ext4 on `/dev/vda`. Sample ordinary and
+exclusive APFS allocation for the same inode before and after trim,
+and capture the host's available bytes. Restart the owned daemon
+and verify the sentinel, pinned images, and BuildKit records.
+
+| Bytes | Before trim | After five seconds |
+| --- | ---: | ---: |
+| Backing file allocation, including shared extents | 51,935,739,904 | 34,480,701,440 |
+| Exclusive backing allocation | 10,933,321,728 | 9,910,153,216 |
+| Host free space | 17,509,224,448 | 18,537,340,928 |
+| Guest live filesystem usage | 33,101,774,848 | 33,101,774,848 |
+
+The file shed 17.46 GB of extent references. Host free space rose by
+1.03 GB, consistent with the 1.02 GB fall in exclusive allocation.
+Most released references still had other APFS owners. The restarted
+guest returned the same sentinel and pinned image receipts. BuildKit's
+939 records were byte-identical before and after. This reclaimed
+space without evicting build caches, and the result still falls
+short of the disk budget for the ten-pair comparison.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Allocation, guest and restart receipts | `9622819373f0f9847f5f16abb7c1060c7a3f133c3005b191ecd09561fc485e44` |
+| Effective BuildKit worker policy | `c439158767834482d1d863f055428cfd8df48061c2b03560e85eb9155fc1f638` |
+| BuildKit cache rows, before and after | `d8ce1d5e82029105b7c69bbf6e81690bc37a9f2ffd0391c1963f652072614fc7` |
+
+##### W7 phase receipts with the corrected sampler
+
+`w7-fresh-host-ticks-827b88` ran one installed-default ctrs leg of
+the full offline W7 fixture on the signed `cd00a03` host and original
+guest. All 25 build, cache and runtime assertions passed. The runtime
+file matched the original ten-pair cohort byte for byte. Run the
+ordinary W7 offline trial against the warm campaign store. This
+diagnostic also read the old aggregate Mach counter immediately
+before each per-processor read, outside the timed operation.
+
+The old sampler returned no delta in six of the 12 phases. The
+per-processor sampler returned a delta in all 12 and saved both tick
+snapshots for every phase. Build cache usage was 22,000,104,822 bytes
+across 964 records after the trial. Host free space fell by
+689,561,600 bytes over the run. The 133 host NAT connections still
+leave engine CPU incomplete. This one-engine diagnostic verifies
+the new receipts on the representative workload. The ten-pair
+comparison and independent confirmation remain open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Trial | `cba9ad52b1ece0becc0ca1cd076dd7d8fcacb0fd7d8ee25b232874e199676f32` |
+| Paired counter reads | `2ef3913f65c272e3a64423f01a2047c024c529d4973e7144d2031959917766f4` |
+| Exact runtime outputs | `0c7da05f53ededa3eafc9e993ce5e5434ad59b08a92668f5479e55d56057c587` |
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,

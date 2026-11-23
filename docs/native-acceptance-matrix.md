@@ -29,8 +29,13 @@ ticks to avoid cached snapshots. Host NAT CPU attribution remains open.
 [Host counter evidence](native-performance-progress.md#host-cpu-counter-freshness)
 
 The archived zero ctrs BuildKit cache sizes in W6 and W7 came from a
-field-name mismatch. The fixed endpoint reports BuildKit's record sizes.
-[Cache accounting evidence](native-performance-progress.md#w7-buildkit-cache-accounting)
+field-name mismatch. One exact W7 leg verified the corrected cache
+sizes and all 12 host CPU phase receipts. W7 warm-store trim reclaimed
+about 1 GiB of physical space while preserving the cache. The full
+comparison still needs disk capacity.
+[Cache accounting](native-performance-progress.md#w7-buildkit-cache-accounting) ·
+[Backing reclaim](native-performance-progress.md#w7-warm-store-backing-reclaim) ·
+[Fresh phase receipts](native-performance-progress.md#w7-phase-receipts-with-the-corrected-sampler)
 
 ## Existing workloads
 
