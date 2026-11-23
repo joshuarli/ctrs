@@ -1550,6 +1550,33 @@ increase by at most 3%. Report the separate IPI counters and their sum for
 mechanism attribution. The running comparison needs at least the
 16 GiB system floor available after the kernel build.
 
+`w2-ttwu-queue-686c758870` completed all three pairs on `45b7c6d`.
+All six legs verified exactly 20,000 guest-direct requests, matching
+inputs, persisted state and the loaded kernel hash. The two guests
+had identical visible memory and zero host NAT connections.
+Both 6.18.58 builds used GCC 14.2.0-19 from the same arm64 Debian
+builder. Their generated configs matched byte-for-byte.
+
+| Median per successful request | Stock | Queue disabled |
+| --- | ---: | ---: |
+| Rescheduling interrupts (IPI0) | 0.05 | 21.58 |
+| Function-call interrupts (IPI1) | 22.04 | 0.68 |
+| IPI0 plus IPI1 | 22.09 | 22.25 |
+
+Turning off the queue shifted interrupts from function calls to
+rescheduling. It missed the CPU screen. Paired medians were 1.0187
+for workload CPU per success, 0.9962 for p99 and 1.0177 for seconds per
+success. Keep the stock scheduler setting.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Stock Image | `d93230facd264a2f4e17700eebd9728208fe75ee3038679a5cd154105394efd0` |
+| Queue-disabled Image | `20cab022539ac54d4f4bf2385e53b989168126d99da75b4800cce2887f2a385f` |
+| Shared config | `382eb3515cdcb8bfde705af5b07d1824f992edcda2c924a89729fab8e4b15398` |
+| Stock trials | `38b438ce5cb2d55c4f3c6d0b52fb03caa8c7438192218b7fdd65cf747b0ae47b` |
+| Queue-disabled trials | `ab325e6923f02a6d376f567bf3d048b0de82070f672ed00f1f9f8c6d26486238` |
+| Paired observation record | `0e388a71577534f3ca4c61b53fd5a3e7528a815cd66001ebbf08e27b8a3d9b7f` |
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
