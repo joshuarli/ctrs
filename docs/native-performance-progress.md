@@ -3758,6 +3758,51 @@ response exceeded the limit before counting host-kernel CPU from ctrs's
 on its comparison branch. Trials SHA-256
 `7c72a0cb29f0265cf6740dc2f32d4014fd40cf1554d66835129b7b04ea780e6f`.
 
+##### CPU before interruption and after recovery
+
+Rechecked both ten-pair W10 API cohorts from their saved process
+samples, request attempts and PostgreSQL rows. All 40 trials accounted
+for their expected outage errors and had zero unexpected errors. The
+recount verified 1,098,229 successful load responses and matched
+329,636 acknowledged writes to exact persisted rows.
+
+| ctrs cache TTL | Whole workload CPU/success | Before kill | After first exact read | Whole workload with outage CPU subtracted |
+| --- | ---: | ---: | ---: | ---: |
+| 250 ms | 1.167 [1.148, 1.173] | 1.279 [1.236, 1.293] | 1.247 [1.237, 1.263] | 1.130 [1.104, 1.140] |
+| 50 ms | 1.180 [1.160, 1.209] | 1.272 [1.229, 1.302] | 1.315 [1.262, 1.324] | 1.138 [1.118, 1.176] |
+
+Ratios compare measured ctrs CPU per successful request with OrbStack,
+with paired medians and 95% bootstrap intervals. The pre-outage and
+post-recovery CPU gap appears in every pair of both cohorts before
+charging ctrs host NAT CPU. The most CPU that could be removed from
+the samples enclosing the outage was 1.34 CPU-seconds per trial at
+250 ms and 1.22 at 50 ms. A change limited to CPU inside that window
+cannot clear the 1.03 bound at the observed completed work. The faster
+restart and the sustained CPU gap call for separate changes. Use the
+[W2 guest-direct attribution](#w2-api-cgroup-cpu-split-at-eight-clients)
+to investigate the shared sustained request path.
+
+Reproduce from the two API cohort IDs above. Use
+`recovery_workload` before and after rusage counters for total CPU,
+and `timeline.json` for kill, restart and first exact read. Within
+`resources.jsonl`, require verified ownership and identical PID,
+kernel start identity and executable for each process. For the outage
+bound, subtract all ctrs CPU from the last sample wholly before the
+kill command through the first sample wholly after the first exact
+read. Keep the observed successful counts and OrbStack CPU. That
+calculation also gives ctrs credit for CPU at the edges of the
+enclosing samples.
+
+For the steady intervals, use the first and last complete samples
+inside the window from workload start plus 1 s to kill minus 500 ms,
+and from first exact read plus 1 s to workload end minus 1 s. Count
+successful load completions in `attempts.jsonl`. To bound sample
+skew in ctrs's favor, use the outer sample times for its completion
+count and the inner times for OrbStack. Reconcile successes, outage
+errors and persisted acknowledgements against both cohorts'
+`trials.jsonl`. The derived paired rows SHA-256 was
+`205a185762d60a17fee4f79f1c5078ba92e6324f038f3fbadbcb017c7f805ca7`.
+
 ### Installed-default W10 database recovery cohort
 
 Run `base-20261122T105526-a8d2` admitted all ten alternating pairs at

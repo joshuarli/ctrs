@@ -153,7 +153,10 @@ qualification gaps.
    candidate passed its ctrs screen at 0.643× recovery time.
    Against OrbStack it reached 0.823× recovery time and 1.180× measured
    CPU per successful response. CPU blocked promotion.
+   The excess was present before the interruption and after recovery
+   in every pair at both TTLs.
    [Evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
+   [CPU by interval](native-performance-progress.md#cpu-before-interruption-and-after-recovery)
 3. **W6 uncached build memory.** Sampled peak physical footprint was
    1.364×. In the quiet-window diagnostic, guest balloon pages increased
    while the VM helper's footprint stayed within 0.7 MB per leg.
