@@ -42,6 +42,23 @@ The macOS harness now sums the per-processor counters and preserves the
 on an ARM64 Mac. The new subsecond-boundary test reproduced repeated
 snapshots with the old sampler and passed with the new one.
 
+New macOS phase receipts preserve `host_cpu_tick_samples.before` and
+`.after`. Each stores four cumulative ticks in Mach CPU state order,
+plus the monotonic times just before and after the tick read. These
+timestamps bracket the native calls separately from the operation's
+start and end. The raw reads reproduce `host_busy_cores` and expose
+missing or quantized deltas and the gap between the operation and
+counter boundaries.
+
+`w2-host-tick-receipt-cb6d0f` exercised the new receipts on the
+original signed `99db1aa` release with installed defaults. The
+pinned guest-direct W2 workload used eight clients and verified
+20,000 requests and exact persisted data with zero host NAT
+connections. All three phases had tick reads bracketing their
+operation interval. Recomputing each phase's busy cores from
+those ticks reproduced its saved estimate. Trial SHA-256
+`d97061886177404c87364bbb9b448d6387faa053bdb58513f2ea02435cc21dc5`.
+
 The saved W7 offline cohort lacked a host busy CPU reading in 39 of
 120 ctrs phases and 1 of 120 OrbStack phases. The network-resolved
 cohort lacked 41 and 5 respectively. A missing phase makes the

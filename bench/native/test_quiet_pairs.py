@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import runner
@@ -53,6 +54,32 @@ class QuietPairs(unittest.TestCase):
 
 
 class ForeignCpu(unittest.TestCase):
+    def test_macos_phase_preserves_raw_host_tick_boundaries(self):
+        engine = SimpleNamespace(measurement_identity={})
+        record = {"resources": {}}
+        ticks_before = [10, 20, 30, 0]
+        ticks_after = [20, 30, 50, 0]
+        with (
+            patch.object(runner.linux_lane, "enabled", return_value=False),
+            patch("macos_counters.host_cpu_ticks", side_effect=[ticks_before, ticks_after]),
+            patch.object(runner.time, "monotonic", side_effect=[1, 2, 3, 4, 5, 6]),
+            patch.object(runner.os, "cpu_count", return_value=10),
+            patch.object(runner, "harness_cpu_seconds", side_effect=[0, 1]),
+            patch.object(runner.collect, "cpu_boundary"),
+            patch.object(runner.collect, "cpu_delta", return_value={"cpu_seconds": 2}),
+            runner.resource_phase(engine, record, "work"),
+        ):
+            pass
+
+        phase = record["resources"]["phases"]["work"]
+        self.assertEqual(phase["host_cpu_tick_samples"], {
+            "before": {"ticks": ticks_before, "started_monotonic": 1, "ended_monotonic": 2},
+            "after": {"ticks": ticks_after, "started_monotonic": 5, "ended_monotonic": 6},
+        })
+        self.assertEqual((phase["operation_started_monotonic"], phase["operation_ended_monotonic"]), (3, 4))
+        self.assertEqual(phase["host_busy_cores"], 5)
+        self.assertEqual(phase["foreign_cpu_cores"], 2)
+
     def test_outside_cpu_excludes_the_engine_and_harness(self):
         with patch.object(runner.os, "cpu_count", return_value=10):
             got = runner.foreign_cpu([0, 0, 0, 0], [400, 100, 500, 0], 2.0, 7.0, engine_cpu=30.0, wall=10.0)

@@ -1039,27 +1039,43 @@ def foreign_cpu(host_before, host_after, harness_before, harness_after, engine_c
 
 @contextmanager
 def resource_phase(engine, rec, name):
-    if linux_lane.enabled():
-        macos_counters = linux_cgroups
+    is_linux = linux_lane.enabled()
+    if is_linux:
+        host_counters = linux_cgroups
     else:
-        import macos_counters
+        import macos_counters as host_counters
     identity = engine.measurement_identity
     before = collect.cpu_boundary(identity)
-    host_before, harness_before = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
+    before_read_started = time.monotonic()
+    host_before = host_counters.host_cpu_ticks()
+    before_read_ended = time.monotonic()
+    harness_before = harness_cpu_seconds()
     started = time.monotonic()
     try:
         yield
     finally:
         ended = time.monotonic()
-        host_after, harness_after = macos_counters.host_cpu_ticks(), harness_cpu_seconds()
+        after_read_started = time.monotonic()
+        host_after = host_counters.host_cpu_ticks()
+        after_read_ended = time.monotonic()
+        harness_after = harness_cpu_seconds()
         after = collect.cpu_boundary(identity)
         result = (linux_cgroups.phase_delta(before, after, engine.measurement_trace)
-                  if linux_lane.enabled() else collect.cpu_delta(before, after))
+                  if is_linux else collect.cpu_delta(before, after))
         result.update({"operation_started_monotonic": started,
                        "operation_ended_monotonic": ended,
                        "operation_wall_seconds": ended - started})
         result.update(foreign_cpu(host_before, host_after, harness_before, harness_after,
                                   result.get("cpu_seconds"), ended - started))
+        if not is_linux:
+            result["host_cpu_tick_samples"] = {
+                "before": {"ticks": host_before,
+                           "started_monotonic": before_read_started,
+                           "ended_monotonic": before_read_ended},
+                "after": {"ticks": host_after,
+                          "started_monotonic": after_read_started,
+                          "ended_monotonic": after_read_ended},
+            }
         rec["resources"].setdefault("phases", {})[name] = result
 
 
