@@ -1463,6 +1463,40 @@ Verify the stored deltas and the interrupt descriptions, divide by
 client path. Derived counter rows SHA-256
 `d139064d37026665127d566a41d7f78da0152d7c8cf94f3849f113b8fce018d5`.
 
+### Installed-default W2 saturation at one client
+
+#### Container to container at one client
+
+`base-20261123T015720-c637` used source `b84334f`, signed release
+`99db1aa`, the v6 portfolio and the unchanged W2 client. All ten
+alternating pairs admitted. Both engines used nine vCPUs and
+20-second windows. The raw audit matched all 184,135 acknowledged
+writes to persisted rows. There were zero request errors and zero
+ctrs host NAT connections. Outside-engine CPU during load stayed
+below 0.79 core.
+
+ctrs completed a median 2,137 requests/s (range 2,000–2,169).
+OrbStack completed a median 933 requests/s (range 917–947).
+
+| Guest-direct metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.4367 | [0.4292, 0.4423] |
+| API p50 | 0.8248 | [0.8024, 0.8466] |
+| API p95 | 0.2233 | [0.2218, 0.2279] |
+| API p99 | 0.2276 | [0.2240, 0.2401] |
+| Measured engine CPU per verified request | 0.8282 | [0.8138, 0.8415] |
+| Sampled peak physical footprint | 0.1531 | [0.1504, 0.1548] |
+
+Measured guest-direct CPU per success clears the strict-win
+interval at one client. It misses parity at four and eight clients.
+The 16-client interval crosses the parity bound. These saturation
+cohorts use the same duration and complete different request counts.
+The exact 50,000-request cells compare equal work at each concurrency.
+
+Reproduce with the 16-client saturation command below using
+`--concurrency 1`. The guest-direct `trials.jsonl` SHA-256 is
+`08c1ad4a1a0a5f4c8901d8fc64de812800d4c6f8d88b6796137775bed5ffd552`.
+
 ### Installed-default W2 saturation at four clients
 
 #### Container to container at four clients
