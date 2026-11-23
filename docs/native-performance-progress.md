@@ -1500,6 +1500,41 @@ the recorded twofold headroom flag for both engines. Retain failed or
 contended trials and tool-limited results with their path and controls. The queue uses
 separate cohort invocations with `--pairs 10 --max-pairs 16` after admission.
 
+#### W13 published-port v3 admission
+
+All four published-port configurations completed one installed-default
+pair on `8c1c25d` and signed release `99db1aa`. Each of the eight legs
+verified three 1 GiB path transfers, a 1 GiB host loopback transfer and
+a 1 GiB guest loopback transfer. The current reporter matched the paired
+inputs and rechecked the receiver receipts and headroom flags. Both
+engines failed the twofold tool-headroom check in every configuration.
+The host control set the lower ceiling in all eight legs.
+
+| Published-port condition | Host controls, ctrs / OrbStack (GB/s) | Highest path attempt across both engines (GB/s) | Tool-limited attempts, ctrs / OrbStack |
+| --- | ---: | ---: | ---: |
+| Upload, 1 stream | 4.73 / 4.66 | 3.33 | 3/3 / 2/3 |
+| Upload, 4 streams | 3.80 / 3.94 | 3.28 | 3/3 / 3/3 |
+| Download, 1 stream | 2.20 / 2.27 | 3.52 | 3/3 / 3/3 |
+| Download, 4 streams | 2.03 / 1.97 | 4.41 | 3/3 / 3/3 |
+
+The one-pair diagnostics establish the gating failure. No published-port
+ten-pair cohort was launched. The 4-stream download would need at least
+8.83 GB/s in both endpoint controls at the highest observed transfer
+rate. The native comparison will test whether receiver copies explain
+enough of the host deficit. Keep the sender and timing boundaries, map
+the expected file, and compare each received range through libc
+`memcmp`. A native socket-pair check passed exact cyclic data and
+rejected corrupted, short, excess, and empty-artifact cases. Compare five
+alternating 1 GiB A/B pairs per direction and stream count on host loopback
+before considering a new engine fixture.
+
+| Run | Raw trials SHA-256 |
+| --- | --- |
+| `base-20261122T185656-8224` | `7b477b253770a0327a1742e93d1685699018c8789d28da8038cec43901c08777` |
+| `base-20261122T185750-36fe` | `6be3593b5c819d5527a79010bf1ddfb85d073324c325c5412e14b09bce55762b` |
+| `base-20261122T185850-5eff` | `881e34d86986ef81be266dc3a61818fdc5963f64f22a5fd880dda7acec0c6497` |
+| `base-20261122T185942-85e2` | `ab867ac0394e07f097679f858d718e8c07a811bf75f639c56c873a6a8133277e` |
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
