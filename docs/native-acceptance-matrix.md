@@ -108,8 +108,11 @@ pairs with no listen overflows or long stalls. p95 and p99 were 0.731×
 and 0.651×. Measured CPU per response was 1.234× [1.209, 1.247]
 before host NAT CPU. [Backlog-128 evidence](native-performance-progress.md#w14-fresh-connections-with-backlog-128)
 The vsock setup diagnostic localized the largest measured elapsed
-interval to connection establishment and the address header.
-[Vsock setup evidence](native-performance-progress.md#w14-vsock-setup-stages)
+interval to connection establishment. The follow-up localized it
+inside the framework call and completion interval. Caching the
+socket device missed its CPU target.
+[Vsock setup](native-performance-progress.md#w14-vsock-setup-stages)
+[Connector breakdown](native-performance-progress.md#w14-virtualizationframework-socket-device-lookup)
 
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
 (`tests/e2e.sh`, `conformance/`), not performance cells. `bench/net/*.py`

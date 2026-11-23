@@ -3226,6 +3226,62 @@ This is a three-pair perturbation check for the attribution.
 | Raw paired receipt | `f5bc5cdbce3ed6592af566618fd56cec570ec6241caddc20c6a1140766119b61` |
 | Derived histogram ranks | `7ef848b7dd598965aa3ea6f1898bd5eb8a409d8868cc299e393457f7b53edc3b` |
 
+##### W14 Virtualization.framework socket device lookup
+
+Split the vsock connector interval at VM queue entry, socket
+device selection, framework completion callback entry, caller
+receipt of the callback result, and completion of file descriptor
+duplication and tuning. Record base-two nanosecond buckets for
+the framed guest relay port only. Each stage must cover the exact
+number of vsock fallback connections. The callback interval
+includes framework and guest work and any delay before the
+callback runs on the VM queue.
+[Apple VM queue contract](https://developer.apple.com/documentation/virtualization/vzvirtualmachine/queue)
+
+Screen lazy retention of the first successfully looked-up socket
+device for the lifetime of its connector. Keep connection requests
+on the VM queue and release the retained device on that queue when
+the connector drops. A failed lookup leaves the cache empty. Use
+the same instrumentation in both signed comparison builds. Run
+five alternating ctrs-only pairs with the same backlog-128 W14
+fixture, boot assets and warm image store. Compare the stage
+histograms and apply the earlier 5% CPU and 1.03 latency screens.
+[Apple socket device contract](https://developer.apple.com/documentation/virtualization/vzvirtiosocketdevice)
+
+`w14-connect-device-cc6c0e00` completed all five pairs. Both
+signed hosts used the same pinned `99db1aa` source and guest
+assets. The audit verified all 32,000 responses, exact routes,
+zero leaked sessions or queue overflows, and owned cleanup. The
+candidate passed 15 focused port tests. There were 13,318 stock
+and 13,317 cached-device vsock connections, with a complete
+five-stage receipt for each. Both host gate checks passed.
+
+| Connector interval | Stock p50 bucket | Stock p95 bucket | Cached-device p95 bucket |
+| --- | ---: | ---: | ---: |
+| Wait for VM queue entry | 0.128–0.256 µs | 65.5–131.1 µs | 65.5–131.1 µs |
+| Socket device selection | 0.256–0.512 µs | 0.512–1.024 µs | 0.032–0.064 µs |
+| Framework call and completion callback | 131.1–262.1 µs | 262.1–524.3 µs | 262.1–524.3 µs |
+| Callback entry through caller receipt | 8.2–16.4 µs | 32.8–65.5 µs | 32.8–65.5 µs |
+| Duplicate and tune descriptor | 2.0–4.1 µs | 16.4–32.8 µs | 16.4–32.8 µs |
+
+Caching shortened device selection to approximately the timer's
+resolution. Connection completion still dominated the measured
+setup interval. Paired cached/stock measured CPU per response was
+1.005 [0.983, 1.008]. Request p50 was 1.003 [0.986, 1.005],
+and p95 was 0.991 [0.960, 1.076]. The candidate missed both the
+CPU screen and the p95 upper bound. Preserve the existing
+device lifetime. The three local relay candidates leave the
+fresh-connection CPU gap open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed instrumented stock host | `2eb3507f88abed8b0635deb19ad8b9e3e655e1def36cba271ecc1a509caefd07` |
+| Signed instrumented cached-device host | `86af734299bc041e2b2747a3e8b117ff4b4e61983b1199beb3299a2509d94ee6` |
+| Instrumentation patch | `45586f7606d468ec377e7859dff566fcd91b947ab4b1cb59336aea64accb3a56` |
+| Instrumented candidate patch | `bd7304c9a3ba148203067966f1b9e01178a8e2956edd18818856f7c7fd5172a2` |
+| Raw paired receipt | `02681f9c8bf67bc38cfcbe621de4948dffdb44ec65a9147be93842ba8fa5dd87` |
+| Derived histogram ranks | `3b0b033ce2e18692acfd936400abee79ac4a21a9bd96317b39385041596b9063` |
+
 #### W14 streaming, cancellation and reconnect with buffered frames
 
 Each installed-default cohort passed all ten alternating pairs on
