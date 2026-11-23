@@ -2393,8 +2393,8 @@ Median time to health was 6.571 s on ctrs and 14.734 s on OrbStack.
 Both guests exposed nine CPUs. Their visible memory was 8,407,957,504
 and 63,157,620,736 bytes respectively. Every ctrs leg recorded 18–19
 NAT connections with host-kernel CPU uncharged. These are
-installed-default pilot results. Matched-resource controls and complete
-CPU attribution remain open.
+installed-default pilot results. Matched-resource results follow.
+Complete CPU attribution remains open.
 
 Use `runner.py w8-baseline --layout <v6 OCI layout> --ctrs-binary
 <signed 99db1aa release> --resource-lane installed-default --content
@@ -2541,6 +2541,35 @@ before seeding a store or stopping the OrbStack registry.
 | Plan | `80716d9521952cf903a0079de2604a23c31fa2a3f11dd4066edbca8ef06c8131` |
 | Trials | `0ba1a61b9444d8e04338c443600027bbae9d87ba5bb97c4f1e30f9b98aa55a75` |
 | Terminal status | `4f6eeb01f803e9f1838e5ba7a0d69c84376a4837ef4c6203b9b67cbcba5fbd03` |
+
+After retiring the earlier 6,144 and 5,120 MiB W6 candidate disks, the
+retry started with 55,657,148,416 bytes free.
+`w8-paired-d86dc35d528f` completed all ten alternating pairs at the
+same nine-vCPU matched budgets. Each leg passed ownership, host and
+workload checks, with 1,000 exact deployment requests and 50,000
+background requests overlapping all four pulls. Median pull-to-health
+was 6.919 s on ctrs and 20.570 s on OrbStack.
+
+| Derived, under load | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.3327 | [0.3176, 0.3564] |
+| API completion p95 during pulls | 0.9229 | [0.8575, 0.9603] |
+| API completion p99 during pulls | 1.0646 | [0.9081, 1.1018] |
+| Sampled peak physical footprint | 0.5797 | [0.4072, 0.6336] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.6194 | [0.6107, 0.6283] |
+
+This completes the four matched W8 controls. Derived-load p99 remains
+inconclusive and ctrs used 18–20 host NAT connections per leg. The
+report reproduced exactly. All generated pair layouts were retired
+and the legacy OrbStack registry was restored.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Warm inputs | `e7bd0bba59351c9957e256afb3413762fc132f4c017c8017ad2a56c40bac7679` |
+| Plan | `80716d9521952cf903a0079de2604a23c31fa2a3f11dd4066edbca8ef06c8131` |
+| Trials | `f0bcc924b994ed4ac1fe5edf6c33d58500626facec2619fbf5f97310f48bf550` |
+| Report | `d17267b1bdd7bb11193b77271982eb39e3a49910ae34d7ee74f42b85ef814b0f` |
+| Terminal status | `88a018fcb99709c3bd34ca3ad507b7b5414a8294cdbc9ae013d9c4bc1c48beeb` |
 
 #### W8 derived-content timing without concurrent load
 
