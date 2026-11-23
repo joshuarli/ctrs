@@ -2403,6 +2403,29 @@ warmed store.
 | Trials | `b69ab358ae76fe194d1a446e4ee93acdb11fbeeb99198b9dc466d0c6fb4d2567` |
 | Report | `af80730b10967fe585ab58bd8b4a1fbfc2920a1b57897c7dd1f6c5b7b1a20a41` |
 
+The derived-under-load control `w8-paired-f6854899e6fe` stopped before
+its first OrbStack workload. The ctrs workload and resource checks
+passed, and free space dropped from 18,301,665,280 bytes before that
+leg to 16,359,575,552 bytes afterward. Both host readiness checks
+passed and both OrbStack inventories were empty. The separate 16 GiB
+disk guard invalidated the ctrs leg and refused the OrbStack leg.
+Cleanup completed and the legacy OrbStack registry was restored.
+Retiring the stopped retained-load guest disk recovered about 8.5 GB.
+
+The retry requires 50 GiB free before seeding the store and keeps the
+16 GiB leg boundary guard. The completed derived no-load cohort
+consumed 28.3 GB of host free space across its trial boundaries.
+The larger starting reserve also covers the observed 1.94 GB drop
+in the first under-load leg and the preparation cost. Keep the
+fresh warmed-store procedure, input pins and ten alternating pairs.
+The partial run has zero admitted pairs.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `80716d9521952cf903a0079de2604a23c31fa2a3f11dd4066edbca8ef06c8131` |
+| Trials | `0ba1a61b9444d8e04338c443600027bbae9d87ba5bb97c4f1e30f9b98aa55a75` |
+| Terminal status | `4f6eeb01f803e9f1838e5ba7a0d69c84376a4837ef4c6203b9b67cbcba5fbd03` |
+
 #### W8 derived-content timing without concurrent load
 
 All ten installed-default pairs passed in `w8-paired-99ec4b7d32de`
