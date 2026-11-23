@@ -878,6 +878,9 @@ Allow at least 40 GiB before cloning for the repeat, given the roughly
 16 GiB operating floor. The configuration remains a candidate pending the
 independent repeat, wider default-workload coverage and CPU accounting.
 
+The repeat refused admission with 32,921,944,064 bytes free.
+No engine or store clone was started. It still needs the 40 GiB reserve.
+
 Trials SHA-256
 `9290841e442d1b1777a6713374f3088367782ec772f1c5278ab9fe9fe412f39f`.
 
@@ -1498,6 +1501,55 @@ The first run's trial and OrbStack trace summary SHA-256s are
 `acf18aa752c818ffb10047b2a5d6f86abddeab52d133049d10b0bff37e1e8e5b`
 and `fdb4f67d5d103598589b32cdae65c938424712b28254a187bf86885c3e0cae36`.
 
+`wake-20261122T223132` completed both exact 50,000-request guest-direct
+legs at nine vCPUs, with zero lost events and clean private-instance
+teardown. ctrs used no host NAT connections. The observer ran for about
+two seconds after the six-second load delay.
+
+| Events per estimated successful request | ctrs | OrbStack |
+| --- | ---: | ---: |
+| Scheduler switches | 45.11 | 29.42 |
+| Task wakeups | 23.20 | 17.90 |
+| Wakeup targeting a remote idle CPU | 19.58 | 8.97 |
+| Wakeup targeting the same CPU | 2.29 | 7.98 |
+| Single-CPU IPI sends | 21.41 | 6.52 |
+
+ctrs traced 88,427 single-CPU IPI sends from `ttwu_queue_wakelist`.
+OrbStack's most frequent site was `wake_up_q`, with 10,578 sends.
+The sites and counts cover the entire guest. The per-request estimates
+use the full trial rate and the actual trace duration. Use the
+untraced cohort for performance and the private trace to locate the
+excess remote-idle wakeups.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Trials | `b229a5ef6e5da49547a4ef6fb96c71d7240db8fa27b9d167482ba871b622cdc3` |
+| ctrs trace | `b11732e8475d87d9eda1ddb92a31ccb015ef757058c3afa3c1d7133bdc4cf65d` |
+| OrbStack trace | `e00d6e6b52c2aceb92071c4f6e0535db1e820b55b857e3380f88b2a8515c6074` |
+
+##### W2 remote wake queue probe
+
+Build two Linux 6.18.58 ARM64 kernels in the same pinned Debian builder,
+using the same ctrs patches, config and fixed Kbuild metadata. Change
+only the non-RT default of `TTWU_QUEUE` in `kernel/sched/features.h`.
+The stock guest has debugfs disabled. A rebuild keeps the test on
+the existing config and avoids a global runtime tuning change.
+Disabling the queue may move wake work onto the sending CPU, so count
+rescheduling IPIs and function-call IPIs together.
+[Linux 6.18 scheduler features](https://raw.githubusercontent.com/torvalds/linux/v6.18/kernel/sched/features.h)
+
+Run three ctrs-only alternating pairs with untraced, guest-direct W2
+at 20,000 exact operations and eight clients. Clone the stopped warm
+store for each kernel. Verify nine vCPUs and the same 8 GiB ceiling.
+Record visible memory and reject differences above 1%. Require pinned inputs,
+exact persisted state, verified running kernel hashes, complete
+workload CPU receipts and zero host NAT connections. Advance to a
+ten-pair screen only if the candidate's median paired CPU per success
+is at least 5% lower and its median paired p99 and seconds per success
+increase by at most 3%. Report the separate IPI counters and their sum for
+mechanism attribution. The running comparison needs at least the
+16 GiB system floor available after the kernel build.
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
@@ -1765,6 +1817,17 @@ Use five alternating 1 GiB pairs per direction and stream count.
 Advance only if the host control reaches the existing twofold capacity
 requirement. This still leaves the guest control to verify.
 [Python socket.sendfile](https://docs.python.org/3/library/socket.html#socket.socket.sendfile)
+
+All 40 sendfile-control transfers verified 1 GiB and every receiver
+digest. One-stream upload median reached 5.892 GB/s from 4.876 GB/s,
+with a maximum of 5.905 GB/s. The existing published-port path had
+reached 3.33 GB/s and therefore needs at least 6.66 GB/s of control
+capacity. Four-stream upload was 4.412 GB/s versus 4.432 GB/s.
+Four-stream download was 2.241 GB/s versus 2.255 GB/s. Neither
+direction advanced to engine qualification. Candidate source SHA-256
+was `ddaed700693ea4090997b8b70dfe6d54f6493dbc26249a75a47c25c081169c34`.
+The comparison JSONL SHA-256 is
+`b41bc2559f31b2cf9a89de532cbc4aed88f973873953eb0d2485d36fd690f97d`.
 
 ### Installed-default W14 idle-resume cohort
 
@@ -2441,6 +2504,10 @@ The larger starting reserve also covers the observed 1.94 GB drop
 in the first under-load leg and the preparation cost. Keep the
 fresh warmed-store procedure, input pins and ten alternating pairs.
 The partial run has zero admitted pairs.
+
+After retiring the stopped W6 candidate disk and both private W10
+comparison disks, the retry had 32,922,091,520 bytes free and stopped
+before seeding a store or stopping the OrbStack registry.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -3243,6 +3310,37 @@ mode with a 750-second work window and separate drain and cleanup
 deadlines. Require at least six exact cycles in each terminal record.
 The first supervisor status SHA-256 is
 `f86745c7c4f87524416f088f82bfef9fc6ad5aace2cb9027263f2603e183af66`.
+
+The duration runs `w11-mixed-20261122T220517-deaf` (read-only sample)
+and `w11-mixed-20261122T221813-e569` (FITRIM) completed 21 and 22 exact
+cycles respectively, with clean supervisor and driver teardown.
+The comparison uses the first six cycles from each, as declared.
+All 12 interventions preserved the probe sentinel and exact 500
+database seed rows. The backing inode stayed fixed in each store.
+
+| First six cycles | Read-only sample | FITRIM |
+| --- | ---: | ---: |
+| Backing allocation change from cycle 0 to cycle 5 | +63,373,312 bytes | +28,659,712 bytes |
+| Steady physical footprint change from cycle 0 to cycle 5 | +59,031,600 bytes | +67,584,024 bytes |
+| Peak descriptor increase | 4 | 0 |
+
+The first trim reclaimed 150,822,912 host bytes immediately. The next
+five reclaimed 8,663,040–12,079,104 bytes each, measured around the
+intervention. Ordinary and exclusive APFS allocations agreed at those
+boundaries. In the later idle observer, sample cycle 2 differed by
+20,480 bytes between the two counters. First and last values agreed.
+Both legs exceeded the 16 MiB backing and physical-footprint budgets.
+Trim cycle 8 recorded a private-backing identity or sharing check
+failure, which leaves the full trim leg's resource-growth summary
+unknown. Keep all 43 exact-work receipts and the failed observer
+record. The 12-hour qualification remains open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Control trials | `41a404866fe2e832d4a4e4c04d8a297324fe3316d4c6ecfda19ae55aa3c2d00b` |
+| Trim trials | `50f1e5c721a2839d5507fcbd1d43452f646caa044c32e35e5ff18e2a0ce18dab` |
+| Control supervisor status | `2a3b2f2ac2b474b0eabd09934a2321cb07cbe7f2d93f9f717b492a9b96b66df7` |
+| Trim supervisor status | `9917b766b48d2486b1a79d6a747edd4fdc9b424371ed425cbb00850da82ec1e8` |
 
 ### Rebuilt W12 workspace fixture
 
