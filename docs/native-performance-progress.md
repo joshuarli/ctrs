@@ -839,6 +839,26 @@ footprints unexplained. This run provides no basis to promote zero grace.
 | 120 s quiet samples | `f64ab627bc8724a2da0122931b459f6b81f27ad92e29642c0fc021d06bf9e4e5` |
 | 0 s quiet samples | `a3f97666670a82f2adea3035e2720ab07600ecbf9186151b9cf7bcc865c61028` |
 
+#### W6 intermediate memory-ceiling screen
+
+Screen 5,632 MiB against 8,192 MiB at the installed vCPU count using
+the same signed artifacts and uncached fixture as the 5,120 and 6,144
+MiB screens. This is their memory midpoint. The earlier screens
+found headroom on different limits, and the balloon diagnostic leaves
+the physical footprint unresolved. Keep the first pair in the cohort.
+Require ten admitted pairs within sixteen attempts, exact Rust and zlib
+artifacts, the assigned ceilings and zero OOM kills on both sides.
+The paired upper 95% bounds must be at most 0.95 for peak physical
+footprint and 1.03 for each build time. Preserve the measured CPU
+receipt and host NAT accounting gap. An admitted screen still requires
+independent confirmation before any macOS default changes.
+
+```sh
+python3 bench/native/runner.py baseline --case W6 --a ctrs --b ctrs \
+  --resource-lane installed-default --candidate-memory-mib 5632 \
+  --pairs 10 --max-pairs 16 --pair-quiet-load 4
+```
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same

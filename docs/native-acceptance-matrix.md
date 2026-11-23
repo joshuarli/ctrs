@@ -120,21 +120,24 @@ qualification gaps.
    and measured engine CPU was 1.163×. The offline install and verification
    walk account for about 71% of the workflow time gap. Both layouts that
    used volumes for dependencies and build outputs cleared workflow
-   non-inferiority. The full-bind inode-cap probe is pending.
+   non-inferiority. The inode-cap probe completed both exact pairs,
+   with little observed timing change. A native descriptor repeat is queued.
    [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 2. **W10 API recovery.** Time to the first exact read was 1.239×. The
-   gap accrued after the start command returned. Trace the
-   refusal cache before attributing the delay to it.
+   gap accrued after the start command returned. The refusal trace
+   found two 250 ms expiries before the first exact read. The 50 ms
+   candidate is in paired verification.
    [Evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
 3. **W6 uncached build memory.** Sampled peak physical footprint was
-   1.364×. The VZ helper retained the allocation across builds. Guest
-   active, cache and balloon counters can test the source of the retention.
+   1.364×. In the quiet-window diagnostic, guest balloon pages increased
+   while the VM helper's footprint stayed within 0.7 MB per leg.
    [Evidence](native-performance-progress.md#installed-default-w6-cohort)
 4. **W12 bind watch and guest-direct W2 CPU.** Whole-trial watch CPU was
    1.186×, with the excess concentrated in setup. W2 CPU per verified
    request was 1.131× on the guest-direct path. Both cohorts had zero ctrs
-   host NAT connections. The watch setup breakdown and W2 observer
-   overhead check are pending.
+   host NAT connections. Offline install accounted for 19.33–20.15
+   of the 28.56–29.04 extra measured watch setup CPU-seconds. W2's
+   leaf samples and guest interrupt counts point to excess wakeup work.
    [W12 evidence](native-performance-progress.md#installed-default-w12-bind-watch-cohort)
    [W2 evidence](native-performance-progress.md#installed-default-w2-container-to-container-fixed-work-cohort)
 5. **CPU losses with incomplete host accounting.** Measured engine CPU
