@@ -1353,6 +1353,28 @@ OrbStack or exercise saved-container restoration during daemon startup.
 Trial SHA-256
 `f5e6a315dd0e5aeaa6bcd7f1c12d2119e706ae1662829d26c53f3be00c0fd2f6`.
 
+##### Build registry routing after saved-container restoration
+
+`w6-vsock-restore-4f8cb0` used candidate `d370e8c`, its signed host
+and updated initramfs. With the preferred mirror port 47391 occupied,
+start a pinned Python container with `--restart always` and an owned
+named volume. On each startup, verify a durable sentinel and append
+the guest boot ID and mirror port from `/proc/cmdline`. Stop the
+owned daemon, occupy its previous mirror port, and start it again.
+Require the same container and volume, a new boot ID, and a different
+mirror port. Run the pinned uncached zlib build and probe the retired
+mirror port with a temporary loopback HTTP listener.
+
+The first launcher timed out because it embedded malformed Python.
+The corrected launcher verified the same container and sentinel
+after restart and observed the mirror port change from 58200 to
+58208. The exact zlib archive used 37 vsock connections and zero NAT
+connections. The retired mirror port returned the exact control
+body over one NAT connection. This checks saved-container restoration
+and port selection. The full performance comparison remains open.
+Receipt SHA-256
+`02295ed10694e9724821d1dbcbbefe547e02a6483d85ccd332d6d2f025eac479`.
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
