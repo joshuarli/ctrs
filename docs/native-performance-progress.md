@@ -1008,6 +1008,75 @@ missed the required timing limit, which blocks promotion. Keep the
 | Screen trials | `9290841e442d1b1777a6713374f3088367782ec772f1c5278ab9fe9fe412f39f` |
 | Repeat trials | `3de92916871bc8683bb0952d26fde317abdfcf2e53a8b1181ef6137616d436da` |
 
+##### W6 zlib timing by build phase
+
+Recomputed the zlib phase boundaries for both 5,632 MiB cohorts
+from their original BuildKit raw progress and host wall receipts.
+All 40 legs verified the pinned Rust and zlib artifacts, completed
+uncached compile and test vertices, used nine vCPUs and reported
+zero OOM kills. No trial was removed from either cohort.
+
+The independent repeat's three slowest candidate/stock pairs
+spent an extra 115–155 ms in image export. The archive build's
+compile-and-test step also took longer at 5,632 MiB in all ten
+repeat pairs, by 4–49 ms with a paired median of 18 ms.
+
+| Independent repeat pair | Extra wall | Extra compile and test | Extra image export | Extra layer push within export |
+| --- | ---: | ---: | ---: | ---: |
+| 5 | 178 ms | 49 ms | 155 ms | 65 ms |
+| 7 | 210 ms | 40 ms | 153 ms | 57 ms |
+| 8 | 229 ms | 18 ms | 115 ms | 54 ms |
+
+Measure the compile interval from its exact non-cached progress
+vertex. Measure export from the first `exporting to image` start
+through the last completion, and read layer push from the
+`pushing layers` status. The whole-build difference includes
+other observed frontend stages and time outside those progress
+intervals. Retain both cohorts as measured. This decomposition
+localizes the major slow pairs and leaves the memory ceiling
+unpromoted.
+
+The derived 20 paired rows SHA-256 was
+`a0c697d325089756b942f5a351a3c5bec2dc748da6d12d12dcf068caaf41367e`.
+
+##### W6 build registry upload work
+
+`w6-upload-work-e85ec4` ran five alternating zlib-only pairs on
+the two stopped warm stores from the independent ceiling repeat.
+Use the signed `99db1aa` host with a diagnostic in
+`crates/ctrs/src/daemon/mirror.rs`. Take monotonic elapsed samples
+around request-body append, copying the upload through the digest
+verifier, and finalizing the verified blob. Record only the method,
+byte count and elapsed time. Keep checksum validation, sync and
+publication unchanged. Read the diagnostic lines from the owned
+daemon's log at the build boundary. The first launcher missed the
+daemon's log prefix. The corrected launcher collected all ten legs.
+
+Both root stores used the pinned ARM64 GCC image, nine vCPUs,
+the assigned ceilings and the exact W6 zlib Dockerfile and tarball.
+The audit checked the running host and boot assets, the uncached
+compile and test vertex, the final library digest and zero guest
+OOM kills for each leg. Fresh tags were removed after verification.
+Both host gate checks returned zero. This short replay omits the
+preceding W6 Rust build and therefore serves as upload attribution.
+
+Each build completed seven blob upload PUTs. No blob bytes went
+through an earlier PATCH or direct POST. The mirror appended about
+3.57 MB and copied the same bytes back through the digest writer
+during each build. The seven second-copy intervals summed to
+11.1–35.9 ms per build, with the largest individual interval
+18.5 ms. Final digest checking, sync and rename summed to
+53.8–83.7 ms per build. The per-request intervals can overlap.
+Eliminating the second copy in this replay would remove real work.
+The observed duration is smaller than the 115–155 ms extra
+export interval in the three slow archived repeat pairs.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed instrumented host | `1ffca1e0fe28228bcaa5800a2b3db5cb9ad9bbd14b8360fa7647363554fbb6f5` |
+| Instrumentation patch | `0124058d3aef6531d601f22d5736e5594153b943b84af8d095136d4720130060` |
+| Verified uploads | `b173043ace5c22eb94e4f6689bda80a41fbe0a81ad1cd708129861669eb156da` |
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same

@@ -179,7 +179,10 @@ qualification gaps.
 3. **W6 uncached build memory.** Sampled peak physical footprint was
    1.364×. In the quiet-window diagnostic, guest balloon pages increased
    while the VM helper's footprint stayed within 0.7 MB per leg.
+   At the 5,632 MiB ceiling, image export accounted for most of the
+   added zlib wall time in the three slowest repeat pairs.
    [Evidence](native-performance-progress.md#installed-default-w6-cohort)
+   [Build phase timing](native-performance-progress.md#w6-zlib-timing-by-build-phase)
 4. **W12 bind watch and guest-direct W2 CPU.** Whole-trial watch CPU was
    1.186×, with the excess concentrated in setup. W2 CPU per verified
    request was 1.131× on the guest-direct path. Both cohorts had zero ctrs
