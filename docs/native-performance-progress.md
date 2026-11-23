@@ -2707,6 +2707,29 @@ existing timing bounds. Full CPU accounting remains a promotion gap.
 | Paired inputs and ratios | `c4d933cf39ae574ecace0aedc056925352516620e1d02c92413ed04af9128a58` |
 | Summary | `e3e63b9d0e91b30d013877fa08b3ec020ecf6fe227a272791aba68acab6c64e8` |
 
+##### OrbStack confirmation
+
+`base-20261122T215431-1975` admitted all ten alternating installed-default
+pairs with the signed 50 ms candidate. All 20 legs passed exact persisted
+state and outage checks. The ctrs daemon and both guest asset hashes
+matched the candidate plan in all ten ownership receipts. Both guests
+exposed nine vCPUs, with 8,407,957,504 bytes visible on ctrs and
+63,157,620,736 bytes on OrbStack.
+
+| Metric | Median candidate/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| Start command to first exact read | 0.8232 | [0.7163, 0.8616] |
+| Recovered request p99 | 0.6109 | [0.5937, 0.6449] |
+| Measured engine CPU per successful response | 1.1803 | [1.1599, 1.2091] |
+| Sampled peak physical footprint | 0.1893 | [0.1862, 0.1910] |
+
+Median recovery was 354.1 ms for ctrs and 450.9 ms for OrbStack.
+The shorter TTL cleared the timing target. Measured CPU per successful
+response exceeded the limit before counting host-kernel CPU from ctrs's
+41–58 NAT connections per leg. Keep the 250 ms default and the candidate
+on its comparison branch. Trials SHA-256
+`7c72a0cb29f0265cf6740dc2f32d4014fd40cf1554d66835129b7b04ea780e6f`.
+
 ### Installed-default W10 database recovery cohort
 
 Run `base-20261122T105526-a8d2` admitted all ten alternating pairs at

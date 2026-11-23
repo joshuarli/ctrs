@@ -127,8 +127,9 @@ qualification gaps.
 2. **W10 API recovery.** Time to the first exact read was 1.239×. The
    gap accrued after the start command returned. The refusal trace
    found two 250 ms expiries before the first exact read. The 50 ms
-   candidate passed its ten-pair ctrs screen at 0.643× recovery
-   time. OrbStack confirmation and host NAT CPU remain open.
+   candidate passed its ctrs screen at 0.643× recovery time.
+   Against OrbStack it reached 0.823× recovery time and 1.180× measured
+   CPU per successful response. CPU blocked promotion.
    [Evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
 3. **W6 uncached build memory.** Sampled peak physical footprint was
    1.364×. In the quiet-window diagnostic, guest balloon pages increased
