@@ -735,7 +735,7 @@ python3 bench/native/reporting.py --match base-20261122T065539-5b0c
 `trials.jsonl` SHA-256
 `fffe7fcb953d0692a0b093cf21a6475e465ec316b71b158ea0a2ceb1e9373aba`.
 
-The next Mac build comparison also verifies runtime contents. After the
+The current Mac build comparison also verifies runtime contents. After the
 timed work and sampling finish, it hashes each loaded Hyperfine executable
 and records the versions and file-content hashes of the installed HTTPie
 runtime distributions. It compares these receipts across uncached, warm and
@@ -744,6 +744,20 @@ Python bytecode and wheel installation metadata are outside the runtime file
 receipt. This check can catch runtime drift. A frozen comparison also needs
 reproducible build-time dependencies. Keep the earlier W7 results separate
 and admit one native pair before the new ten-pair cohort.
+
+Admission `base-20261122T170630-266b` passed on harness `5710ea2` with
+signed release `99db1aa`. Both engines passed all 25 checks across the
+six builds. Each produced the same Hyperfine executable hash
+`fcfbf31a7d309a79dba362d75310ead3eafc35d984248a197f5cfbd2dce09c3f`
+and the same content and version receipts for 16 installed HTTPie
+distributions in all three cache states. Both runtime receipt files
+had SHA-256
+`2ec1c509dd9bca6ff469a88553e74950256160df8e3fb739eba4f803ea07e3f2`.
+The admission `trials.jsonl` SHA-256 was
+`34d10d2334ad9c72d43368574c4e64c9276afd25d2bff024931a4c86a9697aac`.
+The ten-pair installed-default run started as
+`base-20261122T170828-8009`. Use the pinned harness and release with the
+W7 command above to reproduce it.
 
 All 20 uncached HTTPie legs in `base-20261122T065539-5b0c` downloaded the
 same 15 wheel filenames. `bench/native/fixtures/w7/httpie/wheels-arm64.json`
