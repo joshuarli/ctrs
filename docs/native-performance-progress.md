@@ -1834,6 +1834,43 @@ selecting each mode with `--lifecycle-mode`.
 | Cancellation | `base-20261122T183059-142d` | `94a4717438a0e3330959c47364e80eaa554c6dd7d3450ca555c23600d64d0ba9` |
 | Reconnect | `base-20261122T183324-29cd` | `6e74944ca3b79fa906d2c017d064792a9a71307233cdf92e0eefe2eb1b580421` |
 
+##### Streaming sender cadence
+
+`w14-pacing-92adbee7` ran two alternating blocks on `ce50555` and signed
+release `99db1aa`. All eight legs verified all 32 streams and 1,600
+chunks with no validation errors or host contention flag. Each server
+sampled its monotonic time immediately before sending a frame and each
+client sampled its own monotonic time immediately after receiving it.
+For each stream, subtract 980 ms from the elapsed time between chunks 1
+and 50 in each clock domain. The receive-minus-send drift compares
+elapsed durations and needs no shared clock origin. The table gives the
+range across the two blocks, taking the median across streams first for
+each drift metric.
+
+| Send schedule | Engine | Sender drift, ms | Receiver drift, ms | Receive-minus-send drift, ms | Trial chunk lateness p99, ms |
+| --- | --- | --- | --- | --- | --- |
+| Relative 20 ms sleeps | ctrs | 171.12–179.76 | 172.28–177.23 | −1.86 to 0.54 | 202.15–208.48 |
+| Relative 20 ms sleeps | OrbStack | 125.24–127.60 | 125.34–129.36 | −1.31 to 0.37 | 154.47–176.74 |
+| Absolute 20 ms deadlines | ctrs | −0.16 to −0.07 | 0.61–6.47 | 0.51–7.16 | 13.51–19.94 |
+| Absolute 20 ms deadlines | OrbStack | −1.03 to 1.54 | 8.10–12.68 | 9.23–10.98 | 15.46–19.60 |
+
+With relative sleeps, the large end-of-stream drift was already present
+at the sender. Using deadlines from a fixed server start removed nearly
+all sender drift and lowered the observed p99 on both engines. The
+instrumented fixture adds one integer timestamp to every frame. The
+original v4 streaming result and its loss remain recorded separately.
+
+To reproduce, preserve the v4 requests and verify the original response
+after removing the new `send_ns` field. For the absolute condition, sleep
+until `start + (chunk_index + 1) * interval` before each send. Alternate
+relative and absolute conditions and engine order. Effective protocol
+SHA-256 was
+`1583831966ba31a34a93cb00f924b3d888604f4fca76cad65c0ad4b64e71f644`
+for relative and
+`c32d8e59fa426383f709a25f2df1783451b182bb86999263f2f1f47b538412c6`
+for absolute. The comparison JSONL SHA-256 is
+`b8a407819862a07ef9fc8598886dc71575137ed63a8e53d0478b66b8f486780c`.
+
 ### Rebuilt W8 common portfolio
 
 The [v6 recipe and lock](../bench/native/fixtures/w8-v6/README.md) replace
