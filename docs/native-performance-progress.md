@@ -1261,6 +1261,51 @@ accounting incomplete. Use the pinned harness and release with
 | Revision 5 admission | `e0d8932086d05570b0b15b58247ee8deb6715a202f679b3b2313984b2dfdc9ff` |
 | Revision 5 cohort | `dd2af3cc24e1effb74ec517ee1a803dbeccef0b969eb2739bf3fb783508745b6` |
 
+##### W7 offline build over the host-bound vsock fallback
+
+The revision 5 cohort's build steps have networking disabled, but
+BuildKit still uses the host registry. Test whether the existing
+host-bound vsock fallback can run the full offline workload while
+eliminating the host NAT accounting gap. Use a private signed host
+from `99db1aa`. To switch paths, guard the Mac's
+`start_nat_host_bound` call in `Engine::vm` with an unset-environment
+check for `CTRS_W7_DIAG_VSOCK`. Set that variable only on the fallback
+leg. This changes which relay the daemon advertises to the guest.
+Build and sign the diagnostic with `CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`.
+
+Run `trial_w7` with `driver="default"`, `w7-v5-offline-builds`, and
+an installed-default private warm store. Stop the daemon between legs.
+Use a fresh `RunContext.workload_id` for each leg so the incremental
+note cannot be a hit from the preceding leg. Check all 25 assertions,
+the exact runtime receipt, the running binary and guest assets, the
+9-vCPU and 8-GiB ceiling, and zero guest OOM kills. Compare
+`GET /ctrs/relays` immediately before and after the trial, including
+the separate published-port counters. The first replay reused the
+note across legs, so its fallback leg failed both incremental cache
+assertions. The corrected launcher uses a per-leg note.
+
+`w7-vsock-build-06b11a` completed three alternating pairs. Each leg
+passed all 25 assertions and reproduced the original offline cohort's
+runtime receipt. Every NAT leg recorded 133 host-bound NAT connections.
+Every fallback leg recorded 133 host-bound vsock connections and zero
+NAT connections. All six had zero published-port relay connections,
+complete process CPU counters, and no resource collection errors. The
+host quiet checks returned zero before and after. Both paths used the
+same kernel and the `fbed2ff9` initramfs from the Mac resume setup.
+The original revision 5 cohort used `fb0f832b`.
+
+The fallback can exercise all six exact build cells with complete CPU
+accounting under the harness's relay rule. The diagnostic switches the
+host-bound transport for all workloads and compares ctrs with itself.
+The installed-default OrbStack comparison still has uncharged NAT CPU.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed diagnostic host | `672db1d4a7810ab38614cfd5514cd5f5412eee4b48fac6adc2a17b650857d648` |
+| Diagnostic patch | `a2cac2ea6c1fcc44210b2fc8db5b05cddeffa795d4f970cb56f1170daedf1863` |
+| Runtime receipt (every leg) | `0c7da05f53ededa3eafc9e993ce5e5434ad59b08a92668f5479e55d56057c587` |
+| All six corrected trials | `1127542af9408a7200c6139454cb8e85cd30a27c38332205b10aad512ff2f868` |
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
