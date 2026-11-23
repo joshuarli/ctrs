@@ -1465,6 +1465,17 @@ profile, and count raw `cpu.txt` IPs labelled `wake_up_q`.
 Derived count rows SHA-256
 `2a7ab7b0a03b248a1a4f77157b454250f322ea4edd583ca7660057f919db1cd8`.
 
+The first private tracefs run `wake-20261122T204126` collected a valid,
+zero-loss OrbStack trace at nine vCPUs with exact guest-direct work.
+ctrs rejected the launch before work because the wrapper passed
+`CTRS_CPUS` and `CTRS_MEMORY_MIB` in the installed-default lane. Repeat
+both legs with those variables unset, a quiet precheck and the same
+signed binary and assets. Treat wake counts per successful request as
+approximate because the trace window uses the full trial's request rate.
+The first run's trial and OrbStack trace summary SHA-256s are
+`acf18aa752c818ffb10047b2a5d6f86abddeab52d133049d10b0bff37e1e8e5b`
+and `fdb4f67d5d103598589b32cdae65c938424712b28254a187bf86885c3e0cae36`.
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
@@ -1690,6 +1701,38 @@ will still need its own guest control.
 | `base-20261122T190441-bbe2` | `94b6383ac7f3b076232d23fc7522490504eff845a896f096d10f19e9b7fd7d77` |
 | `base-20261122T190523-545d` | `0ea55aae3e05a8ca80431a915d38d686857b1c497e2b14118476ec673340bb25` |
 | `base-20261122T190620-1848` | `c3d6ba312685128a1d27da6431e6104a4584aa1705a8edeb19d8972b7745007c` |
+
+#### W13 native receiver host control
+
+The native receiver comparison used Python 3.15.1 on macOS ARM64.
+All 40 transfers verified exactly 1 GiB and matched every expected
+receiver digest. Each of the four conditions has five alternating
+baseline/candidate pairs.
+
+| Mac loopback condition | Baseline median, GB/s | Mapped-file receiver median, GB/s |
+| --- | ---: | ---: |
+| Download, 1 stream | 2.545 | 2.488 |
+| Download, 4 streams | 2.122 | 2.128 |
+| Upload, 1 stream | 4.925 | 5.031 |
+| Upload, 4 streams | 4.308 | 3.878 |
+
+The mapped-file receiver peaked at 2.155 GB/s for four-stream download,
+below the 8.83 GB/s published-port control requirement. Its largest
+four-stream upload attempt was 3.966 GB/s, below both the measured
+baseline and the required twofold path capacity. Keep the existing
+receiver. All twelve v3 paths remain tool-limited.
+
+To reproduce the diagnostic, replace only the v3 receiver with the
+pretested native comparison. Read into the existing `CHUNK` bytearray,
+map the expected artifact with `mmap.ACCESS_COPY` and compare each received
+span through libc `memcmp`, splitting and wrapping at the artifact end.
+Keep the header, byte count, timing and per-stream digest receipts.
+Use the same 1 GiB input, direction, streams and alternating order
+for each control.
+Candidate source SHA-256 was
+`07e1f084b46e4ec617a8466ef8be00666475533382f630314b63987840152677`.
+Comparison JSONL SHA-256 is
+`30e9a49e3cbf0a96d1f277d2f488728604d510ce6647a7ef24ce7890471cc243`.
 
 ### Installed-default W14 idle-resume cohort
 
@@ -3044,8 +3087,9 @@ capacity changes. These short legs leave 12-hour resource growth open.
 #### W11 repeated trim diagnostic
 
 Compare two private ctrs stores independently copied from the same
-signed release template. Use `aba1516`, six exact cycles per store,
-and 32 seconds of post-cleanup observation. Start with the control.
+signed release template. Use `aba1516` and 32 seconds of post-cleanup
+observation. Start with the control. Compare the first six exact cycles
+in both stores, including the warmup. Preserve any later cycles.
 Repeat with an explicit `FITRIM` after each cycle's exact cleanup and
 before its host observation. Keep the same isolated probe volume
 setup, fsynced sentinel and guest helper in both legs. The control
@@ -3060,6 +3104,13 @@ cleanup before comparing the 16 MiB growth checks. Report backing,
 footprint and descriptors separately. The fixed-order comparison
 tests resource behavior under explicit trim. A performance or
 default-policy change needs further paired validation.
+
+The first sample leg exited 2 before launching an engine because the
+short-pilot CLI accepts one to three cycles. Use the existing duration
+mode with a 750-second work window and separate drain and cleanup
+deadlines. Require at least six exact cycles in each terminal record.
+The first supervisor status SHA-256 is
+`f86745c7c4f87524416f088f82bfef9fc6ad5aace2cb9027263f2603e183af66`.
 
 ### Rebuilt W12 workspace fixture
 
