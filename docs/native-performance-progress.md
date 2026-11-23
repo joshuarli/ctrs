@@ -761,6 +761,44 @@ The ten-pair installed-default run started as
 `base-20261122T170828-8009`. Use the pinned harness and release with the
 W7 command above to reproduce it.
 
+#### W7 installed-default cohort with exact runtime receipts
+
+All ten pairs in `base-20261122T170828-8009` passed. The 20 runtime
+receipt files shared the admission file's SHA-256. Together, the engines
+completed 120 builds and 120 first-use probes, with all 500 correctness
+and cache checks passing. Both guests used nine vCPUs. The installed memory
+budgets were 8,407,957,504 bytes on ctrs and 63,157,620,736 on OrbStack.
+
+All twelve timing cells cleared the descriptive strict-win threshold.
+The table gives paired median ctrs / OrbStack ratios with 95% confidence
+intervals.
+
+| Application and state | Build and load | First use |
+| --- | ---: | ---: |
+| Hyperfine uncached | 0.8769 [0.8592, 0.9067] | 0.0819 [0.0727, 0.0928] |
+| Hyperfine warm | 0.4713 [0.4231, 0.4929] | 0.0471 [0.0455, 0.0480] |
+| Hyperfine incremental | 0.3204 [0.3141, 0.4382] | 0.0565 [0.0542, 0.0725] |
+| HTTPie uncached | 0.8334 [0.8244, 0.8664] | 0.4948 [0.4704, 0.5228] |
+| HTTPie warm | 0.5811 [0.5163, 0.6048] | 0.2443 [0.2316, 0.2480] |
+| HTTPie incremental | 0.3679 [0.3504, 0.3825] | 0.2475 [0.2343, 0.2558] |
+
+Median uncached build and load was 15.487 s versus 17.640 s for
+Hyperfine, and 6.893 s versus 8.306 s for HTTPie. Build time spans
+the default builder command through image load. First use times the
+version probe in the loaded image. The runtime file audits run after
+timing and sampling.
+
+Sampled peak physical footprint was 0.6120 [0.5399, 0.6296].
+Measured CPU was 0.6065 [0.6044, 0.6082] with 130–133 ctrs host NAT
+connections per leg and incomplete accounting. The highest available
+outside-engine CPU estimate in any phase was 1.61 cores. For trials with
+missing host tick estimates in short phases, the reporter used the
+one-minute host load fallback. Build-time dependency freezing remains
+in the separate offline comparison.
+
+Raw `trials.jsonl` SHA-256
+`ece016b66e965bc3f560063eaa2d24e7ee04b8c51c4cbef97fe77ddb6f51dcc4`.
+
 All 20 uncached HTTPie legs in `base-20261122T065539-5b0c` downloaded the
 same 15 wheel filenames. `bench/native/fixtures/w7/httpie/wheels-arm64.json`
 records those files and their SHA-256 digests from the exact PyPI releases.
