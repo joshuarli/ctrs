@@ -2077,8 +2077,7 @@ was 6.46 s overall and 6.12 s before the stack-health phase. The
 background client used four workers with fixed work. The latency samples
 are completions inside the actual pull intervals, with 485–546 per ctrs
 leg and 5,237–5,507 per OrbStack leg. Every pull window had at least 73
-completions. ctrs had 18–20 host NAT connections per leg. A new
-ten-pair installed-default run on the corrected harness is queued.
+completions. ctrs had 18–20 host NAT connections per leg.
 
 To reproduce the diagnostic replay, use
 `resource_cycles.phase_summary` from `1e4fa49` or later with the saved
@@ -2096,6 +2095,44 @@ failed status and exclude the replay from qualification.
 | Original trials | `46b97f86593b3a1e4eb8aebb16d42970488ca7fffb73fc56947a5c45e547516f` |
 | Original report | `9361292dfd2981058ef9888dc2f556a8e1eb7363d79ec04a64ac88524f17977f` |
 | Rejected leg result | `49a7880c155d023d7c2104ffd4c73e79f98524916016d68d2e2c3ddc93e1dc25` |
+
+##### Corrected installed-default repeat
+
+`w8-paired-bb12ddc88484` finished all ten alternating pairs with clean
+teardown, verified ownership and zero validation errors. Each leg
+completed 1,000 deployment requests and 50,000 background requests.
+Completions inside the four pull intervals totaled 508–835 per ctrs leg
+and 5,785–6,288 per OrbStack leg. Every interval had at least 79
+completions. The report reproduced exactly from the 20 trial records.
+
+| Metric | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.4527 | [0.4191, 0.4599] |
+| API completion p95 during pulls | 0.5081 | [0.4357, 0.6118] |
+| API completion p99 during pulls | 0.8696 | [0.7489, 0.8939] |
+| Sampled peak physical footprint | 0.1534 | [0.1481, 0.2130] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.7837 | [0.7734, 0.7915] |
+
+Median time to health was 6.571 s on ctrs and 14.734 s on OrbStack.
+Both guests exposed nine CPUs. Their visible memory was 8,407,957,504
+and 63,157,620,736 bytes respectively. Every ctrs leg recorded 18–19
+NAT connections with host-kernel CPU uncharged. These are
+installed-default pilot results. Matched-resource controls and complete
+CPU attribution remain open.
+
+Use `runner.py w8-baseline --layout <v6 OCI layout> --ctrs-binary
+<signed 99db1aa release> --resource-lane installed-default --content
+retained --under-load --pairs 10 --seed 1` on harness `1e4fa49`. This
+run used the warmed release store and an idle OrbStack endpoint, with
+the verified legacy campaign registry stopped for the batch. Preserve
+the before/after host gates and OrbStack inventories.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `c6acc70fbbeed19e57e370d43b0eda691becef5ece4efca2bea30c21c2fe70cd` |
+| Trials | `e532ab8404f6495e7f941c3c65ec35821a05ff95114473f73bddccf013d6a6cd` |
+| Report | `559abb46219f96bf55dea4cb70d6fb21cd47a9aeaaf4d02953321d2f09fe5a12` |
+| Terminal status | `88a018fcb99709c3bd34ca3ad507b7b5414a8294cdbc9ae013d9c4bc1c48beeb` |
 
 #### W8 derived-content timing without concurrent load
 
