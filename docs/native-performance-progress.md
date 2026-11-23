@@ -25,8 +25,12 @@ Registry vsock was **not promoted**: ten-pair candidate/baseline W7 and W6
 cohorts were non-inferior in every cell with no strict win. The W12 probes
 put about 125 µs of every bind request inside Apple's virtiofs service, with
 caching, kick suppression and thread priority already in order. The next
-decision is a raw agent↔host vsock round-trip probe, gating whether a
-ctrs-owned bind transport could win. The same record has the receipts.
+decision was a raw agent↔host vsock round-trip probe. It measured p50
+49.5 µs: enough on paper for a ctrs-owned bind transport, but that is an
+architecture change and now waits for the owner. W1 warm, W6, W7 and W8 were
+remeasured against OrbStack at `b5ec34b`, and all timing and footprint cells
+are strict wins. The receipts are in the same record. Continue from the
+[Linux handoff](linux-handoff-2026-11-23.md).
 
 - W1 engine-cold and W10 whole-engine recovery still need an independent
   OrbStack endpoint. The current shared endpoint stays available to its

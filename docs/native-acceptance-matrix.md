@@ -22,9 +22,12 @@ Statuses are cumulative and must be stated separately:
 Every cell belongs to the binary recorded with it. The 2026-11-23
 [reconciliation](evidence/main-reconciliation-2026-11-23.md) returned `main`
 to the measured defaults (Fsync disk, 250 ms refusal TTL, gzip loads, stock
-kernel options). Its H3 guest gzip backend is new on the Mac, so W1-cold, W6/W7
-load, W7 first-use and W8 cells need remeasurement before they describe the
-current build.
+kernel options). At that build, W1 warm, W6, W7 and W8 installed-default were
+remeasured against OrbStack, 10/10 pairs each, with every timing and footprint
+cell a strict win. The earlier W6 footprint loss did not reproduce.
+[Current-build cohorts](evidence/main-reconciliation-2026-11-23.md#mac-remeasurement-at-b5ec34b).
+The rows below still give each cell's older recorded binary, and W1 engine-cold
+still needs a disposable OrbStack endpoint.
 
 Lanes: **D** = installed default (ctrs product defaults vs OrbStack as
 installed); **M** = resource-matched control (ctrs vCPUs/memory set to
@@ -197,7 +200,8 @@ qualification gaps.
    in every pair at both TTLs.
    [Evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
    [CPU by interval](native-performance-progress.md#cpu-before-interruption-and-after-recovery)
-3. **W6 uncached build memory.** Sampled peak physical footprint was
+3. **W6 uncached build memory (older binary; not reproduced at `b5ec34b`,
+   0.402).** Sampled peak physical footprint was
    1.364×. In the quiet-window diagnostic, guest balloon pages increased
    while the VM helper's footprint stayed within 0.7 MB per leg.
    At the 5,632 MiB ceiling, image export accounted for most of the

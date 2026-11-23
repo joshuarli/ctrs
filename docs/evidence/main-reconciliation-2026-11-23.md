@@ -189,6 +189,37 @@ Moving build-registry traffic off NAT makes ctrs CPU accounting complete for
 those connections but saves no measurable build time. Do not retry without a
 new causal profile.
 
+## Mac remeasurement at `b5ec34b`
+
+These are installed-default cohorts against OrbStack 2.2.5 at nine vCPUs,
+run with `pyramid.py run --name w1-stack:cohort --name w6-build:cohort --name
+w7-buildx:cohort --name w8-pull-installed-default:cohort`. They replace the
+older-binary standing for these cells only. Every pair was correct and
+admitted (10/10 each). Ratios are ctrs/OrbStack, paired median [95% CI].
+CPU is incomplete in all four because host NAT CPU is not charged to ctrs.
+
+| Cohort | Timing | Footprint | Measured CPU |
+| --- | --- | --- | --- |
+| W1 warm stack `base-20261123T105610-7ad5` | health 0.894 [0.855, 0.916]; DB restart to verified 0.705 [0.675, 0.712] | 0.167 [0.166, 0.168] | 0.412 |
+| W6 `base-20261123T105954-4112` | Rust 0.919 [0.898, 0.936]; zlib 0.476 [0.470, 0.585] | 0.402 [0.363, 0.412] | 0.858 |
+| W7 (`w7-v5-offline-builds`) `base-20261123T111822-1e50` | all 12 build and first-use cells are strict wins; uncached builds: Hyperfine 0.869, HTTPie 0.738; HTTPie uncached first use 0.441 | 0.452 [0.371, 0.463] | 0.512 |
+| W8 installed-default derived `w8-paired-f095671144de` | pull to health 0.389 [0.368, 0.400] | 0.197 [0.194, 0.200] | 0.137 |
+
+The earlier W6 uncached-build footprint loss (1.364×, older binary) did not
+reproduce. The cause is unattributed: this build adds H3's guest gzip
+backend, and its store state and sampling differ from the old cohort.
+
+These are still pilot cells, not qualified ones. Each needs an independent
+confirmation batch and complete NAT CPU accounting.
+
+Raw SHA-256:
+
+- W1 `cf5d51c3…44ef`
+- W6 `66923548…adc3`
+- W7 `a66d453b…00e9c`
+- W8 `62847c9e…0790`
+- pyramid summary `cd703973…aa43`
+
 ## W12 full-bind: the next intervention boundary
 
 These probes ran on `b5ec34b` in a scratch engine. They are diagnostics, not
@@ -221,9 +252,10 @@ unmeasured. The container → `host.docker.internal` relay path measured
 p50 142 µs (Mac Python loopback alone: 28 µs). That path is not faster
 than VZ.
 
-**Next decision:** measure the raw guest-agent ↔ host vsock round trip for
-a 64-byte request/reply. Use a timed control-message loop in ctrs-init
-against the daemon, with no container in the path.
+**Vsock probe, measured.** Diagnostic host `46bcf12` on
+`diagnostic/vsock-rtt` (signed `c55c8d16…61f8`) times host↔agent `Ping`/`Pong`
+over VZ vsock after 1,000 warmup rounds, with `CTRS_DIAG_PING=20000`. Over
+20,000 rounds: p50 49.5 µs, p95 62.0 µs, p99 78.3 µs, min 27.5 µs.
 
 **Stop rule:** prototype FUSE-over-vsock for bind mounts behind a flag only if
 the p50 round trip plus native operation cost is at most half of VZ's
@@ -232,6 +264,18 @@ comparison against current `main`. Promote at a workflow upper bound ≤ 0.95
 with exact outputs, watcher correctness and the Fsync contract intact.
 If the probe misses that bound, record W12 full-bind as a VZ-bound loss
 (1.30×) and move to the next ranked matrix deficit.
+
+**Outcome.** 49.5 µs + about 1.5 µs of native lookup meets the ≤ 65 µs
+arithmetic. The probe leaves out the hop through a guest FUSE daemon (an
+estimated 10–20 µs) and VZ's concurrency, so the margin is thin. The estimated
+gain is about half of each bind request's latency, at most the install plus
+verification gap. That would move the workflow from 1.30× toward about
+1.15×, which is still a loss.
+
+The prototype is a ctrs-owned host file server on the guest boundary: a
+multi-week architecture change needing security and semantics review. It is
+**handed to the owner as a design decision** (see the
+[Linux handoff](../linux-handoff-2026-11-23.md)), not started here.
 
 ## Open items this session could not do
 

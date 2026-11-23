@@ -14,7 +14,8 @@ passed. Read `docs/campaign-native-performance.md`, then the
 "Wound down" section of `docs/native-performance-progress.md`, which gives
 separate steps for a Linux host and a Mac. The native `linux-amd64`
 `ctrs`/`dockerd` lane already exists, with cgroup-v2 accounting and frozen
-fixtures. Resume from [the recoverable Linux checkpoint](docs/evidence/linux-amd64-checkpoint-2026-11-22.md),
+fixtures. On a Linux host, start from [the 2026-11-23 handoff](docs/linux-handoff-2026-11-23.md),
+then [the recoverable Linux checkpoint](docs/evidence/linux-amd64-checkpoint-2026-11-22.md),
 not by implementing an adapter. Linux results never close macOS-vs-OrbStack gates.
 Production defaults follow the recorded experiment decisions; merging a branch
 to retire it never promotes its production diff
@@ -99,6 +100,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Evidence: networking/vzNAT | `docs/evidence/net.md` |
 | Evidence: registry client pilot | `docs/evidence/registry.md` |
 | Evidence: security qualification | `docs/evidence/security.md` |
+| Linux continuation handoff (2026-11-23) | `docs/linux-handoff-2026-11-23.md` |
 | Evidence: defaults reconciled with decisions (2026-11-23) | `docs/evidence/main-reconciliation-2026-11-23.md` |
 | Campaign closeout (Gate J, local) | `docs/evidence/closeout.md` |
 | Release prep (artifact manifest) | `docs/evidence/release.md` |
