@@ -23,8 +23,8 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
   with stock settings, explicit trim, online discard and uncached VZ
   disk backing. The two frozen 12-hour legs and the independent
   holdout remain open.
-- W13 remains tool-limited under the twofold headroom guard, including
-  after the exact mapped receiver and sendfile controls.
+- W13 remains tool-limited under the twofold headroom guard. The exact
+  Mac controls include sendfile, native receive and larger socket buffers.
 
 ## Wound down 2026-11-20
 
@@ -2761,6 +2761,98 @@ direction advanced to engine qualification. Candidate source SHA-256
 was `ddaed700693ea4090997b8b70dfe6d54f6493dbc26249a75a47c25c081169c34`.
 The comparison JSONL SHA-256 is
 `b41bc2559f31b2cf9a89de532cbc4aed88f973873953eb0d2485d36fd690f97d`.
+
+#### W13 native receive loop and sendfile control
+
+The Mac-only control holds the v3 protocol, payload, client completion
+interval and per-stream integrity receipts fixed. Compare the v3 tool,
+its sendfile sender with the standard receiver, and sendfile with a
+native receiver. The latter calls C once per stream through `ctypes`.
+The C code maps the local reference read-only and uses `recv`,
+`poll` and `memcmp` to compare each span, wrapping the reference as
+needed. It requires EOF after exactly the expected byte count. A
+socket-pair check accepted exact cyclic payloads and rejected corrupt,
+short, excess and stalled payloads.
+
+Use the existing host headroom launcher and the unchanged v3
+`prepare` command. Build the native library on Darwin ARM64 with
+`xcrun clang -O3 -std=c17 -Wall -Wextra -Werror -dynamiclib`.
+Apply all six orders of the three variants to each 1 GiB condition.
+Use the same artifact on both local endpoints and divide the payload
+equally across streams. The audit checked 72 successful transfers,
+all stream identities and sizes, and every expected digest. The
+launcher recorded zero for both host gate exit codes.
+
+| Mac loopback condition | Original median | Sendfile median | Sendfile and native receive median [range] | Published-port control needed |
+| --- | ---: | ---: | ---: | ---: |
+| Upload, one stream | 5.043 | 6.044 | 6.282 [6.004, 6.313] | 6.658 |
+| Upload, four streams | 4.460 | 4.388 | 3.894 [3.744, 3.985] | 6.562 |
+| Download, one stream | 2.586 | 2.756 | 2.716 [2.616, 2.833] | 7.048 |
+| Download, four streams | 2.223 | 2.226 | 2.197 [2.124, 2.377] | 8.828 |
+
+Values are GB/s. The final column is twice the fastest prior v3
+published-port attempt in the corresponding condition. The fastest
+exact native loopback attempt missed that value in all four. The
+host controls also missed the requirements for container-to-Mac.
+The guest-only loopback path was outside this Mac diagnostic.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Native receiver C source | `c1de6b9702e1fe0eb6e49eb406aad97fe33863cfe40aae78dc5a6a8b09eb881a` |
+| Native library | `fee9cfe06b7aab439a0362e62ead899423be22b586969d3c61dfd4bbbd3f94ac` |
+| Combined transfer tool | `aced1376aaf6fd2437641d1f55c4fd41aa3bec5b5ddff2c6ec2e5a4bce5391ed` |
+| Comparison JSONL | `456e41767b8f7ac2dbe88c72e0ee5468f9abc13a61ec5e29c5a2429ee70bd69f` |
+
+The buffer follow-up used the combined native tool in five
+alternating pairs per condition. In the alternate, request 1 MiB
+for both `SO_SNDBUF` and `SO_RCVBUF` before connecting or listening.
+An independent check read back 1,048,576 bytes on the listener and
+1,061,580 bytes on both connected sockets for each option. The
+control leaves socket buffers at their OS defaults. All 40
+transfers passed exact 1 GiB and stream-digest checks.
+
+| Mac loopback condition | Default buffers, median GB/s [range] | 1 MiB buffers, median GB/s [range] |
+| --- | ---: | ---: |
+| Upload, one stream | 6.213 [6.128, 6.331] | 5.889 [5.820, 5.955] |
+| Upload, four streams | 3.919 [3.873, 3.990] | 3.794 [3.688, 3.854] |
+| Download, one stream | 2.668 [2.621, 2.710] | 2.628 [2.623, 2.666] |
+| Download, four streams | 2.131 [2.107, 2.402] | 1.985 [1.962, 2.026] |
+
+Neither buffer setting reached the required control rate. Keep the
+scored v3 tool. Buffered-tool SHA-256
+`7e3d510a6e234cdfc44443f118d7d900c95b627d7e27e9f45ab6bbb7a8313c56`
+and raw JSONL SHA-256
+`c2bbdb783a19b320cc377548e2e443b6084dbbdc741cb1cf08a9bb061a0126b0`.
+
+To test how much of the gap comes from `memcmp`, make a separate
+count-only build of the native receiver. Skip the byte comparison
+and return no checksum. Keep the same sendfile sender, data,
+receive loop, EOF check and client completion interval. Run five
+alternating pairs with the exact native receiver per condition.
+All 40 runs transferred exactly 1 GiB. The audit required all
+20 count-only receipts to have zero verified bytes and no scored
+goodput. Their diagnostic rates use counted bytes divided by
+client completion time.
+
+| Mac loopback condition | Exact median GB/s | Count-only median GB/s [range] |
+| --- | ---: | ---: |
+| Upload, one stream | 6.091 | 6.530 [6.385, 6.555] |
+| Upload, four streams | 4.031 | 4.019 [3.960, 4.094] |
+| Download, one stream | 2.709 | 2.663 [2.643, 2.703] |
+| Download, four streams | 2.170 | 2.302 [2.103, 2.430] |
+
+Even the highest count-only rate missed the published-port
+requirement in every condition. The Mac-facing cells remain
+tool-limited. The container-to-container
+cells have a separate guest-loopback requirement and can be
+investigated independently.
+
+| Count-only diagnostic receipt | SHA-256 |
+| --- | --- |
+| C source | `b00f4f78cb495c7a42bf31927b64ff5d0c706817d50ff671b6be937680262a56` |
+| Count-only library | `85f022235468166dcd1347fac07eaf8f78ca509f1f47f4da0c7255c9a569379b` |
+| Transfer tool | `82296ad54741a9bb800f6c32e4237a877ac06546ef68f7eb46ed4173bcaabb96` |
+| Comparison JSONL | `60e9e5a3b99b1888ac094b6e5019e71fe0032c420e5bc4edaf7c422dd1bac52f` |
 
 ### Installed-default W14 idle-resume cohort
 
