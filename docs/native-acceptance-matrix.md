@@ -68,9 +68,9 @@ The table retains W12 timing history from the previous workspace fixture.
 | W14 | Connection lifecycle: fresh, persistent, streaming, cancel, idle-resume, reconnect | yes | yes | yes, exact buffered v4 results in all six modes | D: all six v4 modes (10/10 each) | Fresh p50 1.331×, p95 1.425× and CPU 1.170× lost. Persistent p95 0.829× was a strict win and cleanup 1.279× lost. Streaming p99 lateness 1.393× [1.260, 1.541] lost. Post-cancel response 0.422× was a strict win. Resume p50 and reconnect p99 were inconclusive. Host NAT CPU remains outside the counters. [Fresh and persistent](native-performance-progress.md#w14-fresh-and-persistent-connections-with-buffered-frames) [Streaming, cancel and reconnect](native-performance-progress.md#w14-streaming-cancellation-and-reconnect-with-buffered-frames) [Idle-resume](native-performance-progress.md#w14-idle-resume-with-buffered-frames) |
 | W3-v4 | Persistent storage: meaningful dataset, sustained read/write/checkpoint, declared working set and durability | yes | yes (pgbench fixed work) | no | D: `base-20261119T170441-5abe` (10/10 pairs, per-pair quiet wait) | D: durability unverified. Diagnostic ratios favor ctrs: rw tps 0.46 [0.45, 0.48], rw p95 0.27, checkpoint 0.41, restart 0.33, ro tps 0.81, CPU 0.81, footprint 0.064. Pgdata allocation ratio is 1.0001. The direct guest `fdatasync` probe (2,000 × 4 KiB writes to a named volume, three runs per engine) measured OrbStack p50 at 0.6–2.0 ms and ctrs at 0.26–0.28 ms. Host flush semantics require separate evidence. [Durability boundary](native-performance-progress.md#w3-migration-and-committed-state-cohort) |
 
-W13 v3 published-port admission verified exact bytes in all four modes.
-All four failed the twofold tool-headroom requirement in both engines.
-[Admission evidence](native-performance-progress.md#w13-published-port-v3-admission)
+W13 v3 admission verified exact bytes in all twelve configurations.
+Both engines missed the twofold tool-headroom requirement in every
+configuration. [Published-port evidence](native-performance-progress.md#w13-published-port-v3-admission) · [Guest and host-internal evidence](native-performance-progress.md#w13-guest-and-host-internal-v3-admission)
 
 Existing DNS, UDP, IPv6 and host-access checks are correctness tests
 (`tests/e2e.sh`, `conformance/`), not performance cells. `bench/net/*.py`

@@ -1535,6 +1535,47 @@ before considering a new engine fixture.
 | `base-20261122T185850-5eff` | `881e34d86986ef81be266dc3a61818fdc5963f64f22a5fd880dda7acec0c6497` |
 | `base-20261122T185942-85e2` | `ab867ac0394e07f097679f858d718e8c07a811bf75f639c56c873a6a8133277e` |
 
+#### W13 guest and host-internal v3 admission
+
+The remaining eight installed-default pairs used the same release,
+fixture and three-attempt admission procedure. Both engines verified
+each path and control transfer. The current reporter revalidated the
+receiver receipts and identified both legs as tool-limited in each
+condition. All 48 path attempts in these eight pairs exceeded half the
+applicable loopback rate. Together with published-port, W13 admitted
+24 correct workload legs and verified 72 path transfers and 48 loopback
+controls of 1 GiB each. None of the twelve configurations launched a
+ten-pair throughput cohort.
+
+| Path and condition | Limiting controls, ctrs / OrbStack (GB/s) | Highest path attempt across both engines (GB/s) |
+| --- | ---: | ---: |
+| Container-to-container upload, 1 stream | 7.98 / 6.17 | 8.89 |
+| Container-to-container upload, 4 streams | 9.04 / 7.46 | 9.33 |
+| Container-to-container download, 1 stream | 7.24 / 6.02 | 9.05 |
+| Container-to-container download, 4 streams | 8.08 / 6.90 | 9.62 |
+| Container-to-Mac upload, 1 stream | 4.66 / 4.68 | 3.75 |
+| Container-to-Mac upload, 4 streams | 3.93 / 4.13 | 4.80 |
+| Container-to-Mac download, 1 stream | 2.25 / 2.25 | 1.48 |
+| Container-to-Mac download, 4 streams | 2.00 / 1.96 | 2.65 |
+
+Guest loopback sets the threshold for the container-to-container
+path. Host loopback set the lower ceiling in every container-to-Mac
+leg. The highest 4-stream container-to-container attempt would require
+a guest control of at least 19.23 GB/s on ctrs. The planned host-only
+receiver comparison can inform the Mac-facing paths. Container-to-container
+will still need its own guest control.
+
+| Run | Raw trials SHA-256 |
+| --- | --- |
+| `base-20261122T190033-846c` | `fb2e38a04e772c45820af1f82bf5c662e1bd072c1bcf3d5172b198ba9fec1168` |
+| `base-20261122T190125-e5ac` | `7005bc11e2f9885c3baf162a167f8b77941d51458b01a41834918131612d80c2` |
+| `base-20261122T190207-6568` | `47d1ff4d069f3b678a5e9146e27a8a8da62b6fd4a2bc2209db9c9d6a420032c4` |
+| `base-20261122T190300-257d` | `dffa072ca226f7c9602f1ea08043e247f521d45891f7cb2703bae6c36e1f5953` |
+| `base-20261122T190348-d100` | `448eb433e24658bc548d2cf05855f540f4df9d44b167206e561914c8d7b88c4f` |
+| `base-20261122T190441-bbe2` | `94b6383ac7f3b076232d23fc7522490504eff845a896f096d10f19e9b7fd7d77` |
+| `base-20261122T190523-545d` | `0ea55aae3e05a8ca80431a915d38d686857b1c497e2b14118476ec673340bb25` |
+| `base-20261122T190620-1848` | `c3d6ba312685128a1d27da6431e6104a4584aa1705a8edeb19d8972b7745007c` |
+
 ### Installed-default W14 idle-resume cohort
 
 Run `base-20261122T082410-0094` used clean source `7eb4859`, the W6
@@ -2571,7 +2612,11 @@ Read `/proc/meminfo` at both cleanup boundaries and immediately after
 each post-cleanup observation. Retain available memory, file cache,
 reclaimable slab, anonymous pages, and the ctrs guest's balloon pages.
 Use background `GET /info` on the private ctrs daemon to retain the
-ceiling, target, used, stall, and OOM counters. Match at least six
+ceiling, target, used, stall, and OOM counters. Validate
+`CtrsMemoryStall` as a numeric percentage in `[0, 100]`. A mocked
+response with fractional stall reproduced the original observer's
+rejection before the native run, and passed after the repair.
+Match at least six
 exact cycles to their valid host backing and footprint observations.
 Use these samples for attribution under the current trim, database,
 memory, and durability policies.
