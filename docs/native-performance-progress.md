@@ -2744,6 +2744,46 @@ pinned W12 assets and a signed ctrs build. The diagnostic samples appear
 under `setup_phases`. Use the regular paired cohort for acceptance,
 since the extra counter reads add work to setup.
 
+#### W12 bind watch setup CPU attribution
+
+`w12-watch-setup-b75303435e` ran two alternating installed-default
+pairs on harness `182ced1` and signed release `99db1aa`. All four legs
+verified 120 exact outputs from 60 edits, kept the same watcher PID and
+start ticks, and matched the current reporter's output receipts. The
+source and prepared image matched the existing W12 pins.
+
+| Setup operation | ctrs CPU-s, range across two legs | OrbStack CPU-s, range across two legs |
+| --- | ---: | ---: |
+| Whole setup | 85.89–86.29 | 57.25–57.33 |
+| Offline install | 52.50–53.04 | 32.89–33.17 |
+| Installed-tree verification | 7.02–7.04 | 2.04–2.08 |
+| Standalone seed compile | 10.10–10.17 | 9.97–9.99 |
+| Watcher startup through ready | 16.04–16.26 | 11.92–12.16 |
+
+The offline install accounted for 19.33–20.15 of the 28.56–29.04
+extra measured setup CPU-seconds per pair. Its wall time was
+26.33–26.74 s on ctrs and 12.73–13.07 s on OrbStack, consistent with
+the ten-pair W12 full-bind result. Of the measured ctrs install CPU,
+50.42–50.98 CPU-s came from the verified VZ helper and 2.06–2.08 CPU-s
+from the daemon. The VZ counter includes guest execution and host
+virtualization work. A guest/host split would be needed to attribute
+that cost to a specific path.
+
+All legs passed the whole-trial host-load check. Outside-engine CPU
+was below 0.88 cores during setup and below 1.58 during the install.
+Both ctrs mount samples lasted less than 40 ms, with noisy host-tick
+estimates above two cores. Those samples are excluded from the phase
+interpretation. The two pairs establish the diagnostic breakdown.
+The bind-watch cohort and the full-bind W12 cohort remain the
+comparative evidence. Continue with the inode-cap diagnostic before
+selecting a virtiofs candidate.
+
+Reproduce with the W12 proof tool above, using fresh owned ctrs daemon
+starts and running ctrs/OrbStack then OrbStack/ctrs. Verify all five
+`setup_phases` CPU boundaries and compare exact edit receipts across
+engines. Raw trials SHA-256
+`00235388b37f76dbf082041ab88394865b57e7bd998ed41226cc1ac43c143585`.
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
