@@ -739,8 +739,10 @@ The current Mac build comparison also verifies runtime contents. After the
 timed work and sampling finish, it hashes each loaded Hyperfine executable
 and records the versions and file-content hashes of the installed HTTPie
 runtime distributions. It compares these receipts across uncached, warm and
-incremental builds within each trial and across each engine pair. Generated
-Python bytecode and wheel installation metadata are outside the runtime file
+incremental builds within each trial and across both engines in each pair.
+The reporter also requires one runtime receipt across all pairs in an
+exact-runtime cohort. Generated Python bytecode and wheel installation
+metadata are outside the runtime file
 receipt. This check can catch runtime drift. A frozen comparison also needs
 reproducible build-time dependencies. Keep the earlier W7 results separate
 and admit one native pair before the new ten-pair cohort.

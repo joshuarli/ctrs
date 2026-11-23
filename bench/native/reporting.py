@@ -617,6 +617,9 @@ def _analyze_cohort(identity: dict, records: list[dict],
             paired.setdefault(pair_id, []).append(record)
     valid = []
     version_drift = any(len(info["versions"]) > 1 for info in result["engines"].values())
+    runtime_drift = verified_build and len({
+        _canonical(r["paired_inputs"]) for r in records if r.get("paired_inputs") and _correct(r)
+    }) > 1
     for pair_id, rows in sorted(paired.items()):
         a = [r for r in rows if side_of(r) == sides[0]]
         b = [r for r in rows if side_of(r) == sides[1]]
@@ -647,6 +650,8 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "executed parameters or seeds differ"
         elif require_paired_inputs and (not a[0].get("paired_inputs") or a[0].get("paired_inputs") != b[0].get("paired_inputs")):
             reason = "paired inputs differ or are missing"
+        elif runtime_drift:
+            reason = "W7 runtime content drift within run"
         elif verified_workspace and (not (receipt := _w12_workflow_receipt(a[0]))
                                      or receipt != _w12_workflow_receipt(b[0])):
             reason = 'paired workspace inputs or outputs differ or are missing'
