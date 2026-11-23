@@ -1748,8 +1748,36 @@ stores warm and verify the same 3,200 exchanges per leg. Read
 cookies from the server namespace before and after the timed workload.
 Persist the namespace, test backlog and effective server source hash.
 Compare the counter deltas and counts of exchanges at or above 900 ms.
-Changing the backlog defines a diagnostic separate from the v4 timing
-cohort.
+This diagnostic has its own fixture receipts and the v4 timing cohort
+retains its original results.
+
+`w14-backlog-fde2bba3` completed all eight legs on `ce50555` with signed
+release `99db1aa`, 3,200 exact exchanges per leg and no host contention
+flag. The before/after `TcpExt` reads came from the same server network
+namespace in every leg. Each engine overflowed the queue at backlog 5.
+Backlog 128 removed those overflows and all observed exchanges at or
+above 900 ms on both engines.
+
+| Backlog | Engine | Listen overflows and drops, by block | Sent SYN cookies, by block | Exchanges at least 900 ms, by block | Completion, by block |
+| --- | --- | --- | --- | --- | --- |
+| 5 | ctrs | 81 / 55 | 19 / 12 | 25 / 32 | 2.075 / 3.356 s |
+| 5 | OrbStack | 83 / 84 | 19 / 19 | 28 / 25 | 2.200 / 2.801 s |
+| 128 | ctrs | 0 / 0 | 0 / 0 | 0 / 0 | 0.717 / 0.711 s |
+| 128 | OrbStack | 0 / 0 | 0 / 0 | 0 / 0 | 0.698 / 0.704 s |
+
+`TCPTimeouts` had zero delta in the server namespaces. At backlog 128,
+the trial p99 was 9.38–10.22 ms on ctrs and 14.22–14.79 ms on OrbStack.
+Two blocks establish the fixture's queue sensitivity. A paired timing
+verdict and the original fresh-mode p50/p95 losses remain open.
+
+To reproduce, use W14 v4 fresh mode on `ce50555` and set
+`request_queue_size` in the pinned server's `Server` class to 5 or 128
+as specified above. Save the actual source hash and the counter deltas
+outside the timed lifecycle phase. Effective server SHA-256 was
+`3cacf2e26926c4ad0841cadb70509ca3184aa40c4579f7d34dd0ab0d7ca75718` at
+backlog 5 and `1d71c28cbe155f357474d5fed495a7ef2dd0e06fe43b47dc0a5210ca6e2fdd5f`
+at backlog 128. The comparison JSONL SHA-256 is
+`0230f00aa7e07b67a21122658704102e9102e8db647a0ba21347718fc9480f22`.
 
 | Mode | Run | Raw trials SHA-256 |
 | --- | --- | --- |
