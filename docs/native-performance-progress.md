@@ -1193,6 +1193,51 @@ orders. Use the reporter from the candidate branch on those ten blocks
 in run order. Admission `plan.json` SHA-256
 `9a43c8eaf4b8802c2a3d5ddf020c0694901145bdab9b0ec62e6dadc9217fed3e`.
 
+#### 25 Hz leaf observer confirmation
+
+All ten alternating blocks on `3d0a124` completed 35,140 reads and
+14,860 writes per leg. The 40 legs produced two million exact operations
+and passed cleanup. All 20 profiles covered nine API threads and passed
+raw event validation. ctrs recorded 554–572 samples per profile, with
+at least 18 per thread. OrbStack recorded 448–464 samples per profile,
+with at least 11 per thread.
+
+All 80 phase-boundary host gates exited zero. For each of the 20
+hot-process warnings, the PID and process start time in the host
+snapshot matched the owned VM, and the kernel start identity matched
+both CPU boundaries. Maximum measured outside-engine CPU was 0.823 cores.
+
+| Engine and interval | Median on/off ratio | 95% CI with counter quantization | 5% budget |
+| --- | ---: | ---: | --- |
+| ctrs API CPU | 1.0271 | [1.0076, 1.0463] | Within |
+| ctrs workload wall time | 1.0103 | [1.0048, 1.0212] | Within |
+| OrbStack API CPU | 1.0312 | [1.0083, 1.0719] | Inconclusive |
+| OrbStack workload wall time | 1.0179 | [1.0088, 1.0402] | Within |
+
+The OrbStack CPU interval computed from the raw ratios was
+[1.0261, 1.0533] before the quantization allowance. The comparative
+observer overhead gate remains open. Keep the profiles as diagnostic
+evidence and the 49 Hz runs as a separate cohort.
+
+Use the admission command above with `--profile-kind cpu-leaf-25`
+and the alternating orders. Supply these block directories to the
+candidate reporter in order, with prefix
+`w2-guest-client-cpu-leaf-25-20261122T`.
+
+```text
+175236-66fc  175538-dc75  175837-b4f7  180137-4a20  180436-7ac7
+180735-8baa  181033-711d  181334-fa7a  181633-3b37  181934-ce97
+```
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Signed ctrs binary | `d59eff1a7f5576a7d49e6e5edf0d5d64740fdc0f49c8e4729ce344d08c534796` |
+| Guest kernel | `19657ca4cc150ae8d04d003ac494676bcc5845dd3a3a21cd6bfb17df605d4e6f` |
+| Guest initramfs | `fbed2ff9c71d46718d9e55993e54cfab0ee72b349dcd9cfc6f735a310ab6954d` |
+| Report | `f49215d17f2ab189fb2ff1b60a61e55e0471df509cf01f3c24d673942e10d0d8` |
+| Host process audit | `187230c4991ea395a7a5e7c653af3d685bf97d59047737cd4901594a960ad332` |
+| Batch log | `f007d611f5c31868772203f45105145a4cec573e1e128383a74a29f2d33e23b9` |
+
 ### W9 parallel job resource admission
 
 Run `base-20261122T094007-1ee3` used source `3ad2f5b`, installed defaults,
