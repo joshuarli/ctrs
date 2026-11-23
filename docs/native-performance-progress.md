@@ -3135,6 +3135,97 @@ host NAT CPU on both sides. Keep the 64 KiB default.
 | Paired receipt | `effecae1024d49293e947ee24dca220e361646182b643fc89d1438d1061fe4f5` |
 | Derived analysis | `9049c6dbe73f4b5f372163c6bf3cf4bd55fdda8309d5b50f093cdccc05ea9fb4` |
 
+##### W14 borrowed descriptors for the vsock relay
+
+Screen a host-only change to the published-port vsock fallback.
+The stock relay duplicates the guest descriptor for each direction
+and duplicates the client descriptor for the upload thread. Keep
+one file wrapper for the guest duplicate and borrow it and the
+original client socket from a scoped upload thread. Retain the
+existing copy, frame handling, timeout, half-close and join
+behavior. This removes one guest and one client descriptor
+duplication on the fallback path.
+
+Rebuild signed stock and candidate binaries from `99db1aa` in
+the same worktree with `CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`.
+Use the same guest kernel, initramfs, warm store and backlog-128
+fixture as the initial-buffer comparison. Alternate five ctrs-only
+pairs and verify all per-leg routes, exact responses, zero leaked
+sessions and owned cleanup. Screen for at least a 5% median reduction in
+measured CPU per response and p50 and p95 upper bounds at most 1.03.
+
+`w14-borrow-relay-0a4c2c96` finished all five pairs through the backlog-128
+fixture. All 32,000 exact responses and cleanup checks passed. The
+candidate passed 15 focused port tests. Each leg used 536–537 NAT
+legs and 2,663–2,664 vsock connections. The two host gate checks
+returned zero.
+
+| Metric | Borrowed / stock paired median [95% CI] |
+| --- | ---: |
+| Measured CPU per response | 0.995 [0.984, 1.011] |
+| Completion | 0.992 [0.984, 1.005] |
+| Request p50 | 0.999 [0.994, 1.009] |
+| Request p95 | 0.978 [0.916, 1.049] |
+| Request p99 | 0.932 [0.804, 1.047] |
+
+The candidate missed the CPU screen and the p95 bound. Keep the
+existing ownership pattern. The CPU comparison excludes host NAT
+CPU in both arms.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed stock host | `553c8da4fa9874d30fe30f62cdd60eb5ecf37ba7011f8210d15433b9e57c7170` |
+| Signed candidate host | `fc373bda3d7bb384e3543b4eb7b5749b49cbdc6174fba94883f2e203ed4df74e` |
+| Candidate patch | `75a8eb231790d3fbca994a71069c1fca004ee15bc0ebdcd7ae8c01aa578c672f` |
+| Paired receipt | `d374fee2e09861b8b0270fc2c778ac0ea341b4999e893551e5f60cfe8ee40445` |
+| Derived analysis | `fc6e5266654940d7ba20302acc792627032fe9bafd2dc385cc0971497a9b708a` |
+
+##### W14 vsock setup stages
+
+`w14-relay-stages-60a56947` ran three alternating ctrs-only pairs
+of the stock host and a signed instrumented build from the same
+`99db1aa` source. Use the unchanged backlog-128 fixture, guest
+assets and warm store from the earlier screen. All six legs
+verified 3,200 exact exchanges each with zero leaked sessions,
+server queue overflows or cleanup errors. The published-path
+counters reconciled all connections. On the three instrumented
+legs, each of the four stage histograms had exactly one sample
+for each of the 7,990 vsock fallback connections.
+
+| Host-side elapsed interval | p50 bucket | p95 bucket | p99 bucket |
+| --- | ---: | ---: | ---: |
+| Vsock connection and address header | 131–262 µs | 262–524 µs | 524–1,049 µs |
+| Socket options and descriptor setup | 2–4 µs | 16–33 µs | 33–66 µs |
+| Upload thread spawn call | 8–16 µs | 33–66 µs | 33–66 µs |
+| Spawn call entry to worker start | 16–33 µs | 66–131 µs | 66–131 µs |
+
+The p95 buckets were identical in all three instrumented legs.
+The connection and header interval is the largest measured setup
+stage. It includes queue admission, the framework callback and a
+header write. These elapsed samples leave individual CPU costs and
+the connection's internal breakdown open. Spawn time and worker
+start time overlap.
+
+For reproduction, sample monotonic time around `open_framed_relay`,
+from its return through the socket options and descriptor copies,
+and from upload spawn entry to both its return and the start of the
+worker body. Add one relaxed atomic count to the corresponding
+base-two nanosecond bucket. Read the histogram via the private
+daemon's relay endpoint immediately before and after the timed
+workload. Subtract bin counts, sum across the three instrumented
+legs and select percentile buckets by rank.
+
+The instrumented/stock median CPU ratio was 1.005, with observed
+paired range 1.002–1.006. Completion was 1.011, range 0.991–1.014.
+This is a three-pair perturbation check for the attribution.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed instrumented host | `2f1e185c438db5275366dd1bf76b02bc769a0b38098855ace3ceec8948644301` |
+| Instrumentation patch | `2adca2c681ac92695d11e3204b8dc99eb926c38bba635772022ce04a2f827b75` |
+| Raw paired receipt | `f5bc5cdbce3ed6592af566618fd56cec570ec6241caddc20c6a1140766119b61` |
+| Derived histogram ranks | `7ef848b7dd598965aa3ea6f1898bd5eb8a409d8868cc299e393457f7b53edc3b` |
+
 #### W14 streaming, cancellation and reconnect with buffered frames
 
 Each installed-default cohort passed all ten alternating pairs on
