@@ -1296,9 +1296,8 @@ The six protocol tests and 206 host unit tests passed.
 
 The candidate is parked on its branch. The native zlib test verified
 transport selection and exact work, and the mixed-version controls
-verified ordinary loopback. A full W6/W7 performance comparison,
-forced vsock-failure fallback, and cold-start timing after moving
-mirror startup remain unverified.
+verified ordinary loopback. A full W6/W7 performance comparison
+remains unverified.
 
 | Receipt | SHA-256 |
 | --- | --- |
@@ -1306,6 +1305,53 @@ mirror startup remain unverified.
 | Candidate guest initramfs | `3a0beb214514dac05bfbec054d7866946b4772a90aaa968e6664dd02c127800e` |
 | Zlib and loopback routing | `8fc3bdea1c9fbd2c3b60e3663319f2be30354a1cf0aa8bcdd8ce9f98679e37b7` |
 | Mixed-version controls | `91e7beae10b73d5d44e5408ad83ed2d8fd9ec677d566c7337f1f57f5dfdf031c` |
+
+Candidate `d370e8c` uses the agent's existing timed dial with a
+100 ms timeout for the first registry vsock attempt. To test failed
+connects, rebuild the candidate host with the framed host-bound
+listener registration withheld. Leave the registry listening and
+verify the guest's configured registry port and the Mac's NAT
+listener before the uncached build. Run the same zlib and loopback
+control once with the fault and once with the unmodified signed
+host, using the updated candidate initramfs for both.
+
+Both runs produced the pinned archive and verified the uncached
+compile-and-test step. `w6-vsock-fallback-397f7c` counted 37 build
+connections over NAT and zero over vsock. `w6-selective-vsock-3898bf`
+counted 37 over vsock and zero over NAT. The separate ordinary
+loopback control used NAT in both runs. The listener fault exists
+only in the diagnostic host.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Updated candidate initramfs | `6f86391b71c9b0c27b07b50fda0da63e7a76925ae9c0ecc3571e2844999a9038` |
+| Host with framed listener withheld | `d8cdb95f16f8cb3413e0a98abdd052a74ed6730b323337242908b567c227dc77` |
+| Fault patch | `2a695daef13140418866114c263ff267c4717fb3516ecaebe78ea00fa185cc7c` |
+| Failed-dial fallback receipt | `b5df135949cd36de7ea3442a85b1a8f3d2c086622556c0701fc613b367b4dcea` |
+| Healthy listener receipt | `f9404386cb289ffe13617c510c9b6b4dcf3d2842b83fae3f9d45e63ef9a7445e` |
+
+##### W1 cold-start screen for registry vsock
+
+`w1-mirror-cold-screen-80aa70` compared the stock signed host with the
+candidate in six alternating pairs. Both used the updated candidate
+initramfs and the same campaign-owned preloaded W1 store. For each leg,
+run the existing W1 cold trial with its preparation and timed launch
+boundaries. Stop the daemon before changing the host executable.
+Require the pinned inputs, exact initial and post-restart roundtrips,
+and owned cleanup. All 12 legs passed, and both host quiet checks passed.
+
+| Metric | Stock median (range) | Candidate median (range) | Paired median ratio (95% bootstrap interval) |
+| --- | ---: | ---: | ---: |
+| Daemon readiness | 39.9 ms (36.4–69.0) | 36.1 ms (35.2–50.3) | 0.902 [0.618, 1.151] |
+| Daemon launch to first exact roundtrip | 3.992 s (3.834–4.556) | 4.097 s (3.716–4.227) | 1.034 [0.927, 1.049] |
+
+The roundtrip interval crosses the 1.03 parity bound. In the slower
+candidate legs, the extra time was concentrated after Compose began.
+The measurements cannot attribute it to earlier mirror startup.
+This same-store screen did not compare either host against
+OrbStack or exercise saved-container restoration during daemon startup.
+Trial SHA-256
+`f5e6a315dd0e5aeaa6bcd7f1c12d2119e706ae1662829d26c53f3be00c0fd2f6`.
 
 ### Installed-default W7 cohort
 
