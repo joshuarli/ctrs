@@ -3240,6 +3240,56 @@ overhead is unmeasured.
 | Trials | `f1e001c9ad6d9fa68ac24f34199300b62c364ceb44739c9473c029751cbdbcb9` |
 | Joined socket and client timestamps | `b2a8f41574ad399732b5efbf819435ccfc15dad61a5f65bfc962ad4b012d0aa5` |
 
+##### W14 published relay thread scheduling screen
+
+The socket timeline measured a wait before the daemon read the
+request. Test whether macOS thread scheduling can reduce it while
+keeping the same idle-resume fixture.
+
+Use the route observer in an owned signed `99db1aa` daemon. In the
+candidate leg call `pthread_set_qos_class_self_np` with
+`QOS_CLASS_USER_INITIATED` and relative priority zero on the
+downstream relay and its upload worker, before their I/O loops.
+Read back the class and API results in both arms. Toggle a private
+gate file between trials, so the same daemon, guest, store and
+signed binary serve both arms. Keep the published-port route
+selection, client, server, VM and host scheduler settings fixed.
+
+Retain one declared warmup, then run six alternating AB/BA pairs
+with 32 clients and 30 seconds of idle. Require exact replies,
+owned cleanup, loaded binary and guest assets, all 64 relay-thread
+receipts per trial and the normal host quiet gate. Use the upper
+95% paired bounds of 0.95 for resume p50 and 1.03 for resume p99
+and measured lifecycle CPU. Host-kernel NAT CPU is outside that
+last counter.
+
+`w14-relay-qos-804839c4` completed the warmup and all six pairs.
+All 416 resumed replies were exact, all owned cleanup checks passed,
+and all 832 thread receipts had successful API results. Every
+measured control thread reported class 21 and every candidate
+thread reported class 25 with relative priority zero. Both quiet
+checks passed. Across the paired trials, each arm had 120 NAT-leg
+and 72 vsock sessions. The separate whole-trial counts, including
+probes, were 21–26 NAT connections for control and 20–25 for the
+candidate.
+
+| Metric | Paired candidate/control median | Paired 95% CI | Required upper bound |
+| --- | ---: | ---: | ---: |
+| Resume p50 | 0.928 | [0.534, 1.105] | 0.95 |
+| Resume p99 | 1.064 | [0.721, 1.159] | 1.03 |
+| Measured lifecycle CPU | 1.004 | [0.969, 1.048] | 1.03 |
+
+The candidate missed all three bounds. Individual p50 ratios ranged
+from 0.387 to 1.186. Keep the default scheduling class. The observed
+variation leaves the idle-resume comparison open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed diagnostic host | `c9a2655a49aa4548a5da38c43161f2880ba0e5fa05ac497b46ebcb2f488f4a73` |
+| Instrumentation patch | `7de6bb177046442186e0691f810363ce923b54433d2415f9d9b7191a68e5af94` |
+| Trials | `8c0dcaa6b892db1cfcd13e0fc0f25cd006d2dd1af719c04d17f420f587715421` |
+| Joined session and QoS receipts | `e2025a05ecdf371885ba625cf8e5c65ea229b4172acbcae3556ef1e5e31cef50` |
+
 #### W14 fresh and persistent connections with buffered frames
 
 All ten installed-default pairs in each mode passed on harness
