@@ -1654,10 +1654,10 @@ fn parse_prune(text: &str) -> (Vec<String>, u64) {
     let mut ids = Vec::new();
     let mut space = 0;
     for v in text.lines().filter(|l| l.starts_with('{')).filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
-        if let Some(id) = v["ID"].as_str() {
+        if let Some(id) = v["id"].as_str() {
             ids.push(id.to_owned());
         }
-        space += v["Size"].as_u64().unwrap_or(0);
+        space += v["size"].as_u64().unwrap_or(0);
     }
     (ids, space)
 }
@@ -1686,9 +1686,9 @@ fn du_rows(text: &str) -> Value {
             .iter()
             .map(|r| {
                 json!({
-                    "ID": r["ID"], "Parent": r["Parents"][0], "Parents": r["Parents"], "Type": r["RecordType"],
-                    "Description": r["Description"], "InUse": r["InUse"].as_bool().unwrap_or(false), "Shared": r["Shared"].as_bool().unwrap_or(false),
-                    "Size": r["Size"].as_i64().unwrap_or(0), "CreatedAt": r["CreatedAt"], "LastUsedAt": r["LastUsedAt"], "UsageCount": r["UsageCount"].as_i64().unwrap_or(0),
+                    "ID": r["id"], "Parent": r["parents"][0], "Parents": r["parents"], "Type": r["recordType"],
+                    "Description": r["description"], "InUse": r["inUse"].as_bool().unwrap_or(false), "Shared": r["shared"].as_bool().unwrap_or(false),
+                    "Size": r["size"].as_i64().unwrap_or(-1), "CreatedAt": r["createdAt"], "LastUsedAt": r["lastUsedAt"], "UsageCount": r["usageCount"].as_i64().unwrap_or(0),
                 })
             })
             .collect(),
@@ -1923,14 +1923,18 @@ mod tests {
         assert!(has(&["--all"]) && has(&["--keep-storage", "5000"]) && has(&["--keep-duration", "24h"]) && has(&["--filter", "type==regular"]));
         let bad = Request::internal("POST", "/build/prune", &[("filters", r#"{"until":["2026-01-01"]}"#)], Vec::new());
         assert!(prune_argv(&bad, &api::filters(&bad, &["until"]).unwrap()).is_err());
-        let (ids, space) = parse_prune("{\"ID\":\"a\",\"Size\":10}\n{\"ID\":\"b\",\"Size\":5}\nTotal: 15B\n");
+        let (ids, space) = parse_prune("{\"id\":\"a\",\"size\":10}\n{\"id\":\"b\",\"size\":5}\n");
         assert_eq!((ids, space), (vec!["a".to_owned(), "b".to_owned()], 15));
-        let rows = du_rows(r#"[{"ID":"x","Mutable":false,"InUse":true,"Size":42,"Parents":["p"],"CreatedAt":"2026-10-30T10:00:00Z","LastUsedAt":null,"UsageCount":3,"Description":"mount / from exec","RecordType":"regular","Shared":false}]"#);
-        assert_eq!(rows[0]["ID"], "x");
-        assert_eq!(rows[0]["Parent"], "p");
-        assert_eq!(rows[0]["Type"], "regular");
-        assert_eq!(rows[0]["Size"], 42);
-        assert_eq!(rows[0]["InUse"], true);
+        let rows = du_rows(r#"[{"id":"x","mutable":false,"inUse":true,"size":42,"parents":["p"],"createdAt":"2026-10-30T10:00:00Z","lastUsedAt":null,"usageCount":3,"description":"mount / from exec","recordType":"regular","shared":true}]"#);
+        assert_eq!(rows, json!([{
+            "ID": "x", "Parent": "p", "Parents": ["p"], "Type": "regular",
+            "Size": 42, "InUse": true, "Shared": true, "UsageCount": 3,
+            "Description": "mount / from exec", "CreatedAt": "2026-10-30T10:00:00Z", "LastUsedAt": null,
+        }]));
+        let rows = du_rows(r#"[{"id":"empty","size":0},{"id":"unknown","size":-1},{"id":"missing"}]"#);
+        assert_eq!(rows[0]["Size"], 0);
+        assert_eq!(rows[1]["Size"], -1);
+        assert_eq!(rows[2]["Size"], -1);
     }
 
     #[test]

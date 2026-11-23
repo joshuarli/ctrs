@@ -28,6 +28,10 @@ after incomplete host CPU sampling. The harness now uses per-processor
 ticks to avoid cached snapshots. Host NAT CPU attribution remains open.
 [Host counter evidence](native-performance-progress.md#host-cpu-counter-freshness)
 
+The archived zero ctrs BuildKit cache sizes in W6 and W7 came from a
+field-name mismatch. The fixed endpoint reports BuildKit's record sizes.
+[Cache accounting evidence](native-performance-progress.md#w7-buildkit-cache-accounting)
+
 ## Existing workloads
 
 | ID | Workflow | Spec | Impl | Functional (this host) | Compared (this host) | Critical result (this host) |

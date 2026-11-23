@@ -1504,6 +1504,39 @@ free, allowing for the observed build-cache growth and the disk floor.
 `trials.jsonl` SHA-256
 `d01ef50aa0e8fae6e1f6829f6fc2faa10efc298ac902ae1ed0eba3caf6b42d57`.
 
+##### W7 BuildKit cache accounting
+
+The earlier W7 ctrs receipts recorded growing cache entry counts and
+zero cache bytes. BuildKit v0.35.0 serializes usage records with
+lower-camel-case keys. ctrs read Docker's response field names from
+that input. The same mismatch affected the IDs and reclaimed bytes
+returned by the build-prune endpoint.
+[Pinned BuildKit usage schema](https://github.com/moby/buildkit/blob/v0.35.0/client/diskusage.go)
+
+On the warm campaign-owned ctrs store, the pinned builder returned 939
+rows from `buildctl du --format '{{json .}}'`, totaling 21,448,738,869
+bytes. The original signed host returned 939 rows from `/system/df`
+with null IDs and zero sizes. Rebuild and sign with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`. Keep the same guest
+and store. The signed fix reported the same cache rows as BuildKit
+after translating the field names, and the bench harness and
+`docker system df` reported the corresponding total. Read the
+builder's usage and the Docker endpoint while the owned builder is
+running, and compare by record ID. The control ran no builds or
+prunes. The prune parser was verified against the pinned JSON shape
+in the builder unit test.
+
+These are BuildKit's per-record sizes. Shared records and the
+backing filesystem's allocation require separate measurements.
+The historical zero sizes are invalid. The complete W7 comparison
+with fresh disk and CPU receipts remains open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Builder usage, both hosts | `d8ce1d5e82029105b7c69bbf6e81690bc37a9f2ffd0391c1963f652072614fc7` |
+| Original host cache response | `706b2e8753d0be6dc1a2e70334294c47bc40a5af5ca5c19417ab32b907edcefb` |
+| Fixed host cache response | `aa34cf1124de4a4726cfc47fcffb821e2ba52a79d888d9d8ff0de53de8508fee` |
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
