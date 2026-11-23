@@ -1573,6 +1573,40 @@ command in [W8 timing cohorts](#w8-timing-cohorts) to reproduce it.
 | Raw trials | `480e125d981b1db4fc87ad77196e2c17b84e0e52cfa4989734b2ed41f3b57f74` |
 | Report | `b3c74d676bb2672dff558a712647b0731fd8f6b8b1b2f76598c535c663a8f826` |
 
+#### W8 derived-content timing with concurrent load
+
+All ten installed-default pairs in `w8-paired-6cef19315162` passed on
+harness `ce50555` and signed release `99db1aa`. Both engines fetched
+the 37 regenerated layers at their exact sizes. Compressed layer bytes
+ranged from 315,779,495 to 315,779,525, and total blob bytes matched
+within each pair. All 20 legs verified deployment and 50,000 additional
+background API operations each, including 296,820 persisted background
+writes across the cohort. Host gates and resource validation passed.
+The legacy OrbStack registry was restored after the cohort.
+
+| Metric | Median ctrs/OrbStack | Paired 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| First pull to stack health | 0.4138 | [0.3836, 0.4296] | Strict win |
+| API completion p95 during pulls | 0.9089 | [0.8601, 0.9471] | Strict win |
+| API completion p99 during pulls | 0.8169 | [0.7594, 1.0877] | Inconclusive |
+| Sampled peak physical footprint | 0.1861 | [0.1833, 0.1920] | Strict win |
+| Measured whole-workflow CPU | 0.7353 | [0.7312, 0.7372] | Incomplete Mac NAT accounting |
+
+Median first-pull-to-health time was 7.509 s (7.010–7.717 s) on ctrs
+and 17.806 s (17.357–20.437 s) on OrbStack. The paired median gap was
+10.37 s overall and 10.15 s before the stack-health phase. The four
+background workers supplied fixed work. During the actual pull windows,
+ctrs recorded 708–907 completions per leg and OrbStack recorded
+8,410–9,023. Every pull window had at least 92 completions. ctrs used
+18–20 host NAT connections per leg. The independent matched-resource
+controls and the fresh retained-load confirmation remain queued.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `d3d8fa4d351fd5a70f0d48d3ca5f3fbe2bf422c02eb4cdb11cd60d1f61315dfb` |
+| Raw trials | `8282de1dba8b2f5569af66a65f69d3e1a0c5795542e1d1a715d1ca7146332076` |
+| Report | `876b5f07d480d2da932b7c6a48afe62df6be0d7c923f79dc09607633e9061d87` |
+
 #### Mac release check after the shared layer-install change
 
 Source `83e9c15` changes the gzip decoder compiled into the Linux guest
