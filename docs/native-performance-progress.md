@@ -3141,6 +3141,52 @@ installed-default resources. Keep the v3 and v4 cohorts separate.
 Raw trials SHA-256
 `aaea59cf5cc691fd2a359302a202606ef5aad01f80c99644283925e7eed44c2c`.
 
+##### W14 idle-resume by relay path
+
+`w14-idle-transport-d07f0d40` kept the v4 idle workload, server,
+32 clients, 30-second idle duration and pinned API image. In an
+owned warm daemon on signed `99db1aa`, log the accepted client's
+source port, backend port and selected path after each route is
+chosen in `ports::relay`. On the client, capture the local port
+from `getsockname`, the priming reply duration and the timestamp
+immediately before the resumed exchange. Join on client port and
+require one target and one route event per measured session. The
+client and server still send and validate the original v4 frames.
+
+All five trials verified 32 exact resumed replies, zero leaked
+sessions and owned cleanup. The loaded host and guest assets matched
+their receipts and both host quiet checks passed. The route join
+covered all 160 sessions, with 86 taking a NAT leg and 74 taking
+vsock only. The separate relay totals include setup and cleanup
+probes. There were no published vmnet TCP sessions in the measured
+client set.
+
+| Trial | NAT-leg median RTT | Vsock-only median RTT | NAT-leg replies ≥10 ms | Vsock-only replies ≥10 ms |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 2.00 ms | 2.40 ms | 0/17 | 0/15 |
+| 2 | 16.59 ms | 12.61 ms | 16/17 | 9/15 |
+| 3 | 15.43 ms | 14.14 ms | 19/19 | 12/13 |
+| 4 | 13.16 ms | 10.14 ms | 14/15 | 9/17 |
+| 5 | 14.76 ms | 17.22 ms | 16/18 | 14/14 |
+
+Priming medians were 2.61–3.49 ms across both paths. In trials
+2–5, the median completion times of the two path groups were within
+1.22 ms on the host monotonic clock. Compute completion as the
+client's exchange start plus its RTT, relative to the trial's first
+start. The first 16 clients to start had a higher median RTT than
+the last 16 in every trial. Both paths experienced slow replies,
+and the path with the larger median RTT varied. The join
+is observational. It leaves the relative contributions of host
+client scheduling, guest scheduling and transport unresolved, and
+does not change the existing OrbStack comparison.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed diagnostic host | `e5302077b5b991d8db6f8188b63917d51bcc7090efc2e465b97f56679e04b92e` |
+| Instrumentation patch | `1ddce8d983ef966aa1218aafd0d956289a31e23535e14fe10887d17c97e27778` |
+| Trials | `3cf5716f5a7caba9e39b446055db7f27e1422a9efbcf7532142af9faccc36a3e` |
+| Joined session receipts | `980c114b775e9be9cb2d4de6f4334a2f420ebaef987f5adf813eb74dbc391818` |
+
 #### W14 fresh and persistent connections with buffered frames
 
 All ten installed-default pairs in each mode passed on harness
