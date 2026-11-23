@@ -2794,6 +2794,33 @@ warm rebuild and restore match the initial build, the changed output
 differs, and both engines agree on all four output receipts. The producer
 checks each output against the fixture pin during its timed phase.
 
+#### W12 native build output receipt admission
+
+`base-20261122T191950-b1b8` ran one installed-default mixed-layout
+pair with harness `b9d1cab` and the signed `99db1aa` release. Both
+legs passed and the current reporter admitted the pair. Each installed
+2,830 dependencies and verified 92,306 files and 532,136,968 bytes.
+Both recorded the same initial, warm, changed and restored outputs
+and both discovered the two pinned Jest test paths.
+
+The initial build, warm rebuild and branch restore each matched
+the pinned 121-file server digest
+`6bad94face77f007869dd8dba4f520ca71a426049e515f84c7881c6d8babfb57`.
+The ten-file edit produced the pinned changed server digest
+`07e9957c9014ad968dc6ec6cff578cb93a1937e3c1f9da35606c8e0489c964fc`.
+All four output receipts matched the pinned client manifest and
+runtime digests. This pair verifies the upgraded receipt producer
+and admission path. The timing evidence remains in the ten-pair
+cohorts below.
+
+Reproduce with the W12 baseline command below using
+`--workspace-layout bind-source-volume-deps --pairs 1 --max-pairs 1`.
+Use the pinned source and prepared image archives and compare
+`inputs.initial_output`, `warm_output`, `changed_output`,
+`restored_output` and `tests` against `workload.json`.
+Raw trials SHA-256
+`fa2bbcc02ec3d98128e08b9279fe0fc506ee61f88d5bce2716a0a8f1f64f4123`.
+
 #### Installed-default W12 full-bind cohort
 
 `base-20261122T113705-c0df` admitted ten alternating pairs at `fa72716`

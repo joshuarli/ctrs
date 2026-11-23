@@ -55,6 +55,9 @@ v2 all-volume cohort had non-inferior workflow time at 0.9915
 Both watch cohorts are complete.
 [Mixed-layout evidence](native-performance-progress.md#installed-default-w12-mixed-layout-cohort)
 [All-volume evidence](native-performance-progress.md#installed-default-w12-all-volume-cohort)
+The upgraded mixed-layout receipt passed a native admission pair with
+all four exact build outputs and both discovered tests.
+[Build output admission](native-performance-progress.md#w12-native-build-output-receipt-admission)
 The table retains W12 timing history from the previous workspace fixture.
 [Current cohort](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 
