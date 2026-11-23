@@ -773,7 +773,60 @@ python3 bench/native/runner.py baseline --case W5 --watch-edits 60 \
 
 Raw trials SHA-256
 `ddee9ccc1dc87d0b8dd4592e078198521db754449258035f2fed56aeb575efe3`.
-Frozen confirmation remains open.
+
+#### W5 frozen-executable repeat
+
+Use the original signed `99db1aa` executable and guest assets on a
+separate campaign-owned ctrs store. Verify the original SHA-256s.
+The pinned image can be transferred directly from the existing
+OrbStack endpoint with `docker image save np-w5-marked:v2` piped to
+`docker image load` on the private ctrs endpoint. Require both
+commands to succeed before timing. Verify ordered layers, runtime
+tool versions, fixture file digests, Marked source and dependency
+lock against the original cohort. Run the same ten alternating
+pairs with 60 edits per mount and the installed-default budgets.
+
+`w5-confirmation-2fe3db15` used harness `965f820`. All 10 pairs completed
+with 2,400 exact edited results and 40 verified initial replies. All 40
+mount runs cleaned up their owned resources. The 126 resource receipts
+per leg passed, and ctrs recorded zero host NAT connections. Both engines
+reported 9 vCPUs, with 8.41 GB guest memory on ctrs and 63.16 GB on
+OrbStack. The host-load fallback admitted all pairs, with a maximum
+one-minute load of 2.31 on 10 host CPUs. The ctrs executable SHA-256 was
+`10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17`
+and both guest boot asset hashes matched the original.
+
+Ratios are paired ctrs/OrbStack medians with 95% bootstrap intervals.
+
+| Metric | Bind | Named volume |
+| --- | --- | --- |
+| Edit-to-result p50 | 0.9691 [0.9647, 0.9732], non-inferior | 0.9750 [0.9715, 0.9824], non-inferior |
+| Edit-to-result p95 | 0.9460 [0.9392, 0.9603], non-inferior | 0.9907 [0.9822, 0.9967], non-inferior |
+| Watcher setup | 0.4664 [0.4563, 0.4749], strict win | 0.2492 [0.2441, 0.2586], strict win |
+| Engine CPU per edit | 0.9667 [0.9463, 0.9779], non-inferior | 0.8478 [0.8431, 0.8619], strict win |
+| Sampled physical footprint | 0.0892 [0.0878, 0.0901], strict win | 0.0895 [0.0884, 0.0904], strict win |
+
+On bind mounts, the median trial p50 was 150.42 ms on ctrs and 155.06 ms
+on OrbStack. The edit commands took 0.37 ms and 1.11 ms. On volumes, the
+edit commands took 30.27 ms and 71.81 ms, with a further 110.91 ms and
+73.23 ms respectively before the verified result. The complete volume
+edit took 141.04 ms and 144.51 ms. Each interval has its own median.
+The original cohort showed the same pattern. The watcher polls recently
+changed paths on a 100 ms loop, so both writes could have reached the
+watcher before the same poll. The receipts time the full edit and the
+write command, with no separate measurement of detection, rebuild or
+CLI execution. [esbuild v0.25.3 watcher](https://github.com/evanw/esbuild/blob/v0.25.3/pkg/api/watcher.go)
+
+The OrbStack endpoint was shared and had one other running container
+before and after the repeat. Sampled footprint ratios were about 0.09 in
+this cohort and 0.19 in the original, so the size of that difference
+remains unqualified. An isolated OrbStack comparison and a fresh signed
+release confirmation remain open.
+
+Raw trials SHA-256
+`c176e4cd9524c1db0fc6a4c544268c5348d5bd372f887436b910e82d0f592d03`.
+Image admission SHA-256
+`7ce58350eeb82815991c18ca411667ef647aaba671ed9b2250dd38620a1ab3d0`.
 
 ### Installed-default W6 cohort
 
