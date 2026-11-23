@@ -1462,6 +1462,15 @@ resident controls use the same four conditions and ten pairs per
 condition with `--resource-lane matched`. Backing allocation remains
 covered by the separate diagnostics above.
 
+As a CPU accounting cross-check, multiply each ctrs leg's host busy cores
+by its whole-workflow wall time, then divide by the paired OrbStack
+engine-plus-coordinator CPU. The all-process ctrs host estimate was
+9.25–11.59 CPU-s and the paired OrbStack process measurement was
+18.91–21.25 CPU-s. The median ratio was 0.4965 [0.4694, 0.5306].
+The numerator uses the Mac's aggregate CPU tick fractions and includes
+unrelated processes. The CPU-efficiency verdict still requires attributed
+resource accounting.
+
 | Artifact | SHA-256 |
 | --- | --- |
 | Signed ctrs binary | `10667e6d929207167f1812e5fd41c7ad6474f12bc9d5a42788af5ae027c93d17` |
