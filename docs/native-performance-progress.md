@@ -1227,6 +1227,42 @@ export interval in the three slow archived repeat pairs.
 | Instrumentation patch | `0124058d3aef6531d601f22d5736e5594153b943b84af8d095136d4720130060` |
 | Verified uploads | `b173043ace5c22eb94e4f6689bda80a41fbe0a81ad1cd708129861669eb156da` |
 
+##### W6 build registry relay destinations
+
+`w6-relay-destination-90ee95` repeated the pinned, uncached zlib
+build on the warm installed-default ctrs store. The signed host was
+built from `57bc53f` with a logging-only change. In
+`nat_host_bound`, just after a successful authenticated loopback
+connect, compare the destination port with the active
+`mirror::port()`. Record only whether the connection reached
+the build registry. Keep the original guest and the existing
+relay selection and authorization.
+
+The build verified the uncached compile-and-test step and the
+original `libz.a` SHA-256
+`6b6ba12f2f7ed1e8c7ebe08480e408394c8e66aebec862a10494fb2dc415914b`.
+All 37 successful host-bound NAT connections went to the build
+registry. No published-port or host-bound vsock counters advanced.
+In a separate control, a guest requested a temporary Mac loopback
+HTTP endpoint through `host.docker.internal`, verified its response
+body, and recorded one non-registry NAT connection. Close that
+endpoint and reconcile each phase's classifications with
+`GET /ctrs/relays`.
+
+A registry-specific transport candidate would need the guest to
+learn the current listener port. The host can fall back to an
+ephemeral port when its preferred port is in use. Qualify the
+candidate with the complete W6 and W7 workloads, zero uncharged
+NAT connections in their measured phases, and a separate
+ordinary-loopback control. This diagnostic measured destinations
+for the zlib build. The full W6 and W7 CPU cells remain open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Diagnostic host | `2eaf78292447f6da4525c4b42a4fd30469f35adfcc8034168b8896f89bf625a9` |
+| Patch | `27652e262f75aa0748d0f66531b6cbd15cf6362ded1192ba6eaaca985820861a` |
+| Routing and output checks | `bca6bee4b8158a4cc659e6a4f9e1008e175057d085a3fb4a973edc2ecec69c40` |
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
