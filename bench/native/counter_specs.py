@@ -2,6 +2,7 @@
 import re
 
 VERSION = 'w2-counters-v2-futex-commands'
+WAKE_VERSION = 'w2-counters-v1-wake-entry'
 KRETPROBE_MAXACTIVE = 4096
 SYSCALLS = ('futex', 'read', 'write', 'epoll_pwait', 'recvfrom', 'sendto')
 FUTEX_SELECTORS = (
@@ -49,3 +50,8 @@ def selectors(tag):
     result.extend({'label': 'futex_' + label, 'event': tag + ':' + names[kind], 'filter': expression}
                   for kind, label, expression in FUTEX_SELECTORS)
     return result
+
+
+def wake_selectors(tag):
+    return [selector for selector in selectors(tag)
+            if selector['label'] in ('api_generated_wakes', 'futex_wake')]

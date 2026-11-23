@@ -45,7 +45,12 @@ def cpu_record_args(profile_kind, tasks, period_ns=None):
 
 
 def profile_identity(profile_kind, api_cpus, client_location):
-    version = cpu_profile.PROFILES[profile_kind][0] if profile_kind in cpu_profile.PROFILES else counter_specs.VERSION
+    if profile_kind in cpu_profile.PROFILES:
+        version = cpu_profile.PROFILES[profile_kind][0]
+    elif profile_kind == 'wake-counters':
+        version = counter_specs.WAKE_VERSION
+    else:
+        version = counter_specs.VERSION
     if api_cpus is not None:
         version += '-api-affinity-v1'
     if client_location == 'guest':
@@ -140,6 +145,9 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
     if profile_kind != 'cpu' and cpu_frequency != cpu_profile.FREQUENCY:
         raise ValueError('custom sample frequency requires the CPU profiler')
     cpu_period = cpu_profile.period_for_frequency(cpu_frequency) if profile_kind == 'cpu' else None
+    if profile_kind not in cpu_profile.PROFILES and profile_kind not in ('counters', 'wake-counters'):
+        raise ValueError('unknown W2 profiler kind: ' + profile_kind)
+    wake_only = profile_kind == 'wake-counters'
     directory = root / mode; directory.mkdir()
     project = runner.project_name(run, engine.name, mode)
     tag = 'np' + secrets.token_hex(6)
@@ -219,10 +227,10 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             if profile_kind in cpu_profile.PROFILES:
                 args = cpu_record_args(profile_kind, tasks, cpu_period)
             else:
-                helper('probes')
+                helper('wake-probes' if wake_only else 'probes')
                 args = ['/tmp/np-tools/usr/bin/perf', 'stat', '-j', '--per-thread', '--no-inherit', '-t', ','.join(tasks),
                         '--delay=-1', '--control', 'fifo:/tmp/np-count/control,/tmp/np-count/ack', '-o', '/tmp/np-count/stat.json']
-                spec = counter_specs.selectors(tag)
+                spec = counter_specs.wake_selectors(tag) if wake_only else counter_specs.selectors(tag)
                 save(directory / 'selectors.json', spec)
                 for selector in spec:
                     args += ['-e', selector['event']]
@@ -304,11 +312,11 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                 result['cpu_profile'] = profile
             else:
                 engine.sh(['cp', api + ':/tmp/np-count/stat.json', str(directory / 'stat.json')])
-                counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations)
+                counts = perf_counts.summarize_detail((directory / 'stat.json').read_text(), tag=tag, required_tids=tasks, successful_operations=operations, wake_only=wake_only)
                 save(directory / 'counts.json', counts)
                 if counts['status'] != 'ok':
                     raise ValueError('event counter coverage invalid: ' + repr(counts['errors']))
-                profile = json.loads(helper('probe-profile').stdout)
+                profile = json.loads(helper('wake-probe-profile' if wake_only else 'probe-profile').stdout)
                 if profile['status'] != 'ok':
                     raise ValueError('probe miss coverage invalid')
                 result['probe_profile'] = profile
@@ -343,7 +351,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                     except Exception as kill_exc:
                         result['cleanup_errors'].append(label + ' kill: ' + repr(kill_exc))
         try:
-            if api and mode == 'on' and profile_kind == 'counters':
+            if api and mode == 'on' and profile_kind != 'cpu':
                 helper('cleanup')
         except Exception as exc:
             result['cleanup_errors'].append('probes: ' + repr(exc))

@@ -61,6 +61,21 @@ class DetailedPerfCounts(unittest.TestCase):
         self.assertEqual(result['counts']['futex_other_negative_returns'], 0)
         self.assertEqual(result['per_successful_operation']['futex_all'], 241717 / 5000)
 
+    def test_wake_only_counts_require_both_complete_thread_blocks(self):
+        rows = self.raw.splitlines()
+        wake_rows = rows[40:45] + rows[55:60]
+        options = dict(tag=self.tag, required_tids=TIDS, successful_operations=5000, wake_only=True)
+        result = perf_counts.summarize_detail('\n'.join(wake_rows), **options)
+        full = self.analyze(self.raw)
+        self.assertEqual(result['status'], 'ok', result)
+        self.assertEqual(result['required_cells'], 10)
+        self.assertEqual(result['counts'], {key: full['counts'][key]
+                         for key in ('api_generated_wakes', 'futex_wake')})
+        self.assertIsNone(result['application_cpu_seconds'])
+        incomplete = perf_counts.summarize_detail('\n'.join(wake_rows[:-1]), **options)
+        self.assertEqual(incomplete['status'], 'unknown')
+        self.assertIsNone(incomplete['counts'])
+
     def test_missing_or_duplicate_thread_never_becomes_a_smaller_total(self):
         rows = self.raw.splitlines()
         for text in ('\n'.join(rows[:-1]), '\n'.join([rows[0], rows[0], *rows[2:]])):
