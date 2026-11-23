@@ -23,6 +23,9 @@ pub const FRAMED_PORT: u32 = 1030;
 /// Largest UDP payload.
 const MAX_DATAGRAM: usize = 65_507;
 const BUF: usize = 64 * 1024;
+/// Bytes one relay direction may move per wakeup before the agent loop
+/// serves its other descriptors.
+const STEP_BUDGET: usize = 16 * BUF;
 
 pub fn listen() -> io::Result<OwnedFd> {
     listen_vsock(PORT)
@@ -172,14 +175,14 @@ fn read_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize> {
     if room == 0 {
         return Ok(1); // not EOF; just full
     }
-    buf.resize(start + room, 0);
-    // SAFETY: reading into the spare part of a buffer we own.
-    let n = unsafe { libc::read(fd, buf[start..].as_mut_ptr().cast(), room) };
+    buf.reserve(room);
+    // SAFETY: reading into reserved spare capacity; only the bytes read become part of the buffer.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().add(start).cast(), room) };
     if n < 0 {
-        buf.truncate(start);
         return Err(io::Error::last_os_error());
     }
-    buf.truncate(start + n as usize);
+    // SAFETY: `read` initialized `n` bytes after `start`.
+    unsafe { buf.set_len(start + n as usize) };
     Ok(n as usize)
 }
 
@@ -190,15 +193,15 @@ fn read_frame_into(fd: RawFd, buf: &mut Vec<u8>, max: usize) -> io::Result<usize
     if max <= start + 4 {
         return Ok(1); // not EOF; just full
     }
-    buf.resize(max, 0);
-    // SAFETY: reading into the spare part of a buffer we own, after the frame's length.
-    let n = unsafe { libc::read(fd, buf[start + 4..].as_mut_ptr().cast(), max - start - 4) };
+    buf.reserve(max - start);
+    // SAFETY: reading into reserved spare capacity after the frame's length; only the bytes read become part of the buffer.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().add(start + 4).cast(), max - start - 4) };
     if n < 0 {
-        buf.truncate(start);
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: the length is written below and `read` initialized the `n` bytes after it.
+    unsafe { buf.set_len(start + 4 + n as usize) };
     buf[start..start + 4].copy_from_slice(&(n as u32).to_be_bytes());
-    buf.truncate(start + 4 + n as usize);
     Ok(n as usize)
 }
 
@@ -402,7 +405,8 @@ impl Relay {
     }
 }
 
-/// Moves bytes from `from` to `to` through `pipe`, passing EOF on as a
+/// Moves bytes from `from` to `to` through `pipe` until neither side can
+/// make progress or `STEP_BUDGET` bytes have moved, passing EOF on as a
 /// half-close once everything read has been written.
 fn pump(from: RawFd, to: RawFd, pipe: &mut Pipe, framed: bool) -> io::Result<()> {
     if pipe.kernel.is_none() && !pipe.copy_only && pipe.copied >= SPLICE_AFTER && pipe.buf.is_empty() {
