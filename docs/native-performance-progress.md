@@ -1542,6 +1542,37 @@ failed status and exclude the replay from qualification.
 | Original report | `9361292dfd2981058ef9888dc2f556a8e1eb7363d79ec04a64ac88524f17977f` |
 | Rejected leg result | `49a7880c155d023d7c2104ffd4c73e79f98524916016d68d2e2c3ddc93e1dc25` |
 
+#### W8 derived-content timing without concurrent load
+
+All ten installed-default pairs passed in `w8-paired-99ec4b7d32de`
+on harness `ce50555` and signed release `99db1aa`. Each pair used 37
+regenerated layers totaling 315,779,472 to 315,779,551 compressed bytes.
+Each engine fetched every changed digest at its expected size, and total
+blob delivery matched within each pair. All 20 legs verified 688 reads,
+312 writes, persisted payloads after restart and the Marked output. Both
+host gates passed for each leg and the OrbStack running-container
+inventory was empty at both boundaries. The guest budgets were the
+same as in the retained-content cohort.
+
+| Metric | Median ctrs/OrbStack | Paired 95% CI | Descriptive result |
+| --- | ---: | ---: | --- |
+| First pull to stack health | 0.4334 | [0.4202, 0.4645] | Strict win |
+| Sampled peak physical footprint | 0.1763 | [0.1737, 0.1795] | Strict win |
+| Measured whole-workflow CPU | 0.2125 | [0.2069, 0.2184] | Incomplete Mac NAT accounting |
+
+Median first-pull-to-health time was 7.568 s (7.205–8.162 s) on ctrs
+and 17.034 s (16.482–19.844 s) on OrbStack. The paired median gap was
+9.57 s overall and 9.06 s before the stack-health phase. ctrs used
+11–12 host NAT connections per leg. The run warms the engine and
+controls blob identity through fresh digests. Use the derived no-load
+command in [W8 timing cohorts](#w8-timing-cohorts) to reproduce it.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `1c0dd4c583cc235b2272b33f12b50f1cf1b7087e1b5801e2d07d34415ce128af` |
+| Raw trials | `480e125d981b1db4fc87ad77196e2c17b84e0e52cfa4989734b2ed41f3b57f74` |
+| Report | `b3c74d676bb2672dff558a712647b0731fd8f6b8b1b2f76598c535c663a8f826` |
+
 #### Mac release check after the shared layer-install change
 
 Source `83e9c15` changes the gzip decoder compiled into the Linux guest
