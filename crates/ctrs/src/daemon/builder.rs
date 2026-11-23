@@ -902,6 +902,7 @@ fn idle_expired(now: u64, last_use: u64, idle: u64) -> bool {
 /// Pauses the builder once it has been idle [`idle_secs`]: no build here,
 /// no exec in it (buildx's dial-stdio while it builds). Never wakes the VM.
 pub fn watch(engine: Arc<Engine>) {
+    #[cfg(not(target_os = "macos"))]
     super::mirror::start(&engine);
     let me = Arc::downgrade(&engine);
     drop(engine);
