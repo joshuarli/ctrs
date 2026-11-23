@@ -8,6 +8,7 @@ controls have ten admitted pairs each. The W6 5.5 GiB repeat, the W10
 50 ms confirmation, the W12 native descriptor repeat, and the W2
 remote-wake queue probe have terminal evidence below. The tested
 candidate defaults remain unpromoted. No campaign finish gate is qualified.
+`make test-bench` passed manifest validation and all 551 tests on the Mac.
 
 - W1 engine-cold and W10 whole-engine recovery still need an independent
   OrbStack endpoint. The current shared endpoint stays available to its
@@ -1563,6 +1564,12 @@ excess remote-idle wakeups.
 | Trials | `b229a5ef6e5da49547a4ef6fb96c71d7240db8fa27b9d167482ba871b622cdc3` |
 | ctrs trace | `b11732e8475d87d9eda1ddb92a31ccb015ef757058c3afa3c1d7133bdc4cf65d` |
 | OrbStack trace | `e00d6e6b52c2aceb92071c4f6e0535db1e820b55b857e3380f88b2a8515c6074` |
+
+The hardened reader verified both loss counters for every CPU in
+`wake-20261122T233551` on `1f575c5`. Both engines completed 50,000
+exact guest-direct requests at nine vCPUs. Both traces were valid and
+loss-free. The trial records SHA-256 is
+`74b0903858615da57a9e05ea3fd2804cee925c2054a50120877da4e24493a764`.
 
 ##### W2 remote wake queue probe
 
@@ -3804,6 +3811,18 @@ starts and running ctrs/OrbStack then OrbStack/ctrs. Verify all five
 `setup_phases` CPU boundaries and compare exact edit receipts across
 engines. Raw trials SHA-256
 `00235388b37f76dbf082041ab88394865b57e7bd998ed41226cc1ac43c143585`.
+
+#### W12 full-bind container CPU attribution
+
+Measure the existing full-bind workload in two alternating
+installed-default pairs. Outside the timed install and verification
+phases, read one-shot Docker stats for the verified owned workload
+container. Require stable container identity, monotone CPU counters
+and the original exact workload receipts. Compare container CPU delta
+with measured whole-engine CPU for each phase. The residual can
+include host virtualization and guest work outside the container's
+cgroup. Keep these observations separate from the installed-default
+timing cohort.
 
 #### Installed-default W12 named-volume watch cohort
 
