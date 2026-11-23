@@ -2352,8 +2352,8 @@ and 17.806 s (17.357–20.437 s) on OrbStack. The paired median gap was
 background workers supplied fixed work. During the actual pull windows,
 ctrs recorded 708–907 completions per leg and OrbStack recorded
 8,410–9,023. Every pull window had at least 92 completions. ctrs used
-18–20 host NAT connections per leg. The independent matched-resource
-controls and the fresh retained-load confirmation remain queued.
+18–20 host NAT connections per leg. The corrected retained-load
+confirmation and the matched-control status are recorded above.
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -2516,6 +2516,44 @@ keeps the same release source, thresholds and pair counts.
 | --- | --- |
 | `trials.jsonl` | `53cd874dccc7c2de4b995fab8e73f26988c167b46b117096bb97a21207fbc99b` |
 | `correlated-cache-events.json` | `6058b9910e269fc578801031122be8c02fc6e3e8a66c1d999e20498af24ea47b` |
+
+##### Refusal-cache candidate screen
+
+The candidate passed all four refusal tests and signed with the
+Virtualization entitlement. The admission pair and all ten pairs in
+`w10-refusal-250-vs-50-2df6176ae0` passed exact persisted-state and
+outage-accounting checks. The driver verified the running binary and boot
+assets on every leg. Both ctrs variants ran with nine vCPUs and
+8,407,957,504 bytes of visible memory.
+
+| Metric | Median 50 ms / 250 ms | Paired 95% CI | Upper limit |
+| --- | ---: | ---: | ---: |
+| Start command to first exact read | 0.6435 | [0.6087, 0.6718] | 0.95 |
+| Recovered request p99 | 1.0046 | [0.9896, 1.0203] | 1.03 |
+| Measured engine CPU per successful response | 1.0033 | [0.9966, 1.0088] | 1.03 |
+
+Median recovery was 350.7 ms at 50 ms and 543.8 ms at 250 ms. All
+three screen limits passed. The shorter TTL recorded 44–59 host NAT
+connections per leg versus 23–29 at 250 ms. The measured CPU comparison
+omits host-kernel NAT CPU, so the increased NAT work remains unquantified.
+
+The next confirmation uses the signed `63cd346` candidate and the
+`ca24add` W10 API fixture against installed-default OrbStack. Clone the
+stopped pinned ctrs warm store, use the same guest assets, and run
+`runner.py baseline --case W10 --interrupt-service api --a ctrs
+--b orbstack --resource-lane installed-default --pairs 10 --max-pairs 16
+--pair-quiet-load 4 --seed 7`. Verify exact state, signed running
+identity, host admission and unchanged budgets before evaluating the
+existing timing bounds. Full CPU accounting remains a promotion gap.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Candidate signed binary | `8d5dd573cd05b9e187187d23f9d63828144ca8424750e4d16fa8ce29136663ea` |
+| Plan | `9e8eef9dd3963ece9eeb5fcf6266f0f3d4811e0e06ce5f9ec1efb53899400d8a` |
+| 250 ms trials | `d1bcf685cab6983156dfab63a02a21face958dc19ddd1d85dbb494f3d126f8f7` |
+| 50 ms trials | `43ecbe93214f0e5690b5d668cf61d8e23b5fc741dabf7e655b3d3495c0412e05` |
+| Paired inputs and ratios | `c4d933cf39ae574ecace0aedc056925352516620e1d02c92413ed04af9128a58` |
+| Summary | `e3e63b9d0e91b30d013877fa08b3ec020ecf6fe227a272791aba68acab6c64e8` |
 
 ### Installed-default W10 database recovery cohort
 
