@@ -34,6 +34,33 @@ installed system-wide. Build and run details, including the optional
 launchd example: [docs/development.md](docs/development.md) and
 [docs/launchd.md](docs/launchd.md).
 
+## Bind mounts and volumes on macOS
+
+Bind mounts (`-v ./src:/app`) share Mac files with the guest through Apple's
+virtiofs. Every file operation crosses the VM boundary, which costs roughly
+0.1–0.4 ms more than on the Mac's own disk. That is unnoticeable for source,
+config files, sockets and build outputs. Trees with tens of thousands of
+small files, such as `node_modules`, package caches and build caches, are
+much slower on a bind. A Kutt `npm ci` measured 2.1× slower on a bind than
+on a named volume.
+
+Keep the source on a bind mount so the Mac and the container see the same
+files, and give dependency and cache directories a named volume:
+
+```yaml
+services:
+  app:
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+volumes:
+  node_modules:
+```
+
+With this layout the measured Kutt install, build and test workflow matched
+OrbStack. The Mac does not see files written into the volume; use
+`docker cp` or another mount if you need them on the Mac.
+
 ## Help
 
 Run `ctrs --help` for the native command reference, examples, and Docker
