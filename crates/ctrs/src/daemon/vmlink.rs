@@ -275,6 +275,13 @@ impl VmLink {
         }
     }
 
+    pub fn ping(&self, value: u64) -> io::Result<()> {
+        match self.call(|o| Msg::Ping(value).encode(o), None)? {
+            Reply::Pong => Ok(()),
+            _ => Err(io::Error::other("unexpected reply to ping")),
+        }
+    }
+
     /// Sends a message that has no reply.
     fn send(&self, encode: impl FnOnce(&mut Vec<u8>)) -> io::Result<()> {
         let mut w = self.writer.lock().unwrap_or_else(|e| e.into_inner());

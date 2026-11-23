@@ -631,6 +631,21 @@ impl Engine {
         let _ = engine.fs_events.set(super::fsevents::Watcher::start(Arc::downgrade(&engine)));
         engine.load()?;
         engine.start_balloon();
+        if let Some(rounds) = std::env::var("CTRS_DIAG_PING").ok().and_then(|v| v.parse::<usize>().ok()) {
+            let me = Arc::downgrade(&engine);
+            std::thread::spawn(move || {
+                let Some(engine) = me.upgrade() else { return };
+                let vm = loop {
+                    if let Ok(vm) = engine.vm() { break vm }
+                    std::thread::sleep(Duration::from_millis(100));
+                };
+                drop(engine);
+                for _ in 0..1000 { let _ = vm.ping(0); }
+                let mut lat: Vec<u64> = (0..rounds).map(|i| { let t = std::time::Instant::now(); let _ = vm.ping(i as u64); t.elapsed().as_nanos() as u64 }).collect();
+                lat.sort_unstable();
+                crate::diag::info!("diag ping rtt", rounds = rounds, p50_ns = lat[rounds / 2], p95_ns = lat[rounds * 95 / 100], p99_ns = lat[rounds * 99 / 100], min_ns = lat[0]);
+            });
+        }
         engine.start_cpu_meter();
         engine.start_sleeper();
         engine.start_clock();
