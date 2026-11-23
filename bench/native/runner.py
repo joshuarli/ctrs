@@ -2207,8 +2207,12 @@ def _buildkit_vertex(progress: str, instruction: str, *, cached: bool) -> dict:
     return next(iter(matches.values()))
 
 
+W6_FIXTURE_VERSION = "w6-v2-compile-cache"
+
+
 def trial_w6(ctx, engine: Engine, state: str,
-             driver: str = "default", *, build_cache: str = "uncached") -> dict:
+             driver: str = "default", *, build_cache: str = "uncached",
+             fixture_version: str = W6_FIXTURE_VERSION) -> dict:
     """W6: compiled-app CI — two timed `docker build`s per trial on
     pinned upstream sources: hyperfine 2.0.0 (Rust: cargo build
     --release --locked + cargo test on rust:1.100.0-bookworm) and zlib
@@ -2225,6 +2229,9 @@ def trial_w6(ctx, engine: Engine, state: str,
     checks = rec["correctness"]["checks"]
     sampler = trace = None
     try:
+        if fixture_version != W6_FIXTURE_VERSION:
+            raise ValueError("W6 fixture version mismatch")
+        rec["metrics"]["fixture_version"] = fixture_version
         if build_cache not in ("uncached", "warm"):
             raise ValueError("W6 build cache must be uncached or warm")
         if linux_lane.enabled():
@@ -4666,7 +4673,7 @@ def main() -> int:
 
     p = sub.add_parser("check", help="bounded offline native tests for one component")
     p.add_argument("component", choices=tuple(CHECK_COMPONENTS),
-                   help="component to check")
+                   help="component to verify offline")
     p.add_argument("--timeout", type=int, default=CHECK_TIMEOUT_SECONDS,
                    help=f"whole check timeout in seconds (1 to 300; default {CHECK_TIMEOUT_SECONDS})")
 
