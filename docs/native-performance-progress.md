@@ -2134,6 +2134,33 @@ the before/after host gates and OrbStack inventories.
 | Report | `559abb46219f96bf55dea4cb70d6fb21cd47a9aeaaf4d02953321d2f09fe5a12` |
 | Terminal status | `88a018fcb99709c3bd34ca3ad507b7b5414a8294cdbc9ae013d9c4bc1c48beeb` |
 
+##### Resource-matched controls
+
+Retained content without concurrent load completed ten alternating pairs
+in `w8-paired-d6badc7e5d7e`. All 20 legs passed the host gates, ownership
+and exact deployment checks, each completing 1,000 requests. The report
+reproduced exactly from the trial records. Both guests exposed nine CPUs.
+Visible memory was 62,905,888,768 bytes on ctrs and 63,157,620,736 bytes on
+OrbStack. Median time to health was 8.033 s and 15.756 s respectively.
+
+| Retained, no load | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.4844 | [0.4529, 0.5929] |
+| Sampled peak physical footprint | 0.4811 | [0.3279, 0.6376] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.1760 | [0.1727, 0.1845] |
+
+Each ctrs leg used 11–12 NAT connections with host-kernel CPU uncharged.
+Use the corrected installed-default command with `--resource-lane matched`
+and omit `--under-load`. The retained-under-load and both derived controls
+are still pending.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Plan | `ae06c8150c2b445bfead6d94b786763893679ce39414ef6b1409d522e69d3ab2` |
+| Trials | `5480a96aef367e8b8fca02c20ba24b25602f103e1303774b5feae03ba293b709` |
+| Report | `9a4d8333940bd2bdcd297dd7392ef56185e371df8ce17a542f2956486d84ac1c` |
+| Terminal status | `88a018fcb99709c3bd34ca3ad507b7b5414a8294cdbc9ae013d9c4bc1c48beeb` |
+
 #### W8 derived-content timing without concurrent load
 
 All ten installed-default pairs passed in `w8-paired-99ec4b7d32de`
