@@ -1508,6 +1508,34 @@ python3 bench/native/reporting.py --match base-20261123T005321-6ac0
 `trials.jsonl` SHA-256
 `3f43497690f6788b8c34be8e42367a2c068b8c5e8f52093a369b7fa4b20b2e0b`.
 
+#### Published-port saturation
+
+`base-20261123T010350-c7eb` used the same release, fixture and
+20-second client windows through the published port. All ten
+alternating pairs passed. Both engines verified all acknowledged
+writes with zero request errors. Maximum outside-engine CPU during
+load was 0.68 core. Each ctrs leg used 9–13 host NAT connections.
+
+ctrs completed a median 1,950 requests/s across a range of
+1,931–1,975. OrbStack completed a median 1,352 requests/s across a
+range of 1,347–1,373.
+
+| Metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.6928 | [0.6892, 0.6972] |
+| API p50 | 0.7011 | [0.6984, 0.7058] |
+| API p95 | 0.6040 | [0.5987, 0.6103] |
+| API p99 | 0.5400 | [0.5312, 0.5551] |
+| Measured engine CPU per verified request | 1.1248 | [1.1154, 1.1483] |
+| Sampled peak physical footprint | 0.1504 | [0.1496, 0.1529] |
+
+The measured CPU loss persists before charging host-kernel NAT
+CPU. Reproduce with the guest-direct saturation command using
+`--client-location host` and report this path separately.
+
+`trials.jsonl` SHA-256
+`b79009c7e351530464283bc2231bbf9e61094bce6d091bb357cbe6f4a464058e`.
+
 ### Installed-default W2 published-port fixed offered rate
 
 Run `base-20261122T093101-7063` used the same clean source and artifacts
