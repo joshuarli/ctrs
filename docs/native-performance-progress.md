@@ -1447,6 +1447,58 @@ installed-default resources. Keep the v3 and v4 cohorts separate.
 Raw trials SHA-256
 `aaea59cf5cc691fd2a359302a202606ef5aad01f80c99644283925e7eed44c2c`.
 
+#### W14 fresh and persistent connections with buffered frames
+
+All ten installed-default pairs in each mode passed on harness
+`ce50555` with signed release `99db1aa`. Each leg used 32 clients
+and 100 verified exchanges per client. Both modes verified 64,000
+responses across both engines, with zero leaked sessions and successful
+owned cleanup. The fresh timer includes each connection and exchange.
+The persistent completion timer includes opening and checking the 32
+sockets before the barrier. Its request latency metrics cover the
+subsequent 100 exchanges per established socket.
+
+| Metric | Fresh ctrs/OrbStack, paired median [95% CI] | Persistent ctrs/OrbStack, paired median [95% CI] |
+| --- | ---: | ---: |
+| Completion | 1.1318 [0.9553, 1.1878] | 0.3656 [0.0981, 0.6387] |
+| Request p50 | 1.3314 [1.2536, 1.5025] | 0.9711 [0.9124, 1.0254] |
+| Request p95 | 1.4246 [1.2502, 1.5611] | 0.8294 [0.6852, 0.8921] |
+| Request p99 | 23.6234 [0.7861, 73.9321] | 0.7702 [0.5109, 1.0596] |
+| Cleanup | 1.1724 [0.9601, 1.3775] | 1.2785 [1.1756, 1.3257] |
+| Sampled physical footprint | 0.3779 [0.3727, 0.3843] | 0.3692 [0.3645, 0.3702] |
+
+Fresh p50 and p95 were losses. Measured fresh CPU also lost at
+1.1702 [1.0840, 1.2229] with host NAT CPU uncharged. Persistent
+completion and p95 cleared the descriptive strict-win threshold and
+cleanup was a loss. Persistent p99 was inconclusive. Five ctrs
+persistent legs had fewer than two periodic CPU samples. The exact
+lifecycle boundary counters were present in all ten pairs and yielded
+0.7918 [0.7017, 0.8939] for measured phase CPU, with host NAT CPU
+uncharged. The broader periodic CPU comparison remains incomplete.
+
+In fresh mode, five ctrs legs had trial p99 above one second. Across all
+ten legs per engine, there were 346 ctrs and 268 OrbStack exchanges
+lasting at least 900 ms. The first per-client request accounted for
+133 of those on ctrs and 236 on OrbStack. The fixture inherits a
+five-entry listen backlog from the pinned CPython TCPServer while the
+32 clients share a launch barrier. This makes listen-queue saturation a
+testable explanation. [CPython 3.13.18 TCPServer](https://raw.githubusercontent.com/python/cpython/v3.13.18/Lib/socketserver.py)
+
+For the separate diagnostic, alternate backlog 5 and 128 in each
+engine over two blocks with reversed opening order. Keep both engine
+stores warm and verify the same 3,200 exchanges per leg. Read
+`TcpExt` listen overflows, listen drops, TCP timeouts and sent SYN
+cookies from the server namespace before and after the timed workload.
+Persist the namespace, test backlog and effective server source hash.
+Compare the counter deltas and counts of exchanges at or above 900 ms.
+Changing the backlog defines a diagnostic separate from the v4 timing
+cohort.
+
+| Mode | Run | Raw trials SHA-256 |
+| --- | --- | --- |
+| Fresh | `base-20261122T182242-86e9` | `8aee79b6a755abff20c50a7f9fef0345cf171f2dd528c57a9d91f79c45a38a2a` |
+| Persistent | `base-20261122T182545-6dad` | `8eae326eb656501c8d6a62a2bf9598b93fae60cd2f3b4cf15b7668e69719783d` |
+
 ### Rebuilt W8 common portfolio
 
 The [v6 recipe and lock](../bench/native/fixtures/w8-v6/README.md) replace
