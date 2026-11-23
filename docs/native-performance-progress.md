@@ -2642,6 +2642,53 @@ These runs verify the lifecycle receipts. Freeze the candidate and resolve the
 [host durability evidence](#w3-migration-and-committed-state-cohort) before
 requesting qualification admission.
 
+#### W11 ctrs guest attribution result
+
+`w11-mixed-20261122T190720-2e70` completed all ten post-cleanup
+observations with the signed `99db1aa` release and `ae96711` harness.
+The driver verified 50,000 API operations, stable API, DB and cache
+process identities, and owned cleanup. Rejoining the raw samples
+matched each pre-cleanup read to the 500 seed rows and that cycle's
+acknowledged writes. All 15,310 writes matched their delete receipts,
+with the 500 seed rows retained after each cycle.
+Storage and memory samples bracketed the exact cleanup and the
+32-second host observations in the declared order.
+
+| Resource | First-to-last change across the ten observations |
+| --- | ---: |
+| Ordinary allocation of the owned host backing file | +102,907,904 bytes |
+| Used space on guest ext4 `/dev/vda` | +17,236 KiB |
+| Allocated PostgreSQL data directory | +17,164 KiB |
+| Allocated WAL directory, included in PostgreSQL data | +16,384 KiB |
+| Sampled steady physical footprint | +49,725,464 bytes |
+| Guest page cache | +17,932 KiB |
+| Guest anonymous pages | +216 KiB |
+| Owned descriptors | 0 |
+
+The backing file kept the same device and inode. The WAL directory
+accounts for most of the guest space increase. The ordinary host
+allocation increased by 85,258,240 bytes more than guest used space.
+The extent sharing and discarded ranges were outside this observer's
+scope. The 8,192 MiB daemon target stayed at the ceiling, with zero
+guest balloon pages, zero OOM kills, and a sampled stall of 0.0% at each
+quiet boundary. The counters leave part of the host footprint
+increase unattributed.
+Post-warmup host footprint grew by 33,513,496 bytes and backing
+allocation by 86,212,608 bytes, both above the short 16 MiB budgets.
+
+Use the guest attribution procedure above with the v5 worker and v6
+portfolio, an isolated ctrs root, and the six-minute work cutoff.
+Match cycle numbers, stable backing identity, raw acknowledged and
+deleted contents, and each observation's monotonic bounds before
+computing endpoint differences.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Trial | `903cee78a3a6b767f6782c28221b7a7f9f40e99cc2692f8aa357139be6bdd718` |
+| Plan | `b103a45ddbea97f042499ab67961c6db54f1bc9585a6888c0025e0a96d1956a4` |
+| Driver result | `f0914f7f9b678cd3e6981946403df7a2ee579c602c0fb1b10370330ab10984b0` |
+| Joined post-cleanup observations | `ba854a23457282dd480a16cffff9bc9b4b4f60e307b897e99a09032b94753548` |
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
