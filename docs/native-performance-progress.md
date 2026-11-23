@@ -859,6 +859,28 @@ python3 bench/native/runner.py baseline --case W6 --a ctrs --b ctrs \
   --pairs 10 --max-pairs 16 --pair-quiet-load 4
 ```
 
+`base-20261122T213657-5cd3` passed all ten alternating pairs on
+`34141a3`. Each leg reported nine vCPUs, its assigned ceiling and zero
+guest OOM kills. Both artifacts matched across all 20 legs. Each slot
+used 69–71 host NAT connections per leg.
+
+| Metric | Median 5,632 / 8,192 MiB | Paired 95% CI | Screen |
+| --- | ---: | ---: | --- |
+| Sampled peak physical footprint | 0.6893 | [0.6891, 0.8678] | Met 0.95 upper bound |
+| Rust build time | 1.0081 | [1.0014, 1.0131] | Met 1.03 upper bound |
+| zlib build time | 0.9842 | [0.9477, 1.0285] | Met 1.03 upper bound |
+| Measured engine CPU | 1.0087 | [1.0046, 1.0257] | Incomplete host NAT accounting |
+
+The midpoint passed the footprint and build-time screen. Repeat from
+independent stopped-store clones with the same signed assets and gates.
+Allow at least 40 GiB before cloning for the repeat, given the roughly
+23 GB net free-space drop after accounting for retired scratch and the
+16 GiB operating floor. The configuration remains a candidate pending the
+independent repeat, wider default-workload coverage and CPU accounting.
+
+Trials SHA-256
+`9290841e442d1b1777a6713374f3088367782ec772f1c5278ab9fe9fe412f39f`.
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
