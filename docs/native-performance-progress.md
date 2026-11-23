@@ -18,7 +18,15 @@ keeps H3 and the correctness fixes, and adds the compressible-layer
 regression. The [reconciliation record](evidence/main-reconciliation-2026-11-23.md)
 has the table, the Fsync persistence contract, the build identity, the
 tests run and not run, and the cells that need remeasurement. The next
-action is unchanged: the registry-vsock W7/W6 decision, then W12 full-bind.
+action was the registry-vsock W7/W6 decision, then W12 full-bind.
+
+**Mac resumed the same day.** Every runtime gate passed at `b5ec34b`.
+Registry vsock was **not promoted**: ten-pair candidate/baseline W7 and W6
+cohorts were non-inferior in every cell with no strict win. The W12 probes
+put about 125 µs of every bind request inside Apple's virtiofs service, with
+caching, kick suppression and thread priority already in order. The next
+decision is a raw agent↔host vsock round-trip probe, gating whether a
+ctrs-owned bind transport could win. The same record has the receipts.
 
 - W1 engine-cold and W10 whole-engine recovery still need an independent
   OrbStack endpoint. The current shared endpoint stays available to its

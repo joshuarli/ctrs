@@ -87,8 +87,8 @@ the single 2 GiB file `payload`.
   - with `CTRS_LAYER_ROOT` set, no `.tmp-*` or `.blob-*` entries may remain;
   - the default image must still run after the refusal.
 
-  It needs 12 GiB free on the engine disk. **It has not been run.** The Mac is
-  paused, and no Linux host is reachable from this session.
+  It needs 12 GiB free on the engine disk. It passed on the Mac at `b5ec34b`
+  (see below). It has not run on a Linux host.
 
 `decoded()` moved the decoder choice out of `unpack()` into a boxed reader so
 the tests can drive the production composition without writing 2 GiB to disk.
@@ -127,7 +127,11 @@ Runtime defaults in this source:
 | `cargo test -p xtask -p ctrs-vmm` | pass. A temporary `CONFIG_SCHED_MC=y` made the kernel guard fail as intended. |
 | `make lint` (macOS) and clippy `-D warnings` for `ctrs-init`/`ctrs-proto` on `aarch64-unknown-linux-musl` | clean |
 | `make test-bench` | 556 tests OK |
-| `tests/layer-expansion.sh`, `conformance/smoke.sh`, `tests/e2e.sh`, watch and inode tests | **not run**: Mac host work is paused |
+| `conformance/smoke.sh` with `CTRS_BINARY` set to the signed host above (Mac resumed the same day) | 21 pass, 0 fail |
+| `tests/e2e.sh`, scratch engine (9 vCPUs, guest `6.18-ctrs`) | **509 passed, 0 failed, 0 skipped**, exit 0 |
+| `tests/watch-recovery.sh` | exit 0 |
+| `tests/fuse-inode-bound.sh` | First attempt exit 1: `lsof` was missing from the shell's `PATH` (no `/usr/sbin`), so the script found no VM process. That failure is environmental and is kept here. Rerun with `/usr/sbin` on `PATH`: exit 0. 150,000 files read back, peak 65,575 descriptors under the 73,728 limit, back to 89 after `drop_caches`. |
+| `tests/layer-expansion.sh` on the Mac | exit 0. The classic `POST /build` and the default buildx `--load` each returned payload SHA-256 `680be809fbc078cfd603d13375cbcd634817888941149c88f4383b1473627bfd` on first use. The explicit zstd load was refused on both runs: the daemon logged `failed to unpack …/payload` while streaming the layer. The default image still ran afterwards. The cleanup check was skipped because the guest layer root is not visible from the Mac. The Linux unit test covers it. |
 | Integrated native Linux runtime suite | **not run**: no Linux host access from this session |
 
 The newest full Linux runtime result (ctrs 482/1/26) belongs to `65b7bbd`;
@@ -152,45 +156,87 @@ fix.
   [1.036, 1.180] against Docker. The bounded queue is closed. W3, W12,
   resource-accounting and W13/W14 networking limitations remain open.
 
-## Next decision and stopping rule
+## Registry-vsock decision (Mac resumed 2026-11-23)
 
-When Mac host work resumes, the one next optimization decision is the
-already-declared **registry-vsock candidate**:
+The candidate is `campaign/build-mirror-vsock-b5ec34b` (`279809e`): merge
+`7307888`'s production diff reapplied on `e07eeb8`. Its `relay.rs` and
+`agent.rs` are byte-identical to `d370e8c`, so the earlier selection,
+forced-fallback, mixed-version and restoration receipts still apply to the
+dial. The signed candidate host is `fb8d65ea…0813d` and its initramfs
+`e70c8084…6b0a2`. It uses the same kernel and disk template.
 
-1. Rebase `campaign/build-mirror-vsock` onto this `main` and rebuild the host
-   and initramfs.
-2. Reuse the selection, fallback, mixed-version and restoration receipts only
-   if `relay.rs` and `agent.rs` around the dial are unchanged by the rebase.
-   Otherwise rerun the zlib routing control once.
-3. With at least 32 GiB free, run one fresh full W7 comparison (ten alternating
-   pairs of baseline `main` and the candidate, against frozen OrbStack). Then
-   run full W6.
+Harness `c567992` adds `runner.py baseline --candidate-checkout DIR`. Slot b
+runs the other checkout's signed host and guest assets in a clone of the warm
+engine, and every slot-b trial records that build's hashes. Each cohort ran
+ten pairs, installed-default, with `--pair-quiet-load 4.0 --max-pairs 16`.
+Ratios are candidate / baseline `main`:
 
-**Stop rule:**
+| Cohort | Correct | Result |
+| --- | --- | --- |
+| Admission `base-20261123T093237-6e4d` (1 pair) | 2/2 | candidate 0 NAT connections, baseline 133 |
+| W7 `base-20261123T093409-2133` | 20/20 | Every build and first-use cell non-inferior, none ≤ 0.95: Hyperfine uncached 1.003 [0.994, 1.007], warm 0.963 [0.925, 1.010], incremental 0.972 [0.932, 1.006]; HTTPie uncached 1.003 [0.998, 1.010], warm 0.981 [0.953, 1.024], incremental 0.989 [0.975, 1.007]. Footprint 1.007 [0.993, 1.017]; measured CPU 1.003 [0.991, 1.011]. |
+| W6 `base-20261123T094441-1c01` | 20/20 | Rust 1.002 [0.993, 1.007]; zlib 0.994 [0.916, 1.019]. Footprint 1.000 [1.000, 1.003]; CPU 1.001 [0.993, 1.014]. The candidate made 0 NAT connections per leg; baseline made 69–71. |
 
-- Promote only if the default-build W7 primary cells improve on baseline
-  `main` with a paired upper bound ≤ 0.95. W6, W1 cold start and the fallback
-  must stay within their existing budgets (≤ 1.03), with exact artifacts.
-- Otherwise record the result and leave the candidate parked. Do not retry
-  without a new causal profile.
+Raw `trials.jsonl` SHA-256: admission `9d624905…6c6e`, W7 `dc122cad…1fff`,
+W6 `0a3b0764…0c16`.
 
-After that decision, W12 full-bind gets one declared intervention. It targets
-the host-service and device-notification part of the virtiofs round trip:
-130–182 µs p50 per request, with all nine vCPUs on one request queue and only
-0.501 s of the 26.80 s install in completion-worker dispatch. Mixed and
-all-volume layouts are at parity, so the ceiling for any bind-path change is
-the install-plus-verification gap, about 71% of the 26.7 s workflow gap.
+The stop rule written before the Mac resumed required a W7 strict win. W7
+was non-inferior with no win. Because the candidate was originally a W6
+hypothesis, I amended the rule **before running W6**: a strict W6 primary
+win with W7 non-inferior would promote it. W6 showed no win either.
+**Decision: not promoted.** The candidate stays parked on its branch.
+Moving build-registry traffic off NAT makes ctrs CPU accounting complete for
+those connections but saves no measurable build time. Do not retry without a
+new causal profile.
 
-Stop rule: ten alternating full-bind pairs against the current `main`, with
-exact installed contents and outputs, watcher correctness and the Fsync
-contract unchanged. Promote at a paired workflow upper bound ≤ 0.95;
-otherwise revert and record. Keep the result separate from the volume-layout
-cells.
+## W12 full-bind: the next intervention boundary
+
+These probes ran on `b5ec34b` in a scratch engine. They are diagnostics, not
+cohorts.
+
+- Native APFS on this Mac, single-threaded C over 92,306 files: 58–60 µs per
+  create+write+close and about 1.5 µs per stat, hit or miss.
+- The VZ virtiofs devices negotiate only `INDIRECT_DESC`, `EVENT_IDX` and
+  `VERSION_1`, with one request queue. All their interrupts land on vCPU 0.
+  Guest kicks are already suppressed.
+- Inside a container, 100 repeated `stat`s of an existing bind path sent 0
+  FUSE requests, and 100 of a missing path sent 1. VZ's entry and attribute
+  replies already allow positive and negative caching. The install's ~650k
+  requests are first-touch operations; npm's 4-thread libuv pool keeps about
+  4 in flight.
+- Every thread in the VZ VM process ran at priority 31 during a create loop.
+  The loop managed 22,341 create+write+close cycles in 8 s, about 358 µs per
+  file against 59 µs natively.
+- The earlier trace measured submit→retrieve p50 of 182 / 142 / 128 µs for
+  CREATE / WRITE / LOOKUP, with 0.501 s of worker dispatch.
+
+So about 125 µs of every request is Apple's virtiofs service, not
+filesystem work or guest dispatch. Caching, kick suppression, thread
+priority, notification suppression (≤ 1.33 s) and a second device (rejected)
+have been checked or tried, and VZ's API offers no queue count or server
+options. What remains in ctrs's control is a ctrs-owned bind transport.
+
+Containers cannot open `AF_VSOCK`, so raw vsock round-trip time is
+unmeasured. The container → `host.docker.internal` relay path measured
+p50 142 µs (Mac Python loopback alone: 28 µs). That path is not faster
+than VZ.
+
+**Next decision:** measure the raw guest-agent ↔ host vsock round trip for
+a 64-byte request/reply. Use a timed control-message loop in ctrs-init
+against the daemon, with no container in the path.
+
+**Stop rule:** prototype FUSE-over-vsock for bind mounts behind a flag only if
+the p50 round trip plus native operation cost is at most half of VZ's
+per-request latency (≤ 65 µs for a LOOKUP). Then run one ten-pair full-bind
+comparison against current `main`. Promote at a workflow upper bound ≤ 0.95
+with exact outputs, watcher correctness and the Fsync contract intact.
+If the probe misses that bound, record W12 full-bind as a VZ-bound loss
+(1.30×) and move to the next ranked matrix deficit.
 
 ## Open items this session could not do
 
 - Copy `/home/ubuntu/ctrs-evidence/` off the Linux VM and verify the committed
   manifests before retiring it. No host or credentials for that machine are
   configured here.
-- Run the integrated Linux runtime suite and `tests/layer-expansion.sh` at
-  `b5ec34b`. This needs that Linux host, or the Mac once it is resumed.
+- Run the integrated Linux runtime suite and `tests/layer-expansion.sh` (with
+  `CTRS_LAYER_ROOT`) on a Linux host at `b5ec34b`.
