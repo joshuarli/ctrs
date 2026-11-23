@@ -53,6 +53,7 @@ def receipt_for(contract, source, seed):
 
 
 def prepare_fake(source, contract, dest, seed):
+    dest.mkdir()
     return receipt_for(contract, source_for(contract), seed)
 
 
@@ -242,8 +243,9 @@ class PairedBatch(unittest.TestCase):
             class Context:
                 def __init__(self, run):
                     self.run_id = run
-                    self.results_dir = root
-                    self.jsonl = root / (run + '-trials.jsonl')
+                    self.results_dir = root / run
+                    self.results_dir.mkdir()
+                    self.jsonl = self.results_dir / 'trials.jsonl'
                     self.provenance = {'source': 'fixed'}
                     self.rows = []
                     contexts.append(self)
@@ -264,6 +266,7 @@ class PairedBatch(unittest.TestCase):
             def measure(engine, directory, run, contract, portfolio, receipt, layout, server, under_load):
                 self.assertEqual(w8.os.environ.get('CTRS_IDLE_SECS'),
                                  '0' if engine.resource_lane == 'matched' else None)
+                self.assertTrue(layout.is_dir())
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
                 processes = [{'pid': 1 if engine.name == 'ctrs' else 2,
                               'role': 'daemon', 'kernel_start_identity': 100}]
@@ -288,6 +291,7 @@ class PairedBatch(unittest.TestCase):
             self.assertEqual(calls[2][2:], calls[3][2:])
             self.assertNotEqual(calls[0][2], calls[2][2])
             self.assertEqual(calls[0][1], calls[3][1])
+            self.assertTrue(all(not Path(call[3]).exists() for call in calls))
             self.assertEqual((engines['ctrs'].stops, engines['orbstack'].stops), (1, 0))
             rows = contexts[0].rows
             cohort = reporting.analyze(rows)['cohorts'][0]
@@ -320,7 +324,7 @@ class PairedBatch(unittest.TestCase):
             cohort = reporting.analyze(diagnostic)['cohorts'][0]
             self.assertEqual(cohort['valid_pairs'], 0)
             self.assertTrue(all(m['ratio_median'] is None for m in cohort['metrics']))
-            status = json.loads((root / 'status.json').read_text())
+            status = json.loads((contexts[-1].results_dir / 'status.json').read_text())
             self.assertEqual(status['completed_records'], status['planned_records'])
             self.assertFalse(status['timing_eligible'])
             seen = []
@@ -394,7 +398,9 @@ class PairedBatch(unittest.TestCase):
                     prepare=prepare_fake,
                     serve=lambda *a: Server(), gate_fn=lambda *a: True,
                     measure=mock.Mock(side_effect=RuntimeError('failed leg')))
-            records = [json.loads(line) for line in next(root.glob('*/trials.jsonl')).read_text().splitlines()]
+            raw = next(root.glob('*/trials.jsonl'))
+            records = [json.loads(line) for line in raw.read_text().splitlines()]
+            self.assertTrue((raw.parent / 'pair-1-layout').is_dir())
             self.assertEqual(code, 1)
             self.assertEqual(len(records), 2)
             self.assertTrue(all('failed leg' in ''.join(r['validation_errors']) for r in records))

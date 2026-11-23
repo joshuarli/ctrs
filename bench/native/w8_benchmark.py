@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
+import stat
 import subprocess
 import threading
 import traceback
@@ -179,10 +181,14 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                 receipt = build_pair_layout(args.layout, contract_path, layout, seed, content=args.content)
             else:
                 receipt = prepare(args.layout, contract, layout, seed)
+            layout_stat = layout.lstat()
+            if not stat.S_ISDIR(layout_stat.st_mode):
+                raise ValueError('W8 pair layout is not an owned directory')
             validate_receipt(receipt, contract, source, seed, previous_digests, previous_diff_ids, content=args.content)
             portfolio = registry_portfolio.prepare_layout(layout, {name: image['reference'] for name, image in receipt['images'].items()})
             server = serve(portfolio, 0)
             thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
+            pair_failed = False
             try:
                 thread.start()
                 for index, name in enumerate(('ctrs', 'orbstack') if pair % 2 else ('orbstack', 'ctrs')):
@@ -244,7 +250,8 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                             rec['measurement_invalidation'] = 'diagnostic mode or host gate contamination'
                         ctx.write(rec)
                         completed += 1
-                    failed |= not rec['correctness']['ok'] or bool(rec['validation_errors']) or (not args.diagnostic and not rec['measurement_valid'])
+                    pair_failed |= (not rec['correctness']['ok'] or bool(rec['validation_errors'])
+                                    or (not args.diagnostic and not rec['measurement_valid']))
                     print(f"pair {pair} {name}: {'OK' if rec['correctness']['ok'] else 'FAIL'}", flush=True)
                     if busy_initial:
                         stopped_reason = 'initial-host-busy'
@@ -257,6 +264,12 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                     thread.join(timeout=5)
                 if thread.is_alive():
                     raise RuntimeError('registry did not terminate')
+            failed |= pair_failed
+            if not pair_failed:
+                current = layout.lstat()
+                if (current.st_dev, current.st_ino) != (layout_stat.st_dev, layout_stat.st_ino):
+                    raise ValueError('W8 pair layout identity changed before cleanup')
+                shutil.rmtree(layout)
         analysis = reporting.analyze([json.loads(line) for line in ctx.jsonl.read_text().splitlines()])
         pilot.save(ctx.results_dir / 'report.json', analysis)
         if not args.diagnostic:

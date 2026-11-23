@@ -1891,6 +1891,17 @@ stop only the verified legacy campaign registry and restore its original
 running state after the cohorts. Preserve complete timing and correctness
 receipts, and report the backing-allocation diagnostic separately.
 
+The paired runner now removes each generated OCI layout once both
+legs have saved their receipts and the registry thread has stopped.
+Failed and interrupted pairs retain their layouts for investigation.
+An older retained pair used about 317 MiB in generated files. Keeping
+that amount for 50 pairs consumes about 15.5 GiB before trial logs and
+engine storage. The run records retain the seed and exact layer, config
+and manifest digests in `paired_inputs`. Recreate a successful layout
+with `registry_variant.py`, the pinned source layout and portfolio,
+and the recorded `seed_hex` in a fresh destination. Pass
+`--retain-other-layers` for a retained condition.
+
 ```sh
 for content in retained derived; do
   python3 bench/native/runner.py w8-baseline --layout "$v6_layout" \
