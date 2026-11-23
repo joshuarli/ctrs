@@ -2378,6 +2378,31 @@ store preparation above.
 | Trials | `027bb3de5ab24735902a2d66d412106150dd2e3cb2b3edc6a67f65686cc8386d` |
 | Report | `903a8b4190ae5a57da68435ae9407f6fabe1e3dcd0999b743f3774bbddb7ed68` |
 
+Derived content without concurrent load completed ten alternating pairs
+in `w8-paired-17d0972fa55a` with the same harness, signed release and
+matched guest budgets. Each leg verified 1,000 deployment requests.
+All 20 legs passed the workload, host and ownership checks. Median
+pull-to-health was 7.956 s on ctrs and 19.669 s on OrbStack.
+
+| Derived, no load | Median ctrs/OrbStack | Paired 95% CI |
+| --- | ---: | ---: |
+| First pull to stack health | 0.3935 | [0.3719, 0.4056] |
+| Sampled peak physical footprint | 0.6114 | [0.3779, 0.8296] |
+| Measured whole-workflow CPU, incomplete NAT accounting | 0.1481 | [0.1457, 0.1516] |
+
+ctrs used 11–12 host NAT connections per leg. The report reproduced
+exactly and the driver retired all generated pair layouts. The stopped
+private guest disk allocated 12,041,928,704 bytes at teardown. Use
+`--content derived` with the matched no-load command and a separately
+warmed store.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Warm inputs | `549fb48a65a6c5addcc7af96d332d4b0e0848638e7f561b67974f0876283bf8c` |
+| Plan | `5dd96bd5205816dc033b42008429b2925061ff334b940055952c75db919e4986` |
+| Trials | `b69ab358ae76fe194d1a446e4ee93acdb11fbeeb99198b9dc466d0c6fb4d2567` |
+| Report | `af80730b10967fe585ab58bd8b4a1fbfc2920a1b57897c7dd1f6c5b7b1a20a41` |
+
 #### W8 derived-content timing without concurrent load
 
 All ten installed-default pairs passed in `w8-paired-99ec4b7d32de`
