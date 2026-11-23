@@ -813,6 +813,32 @@ states. Repeat the entire two-leg diagnostic with the revised observer.
 | Initial uncached trial | `9fbd79ba381d55c12ae3c0d79d819c2845f53e2b7c4febc65450e052d87d7f9c` |
 | Initial guest counters | `2a750d070e495ba282100cf69cccdad07dff528dca9f612e5576e2947e981188` |
 
+`w6-balloon-67105c86c0` completed both legs on `182ced1` with signed
+release `99db1aa`. All four uncached Rust and zlib build groups produced
+the same exact artifacts. Each quiet interval had 31 owned footprint
+samples over 150 seconds, with the VM awake, zero OOM kills and at most
+0.09% reported memory stall.
+
+| Grace | Target, first to last | Guest balloon, initial to final | VM physical footprint range |
+| --- | --- | --- | --- |
+| 120 s | 8,192 to 1,280 MiB | 0 to 7,077,888 KiB | 3,064,271,912–3,064,943,680 bytes |
+| 0 s | 822 to 758 MiB | 7,546,880 to 7,612,416 KiB | 5,378,909,880–5,379,598,008 bytes |
+
+At 120-second grace, the first lower target was observed at 125.0 s.
+Guest cache fell from 1,682,076 to 807,340 KiB as the balloon grew.
+The owned VM's footprint varied by less than 0.7 MB during each quiet
+interval, leaving host footprint reclamation unobserved. The zero-grace
+leg had already inflated the balloon before the first quiet sample.
+The fixed order and reused store leave the difference in starting
+footprints unexplained. This run provides no basis to promote zero grace.
+
+| Repeat receipt | SHA-256 |
+| --- | --- |
+| Plan | `b343b1c80ac69edb6c85b927f4568a2c28d8f81e73981283f15bea0b5c57e25b` |
+| Trials | `6b46a2292cbc54a751cb78796b4804c2aba55e9100003792625bfd837efa7630` |
+| 120 s quiet samples | `f64ab627bc8724a2da0122931b459f6b81f27ad92e29642c0fc021d06bf9e4e5` |
+| 0 s quiet samples | `a3f97666670a82f2adea3035e2720ab07600ecbf9186151b9cf7bcc865c61028` |
+
 ### Installed-default W7 cohort
 
 Run `base-20261122T065539-5b0c` used harness source `2910f31`, the same
