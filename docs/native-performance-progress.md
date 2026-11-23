@@ -1965,6 +1965,37 @@ Main reuses the W4 image verifier for the queue input contract. The focused
 integration suite passed 135 tests and the reports reproduced on the
 integrated analyzer.
 
+#### W10 owned-engine recovery on ctrs
+
+Run `run-20261122T174201-330f` passed with the signed `99db1aa` release
+and harness `2598d6a`. The run used the pinned API/Postgres/Redis stack
+and eight clients for 90 seconds with seed 11. A verified owned daemon
+and VM were interrupted after six seconds of load and restarted
+after the declared three-second downtime. The new native process
+identities reopened the same disk and control socket. The database and
+API kept their container IDs. The PostgreSQL startup authentication file
+had matching hashes before and after restart.
+
+The first exact read finished 4.046 s after the restart request, or
+7.301 s after interruption began. The run verified 47,362 acknowledged
+writes, one persisted write whose reply was uncertain and the 500 seed
+rows. There were 145,273 successful recovered requests and zero
+unexpected errors. The outage classifier accounted for the failed
+attempts during the interruption. The recovered client p99 was 6.838 ms.
+This is one owned-engine admission. Equivalent whole-engine recovery
+requires a dedicated OrbStack instance.
+
+Use the pinned v6 OCI layout and signed binary with the private engine
+root selected by the harness.
+
+```sh
+python3 bench/native/runner.py run --case W10 --engine ctrs --state warm \
+  --interrupt-service engine --duration 90 --concurrency 8 --seed 11
+```
+
+Raw `trials.jsonl` SHA-256
+`991329f40e9cae52a05fcfaf96ee5c44284bc822c79b0f64f5ea4d9d0bc82acb`.
+
 ### Rebuilt W11 worker fixture
 
 The historical worker's manifest and config IDs were absent from OrbStack
