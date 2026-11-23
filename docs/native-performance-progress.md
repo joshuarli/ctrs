@@ -1306,6 +1306,54 @@ The installed-default OrbStack comparison still has uncharged NAT CPU.
 | Runtime receipt (every leg) | `0c7da05f53ededa3eafc9e993ce5e5434ad59b08a92668f5479e55d56057c587` |
 | All six corrected trials | `1127542af9408a7200c6139454cb8e85cd30a27c38332205b10aad512ff2f868` |
 
+##### W7 vsock fallback against OrbStack
+
+`base-20261123T054723-5762` ran the same diagnostic host and boot
+assets against the running OrbStack Docker server (29.8.2). Both
+engines used nine vCPUs and the default builder with revision 5
+offline inputs. Use the signed diagnostic as `runner.CTRS_BIN` and
+set `CTRS_W7_DIAG_VSOCK=1` in the runner environment. Keep both
+engines warm. Check free space before each leg and require a
+zero-NAT CPU accounting receipt from each ctrs leg.
+
+```sh
+PYTHONPATH="$PWD/bench/native" CTRS_W7_DIAG_VSOCK=1 \
+  W7_DIAGNOSTIC_BINARY=/absolute/path/to/signed/ctrs \
+  python3 -c 'import os; from pathlib import Path; import runner
+runner.CTRS_BIN = Path(os.environ["W7_DIAGNOSTIC_BINARY"])
+raise SystemExit(runner.main())' baseline --case W7 --a ctrs --b orbstack \
+  --resource-lane installed-default --pairs 10 --max-pairs 16 --pair-quiet-load 4
+python3 bench/native/reporting.py --match base-20261123T054723-5762
+```
+
+The diagnostic launcher stopped before the seventh
+OrbStack leg with 16,690,196,480 bytes free, below the 16 GiB disk
+floor. The six complete alternating pairs and the unpaired seventh
+ctrs leg passed all 25 assertions. All 13 runtime receipts matched the
+original offline cohort. Process CPU counters were complete on both
+engines, and all seven ctrs runs recorded zero NAT connections. The
+quiet checks passed before and after. The observed outside CPU
+estimates stayed below 0.96 cores across the six complete pairs.
+
+| Metric | Paired ctrs / OrbStack median | 95% interval |
+| --- | ---: | ---: |
+| Measured engine CPU seconds | 0.5134 | [0.5098, 0.5212] |
+| Sampled peak physical footprint | 0.3743 | [0.2504, 0.4522] |
+| Hyperfine uncached build and load | 0.8695 | [0.8543, 0.8881] |
+| HTTPie uncached build and load | 0.7476 | [0.7414, 0.7861] |
+
+The six complete pairs used median 42.82 CPU-seconds on ctrs and
+83.49 on OrbStack. The two uncached build intervals accounted for
+41.38 and 54.45 CPU-seconds respectively. The difference also covers
+warm and incremental build/load and the first-use probes. Keep pair
+seven visible. The reporter marks this interrupted cohort invalid,
+and the installed-default comparison and independent confirmation
+remain open. Start the next ten-pair attempt with at least 32 GiB
+free, allowing for the observed build-cache growth and the disk floor.
+
+`trials.jsonl` SHA-256
+`d01ef50aa0e8fae6e1f6829f6fc2faa10efc298ac902ae1ed0eba3caf6b42d57`.
+
 #### Frozen HTTPie first-use input
 
 Prepare a single Linux ARM64 image using the pinned W7 HTTPie Dockerfile,
