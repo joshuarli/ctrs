@@ -58,8 +58,9 @@ cohorts.
 
 The installed-default fixed-work grid has ten admitted pairs at each of
 1, 4, 8 and 16 clients on both paths using signed release `99db1aa`.
-All 160 legs matched the running executable and boot identities for their
-engine and the shared API, portfolio, SQL seed and client pins. The raw
+All 160 legs matched their engine's executable identities and the shared
+API, portfolio, SQL seed and client pins. All ctrs legs matched the guest
+boot assets. The raw
 equal-work audit verified 8,000,000 requests and 2,403,504 acknowledged
 writes with zero errors. The eight-client cohorts from the earlier
 `5cac40d` runtime remain separate historical evidence.

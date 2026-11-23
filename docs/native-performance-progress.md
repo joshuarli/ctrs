@@ -2117,6 +2117,31 @@ SHA-256 `fa250cf1ac0b709a49cc3062fa9be13d7dff95a9bf6d7a647c3804161e4eef91`
 and `checks.jsonl` SHA-256
 `b5418f4abbc2692f13ff8ab4db048510873051c863a788f7c37e0c35171c2d68`.
 
+#### W2 guest timer early-wake control
+
+`w2-clock-lead-9d82b0` used one waiter, the same 10,000 absolute
+slots and 50,000 ns timer slack. Compare sleeping to the deadline
+against sleeping to 500 µs before it and checking the monotonic
+clock until the original deadline. Count any overshoot against
+that deadline with the existing 10 ms cutoff. The waiter measures
+its own thread CPU around the complete schedule. Each engine ran
+two alternating pairs with no HTTP traffic.
+
+| Guest | Lead | Late slots by pair | Waiter CPU seconds by pair |
+| --- | ---: | ---: | ---: |
+| ctrs | 0 | 2, 1 | 0.111, 0.120 |
+| ctrs | 500 µs | 4, 0 | 0.182, 0.198 |
+| OrbStack | 0 | 4, 1 | 0.111, 0.114 |
+| OrbStack | 500 µs | 0, 0 | 0.950, 0.650 |
+
+The early wake still missed four deadlines on ctrs and increased
+waiter CPU on both engines. Keep it as a timer-only result. The
+fixed offered-rate cells still lack admitted comparisons.
+Executable SHA-256
+`8ff394d60e7dd84bb3071c3402aa36a9a094a53356bb4ed88da9aa6b2071bdb7`
+and `checks.jsonl` SHA-256
+`79284e118ae5238e30b1cc168fda6533cacc7020cc0a57951d905bc50941f0e5`.
+
 ### W2 leaf observer overhead on the guest-direct workload
 
 The 49 Hz confirmation at `44e542f` ran all ten alternating blocks.
