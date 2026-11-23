@@ -1,6 +1,6 @@
 # Campaign: beat OrbStack on macOS
 
-**macOS work resumed 2026-11-22. All campaign gates remain open.** The standing at the 2026-11-20 pause and the current evidence are in [the progress file](native-performance-progress.md#macos-resume-setup--2026-11-22). This contract supersedes the previous campaign's
+**Status: winding down 2026-11-23. All campaign gates remain open.** The standing at the 2026-11-20 pause and the current evidence are in [the progress file](native-performance-progress.md#macos-resume-setup--2026-11-22). This contract supersedes the previous campaign's
 Linux requirements, 30-candidate stop, and monitoring-driven closeout.
 On every resume read `AGENTS.md`, this document, and
 [`native-performance-progress.md`](native-performance-progress.md).
