@@ -1497,6 +1497,32 @@ Reproduce with the 16-client saturation command below using
 `--concurrency 1`. The guest-direct `trials.jsonl` SHA-256 is
 `08c1ad4a1a0a5f4c8901d8fc64de812800d4c6f8d88b6796137775bed5ffd552`.
 
+#### Published port at one client
+
+`base-20261123T020744-c034` used source `aef7080` with the same
+release and fixture. All ten alternating pairs admitted. The raw
+audit matched all 111,348 acknowledged writes to persisted rows
+with zero request errors. Outside-engine CPU during load stayed
+below 0.67 core. Each ctrs leg recorded five or six host NAT
+connections.
+
+ctrs completed a median 1,441 requests/s (range 1,411–1,453).
+OrbStack completed a median 409 requests/s (range 392–434).
+
+| Published-port metric | Paired median ratio | 95% CI |
+| --- | ---: | ---: |
+| Request rate (OrbStack / ctrs) | 0.2852 | [0.2779, 0.2963] |
+| API p50 | 0.3578 | [0.3527, 0.3604] |
+| API p95 | 0.1635 | [0.1601, 0.1653] |
+| API p99 | 0.1403 | [0.1329, 0.1413] |
+| Measured engine CPU per verified request | 0.3781 | [0.3733, 0.3997] |
+| Sampled peak physical footprint | 0.1520 | [0.1511, 0.1529] |
+
+The CPU result excludes host-kernel NAT CPU and remains incomplete.
+Reproduce with `--concurrency 1` and `--client-location host`.
+The published-port `trials.jsonl` SHA-256 is
+`3e68dfa8b310684879cb9f34dc854938d9897148d5eb79606afe2774246b71aa`.
+
 ### Installed-default W2 saturation at four clients
 
 #### Container to container at four clients
