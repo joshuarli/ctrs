@@ -1710,6 +1710,37 @@ CPU. Reproduce with the guest-direct saturation command using
 `trials.jsonl` SHA-256
 `b79009c7e351530464283bc2231bbf9e61094bce6d091bb357cbe6f4a464058e`.
 
+#### W2 saturation API cgroup accounting by concurrency
+
+For each admitted leg in the eight saturation cohorts, divide
+the API cgroup's user and system CPU deltas by the leg's successful
+request count. Take the median separately for each engine, path
+and concurrency. These are the medians of the per-leg values in
+microseconds per successful request.
+
+| Clients | Guest-direct user, ctrs / OrbStack | Guest-direct system, ctrs / OrbStack | Published-port user, ctrs / OrbStack | Published-port system, ctrs / OrbStack |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 295 / 353 | 46 / 34 | 314 / 761 | 50 / 73 |
+| 4 | 367 / 342 | 142 / 62 | 391 / 328 | 163 / 58 |
+| 8 | 357 / 342 | 126 / 64 | 385 / 345 | 149 / 64 |
+| 16 | 350 / 357 | 120 / 74 | 381 / 376 | 142 / 85 |
+
+The guest-direct system CPU gap was smallest with one client and
+largest with four. The one-client guest-direct ctrs leg had lower
+median user CPU and higher system CPU per request than OrbStack.
+The published-port one-client cohort had a distinct user CPU
+gap. These measurements point to different CPU profiles across
+load levels. They do not identify a kernel fix. Saturation
+counts differ across engines and the cgroup counters include
+the counter-reader exec. The published-port whole-engine CPU
+still excludes ctrs host NAT CPU.
+
+Recompute from `resources.application_cpu.delta.user_usec`,
+`resources.application_cpu.delta.system_usec` and
+`metrics.requests_ok`. Keep the eight cell receipts separate.
+Derived JSONL SHA-256
+`e9f61c33cad91e106cea21dcbbf03db783822bc290363dabb421de8108eb1311`.
+
 ### Installed-default W2 published-port fixed offered rate
 
 Run `base-20261122T093101-7063` used the same clean source and artifacts
