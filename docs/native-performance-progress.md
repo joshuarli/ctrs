@@ -6147,6 +6147,55 @@ cannot be added to obtain the install's wall time.
 | Full install trace, gzip | `7fab7807a9b96b40f5c426fafa4dbf4eb3a5a0aa36b07cbeb4be5a89330362cb` |
 | Full install analysis | `3621522709594a6e408e318e1f5348f02ea8ae2acedacf0d436fd56cbff0a278` |
 
+##### W12 guest completion-worker dispatch
+
+Repeat the full-bind install trace with `workqueue_queue_work`,
+`workqueue_execute_start` and `workqueue_execute_end` enabled in
+the same guest instance. Filter all three events by the running
+kernel's symbol address for `virtio_fs_requests_done_work`.
+Join queue to execute-start by the work object. Associate each
+used-buffer retrieval with the worker active on that thread, and
+check the matching execute-end against the same work object.
+When the worker was queued before the request was submitted,
+count only the portion of its dispatch wait after submission.
+Use a 160 MiB per-CPU trace buffer for the full install.
+
+The wait can overlap service of the same request or work on other
+requests. A work item can retrieve multiple buffers. Keep the union
+of dispatch intervals separate from per-request timing, and do not
+sum the latter to estimate workflow savings.
+
+`w12-wq-control-aa4920` verified the contents of 256 newly created
+bind files and joined all 256 creates and writes to their completion
+workers. `w12-wq-install-d97798` repeated the full W12 v2 workflow
+from harness `077ea08` with the same signed host and guest hashes.
+It verified 2,830 dependencies, 92,306 files, 532,136,968 bytes and
+all pinned build and test outputs. All 654,834 requests and 154,063
+completion jobs joined. The trace reported zero loss, missed probes,
+enqueue retries or pending requests at the end.
+
+| Stage (p50 / p95, µs) | Create (92,102) | Write (146,395) | Lookup (287,183) |
+| --- | ---: | ---: | ---: |
+| Submit entry → used buffer retrieval | 181 / 280 | 142 / 245 | 128 / 249 |
+| Worker dispatch wait after request submit | 3 / 8 | 3 / 7 | 3 / 7 |
+| Worker start → used buffer retrieval | 2 / 4 | 2 / 4 | 2 / 3 |
+
+The union of all completion worker dispatch waits was 0.501 s
+during the 26.80 s instrumented install. Dispatch in this trace
+accounted for a small portion of the measured device round trip.
+Changing guest worker priority alone has little measured wait to
+remove. The interval before a completion worker is queued still
+includes host service and device notification delivery. This
+single traced run does not establish the observer's overhead or
+qualify a performance cell.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Control trace | `2bc61f680d024beb274909271a84cd49a2eee9470c8c5322fbc51bef65feec9a` |
+| Full install trial | `94c805bf10ea37ccfddc30d308c85ebdf8df695916432f8b94aee557c19b3510` |
+| Full install trace, gzip | `191369d45d999e2144d75bf9b2aa66e28c358bd0e587567e66d3d7110b9dea25` |
+| Full install analysis | `ae4b3717a87bf6ef90fefafc63287cf2b812f8723e3f200c20f6351057205bb4` |
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
