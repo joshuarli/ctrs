@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::Path;
 
-use ctrs_proto::{Exited, LayerStored, MAX_OUTPUT_CHUNK, Msg, Stats, Stream};
+use ctrs_proto::{BUILD_MIRROR_PORT_BOOT_ARG, Exited, LayerStored, MAX_OUTPUT_CHUNK, Msg, Stats, Stream};
 
 use super::container::{self, NetCtx, Paths, Process};
 use super::net::{self, Bridges, Dhcp};
@@ -309,6 +309,15 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
     // listener would only be a port open to the LAN and a clash with any
     // host service on it.
     let host_bound = if host_process { None } else { Some(super::relay::listen_host_bound(net::HOST_RELAY_PORT)?) };
+    let build_mirror_port = if host_process {
+        None
+    } else {
+        std::fs::read_to_string("/proc/cmdline").ok().and_then(|cmdline| {
+            cmdline.split_ascii_whitespace()
+                .find_map(|arg| arg.strip_prefix(BUILD_MIRROR_PORT_BOOT_ARG))?
+                .parse::<std::num::NonZeroU16>().ok()
+        })
+    };
     let framed = super::relay::listen_framed()?;
     let ssh_agent = super::relay::listen_ssh_agent()?;
     // The engine's API for containers that mount the docker socket (VM only).
@@ -552,7 +561,7 @@ pub fn serve(mut conn: File, paths: &Paths) -> io::Result<()> {
                 continue;
             }
             if let Some(l) = host_bound.as_ref().filter(|l| l.as_raw_fd() == pfd.fd) {
-                while let Some(r) = super::relay::accept_host_bound(l, super::net::HOST_ADDR, nat_relay.as_ref()) {
+                while let Some(r) = super::relay::accept_host_bound(l, super::net::HOST_ADDR, nat_relay.as_ref(), build_mirror_port) {
                     relays.push(r);
                 }
                 continue;

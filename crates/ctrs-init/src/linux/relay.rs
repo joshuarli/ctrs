@@ -621,6 +621,7 @@ pub struct NatRelay {
 /// How long a NAT relay connect may hold up the agent loop before the
 /// connection falls back to vsock.
 const NAT_CONNECT_MS: libc::c_int = 100;
+const MIRROR_VSOCK_CONNECT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// What a connection to the Mac's NAT relay is for, the byte after the token.
 const NAT_HOST_BOUND: u8 = 0;
@@ -665,7 +666,7 @@ pub fn dial_leg(nat: &NatRelay, id: u16) -> Option<Relay> {
     Some(Relay { host, target: None, connected: false, header: Vec::with_capacity(6), up: Pipe::new(), down: Pipe::new(), dead: false, udp: false, framed: true, refusing: false, leg: true, leg_id: id, up_src: None, attach: None })
 }
 
-pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&NatRelay>) -> Option<Relay> {
+pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&NatRelay>, build_mirror_port: Option<std::num::NonZeroU16>) -> Option<Relay> {
     // SAFETY: accept4 on a listening socket we own; the fd is owned immediately.
     let fd = unsafe { libc::accept4(listener.as_raw_fd(), std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) };
     if fd < 0 {
@@ -688,10 +689,13 @@ pub fn accept_host_bound(listener: &OwnedFd, host_addr: [u8; 4], nat: Option<&Na
     };
     let mut target = [127, 0, 0, 1, 0, 0];
     target[4..].copy_from_slice(&port.to_be_bytes());
-    if let Some(host) = nat.and_then(|nat| dial_nat(nat, NAT_HOST_BOUND, target)) {
+    let vsock = build_mirror_port.is_some_and(|mirror| mirror.get() == port)
+        .then(|| super::transport::dial_within(HOST_FRAMED_VSOCK_PORT, MIRROR_VSOCK_CONNECT));
+    if !matches!(vsock, Some(Ok(_)))
+        && let Some(host) = nat.and_then(|nat| dial_nat(nat, NAT_HOST_BOUND, target)) {
         return Some(Relay { host, target: Some(client), connected: true, header: Vec::new(), up: Pipe::copied_only(), down: Pipe::new(), dead: false, udp: false, framed: false, refusing: false, leg: false, leg_id: 0, up_src: None, attach: None });
     }
-    let Ok(host) = dial_host(HOST_FRAMED_VSOCK_PORT) else { return Some(Relay::dead_one(client)) };
+    let Ok(host) = vsock.unwrap_or_else(|| dial_host(HOST_FRAMED_VSOCK_PORT)) else { return Some(Relay::dead_one(client)) };
     // The Mac connects to its own loopback: services bound to 127.0.0.1 work.
     let mut header = [127, 0, 0, 1, 0, 0];
     header[4..].copy_from_slice(&port.to_be_bytes());
