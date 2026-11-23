@@ -179,8 +179,12 @@ qualification gaps.
    [W10 API evidence](native-performance-progress.md#installed-default-w10-api-recovery-cohort)
    [W13 evidence](native-performance-progress.md#installed-default-w13-overlap-cohort)
 
-W11 exceeded the short resource-growth budgets on both engines. The
-12-hour reliability gate remains open. W7 peak footprint is inconclusive,
+W11 exceeded the short resource-growth budgets on both engines. Online
+discard reduced ctrs backing growth in an eight-cycle screen and still
+missed the backing and physical-footprint limits. The 12-hour reliability
+gate remains open. [Online discard evidence](native-performance-progress.md#w11-ext4-online-discard-screen)
+
+W7 peak footprint is inconclusive,
 and earlier guest-to-host bulk transfer was tool-limited. The
 [November 20 observations](evidence/native-w12-w13-2026-11-18.md#ranked-measured-deficits)
 retain the previous workload versions and their limitations.

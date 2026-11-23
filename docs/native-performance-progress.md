@@ -19,9 +19,9 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
   comparisons lack host NAT attribution.
 - Both W3 sync modes recovered from guest relation ENOSPC and from backing
   writes failing on an exhausted private host APFS volume. Equivalent
-  power-loss durability remains open. W11's bounded trim diagnostic exceeded
-  the growth limits. The two frozen 12-hour legs and the independent holdout
-  remain open.
+  power-loss durability remains open. W11 exceeded its growth limits
+  with stock settings, explicit trim and online discard. The two frozen
+  12-hour legs and the independent holdout remain open.
 - W13 remains tool-limited under the twofold headroom guard, including
   after the exact mapped receiver and sendfile controls.
 
@@ -4340,6 +4340,91 @@ Trim cycle 8 recorded a private-backing identity or sharing check
 failure, which leaves the full trim leg's resource-growth summary
 unknown. Keep all 43 exact-work receipts and the failed observer
 record. The 12-hour qualification remains open.
+
+#### W11 ext4 online discard screen
+
+Build two ARM64 initramfs files from `99db1aa` in one worktree with
+the pinned Rust toolchain and `CARGO_ENCODED_RUSTFLAGS="" cargo xtask
+guest`. For the second build, add `discard` to the existing
+`noinit_itable` option on the `/dev/vda` ext4 mount in
+`crates/ctrs-init/src/linux/mod.rs`. Use the same signed `99db1aa`
+host binary, guest kernel and sparse data template. Ext4 online
+discard submits discards as blocks are freed. It differs from the
+earlier explicit scan of free extents.
+[Linux ext4 mount options](https://www.kernel.org/doc/html/v6.18/admin-guide/ext4.html)
+
+Run the W11 mixed pilot with the v6 portfolio and v5 worker, stock
+first, on independently copied sparse templates. Use nine vCPUs,
+8,192 MiB, a 290-second work window, 75 seconds of drain and another
+75 seconds for cleanup. Retain 32-second resource observations and
+match the first six exact cycles before comparing allocation. Have
+the mixed pilot verify both loaded boot assets. After exact row
+cleanup and before each host observation, read `/proc/self/mountinfo`
+and `/sys/class/block/vda/stat` from the database container. Require
+the `PGDATA` mount to resolve to ext4 on `/dev/vda`, with the
+`discard` option only in the candidate. Compare the completed
+discard I/O and sector counts with the owned APFS backing allocation
+at the resource boundaries. Retain all remaining cycles.
+[Linux block counters](https://www.kernel.org/doc/html/v6.18/block/stat.html)
+
+`w11-mixed-20261123T042339-6f28` (stock) and
+`w11-mixed-20261123T042844-02e8` (online discard) each completed
+eight cycles with stable service identities and clean teardown.
+The raw audit verified 80,000 API operations, 24,496 acknowledged
+writes through persistence and exact deletion, 3,200 queue jobs,
+6,400 artifacts and 256 build jobs. Every cycle retained the exact
+500 seed rows. The daemon and loaded assets matched on both legs.
+
+| Resource | Stock, first six | Discard, first six | Stock, all eight | Discard, all eight |
+| --- | ---: | ---: | ---: | ---: |
+| Post-warmup backing growth | 54,362,112 B | 21,463,040 B | 74,268,672 B | 31,485,952 B |
+| Final backing increase from cycle 0 | 67,665,920 B | 27,025,408 B | 87,572,480 B | 37,048,320 B |
+| Post-warmup physical-footprint growth | 16,973,824 B | 14,499,840 B | 18,055,168 B | 34,193,432 B |
+| Final physical-footprint increase from cycle 0 | 39,976,960 B | 24,100,864 B | 41,058,304 B | 43,794,456 B |
+| Peak descriptor increase | 0 | 0 | 0 | 0 |
+| Completed guest discard requests by final cycle | 0 | 2,226 | 0 | 3,004 |
+
+The candidate used fewer allocated backing bytes at every boundary
+and reduced growth in this fixed-order comparison. It still missed the
+16 MiB backing and footprint budgets over eight cycles. The backing
+inode stayed fixed in each leg. The ordinary and private counts
+agreed on every stock observation and five candidate observations.
+They differed by up to 98,304 bytes in the remaining candidate
+observations. The table uses ordinary allocation. Keep the stock
+mount option and leave the candidate unpromoted. The run supports
+a storage mechanism and does not establish a timing result.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Stock initramfs | `7169b9f31b5afa289cb88a9f0079faec7a9d2b20e23a327aa60af7cea11bb64c` |
+| Discard initramfs | `c231a7d10244a1692009c4c7b88f1da73d1c43d6e8fdb6e8c2aafb82d3fe55b1` |
+| Stock trials | `c3341c36d316d0017b456021cf040b73b39e80672ef6e2fe8a6244721df52f9c` |
+| Discard trials | `0ca73c171191ef87e44c0ad3c06442b192d423b837375267550bbac2255649c9` |
+| Raw work and resource audit | `8351d948accfec7f61c63d51e63baf2fe83f7be5ad645e6d42d388d3bd35ab3f` |
+
+After both legs stopped, restart each private store on the same
+backing inode with its original boot assets. Repeat the earlier
+sentinel and `FITRIM` procedure with ten seconds before and after
+trim. Confirm the signed binary, loaded assets, live mount, and
+pinned image, then verify the sentinel again after a second restart.
+
+| Residual trim | Stock | Online discard |
+| --- | ---: | ---: |
+| Backing increase during pre-trim idle | 32,768 B | 4,096 B |
+| Backing bytes reclaimed by explicit trim | 327,675,904 B | 46,026,752 B |
+| Backing allocation after trim | 1,193,316,352 B | 1,190,768,640 B |
+
+Ordinary and private allocation agreed at all residual trim
+boundaries. Guest used space stayed constant within each trim and
+the sentinel passed both restarts. Online discard removed most of
+the reclaimable difference during the run. Explicit trim still
+reclaimed 46,026,752 bytes afterward, so online discard did not
+exhaust the reclaimable space. Both 12-hour legs remain open.
+
+| Residual trim receipt | SHA-256 |
+| --- | --- |
+| Stock | `1aa1c8d5df295a61754e8deec5bab3a6ee8714d188704d3eeb91ece62b00b6f9` |
+| Online discard | `ac4d2f3ed2adc16c770a9c7ee7b01443ca49af31ba1a66eed8ee8916b047c3d6` |
 
 A native APFS control on macOS 27.2.1 reproduced allocation
 disagreement on a file that had never been cloned. A writer repeated
