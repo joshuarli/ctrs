@@ -6036,6 +6036,42 @@ native host gate returned zero before and after both batches.
 | Suppression receipt | `ce40452cf729749ba17ae06e45971b2ce7e3ff00ce56ce8fbcb7f984d8135a8f` |
 | Derived request analysis | `b388bf0316ee638b33f33f6cc7ac853f451aff1bdbcd40fe640d9485dce013a2` |
 
+##### W12 missing-path lookup overlap
+
+Reanalyze the two zero-loss full-bind install traces and the mixed-layout
+control. Join each request's send and end by connection and request ID.
+Group `FUSE_LOOKUP` replies with error `-2` as missing-path lookups.
+Sweep the sorted send and end timestamps, counting each wall interval
+once according to which request groups are outstanding. Apply all
+changes at the same timestamp before counting the next interval.
+
+| Observed interval | Full bind, notifications on | Full bind, test gate active | Mixed layout |
+| --- | ---: | ---: | ---: |
+| Any FUSE request outstanding | 21.729 s | 19.323 s | 9.698 ms |
+| At least one missing-path lookup outstanding | 12.400 s | 11.677 s | 0.224 ms |
+| Missing-path lookups the only requests outstanding | 0.320 s | 0.501 s | 0.050 ms |
+| Any lookups outstanding, with no other opcodes pending | 2.191 s | 1.049 s | 1.051 ms |
+
+The large missing-path lookup count does not by itself identify the
+critical path. These requests overlap writes, creates and other lookups
+for most of the interval. Removing requests could reduce time spent
+waiting for other work too. The traces lack path identity and task
+dependencies, so they cannot establish cache hit potential or predict
+wall-time savings from removing a request class.
+
+Full bind issued 146,395 writes in both traces, with identical request
+length totals of 541,826,302 bytes. In each trace, 114,499 writes
+(78%) had an input frame of at most 4,176 bytes, headers included.
+Create and write each had a request outstanding for more than 13.69
+seconds even with the notification gate active. A candidate aimed at
+the full install gap should first measure where those create and write
+requests wait, and verify that any reduction preserves host visibility
+and the existing write and flush semantics. The overlap alone gives no
+basis to extend the negative-entry cache lifetime.
+
+Derived interval report SHA-256
+`fe03df0e50159127e6f727e0084e3a508135a21b7a75c8baaa53556baddc0782`.
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
