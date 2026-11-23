@@ -2704,6 +2704,62 @@ python3 bench/native/reporting.py --match base-20261122T101434-f89b
 `trials.jsonl` SHA-256
 `8e354c33086fa356b6d9ebe52403270adc69a04dae8195f54074345268b9e012`.
 
+#### W9 rebuilt-release confirmation
+
+`w9-confirmation-c30e65e8` repeated the four concurrency conditions
+in ten alternating pairs. Rebuild host source `5cac40d` with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host` and verify the signature.
+The resulting binary matched the original W9 SHA-256 byte for byte,
+and every ctrs trial loaded the original kernel and initramfs. The
+runner was `f246d01`. The macOS W9 job code and fixture remained
+equivalent to `3ad2f5b`. The intervening job-validator branch selects
+the separate Linux lane.
+
+Use a separate stopped campaign-owned ctrs store. This repeat reused
+the private W11 diagnostic store and checked that it had no containers
+before starting. Preinstall the original pinned v6 Marked image under
+the same digest reference on each engine. If the reference is missing
+on ctrs, serve the pinned portfolio at its original loopback port and
+pull before timing. Verify the engine-specific image ID, ARM64 platform
+and ordered DiffIDs. Run `baseline --case W9 --a ctrs --b orbstack
+--resource-lane installed-default --pairs 10 --pair-quiet-load 4
+--image-ref "$common_marked_digest_ref"` with `runner.CTRS_BIN` pointing
+to the signed rebuild and the ctrs slot using the private store.
+
+The 20 legs completed all 1,280 exact jobs. A
+raw audit compared each artifact hash, source lock and three CLI
+outputs with the original cohort and verified owned container cleanup.
+Neither engine had incomplete phase receipts, and all ctrs legs
+recorded zero NAT connections. Both engines reported nine vCPUs.
+The maximum observed outside-engine load during a job phase was
+1.02 cores. Both host quiet checks passed. The ctrs VM slept between
+pairs 7 and 8 and booted before pair 8's untimed warmup. Each timed
+phase verified the running identity throughout its measurement.
+
+| Concurrency | Batch time | Job p95 | CPU per job | Sampled peak footprint |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.379 [0.373, 0.385] | 0.379 [0.373, 0.385] | 0.387 [0.382, 0.391] | 0.082 [0.063, 0.083] |
+| 4 | 0.235 [0.227, 0.237] | 0.235 [0.227, 0.237] | 0.400 [0.393, 0.410] | 0.082 [0.070, 0.083] |
+| 8 | 0.189 [0.183, 0.202] | 0.189 [0.183, 0.201] | 0.444 [0.431, 0.452] | 0.081 [0.074, 0.082] |
+| 16 | 0.206 [0.196, 0.214] | 0.206 [0.196, 0.214] | 0.485 [0.466, 0.494] | 0.081 [0.080, 0.082] |
+
+The table gives paired ctrs/OrbStack medians and 95% confidence
+intervals. All four conditions reproduced the original direction
+and cleared the descriptive strict-win bounds. At 16 workers, median
+batch time was 0.465 s on ctrs and 2.284 s on OrbStack. The median
+sampled footprint moved from 2.79 GB to 1.34 GB on ctrs and from
+5.31 GB to 16.47 GB on OrbStack between cohorts. The smallest phase
+had one interior sample. The shared OrbStack endpoint had one running
+container in both pre- and post-run inventories, so this repeat does
+not establish the footprint ratio on an isolated OrbStack root.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Fresh signed binary | `d59eff1a7f5576a7d49e6e5edf0d5d64740fdc0f49c8e4729ce344d08c534796` |
+| Image admission | `ec1074e88c8cb2cf311f68dfb72184d7ab06bc239703c17c8b45f66f45c80140` |
+| Trials | `c7be61a7582fdaf896e038b0a8b90e0054e6d4be4dd3048c434d6512d0a9f45a` |
+| Report | `ded6659f99e3bb3ad6a93de08d93b9cf983f57a05c0a565efad21a32d668e88e` |
+
 ### Installed-default W13 overlap cohort
 
 Run `base-20261122T073402-7351` used harness source `6278898`, the W6
