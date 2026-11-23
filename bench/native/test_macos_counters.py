@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock
 
 import collect
-from macos_counters import Counters
+from macos_counters import Counters, host_cpu_ticks
 
 
 class CoverageTests(unittest.TestCase):
@@ -32,6 +32,14 @@ class CoverageTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'darwin' and os.uname().machine == 'arm64',
                      'native ARM64 macOS counters')
 class NativeCounterTests(unittest.TestCase):
+    def test_host_ticks_advance_at_subsecond_phase_boundaries(self):
+        previous = host_cpu_ticks()
+        for _ in range(24):
+            time.sleep(.05)
+            current = host_cpu_ticks()
+            self.assertNotEqual(current, previous, 'host CPU tick snapshot repeated')
+            previous = current
+
     def test_cpu_units_match_process_clock_and_bad_pid_errors(self):
         counters = Counters()
         before = counters.read(os.getpid())

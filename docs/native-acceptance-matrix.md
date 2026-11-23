@@ -23,6 +23,11 @@ Lanes: **D** = installed default (ctrs product defaults vs OrbStack as
 installed); **M** = resource-matched control (ctrs vCPUs/memory set to
 OrbStack's). Never pool lanes.
 
+Early W7 cohorts include trials admitted with the load-average fallback
+after incomplete host CPU sampling. The harness now uses per-processor
+ticks to avoid cached snapshots. Host NAT CPU attribution remains open.
+[Host counter evidence](native-performance-progress.md#host-cpu-counter-freshness)
+
 ## Existing workloads
 
 | ID | Workflow | Spec | Impl | Functional (this host) | Compared (this host) | Critical result (this host) |

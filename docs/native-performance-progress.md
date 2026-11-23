@@ -26,6 +26,31 @@ candidate defaults remain unpromoted. No campaign finish gate is qualified.
 - W13 remains tool-limited under the twofold headroom guard. The exact
   Mac controls include sendfile, native receive and larger socket buffers.
 
+### Host CPU counter freshness
+
+On macOS 27.2.1, an SDK probe read `host_statistics(HOST_CPU_LOAD_INFO)`
+and `host_processor_info(PROCESSOR_CPU_LOAD_INFO)` back to back 64 times,
+with 25 ms between samples. The aggregate API repeated the entire
+snapshot across 12 of the 63 adjacent intervals. The per-processor
+sum advanced in every interval. The published XNU implementation
+rate-limits the aggregate API for third-party clients and can return
+a cached snapshot. [XNU host statistics](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/host.c)
+
+The macOS harness now sums the per-processor counters and preserves the
+32-bit wrap handling. Run
+`PYTHONPATH=bench/native python3 -m unittest test_macos_counters`
+on an ARM64 Mac. The new subsecond-boundary test reproduced repeated
+snapshots with the old sampler and passed with the new one.
+
+The saved W7 offline cohort lacked a host busy CPU reading in 39 of
+120 ctrs phases and 1 of 120 OrbStack phases. The network-resolved
+cohort lacked 41 and 5 respectively. A missing phase makes the
+reporter fall back to host load average for that trial. The old
+receipts do not retain the underlying tick samples, so a stricter
+CPU comparison needs a fresh run. Host CPU tick fractions include
+unrelated work and still cannot attribute host NAT CPU to the engine.
+The W7 and W8 NAT CPU cells remain incomplete.
+
 ## Wound down 2026-11-20
 
 The owner paused the campaign on 2026-11-20. No gate in

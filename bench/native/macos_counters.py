@@ -50,22 +50,54 @@ class Counters:
                 'footprint_method': 'rusage_info_v0.ri_phys_footprint'}
 
 
-HOST_CPU_LOAD_INFO = 3
+PROCESSOR_CPU_LOAD_INFO = 2
 CPU_STATES = 4
 CPU_STATE_IDLE = 2
 
 
 def host_cpu_ticks(lib=None):
-    """Cumulative per-state CPU ticks over all cores from
-    host_statistics(HOST_CPU_LOAD_INFO). The counters are 32-bit and wrap;
-    the tick unit cancels in `busy_cores`."""
+    """Cumulative 32-bit CPU ticks per state. Read the per-processor API
+    because XNU rate-limits HOST_CPU_LOAD_INFO and may return cached ticks."""
     lib = lib or ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    task = ctypes.c_uint32.in_dll(lib, 'mach_task_self_').value
+    count_type = ctypes.c_uint32
+    ticks_type = ctypes.POINTER(ctypes.c_int32)
     lib.mach_host_self.restype = ctypes.c_uint32
-    ticks = (ctypes.c_uint32 * CPU_STATES)()
-    count = ctypes.c_uint32(CPU_STATES)
-    if lib.host_statistics(lib.mach_host_self(), HOST_CPU_LOAD_INFO, ticks, ctypes.byref(count)):
-        raise OSError('host_statistics(HOST_CPU_LOAD_INFO) failed')
-    return list(ticks)
+    lib.host_processor_info.argtypes = [ctypes.c_uint32, ctypes.c_int32,
+                                       ctypes.POINTER(count_type), ctypes.POINTER(ticks_type),
+                                       ctypes.POINTER(count_type)]
+    lib.host_processor_info.restype = ctypes.c_int32
+    lib.vm_deallocate.argtypes = [ctypes.c_uint32, ctypes.c_size_t, ctypes.c_size_t]
+    lib.vm_deallocate.restype = ctypes.c_int32
+    lib.mach_port_deallocate.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    lib.mach_port_deallocate.restype = ctypes.c_int32
+    host = lib.mach_host_self()
+    if not host:
+        raise OSError('mach_host_self failed')
+    cpus = count_type()
+    words = count_type()
+    ticks = ticks_type()
+    try:
+        error = lib.host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, ctypes.byref(cpus),
+                                        ctypes.byref(ticks), ctypes.byref(words))
+        if error:
+            raise OSError(f'host_processor_info(PROCESSOR_CPU_LOAD_INFO) failed ({error})')
+        try:
+            if not cpus.value or not ticks or words.value != cpus.value * CPU_STATES:
+                raise OSError('host_processor_info returned an invalid CPU tick array')
+            return [ctypes.c_uint32(sum(ticks[i] for i in range(state, words.value, CPU_STATES))).value
+                    for state in range(CPU_STATES)]
+        finally:
+            if ticks:
+                address = ctypes.cast(ticks, ctypes.c_void_p).value
+                size = words.value * ctypes.sizeof(ctypes.c_int32)
+                error = lib.vm_deallocate(task, address, size)
+                if error:
+                    raise OSError(f'vm_deallocate CPU ticks failed ({error})')
+    finally:
+        error = lib.mach_port_deallocate(task, host)
+        if error:
+            raise OSError(f'mach_port_deallocate host port failed ({error})')
 
 
 def busy_cores(before, after, cpus):
