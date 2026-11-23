@@ -109,7 +109,6 @@ family = "compiled-app-ci"
 title = "timed docker builds: pinned hyperfine 2.0.0 (Rust cargo build+test --locked) and zlib 1.3.1 (C configure/make/check); artifact sha256 probes"
 fixture = "fixtures/w6 (zlib-1.3.1.tar.gz + hyperfine-2.0.0.tar.gz, checksum-pinned fetch; rust/Dockerfile + Dockerfile)"
 status = "implemented"
-fixture_version = "w6-v2-compile-cache"
 metrics = ["build_rust_s", "build_zlib_s", "artifact_rust_sha256", "artifact_zlib_sha256"]
 states = ["warm"]
 params = { driver = ["default", "dc"], build_cache = ["uncached", "warm"] }
@@ -139,7 +138,6 @@ family = "real-image-deployment"
 title = "paired retained or derived portfolio pull and deployment"
 fixture = "fixtures/w8-v3 + independent host registry"
 status = "implemented"
-fixture_version = "w8-paired-v1"
 metrics = ["pull_to_health_s", "under_pull_p95_ms", "under_pull_p99_ms", "cpu_seconds_est", "peak_phys_footprint_bytes"]
 states = ["warm"]
 params = { under_load = [false, true], content = ["derived", "retained"] }
@@ -186,7 +184,6 @@ note = "API and database recovery uses the common pinned stack and ends on the f
 id = "W11"
 fixture_version = "w11-v5-restored-worker"
 family = "soak"
-fixture_version = "w11-v4-post-cleanup-resources"
 title = "pilot sustained load windows + container churn; correctness gates, resource-growth qualification pending"
 fixture = "fixtures/w1 + fixtures/w2/load.py + inline churn"
 status = "implemented"
