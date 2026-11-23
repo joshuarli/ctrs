@@ -1168,6 +1168,38 @@ confirmation before attributing system CPU to specific kernel functions.
 The derived `pairs.jsonl` SHA-256 is
 `043c3e8d4cf5095cd3d5c6844a42bad9eb9d23e43e86ee893b35c8a50e94bc91`.
 
+#### W2 guest scheduler and interrupt counts
+
+The same 40 fixed-work legs saved guest-wide `/proc/stat` and
+`/proc/interrupts` on both sides of the workload. All legs verified
+50,000 requests with eight clients, exact persisted rows, and no
+errors. Both guests reported nine vCPUs. Both engines' before and
+after receipts identified `IPI1` as `Function call interrupts`.
+
+| Client path and counter | ctrs median per request | OrbStack median per request | Paired ctrs/OrbStack median and 95% CI |
+| --- | ---: | ---: | --- |
+| Published port, context switches | 54.77 | 29.89 | 1.831 [1.817, 1.842] |
+| Published port, total interrupts | 29.41 | 12.29 | 2.371 [2.340, 2.419] |
+| Published port, function-call interrupts | 23.45 | 5.19 | 4.464 [4.363, 4.627] |
+| Guest-direct, context switches | 46.92 | 27.44 | 1.701 [1.625, 1.724] |
+| Guest-direct, total interrupts | 23.77 | 9.69 | 2.435 [2.344, 2.471] |
+| Guest-direct, function-call interrupts | 22.08 | 6.52 | 3.353 [3.224, 3.407] |
+
+The guest-direct result persists with zero ctrs host NAT connections.
+These counts cover the guest as a whole, including the database, cache,
+client and counter-reader boundaries. The increase establishes extra
+interrupt arrivals and context switches for fixed successful work.
+Attributing them to individual tasks and estimating the CPU cost per
+interrupt remain separate measurements.
+
+Use the two fixed-work cohort receipts referenced above. Subtract
+`before` from `after` for `stat.ctxt`, `stat.intr`, and
+`interrupts.IPI1.total` under `resources.guest_kernel_counters`.
+Verify the stored deltas and the interrupt descriptions, divide by
+`metrics.requests_ok`, and bootstrap the ten paired ratios for each
+client path. Derived counter rows SHA-256
+`d139064d37026665127d566a41d7f78da0152d7c8cf94f3849f113b8fce018d5`.
+
 ### Installed-default W2 published-port fixed offered rate
 
 Run `base-20261122T093101-7063` used the same clean source and artifacts
