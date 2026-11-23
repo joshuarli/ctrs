@@ -92,18 +92,15 @@ The host is the existing native x86_64 lane machine: Ubuntu 22.04.5, kernel
 
 ## Decisions waiting for the owner (not Linux work)
 
-- **W12 full-bind transport.** VZ virtiofs adds about 125 µs to every bind
-  request: LOOKUP p50 is 128 µs against 1.5 µs native, and create+write+close
-  is about 358 µs per file against 59 µs native. Caching, kick suppression
-  (EVENT_IDX), VZ thread priority and notification suppression are already in
-  order or measured, and a second device was rejected.
-  - The host↔agent vsock control round trip measured p50 49.5 µs
-    (`diagnostic/vsock-rtt` `46bcf12`). That fits the ≤ 65 µs gate on the
-    arithmetic, but the hop through a guest FUSE daemon isn't counted.
-  - The remaining lever is a ctrs-owned FUSE-over-vsock bind transport. That
-    is a multi-week architecture change that puts a host file server on the
-    guest boundary, with security and semantics review.
-  - Approve a design, or record W12 full-bind (1.30×) as a VZ-bound loss.
+- **W12 full-bind transport: parked by the owner (2026-11-23).** VZ virtiofs
+  adds about 125 µs to every bind request. The only lever left is a ctrs-owned
+  FUSE-over-vsock bind transport, and the owner parked it because FUSE is
+  tricky. W12 full-bind stays a recorded VZ-bound loss (workflow 1.30×,
+  install 2.11×, verification 4.16×). Mixed and all-volume layouts stay near
+  parity. Reopen only with a new design that addresses the FUSE protocol,
+  security and semantics risk, or with new evidence of a cheaper lever. The
+  probe and estimate are in the
+  [record](evidence/main-reconciliation-2026-11-23.md#w12-full-bind-the-next-intervention-boundary).
 - **W11 12-hour legs.** These are not admitted. Both engines exceeded the
   short-run growth budgets, and the frozen cell contract and durability
   admission are still incomplete. Launching them now would be a known-failing

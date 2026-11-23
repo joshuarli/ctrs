@@ -277,6 +277,9 @@ multi-week architecture change needing security and semantics review. It is
 **handed to the owner as a design decision** (see the
 [Linux handoff](../linux-handoff-2026-11-23.md)), not started here.
 
+**Owner decision, 2026-11-23: parked.** FUSE is tricky. W12 full-bind stays
+a recorded VZ-bound loss, and `diagnostic/vsock-rtt` stays unmerged.
+
 ## Open items this session could not do
 
 - Copy `/home/ubuntu/ctrs-evidence/` off the Linux VM and verify the committed

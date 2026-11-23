@@ -27,7 +27,7 @@ put about 125 µs of every bind request inside Apple's virtiofs service, with
 caching, kick suppression and thread priority already in order. The next
 decision was a raw agent↔host vsock round-trip probe. It measured p50
 49.5 µs: enough on paper for a ctrs-owned bind transport, but that is an
-architecture change and now waits for the owner. W1 warm, W6, W7 and W8 were
+architecture change, and the owner parked it (FUSE is tricky). W1 warm, W6, W7 and W8 were
 remeasured against OrbStack at `b5ec34b`, and all timing and footprint cells
 are strict wins. The receipts are in the same record. Continue from the
 [Linux handoff](linux-handoff-2026-11-23.md).
