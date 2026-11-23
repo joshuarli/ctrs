@@ -677,6 +677,61 @@ python3 bench/native/reporting.py --match base-20261122T143625-9f92
 `trials.jsonl` SHA-256
 `5e8c8f8308ab99e585d114fa3346b50dfb799d0921fcf5246a707d8326b9b98a`.
 
+##### W4 rebuilt-source repeat
+
+Build the signed host again from clean source `99db1aa` with
+`CARGO_ENCODED_RUSTFLAGS="" cargo xtask host`. The first launcher
+required the original executable digest and stopped before starting
+a daemon. The standard rebuild produced `553c8da4` and the separate
+wrapper-free rebuild produced `070acddb`. The archived host hash is
+`10667e6d`. Both rebuild signatures verified. The difference between
+the executable bytes is unresolved.
+
+The retry used the standard signed rebuild and matched the original
+kernel, initramfs and disk template hashes. Reuse an independent
+stopped ctrs store and verify it has no existing containers. Load
+the pinned worker archive if needed, and preinstall the pinned Redis
+digest. Verify both engines' layer and launch-configuration receipts
+against the earlier run before any timing. Use the earlier W4
+baseline arguments with the rebuilt host and private ctrs root.
+
+`w4-confirmation-2ce01ca3` completed ten alternating pairs with
+runner `29fa508`. Both engines used nine vCPUs. All 60 batches
+verified 12,000 exact jobs and 24,000 artifacts in total. The raw
+audit checked the boot clock ID, enqueue and completion order and
+all 200 timing records per batch. Worker and Redis image receipts
+matched the original cohort in every leg. All phase counters and
+owned cleanups passed. ctrs recorded zero NAT connections. Both
+host quiet checks passed, and the highest observed outside-engine
+CPU in a worker phase was 0.93 cores. The ctrs VM slept once
+between legs and booted before the next setup.
+
+| Metric | 1 worker | 4 workers | 16 workers |
+| --- | ---: | ---: | ---: |
+| Worker phase time | 0.614 [0.606, 0.620] | 0.447 [0.428, 0.450] | 0.286 [0.262, 0.300] |
+| Queue p95 | 0.654 [0.650, 0.662] | 0.526 [0.500, 0.545] | 0.295 [0.271, 0.320] |
+| Queue p99 | 0.654 [0.651, 0.662] | 0.530 [0.504, 0.548] | 0.296 [0.272, 0.321] |
+| Engine CPU per verified job | 0.627 [0.586, 0.651] | 0.637 [0.621, 0.651] | 0.590 [0.576, 0.605] |
+| Sampled peak physical footprint | 0.061 [0.044, 0.062] | 0.060 [0.049, 0.061] | 0.060 [0.056, 0.060] |
+
+The table gives paired ctrs/OrbStack medians and 95% intervals.
+The source rebuild reproduced the strict-win direction at all three
+worker counts. The 16-worker median phase took 0.726 s on ctrs and
+2.538 s on OrbStack. Sampled median peak at 16 workers was 0.97 GB
+and 16.29 GB, compared with 1.33 GB and 9.47 GB in the original
+cohort. OrbStack used its shared endpoint, with one container running
+in both pre- and post-run inventories. The smallest phase had one
+interior footprint sample. Exact-binary confirmation and the
+isolated OrbStack footprint comparison remain open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed rebuild used for the repeat | `553c8da4fa9874d30fe30f62cdd60eb5ecf37ba7011f8210d15433b9e57c7170` |
+| Wrapper-free rebuild | `070acddb8a1a054378e7194468e90fd8e61c3c46aa798eecc573b7f1fb57ee47` |
+| Image admission | `4c4ecb78e0b3df8c18ee2a0d7589214d6b72cdacb7f657af0ef458148c27b39e` |
+| Trials | `7c72316797bb4e8730cc3cb19fedb44bb6913f12943c5ef043d501d0c0f808a3` |
+| Report | `1bf2126d4fc245c32ce00602e0daedce7229eeeba4ebd8f4bc435cf3d2d07a72` |
+
 ### Installed-default W5 cohort
 
 `base-20261122T123236-7047` used harness `a6de621` and signed release
