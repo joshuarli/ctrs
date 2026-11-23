@@ -222,7 +222,7 @@ def allocation_receipt(snapshots):
 
 def measure_engine(engine, directory, run, contract, portfolio, receipt, layout, server,
                    under_load=False, *, orbstack_storage_files=()):
-    result = {'correctness': False, 'qualification_eligible': False, 'errors': [], 'pulls': [],
+    result = {'correctness': False, 'workload_correct': False, 'qualification_eligible': False, 'errors': [], 'pulls': [],
               'resources': {'phases': {}}, 'phase_status': {},
               'pre_content_state': 'unknown below image API; no cache purge'}
     sampler = trace = None
@@ -348,6 +348,7 @@ def measure_engine(engine, directory, run, contract, portfolio, receipt, layout,
                 retained_after = json.loads(engine.sh(['image', 'inspect', *old_refs]).stdout)
                 save(directory / 'retained-after.json', retained_after)
                 w8_under_pull.require_baseline_images(engine.name, retained_pins, retained_after)
+            result['workload_correct'] = True
             result['correctness'] = True
         if engine.name == 'ctrs':
             result['cpu_accounting'] = runner.cpu_accounting(

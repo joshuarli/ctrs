@@ -627,8 +627,12 @@ def _analyze_cohort(identity: dict, records: list[dict],
             reason = "incomplete or mismatched pair"
         elif same_engine_required and a[0].get("engine") != b[0].get("engine"):
             reason = "noise-control pair spans different engines"
-        elif not (_correct(a[0]) and _correct(b[0])):
+        elif rejected := [r for r in (*a, *b) if not _correct(r)]:
             reason = "failed correctness or validation"
+            if paired_w8 and all(r.get("correctness", {}).get("checks") == {"workload": True, "resources": False}
+                                 for r in rejected):
+                reason = "W8 resource validation failed after workload passed: " + ", ".join(
+                    side_of(r) for r in rejected)
         elif version_drift:
             reason = "engine version drift within run"
         elif same_engine_required and sides == ("b", "a") and (

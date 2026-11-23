@@ -154,7 +154,7 @@ class PairedBatch(unittest.TestCase):
             (fixture / 'portfolio.json').write_text(json.dumps(contract))
             engine = mock.Mock(proc=object())
             engine.name = 'ctrs'
-            result = {'correctness': True, 'pull_to_health_s': 1, 'errors': [],
+            result = {'correctness': True, 'workload_correct': True, 'pull_to_health_s': 1, 'errors': [],
                       'resources': {'status': 'ok', 'ownership': {'required_processes': [
                           {'pid': 1, 'role': 'daemon', 'kernel_start_identity': 2}]}}}
             measure = mock.Mock(return_value=result)
@@ -267,7 +267,7 @@ class PairedBatch(unittest.TestCase):
                 calls.append((engine.name, id(engine), receipt['seed'], str(layout), server))
                 processes = [{'pid': 1 if engine.name == 'ctrs' else 2,
                               'role': 'daemon', 'kernel_start_identity': 100}]
-                return {'correctness': True, 'pull_to_health_s': 1, 'errors': [],
+                return {'correctness': True, 'workload_correct': True, 'pull_to_health_s': 1, 'errors': [],
                         'resources': {'status': 'ok', 'ownership': {'required_processes': processes},
                             'phase_summaries': {'whole_workflow': {
                                 'status': 'ok', 'errors': [], 'required_processes': processes,
@@ -295,13 +295,17 @@ class PairedBatch(unittest.TestCase):
             metrics = {m['metric']: m for m in cohort['metrics']}
             self.assertEqual(metrics['peak_phys_footprint_bytes']['valid_pairs'], 2)
             self.assertEqual(metrics['cpu_seconds_est']['cpu_accounting_incomplete_trials'], 2)
-            for change in ('mismatch', 'failed', 'diagnostic', 'duplicate'):
+            for change in ('mismatch', 'failed', 'resources', 'diagnostic', 'duplicate'):
                 altered = json.loads(json.dumps(rows))
                 if change == 'mismatch': altered[0]['paired_inputs']['seed_hex'] = 'other'
                 if change == 'failed': altered[0]['correctness']['ok'] = False
+                if change == 'resources': altered[0]['correctness']['checks']['resources'] = False
                 if change == 'diagnostic': altered[0]['measurement_valid'] = False
                 if change == 'duplicate': altered.append(altered[0])
-                self.assertTrue(reporting.analyze(altered)['cohorts'][0]['rejections'], change)
+                rejection = reporting.analyze(altered)['cohorts'][0]['rejections']
+                self.assertTrue(rejection, change)
+                if change == 'resources':
+                    self.assertIn('resource validation failed after workload passed', rejection[0]['reason'])
             args.diagnostic = True
             with mock.patch.object(w8.runner, 'RunContext', Context), \
                  mock.patch.object(w8.registry_portfolio, 'prepare_pinned_portfolio', side_effect=lambda layout, contract: source_for(contract)), \

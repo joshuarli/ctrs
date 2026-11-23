@@ -1494,8 +1494,10 @@ by its start time put its later CPU reading before the true end boundary.
 Phase accounting now requires a periodic sample to finish before the
 phase end boundary starts. Replaying the saved cleanup trace keeps five
 interior samples and reports 0.7834 CPU-s with no validation errors.
-The original leg remains rejected in its run records. Use the corrected
-harness for subsequent cohorts and keep all stored samples for review.
+The original leg remains rejected in its run records. New W8 trial
+records preserve separate workload and resource checks. The report
+identifies resource rejection after a successful workload, and both
+checks are required for timing admission.
 
 #### Mac release check after the shared layer-install change
 

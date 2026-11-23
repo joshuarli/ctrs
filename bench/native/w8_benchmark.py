@@ -213,15 +213,18 @@ def run_batch(args, *, engine_factory=None, measure=None, prepare=None, serve=No
                             rec['resources']['allocation'] = result.get('allocation', {})
                         budgets = bool(info) and all(type(info.get(key)) is int and info[key] > 0
                                                     for key in ('ncpu', 'mem_total_bytes'))
-                        ok = result.get('correctness') is True and result.get('resources', {}).get('status') == 'ok' and budgets and rec['engine_server_version'] != 'unreachable'
+                        resources_ok = (result.get('resources', {}).get('status') == 'ok'
+                                        and budgets and rec['engine_server_version'] != 'unreachable')
                         if storage_files:
-                            ok = ok and rec['resources']['allocation'].get('status') == 'ok'
+                            resources_ok = resources_ok and rec['resources']['allocation'].get('status') == 'ok'
+                        workload_ok = result.get('workload_correct') is True
+                        ok = result.get('correctness') is True and workload_ok and resources_ok
                         if ok:
                             current = (_warm_identity(result, allow_vm_rotation=name == 'ctrs' and not resident),
                                        info['ncpu'], info['mem_total_bytes'])
                             if identities.setdefault(name, current) != current:
                                 raise ValueError('warm engine identity changed or resource budget drifted between trials')
-                        rec['correctness'] = {'ok': ok, 'checks': {'workload_and_resources': ok}}
+                        rec['correctness'] = {'ok': ok, 'checks': {'workload': workload_ok, 'resources': resources_ok}}
                         rec['validation_errors'].extend(result.get('errors', []))
                         if ok:
                             rec['metrics']['pull_to_health_s'] = result['pull_to_health_s']

@@ -220,7 +220,8 @@ class PhaseAccounting(unittest.TestCase):
 
     def test_summary_failure_stops_engine_persists_failure_and_rejects_result(self):
         engine = mock.Mock()
-        result = {'correctness': True, 'errors': [], 'resources': {'phases': {}}, 'phase_status': {}}
+        result = {'correctness': True, 'workload_correct': True, 'errors': [],
+                  'resources': {'phases': {}}, 'phase_status': {}}
         with tempfile.TemporaryDirectory() as directory, \
              mock.patch.object(pilot, 'summarize_resources', side_effect=OSError('damaged trace')), \
              mock.patch.object(pilot, 'host_snapshot'):
@@ -228,6 +229,7 @@ class PhaseAccounting(unittest.TestCase):
             saved = json.loads((Path(directory) / 'result.json').read_text())
         engine.stop.assert_called_once_with()
         self.assertFalse(saved['correctness'])
+        self.assertTrue(saved['workload_correct'])
         self.assertEqual(saved['resources']['status'], 'unknown')
         self.assertIn('damaged trace', ''.join(saved['errors']))
         with self.assertRaisesRegex(RuntimeError, 'resource coverage failed'):
