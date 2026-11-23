@@ -32,12 +32,11 @@ LEAF_TOOLS_SHA = '990b13e40dcd7726198911b133c2ac59a7df8576f7c914b88b5f4b6527340a
 GUEST_CLIENT_SUFFIX = '-guest-client-v2'
 HELPER = Path(__file__).with_name('w2_counter_guest.py')
 BOOTSTRAP = Path(__file__).with_name('w2_scheduler_app.py')
-CPU_PROFILES = {'cpu': cpu_profile.VERSION, 'cpu-leaf': cpu_profile.LEAF_VERSION}
 
 
 def cpu_record_args(profile_kind, tasks):
     args = ['/tmp/np-tools/usr/bin/perf', 'record', '--no-inherit', '-t', ','.join(tasks),
-            '-e', 'cpu-clock', '-c', str(cpu_profile.PERIOD_NS)]
+            '-e', 'cpu-clock', '-c', str(cpu_profile.period_ns(profile_kind))]
     if profile_kind == 'cpu':
         args += ['--call-graph', 'dwarf,16384']
     return args + ['--sample-cpu', '--clockid', 'mono', '-m', '256', '--delay=-1',
@@ -45,7 +44,7 @@ def cpu_record_args(profile_kind, tasks):
 
 
 def profile_identity(profile_kind, api_cpus, client_location):
-    version = CPU_PROFILES.get(profile_kind, counter_specs.VERSION)
+    version = cpu_profile.PROFILES[profile_kind][0] if profile_kind in cpu_profile.PROFILES else counter_specs.VERSION
     if api_cpus is not None:
         version += '-api-affinity-v1'
     if client_location == 'guest':
@@ -209,7 +208,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         if engine.name == 'ctrs' and [p['executable']['sha256'] for p in identity['required_processes'] if p['role'] == 'daemon'] != [runner.sha256_file(runner.CTRS_BIN)]:
             raise ValueError('adopted daemon differs from requested binary')
         if mode == 'on':
-            if profile_kind in CPU_PROFILES:
+            if profile_kind in cpu_profile.PROFILES:
                 args = cpu_record_args(profile_kind, tasks)
             else:
                 helper('probes')
@@ -232,13 +231,13 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         result['effective_api_cpus']['before'] = task_affinities(before['tasks'], api_cpus)
         cpu_profile.check_attachment(tasks, before['tasks'], before['clock_ticks'])
         host_before = collect.cpu_boundary(identity)
-        if profile_kind == 'cpu-leaf':
+        if profile_kind in cpu_profile.LEAF_PROFILES:
             ticks_before, harness_before = macos_counters.host_cpu_ticks(), runner.harness_cpu_seconds()
         started = time.monotonic()
         summary = load(engine, client_location, client, base, directory, 'work', operations, .3,
                        concurrency=concurrency, seed=seed)
         ended = time.monotonic()
-        if profile_kind == 'cpu-leaf':
+        if profile_kind in cpu_profile.LEAF_PROFILES:
             ticks_after, harness_after = macos_counters.host_cpu_ticks(), runner.harness_cpu_seconds()
         host_after = collect.cpu_boundary(identity)
         phase.stdin.write('STOP\n'); phase.stdin.flush(); phase.stdin.close()
@@ -255,7 +254,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
         host_cpu = collect.cpu_delta(host_before, host_after)
         if host_cpu['errors']:
             raise ValueError('host CPU coverage invalid: ' + repr(host_cpu['errors']))
-        if profile_kind == 'cpu-leaf':
+        if profile_kind in cpu_profile.LEAF_PROFILES:
             host_cpu.update(runner.foreign_cpu(ticks_before, ticks_after, harness_before, harness_after,
                                                host_cpu['cpu_seconds'], ended - started))
         save(directory / 'host-cpu.json', host_cpu)
@@ -272,7 +271,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
             result['profiler_exit'] = code
             if code not in (0, 130):
                 raise RuntimeError('profiler exit failed')
-            if profile_kind in CPU_PROFILES:
+            if profile_kind in cpu_profile.PROFILES:
                 engine.sh(['cp', api + ':/tmp/np-count/cpu.data', str(directory / 'cpu.data')])
                 script = engine.sh(['exec', '--privileged', api, 'env', 'LD_LIBRARY_PATH=/tmp/np-tools/lib/aarch64-linux-gnu',
                     '/tmp/np-tools/usr/bin/perf', 'script', '--ns', '--show-lost-events',
@@ -289,7 +288,7 @@ def trial(engine, refs, archive, root, mode, operations, run, profile_kind='coun
                 profile = cpu_profile.analyze(script.stdout, tag=tag, tasks_before=before['tasks'], tasks_after=after['tasks'],
                     application_cpu=delta, successful_operations=operations,
                     diagnostics=(directory / 'profiler.log').read_text() + script.stderr + raw.stderr,
-                    raw_events=raw.stdout, leaf_only=profile_kind == 'cpu-leaf')
+                    raw_events=raw.stdout, profile_kind=profile_kind)
                 save(directory / 'cpu-profile.json', profile)
                 if profile['status'] != 'ok':
                     raise ValueError('CPU profile coverage invalid: ' + repr(profile['errors']))
@@ -373,8 +372,8 @@ def main():
     parser.add_argument('--engines', default='ctrs,orbstack')
     parser.add_argument('--client-location', choices=('host', 'guest'), default='host')
     parser.add_argument('--api-cpus', type=parse_api_cpus, default=None, help='explicit comma-separated guest API CPU IDs')
-    parser.add_argument('--profile-kind', choices=('counters', *CPU_PROFILES), default='counters',
-                        help='syscall counters, 49 Hz DWARF stacks, or 49 Hz leaf PCs')
+    parser.add_argument('--profile-kind', choices=('counters', *cpu_profile.PROFILES), default='counters',
+                        help='syscall counters, 49 Hz DWARF stacks, or leaf PCs at 49 Hz or 25 Hz')
     parser.add_argument('--mode-order', choices=('off,on', 'on,off'), default='off,on')
     args = parser.parse_args()
     engines = args.engines.split(',')
@@ -385,7 +384,7 @@ def main():
     if sys.platform != 'darwin' or os.uname().machine != 'arm64':
         parser.error('native ARM64 macOS only')
     archive = args.tools_archive.resolve()
-    tools_sha = LEAF_TOOLS_SHA if args.profile_kind == 'cpu-leaf' else TOOLS_SHA
+    tools_sha = LEAF_TOOLS_SHA if args.profile_kind in cpu_profile.LEAF_PROFILES else TOOLS_SHA
     if runner.sha256_file(archive) != tools_sha or runner.sha256_file(runner.LOAD_PY) != PIN['w2_load_sha256']:
         parser.error('profiler/workload input differs from pin')
     supplied = json.loads(args.image_refs.read_text())
@@ -395,7 +394,7 @@ def main():
             parser.error('service reference differs from pin')
     diagnostic_signals.install_cleanup_signals()
     runner.DOCKER = runner.find_docker(); runner.CTRS_BIN = args.ctrs_binary.resolve()
-    kind_label = args.profile_kind if args.profile_kind in CPU_PROFILES else 'count'
+    kind_label = args.profile_kind if args.profile_kind in cpu_profile.PROFILES else 'count'
     run = 'w2-' + ('affinity-' if args.api_cpus is not None else '') + kind_label + '-'
     if args.client_location == 'guest':
         run = run.replace('w2-', 'w2-guest-client-', 1)
@@ -409,13 +408,14 @@ def main():
     scope = {
         'counters': 'matched stock ARM64 syscall-entry kprobes on both engines; per-API-thread attachment; no sampled trace buffer/loss; missing counts invalidate',
         'cpu': 'separate per-API-thread cpu-clock sampling with native DWARF stacks; no syscall probes; zero loss required',
-        'cpu-leaf': 'per-API-thread cpu-clock leaf PCs without stacks; every API thread sampled; zero loss required',
+        **{kind: 'per-API-thread cpu-clock leaf PCs without stacks; every API thread sampled; zero loss required'
+           for kind in cpu_profile.LEAF_PROFILES},
     }
-    admission = {'host_admission': OUTSIDE_CPU_ADMISSION} if args.profile_kind == 'cpu-leaf' else {}
+    admission = {'host_admission': OUTSIDE_CPU_ADMISSION} if args.profile_kind in cpu_profile.LEAF_PROFILES else {}
     save(root / 'plan.json', {**admission, 'requested_client_location': args.client_location, 'client_image': refs['api'] if args.client_location == 'guest' else None, 'client_image_sha256': refs['api'].rsplit('@', 1)[-1] if args.client_location == 'guest' else None, 'client_source_sha256': hashes[runner.LOAD_PY.name], 'fixture_version': version,
         'requested_api_cpus': list(args.api_cpus) if args.api_cpus is not None else None,
         'profile_identity': identity_label,
-        'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.PERIOD_NS if args.profile_kind in CPU_PROFILES else None,
+        'profile_kind': args.profile_kind, 'fixed_cpu_clock_period_ns': cpu_profile.period_ns(args.profile_kind) if args.profile_kind in cpu_profile.PROFILES else None,
         'mode_order': args.mode_order.split(','), 'engine_order': engines,
         'operations': args.operations, 'concurrency': args.concurrency, 'seed': args.seed,
         'refs': refs, 'tools_sha256': tools_sha, 'source_sha256': hashes,
