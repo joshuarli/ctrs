@@ -5123,6 +5123,63 @@ the guest config alone cannot activate that path on the observed VM.
 | Trials | `9e4c64bc696d7cea3bb39ccae8a0d5b9bbe8abd5e0160542f267b16b68ed9317` |
 | Balloon feature receipt | `df29abe06dfaef30654ecd2ba653cf4c9007849b9137aec6c3b28199ef987c75` |
 
+##### W11 WAL allocation during the quiet interval
+
+Earlier ctrs and OrbStack attribution read the WAL directory about
+32 seconds before reading host allocation. Those receipts placed the
+host allocation step one observation earlier than the first larger
+guest WAL reading. Sample both sides of the quiet interval to locate
+the change in the workload.
+
+`w11-mixed-20261123T060920-49a3` reused the stopped private store and
+verified its signed host and boot assets from the combined reclaim
+screen. The mixed pilot created a fresh PostgreSQL volume and held the
+usual 32-second observation per cycle. Use a 350-second work deadline
+and the same drain and cleanup budgets. After normal cycle cleanup,
+trim and exact seed verification, query `pg_ls_waldir()`, filter to
+24-character hexadecimal segment names, and record their names and
+sizes, `pg_current_wal_insert_lsn()`, `pg_walfile_name()` for the
+current write LSN, and `pg_stat_checkpointer`. Take a host allocation
+snapshot, run the normal quiet observer, then query PostgreSQL again.
+Verify monotonic ordering and the same backing device and inode across
+the two host snapshots. [PostgreSQL checkpoint counters](https://www.postgresql.org/docs/17/monitoring-stats.html#MONITORING-PG-STAT-CHECKPOINTER)
+
+All ten cycles passed the exact-state audit, including 50,000 API
+operations, 15,310 acknowledged and deleted writes, and 160 build
+jobs. The service identities stayed stable, both host quiet checks
+passed, and teardown reported zero errors.
+
+| Cycle 8 observation, zero-based | Before | After |
+| --- | ---: | ---: |
+| WAL segments | 1 | 2 |
+| Timed checkpoint count | 0 | 1 |
+| Requested checkpoint count | 1 | 1 |
+| Checkpointer buffers written | 950 | 1,094 |
+| Active WAL segment suffix | `01` | `01` |
+| WAL insert LSN | `0/1E0DF68` | `0/1E0E088` |
+
+The new segment was `000000010000000000000002`, 16,777,216 bytes.
+Ordinary and APFS private allocation both grew by 17,088,512 bytes
+inside the same 32.167-second host interval. Across the other nine
+quiet intervals, allocation changed by −303,104 to +106,496 bytes,
+with no new segment. The cycle-to-cycle increase ending at cycle 8
+was 22,765,568 bytes.
+
+The new WAL segment, unchanged active segment and checkpoint writes
+place the main allocation step at PostgreSQL preparing a future
+segment during a checkpoint. The live snapshots leave the exact
+physical block attribution and OrbStack's corresponding event
+unverified. Post-warmup backing growth was already 21,180,416 bytes
+over the first six observations. Addressing this checkpoint step
+alone would leave that earlier growth and the footprint gate open.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Plan | `19b3c114bc5cdff2b53752a083af55f5aa192112fbd3f9ec2a48ac841462d9c5` |
+| Trials | `22628ed58726e04879f242b9746ac6a297086e5c5f82a8ab51bdcc5c4144dbd5` |
+| Boundary observer | `2d8b5af97bd198b591a3b7bbd583605f3c74cab0bdf26f7cfd55a64f87da563a` |
+| Joined WAL and host observations | `6e650784349a2bd4d5b52215f4a9a2faa3e058d73d7852579df8066dbd04783a` |
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
