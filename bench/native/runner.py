@@ -4632,7 +4632,7 @@ def main() -> int:
         sub.choices[command].add_argument("--interrupt-service", choices=("api", "db", "queue", "engine"),
                                          help="W10 target (default: api); engine requires a standalone ctrs run")
     p = sub.choices["baseline"]
-    p.add_argument("--workspace-layout", choices=("full-bind", "bind-source-volume-deps", "all-volume"),
+    p.add_argument("--workspace-layout", choices=("full-bind", "bind-source-volume-deps", "all-volume", "all-volume-export"),
                    default="full-bind", help="W12 layout")
     p.add_argument("--watch-mount", choices=("bind", "volume"), default="bind", help="W12-watch mount")
     p.add_argument("--watch-edits", type=int,

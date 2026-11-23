@@ -280,6 +280,43 @@ multi-week architecture change needing security and semantics review. It is
 **Owner decision, 2026-11-23: parked.** FUSE is tricky. W12 full-bind stays
 a recorded VZ-bound loss, and `diagnostic/vsock-rtt` stays unmerged.
 
+### Sync-to-volume screen
+
+The owner asked to try sync instead of FUSE. Sync means keeping a copy of the
+workspace in a guest volume and copying it back to the Mac. Before building
+anything, the diagnostic layout `all-volume-export` measured what that would
+buy and cost. It runs the unchanged all-volume W12 workflow, then copies the
+finished `/app` tree to the Mac with `docker cp` and requires every regular
+file and byte to match the container's count.
+
+The command was `runner.py baseline --case W12 --a ctrs --b orbstack
+--workspace-layout all-volume-export --pairs 3 --resource-lane
+installed-default --pair-quiet-load 4.0`, run as `base-20261123T124315-b074`
+(trials `bb9f4b14…0fcf`). All six trials were correct.
+
+| Per trial | ctrs | OrbStack |
+| --- | --- | --- |
+| Volume workflow (same as all-volume) | 83.27 / 87.28 / 85.99 s | 83.66 / 83.31 / 83.75 s |
+| Copy of 92,900–92,922 files (545.7–546.7 MB) to the Mac | 52.23 / 52.51 / 53.63 s | 54.73 / 54.65 / 55.08 s |
+
+The reference is OrbStack's coherent full-bind workflow, median 89.76 s.
+
+- Docker's copy path costs about 565 µs per file on both engines, nearly 10×
+  native APFS (59 µs per file, about 5.5 s for this tree). A naive "volume
+  plus copy back" therefore loses badly.
+- A sync worth building needs a ctrs-native Mac writer that overlaps the
+  workflow. Its best case is the volume workflow time, 83–87 s, a ceiling of
+  about **0.93–0.96×** OrbStack's full bind. It would also give
+  eventually-consistent Mac files where OrbStack's share is coherent. Writes
+  in both directions, conflicts, deletes, renames and echo suppression would
+  all be new engine surface.
+- The bind-source-plus-volume-dependencies layout is already at parity
+  (0.999×) with none of that. The README now recommends it.
+
+**Assessment:** sync's measured ceiling is a small win that carries large
+semantic and complexity cost. Recommendation: do not build it unless
+coherent-enough sync is wanted as a product feature in its own right.
+
 ## Open items this session could not do
 
 - Copy `/home/ubuntu/ctrs-evidence/` off the Linux VM and verify the committed

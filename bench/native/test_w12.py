@@ -93,6 +93,24 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'identity unavailable'):
             workspace.watcher_identity('42 (node) ' + ' '.join(fields))
 
+    def test_mac_export_requires_every_file_and_byte(self):
+        import contextlib, json, tempfile
+        def copied(files):
+            def sh(args, timeout=None):
+                destination = Path(args[-1])
+                for name, data in files.items():
+                    (destination / name).parent.mkdir(parents=True, exist_ok=True)
+                    (destination / name).write_bytes(data)
+            return Mock(sh=Mock(side_effect=sh))
+        run = Mock(return_value=SimpleNamespace(stdout=json.dumps({'files': 2, 'bytes': 5})))
+        phase = lambda name: contextlib.nullcontext()
+        with tempfile.TemporaryDirectory() as temporary:
+            got = workspace.mac_export(copied({'a': b'12', 'd/b': b'345'}), 'c', run, Path(temporary) / 'one', phase)
+            self.assertEqual(got, {'files': 2, 'bytes': 5})
+            self.assertFalse((Path(temporary) / 'one').exists())
+            with self.assertRaisesRegex(ValueError, 'Mac export differs'):
+                workspace.mac_export(copied({'a': b'12'}), 'c', run, Path(temporary) / 'two', phase)
+
     def test_phase_metrics_cover_scored_workflow(self):
         phases = {name: {'operation_wall_seconds': float(i + 1)}
                   for i, name in enumerate(('setup',) + workspace.BUILD_PHASES + ('verify-install', 'cleanup'))}

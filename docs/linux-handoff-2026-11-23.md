@@ -98,7 +98,11 @@ The host is the existing native x86_64 lane machine: Ubuntu 22.04.5, kernel
   tricky. W12 full-bind stays a recorded VZ-bound loss (workflow 1.30×,
   install 2.11×, verification 4.16×). Mixed and all-volume layouts stay near
   parity. Reopen only with a new design that addresses the FUSE protocol,
-  security and semantics risk, or with new evidence of a cheaper lever. The
+  security and semantics risk, or with new evidence of a cheaper lever. A
+  sync-to-volume screen was also run. Its ceiling is about 0.93–0.96×
+  OrbStack's full bind, which needs a ctrs-native Mac writer; through
+  `docker cp`, copying the tree back takes 52 s. Not built. The README
+  recommends volumes for dependency trees. The
   probe and estimate are in the
   [record](evidence/main-reconciliation-2026-11-23.md#w12-full-bind-the-next-intervention-boundary).
 - **W11 12-hour legs.** These are not admitted. Both engines exceeded the

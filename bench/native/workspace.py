@@ -185,6 +185,29 @@ walk('/app');packages('/app/node_modules');console.log(JSON.stringify({files:cou
     return counts
 
 
+def mac_export(engine, container, run, destination, phase):
+    """Sync-to-volume cost probe: copies the finished workspace to the Mac
+    and checks every regular file and byte arrived."""
+    script = '''const fs=require('fs'),path=require('path');let files=0,bytes=0;
+function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()){files++;bytes+=fs.statSync(p).size}}}
+walk('/app');console.log(JSON.stringify({files,bytes}));'''
+    want = json.loads(run(['node', '-e', script]).stdout)
+    destination.mkdir()
+    with phase('mac-export'):
+        engine.sh(['cp', f'{container}:/app/.', str(destination)], timeout=900)
+    got = {'files': 0, 'bytes': 0}
+    for root, _, names in destination.walk():
+        for entry in names:
+            path = root / entry
+            if path.is_file() and not path.is_symlink():
+                got['files'] += 1
+                got['bytes'] += path.stat().st_size
+    shutil.rmtree(destination)
+    if got != want:
+        raise ValueError(f'W12 Mac export differs: container {want}, Mac {got}')
+    return got
+
+
 def discard_source(engine, container, source):
     if source.exists() and engine.sh(['inspect', container], check=False, timeout=60).returncode != 0:
         shutil.rmtree(source)
@@ -201,8 +224,10 @@ def trial_w12(ctx, engine, state, layout='full-bind'):
     import subprocess
     import runner
 
-    if layout not in ('full-bind', 'bind-source-volume-deps', 'all-volume'):
+    if layout not in ('full-bind', 'bind-source-volume-deps', 'all-volume', 'all-volume-export'):
         raise ValueError('unknown W12 layout')
+    export = layout == 'all-volume-export'
+    volume_only = layout in ('all-volume', 'all-volume-export')
     trial_dir = ctx.trial_dir(engine.name, 'W12', state)
     rec = ctx.new_record(engine, 'W12', state, trial_dir)
     rec['metrics'].update(fixture_version='w12-v2', layout=layout)
@@ -266,7 +291,7 @@ fs.writeFileSync(p,next)}'''
         expected = spec['receipts']
         mounts = []
         with phase('setup'):
-            if layout == 'all-volume':
+            if volume_only:
                 add_volume('source', '/app', mounts)
             else:
                 source.mkdir()
@@ -279,7 +304,7 @@ fs.writeFileSync(p,next)}'''
             engine.sh(['run', '-d', '--name', name, '--label', label, '--network', 'none',
                        *mounts, '-w', '/app', image, 'sleep', 'infinity'])
             container_created = True
-            if layout == 'all-volume':
+            if volume_only:
                 run(['sh', '-ec', 'cp -a /fixture/source/. /app/'])
             inspected = json.loads(engine.sh(['inspect', name]).stdout)[0]
             if inspected['Config']['Labels'].get('dev.ctrs.campaign.run') != ctx.run_id:
@@ -287,7 +312,7 @@ fs.writeFileSync(p,next)}'''
             if inspected['HostConfig']['NetworkMode'] != 'none':
                 raise ValueError('W12 installation requires network none')
             observed = {m['Destination']: m for m in inspected['Mounts']}
-            required = {'/app': ('volume', volume_names[0])} if layout == 'all-volume' else {'/app': ('bind', str(source.resolve()))}
+            required = {'/app': ('volume', volume_names[0])} if volume_only else {'/app': ('bind', str(source.resolve()))}
             if layout == 'bind-source-volume-deps':
                 required.update({'/app/node_modules': ('volume', volume_names[0]),
                                  '/app/production-server': ('volume', volume_names[1]),
@@ -346,6 +371,10 @@ fs.writeFileSync(p,next)}'''
             verify_output(rec['inputs']['restored_output'], expected['base'])
         rec['correctness']['checks']['exact_outputs'] = True
         rec['metrics'].update(phase_metrics(rec['resources']['phases']))
+        if export:
+            rec['metrics']['exported'] = mac_export(engine, name, run, trial_dir / 'export', phase)
+            rec['metrics']['mac_export_seconds'] = rec['resources']['phases']['mac-export']['operation_wall_seconds']
+            rec['correctness']['checks']['mac_export'] = True
         rec['correctness']['ok'] = True
     except Exception as exc:
         rec['correctness']['ok'] = False
