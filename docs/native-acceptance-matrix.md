@@ -151,7 +151,10 @@ qualification gaps.
    non-inferiority. The native inode-cap repeat verified headroom at
    both settings. Each reached about 105,000 VM descriptors, and
    whole-workflow differences were under 0.54 s.
+   The notification-loss diagnostic removed 121,674 init lookups
+   but left the traced install near twice the mixed-layout time.
    [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
+   [Install trace](native-performance-progress.md#w12-offline-install-fuse-requests)
 2. **W10 API recovery.** Time to the first exact read was 1.239×. The
    gap accrued after the start command returned. The refusal trace
    found two 250 ms expiries before the first exact read. The 50 ms

@@ -5140,6 +5140,88 @@ counting opcodes. The traced runs are for attribution.
 | Mixed-layout trace | `15611a000483a4e0d3df9720461ea6f9f1d1c991c30eb3839cd19d30cc1a03d7` |
 | Attribute-mask control | `981cf27fe9a2fadb5c9a88362477d37d7f243717bf236b62da70cc0b57237aef` |
 
+#### W12 offline install FUSE requests
+
+`w12-install-trace-192954` traced `npm ci --offline` on full bind
+and bind source with named dependency volumes. Both ran the signed
+`99db1aa` release at installed defaults and passed the exact W12
+file, build and test receipts. The full-bind install took 26.51 s and
+the mixed-layout install took 12.95 s with the observer active.
+Only the install phase was traced. Both tracefs instances reported
+zero loss and every request had a matching completion.
+
+| Install trace | Full bind | Bind source with named volumes |
+| --- | ---: | ---: |
+| All FUSE requests | 647,922 | 132 |
+| LOOKUP requests | 279,833 | 34 |
+| LOOKUP replies with ENOENT | 112,143 | 3 |
+| WRITE requests | 146,395 | 0 |
+| CREATE requests | 92,102 | 0 |
+| RELEASE requests | 92,689 | 14 |
+| STATX requests | 5,465 | 11 |
+| Time with any request outstanding | 21.729 s | 0.010 s |
+| Peak concurrent requests | 17 | 4 |
+
+The full-bind phase spent 20.464 seconds with a LOOKUP outstanding.
+LOOKUP had a median request duration of 138 µs and a p95 of 260 µs.
+The durations for different requests overlap. Use their interval
+union for elapsed coverage. The init task issued 121,674 lookups,
+while tasks named `npm` issued 157,105. The latter count excludes
+the separate `npm ci` task label.
+
+For comparison, the earlier full-bind verifier had 91,875 STATX
+requests taking 1.762 seconds, with a median of 19 µs. It had a
+request outstanding for 4.447 seconds of its 7.001-second trace
+span. The mixed-layout verifier had a request outstanding for
+0.042 seconds. This distinguishes the single verifier's metadata
+walk from the concurrent requests during install.
+
+##### W12 host notification-loss control
+
+`w12-install-no-notify-d1cdc2` repeated the full-bind trace with
+the existing notification-loss test gate set for an owned daemon.
+The daemon recorded that the gate suppressed bind notifications.
+The diagnostic verified the same 92,306 files, 532,136,968 bytes,
+2,830 packages and exact W12 outputs. The private trace reported
+zero loss and paired every request with its completion.
+
+| Full-bind install trace | Normal notifications | Test gate active |
+| --- | ---: | ---: |
+| All FUSE requests | 647,922 | 515,640 |
+| Init task LOOKUPs | 121,674 | 0 |
+| All LOOKUPs | 279,833 | 154,106 |
+| LOOKUPs returning ENOENT | 112,143 | 110,726 |
+| GETXATTR requests | 6,607 | 0 |
+| Time with any FUSE request outstanding | 21.729 s | 19.323 s |
+| Install elapsed with observer | 26.509 s | 25.178 s |
+
+CREATE, WRITE and RELEASE counts matched exactly in the two legs.
+Suppressing delivery removed the init lookups and reduced the traced
+install interval by 1.33 seconds in this fixed-order diagnostic.
+The remaining full-bind install still took nearly twice as long as
+the traced mixed-layout install. Keep the notification-loss gate
+restricted to diagnostics. The full-bind performance gap remains.
+
+Reproduce with the normal W12 runner and signed release. Trace
+`fuse_request_send` and `fuse_request_end` only around the
+`install` phase in a private `mono` tracefs instance with 64 MiB
+per CPU. Repeat full bind with `CTRS_TEST_FSEVENTS_GATE` pointing to
+an existing private file for the lifetime of the owned daemon.
+Require the daemon's suppression receipt and remove the private
+gate after teardown. Count requests by opcode and originating
+task and join completions on connection and request ID. The
+native host gate returned zero before and after both batches.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Normal trials | `d5a24dc15d3f33381e5fadbc72674bc31542083a56dc75ea6d7f3e1e8de02e72` |
+| Full-bind install trace | `26c3f37ade5b4bb14a1a2bd0dded716f127fc89f94010c047b742bb8ab675753` |
+| Mixed install trace | `4dd2e32b87b581f048e6a12a602a0a313c0cd4cbe240f851517b5629e7171428` |
+| Notification-loss trial | `b9be71d813192528d0ff448d64b9d927188e1d83b1981b4712921ba81fbb588f` |
+| Notification-loss trace | `1c9c3df57826e4cb296ccccc511a4bb4ad419446d4b936fc5458a03511c36b83` |
+| Suppression receipt | `ce40452cf729749ba17ae06e45971b2ce7e3ff00ce56ce8fbcb7f984d8135a8f` |
+| Derived request analysis | `b388bf0316ee638b33f33f6cc7ac853f451aff1bdbcd40fe640d9485dce013a2` |
+
 #### Installed-default W12 named-volume watch cohort
 
 `base-20261122T135713-1c0c` used clean harness `b7c59e1` and the signed
