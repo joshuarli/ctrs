@@ -2142,6 +2142,56 @@ Executable SHA-256
 and `checks.jsonl` SHA-256
 `79284e118ae5238e30b1cc168fda6533cacc7020cc0a57951d905bc50941f0e5`.
 
+#### W2 guest periodic timer control
+
+`w2-clock-periodic-b11921` ran two alternating pairs per engine
+with one waiter, 10,000 absolute slots at 2 ms intervals, 50,000 ns
+timer slack and no HTTP. Compare absolute `clock_nanosleep` with
+a monotonic `timerfd` armed at the same absolute start and a 2 ms
+period. After each read, use one monotonic timestamp to check each
+reported expiration against its original deadline. Require every
+slot and count overshoots past the same 10 ms cutoff.
+
+| Guest | Wait | Late slots by pair | Waiter CPU seconds by pair |
+| --- | --- | ---: | ---: |
+| ctrs | Absolute sleep | 1, 0 | 0.113, 0.108 |
+| ctrs | Periodic timer | 1, 0 | 0.135, 0.117 |
+| OrbStack | Absolute sleep | 1, 2 | 0.118, 0.111 |
+| OrbStack | Periodic timer | 3, 1 | 0.112, 0.111 |
+
+The periodic timer still missed deadlines on both engines. The
+scored fixture remains unchanged. The diagnostic executable SHA-256
+was `41a8f26ebcaa0a598eb48bdb47b752b5da17d15569fd9416debb1ad372da4324`
+and the `checks.jsonl` SHA-256 was
+`56ebc5be7769481a09a0b569d605c4779070faf7c925d6afcc927a7a3eceda28`.
+Correcting the scratch probe's `read` declaration to take a
+`void *` buffer produced byte-identical executable `.text`.
+
+#### W2 macOS timer control
+
+`w2-mac-clock-e386aa5d` ran two alternating pairs on macOS 27.2.1
+with ARM64 Python 3.15.1. Four host threads took every fourth slot
+of a 10,000-slot, 500-slot/s schedule. Both variants used the same
+monotonic deadlines and counted starts more than 10 ms late. The
+baseline called the unchanged fixture's `_wait_until_kqueue`.
+The alternate subtracted `time.monotonic_ns()` from the deadline,
+rounded the positive remainder up to Mach ticks with
+`mach_timebase_info`, added it to `mach_absolute_time()` and called
+`mach_wait_until` through `ctypes`. It checked the deadline again
+after each successful wait. Each leg used a fresh thread pool and a
+first deadline 500 ms after setup began. There was no HTTP traffic.
+
+| Host wait | Late slots by pair | Maximum lag by pair | Total waiter CPU seconds by pair |
+| --- | ---: | ---: | ---: |
+| Fixture kqueue | 10, 6 | 17.33 ms, 20.34 ms | 0.395, 0.407 |
+| `mach_wait_until` | 6,360, 6,383 | 149.47 ms, 150.39 ms | 0.113, 0.116 |
+
+All four legs checked exactly 10,000 slots and recorded no starts
+before their deadline. Both host wait paths still missed deadlines
+with no engine workload. Keep the fixed offered-rate fixture
+unchanged. The `checks.jsonl` SHA-256 was
+`e386aa5d7704813ec7391655de3673dc6ec61b8f9c0b6f2de4d59d4bb75060cb`.
+
 ### W2 leaf observer overhead on the guest-direct workload
 
 The 49 Hz confirmation at `44e542f` ran all ten alternating blocks.
