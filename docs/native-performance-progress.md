@@ -5064,6 +5064,65 @@ The original cycle 8 sample remains unresolved. Control log SHA-256
 | Control supervisor status | `2a3b2f2ac2b474b0eabd09934a2321cb07cbe7f2d93f9f717b492a9b96b66df7` |
 | Trim supervisor status | `9917b766b48d2486b1a79d6a747edd4fdc9b424371ed425cbb00850da82ec1e8` |
 
+#### W11 uncached disk with online discard and explicit trim
+
+Combine the uncached VZ host from the disk-image cache screen with
+the discard initramfs from the ext4 screen. Keep Fsync and the same
+signed release source, kernel, nine vCPUs and 8 GiB ceiling. Seed a
+private backing file from the original sparse template. The seed
+helper rejects a symlink as its source, so use the regular template
+file and verify its logical-content receipt before boot.
+
+Use the v6 portfolio and v5 worker with `mixed_pilot.py` in duration
+mode. Set a 315-second work deadline, then 75 seconds each for drain
+and cleanup. Run the repeated trim observer after the normal cycle
+cleanup and before each 32-second host observation. Verify PGDATA's
+ext4 `/dev/vda` mount has `discard`. Read ordinary and APFS private
+allocation immediately before and after the trim helper, with the
+same verified backing device and inode. Check both the fsynced
+sentinel and all 500 seed rows after every intervention. Use the
+first six observations and report the full run as well.
+
+`w11-mixed-20261123T060053-9e49` completed nine exact cycles and clean
+teardown. The raw audit verified 45,000 successful API operations,
+13,779 acknowledged and deleted writes, 1,800 queue jobs, 3,600
+artifacts and 144 build jobs. The service identities stayed stable,
+and both host quiet checks passed.
+
+| Resource | Post-warmup rise, first six | Post-warmup rise, all nine | Final change from cycle 0 |
+| --- | ---: | ---: | ---: |
+| Owned backing allocation | 23,748,608 B | 57,614,336 B | 63,287,296 B |
+| Sampled steady physical footprint | 17,448,936 B | 25,591,784 B | 84,312,112 B |
+| Owned descriptors | 0 | 0 | 0 |
+
+Both byte counts exceeded the 16 MiB budgets. Ordinary and private
+allocation agreed at all nine quiet boundaries. They also showed a
+net increase of 356,352–503,808 bytes across each trim-helper call,
+including its container activity. The guest reported submitted extents
+and unchanged filesystem usage across those calls. This run gives no
+evidence of additional immediate host reclaim from explicit trim with
+online discard enabled. It leaves both 12-hour legs open.
+
+After the run, restart the same private guest and read its balloon
+feature bitmap through an existing pinned image with networking off.
+Find the single `/sys/bus/virtio/devices/virtio*/device` with ID
+`0x0005` and read its `features` file. Linux prints bits in increasing
+index order. On this VZ device, both bit 3 (free-page hinting) and bit
+5 (free-page reporting) were zero on Linux 6.18.58. The kernel config
+already enables `CONFIG_PAGE_REPORTING`. Linux registers the balloon
+reporter only when the corresponding feature is present, so changing
+the guest config alone cannot activate that path on the observed VM.
+[Linux sysfs implementation](https://github.com/gregkh/linux/blob/v6.18.58/drivers/virtio/virtio.c#L44-L57)
+[Balloon feature flags](https://github.com/gregkh/linux/blob/v6.18.58/include/uapi/linux/virtio_balloon.h#L31-L38)
+[Balloon reporter registration](https://github.com/gregkh/linux/blob/v6.18.58/drivers/virtio/virtio_balloon.c#L963-L989)
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Signed uncached host | `74dad6a03b91dff789f8a209a476f5c427e161f45793097644c71eb2198d0116` |
+| Plan | `12013d39d3c43d387531e35e11b643b7443797ccd92d051ef7f9410be678c436` |
+| Trials | `9e4c64bc696d7cea3bb39ccae8a0d5b9bbe8abd5e0160542f267b16b68ed9317` |
+| Balloon feature receipt | `df29abe06dfaef30654ecd2ba653cf4c9007849b9137aec6c3b28199ef987c75` |
+
 ### Rebuilt W12 workspace fixture
 
 The [v2 recipe and lock](../bench/native/fixtures/w12/README.md) rebuild
