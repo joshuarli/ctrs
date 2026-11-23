@@ -120,8 +120,9 @@ qualification gaps.
    and measured engine CPU was 1.163×. The offline install and verification
    walk account for about 71% of the workflow time gap. Both layouts that
    used volumes for dependencies and build outputs cleared workflow
-   non-inferiority. The inode-cap probe completed both exact pairs,
-   with little observed timing change. A native descriptor repeat is queued.
+   non-inferiority. The native inode-cap repeat verified headroom at
+   both settings. Each reached about 105,000 VM descriptors, and
+   whole-workflow differences were under 0.54 s.
    [Evidence](native-performance-progress.md#installed-default-w12-full-bind-cohort)
 2. **W10 API recovery.** Time to the first exact read was 1.239×. The
    gap accrued after the start command returned. The refusal trace

@@ -3410,9 +3410,8 @@ flag. Both bounds finished install with 103,959 live inodes. At cleanup
 the four guests had 105,036–105,088 live inodes and the system reported
 110,933–110,972 open files out of 491,520. At 98,304, observed install
 times were 0.12 s and 0.24 s shorter and whole-workflow times were
-0.12 s and 0.18 s shorter across the two pairs. Timing and per-VM headroom
-remain unqualified. Keep the default 65,536 while the proc-based repeat
-is pending.
+0.12 s and 0.18 s shorter across the two pairs. This first repeat left
+timing and per-VM headroom unqualified.
 
 | Trial suffix | `trials.jsonl` SHA-256 |
 | --- | --- |
@@ -3420,6 +3419,36 @@ is pending.
 | `1-98304` | `179c99b157f9267d4c003f5df8b5951a9f384973d08914223b65b9a7e1733194` |
 | `2-98304` | `49285858e4785aaec27e7de3891a5ab0d4526948d96a1743b722c0889e1ad744` |
 | `2-65536` | `3ced81a5750bb2c06839c41efda3578baa1ec8efd965e98d24927a8b9f00241f` |
+
+The `PROC_PIDLISTFDS` repeat `w12-inode-cap-73Nlv7` on `321bf68`
+completed two further alternating pairs with exact W12 outputs and no
+host contention flag. The native self-check counted 3 descriptors,
+then exactly 105,091 after opening or duplicating 105,088 more, and
+returned to 3 after closing them. Each VM reading verified the owned
+process's start identity before and after sampling.
+
+| Pair | Guest cap | Peak VM descriptors | Cleanup live inodes | Install / whole workflow |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 65,536 | 105,111 | 105,094 | 26.522 / 116.291 s |
+| 1 | 98,304 | 105,109 | 105,093 | 26.048 / 115.961 s |
+| 2 | 98,304 | 105,071 | 105,038 | 25.720 / 115.180 s |
+| 2 | 65,536 | 105,066 | 105,036 | 26.012 / 115.718 s |
+
+The observed per-VM headroom was at least 140,649 descriptors and
+system-wide headroom at least 380,534. Both ceilings passed the
+declared headroom checks. Their live inode and descriptor counts were
+nearly identical, and whole-workflow differences were under 0.54 s in
+both pairs. The diagnostic leaves the much larger full-bind loss open
+and provides no basis to raise the default cap.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Native self-check | `86c51b181d209cb018be29fa0f3d17d1fb1290267a2ab0a53f8d4a1a2af0622f` |
+| Comparison | `940eaf63f79b1805d7f14f67a7dfbc570eb66dad0779e02f7844e934376d1392` |
+| `1-65536` trials | `1253634e0249e62b49cfd85d461664624e3e1223cc057ec28f2f2ff6e9412f87` |
+| `1-98304` trials | `2ec27db107a5457a96b96eb25395f0cd94f97a33d016e295069837f274f1c908` |
+| `2-98304` trials | `bae1b53174b3f0ea24fc60292311851d87615049b0f0002f90ff36cae400be37` |
+| `2-65536` trials | `a63b6dd1cc77dfb4dcada6284ba003579a78d4dfa3ec5785b8fbd787d70bdc9c` |
 
 ```sh
 for layout in full-bind bind-source-volume-deps all-volume; do
