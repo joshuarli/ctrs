@@ -23,7 +23,7 @@ class Context:
         return path
 
     def new_record(self, engine, case, state, directory):
-        return {'metrics': {}, 'inputs': {}, 'resources': {},
+        return {'metrics': {}, 'inputs': {}, 'resources': {}, 'workload_params': {},
                 'correctness': {'ok': True, 'checks': {}}, 'validation_errors': []}
 
 
@@ -233,6 +233,7 @@ class OverlapTests(unittest.TestCase):
             self.assertEqual(rec['paired_inputs']['api_config'], 'sha256:c')
             self.assertEqual(rec['paired_inputs']['sha256_per_stream'], 'hash')
             self.assertEqual(rec['metrics']['fixture_version'], 'w13-v3')
+            self.assertEqual(rec['workload_params']['fixture_version'], 'w13-v3')
             creations = [c for c in engine.commands if c[:2] == ['network', 'create'] or c[:2] == ['run', '-d']]
             self.assertEqual(len(creations), 3)
             self.assertTrue(all('dev.ctrs.campaign.run=test-run' in c for c in creations))
