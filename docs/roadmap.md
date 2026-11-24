@@ -22,9 +22,6 @@ This is the single plan for this repository: all current and future work, and th
 | L2 | Native performance | Linux runtime, `crates/ctrs-init/`, `tests/` | L1; owned Linux engine and isolated Docker | `CARGO_ENCODED_RUSTFLAGS="" cargo xtask linux --arch amd64`, `make test`, `make lint`, root `cargo test -p ctrs-init --target x86_64-unknown-linux-musl`, `tests/linux-host.sh`, `tests/kernel-features.sh`, and `tests/e2e.sh` on each owned engine. |
 | L3 | Native performance | Linux layer store | L2; running ctrs | `CTRS_SOCKET=<sock> CTRS_LAYER_ROOT=/var/lib/ctrs/layers tests/layer-expansion.sh`, including zstd-refusal-cleanup. |
 | W11 | Native performance | `bench/native/`, owned Mac engines | frozen cell contract, durability admission, bounded growth and review | Run one 12-hour mixed leg per engine with the finite supervisor; verify outputs, errors and growth. |
-| DSLP-3 | Deslop | Rust/Python types and lint configuration | explicit campaign execution request | Complete the type profile and witnesses in [TODO-DESLOP.md](../TODO-DESLOP.md). |
-| DSLP-4 | Deslop | test suites | DSLP-3 | Complete the coverage and mutation acceptance in [TODO-DESLOP.md](../TODO-DESLOP.md). |
-| DSLP-5 | Deslop | repository sources | DSLP-4 | Complete the dead-code acceptance in [TODO-DESLOP.md](../TODO-DESLOP.md). |
 
 ## Campaign: Native performance
 
@@ -425,20 +422,6 @@ retain the previous workload versions and their limitations.
 `--pid host` is accepted and ignored by ctrs (no PidMode handling). That is
 a compatibility gap and is not scored.
 
-## Campaign: Deslop
-
-### Goal and state
-
-The [ticket backlog](../TODO-DESLOP.md) contains the remaining types, test and dead-code work. The original ground pass passed `make test`; later project instructions report `make lint` clean, superseding the backlog's old lint observation. The diagnostic found the layer symlink xattr defect, subsequently covered by the Linux test named in AGENTS.md. Take the lowest numbered open deslop ticket and proceed through DSLP-5 before other open P1/P2 findings when this campaign is explicitly resumed.
-
-### Acceptance
-
-Each ticket in the backlog states its acceptance. Linux-only and privileged verification needs an appropriate environment.
-
-### Execution boundary and non-goals
-
-The backlog and this roadmap do not authorize execution by themselves.
-
 ## Later
 
 - CTRS-11: qualify the benchmark pyramid when the host is ready. See [TODO.md](../TODO.md).
@@ -446,7 +429,6 @@ The backlog and this roadmap do not authorize execution by themselves.
 - CTRS-14: investigate kache reading the sparse guest disk. See [TODO.md](../TODO.md).
 - CTRS-15: decide the optional firewall backend and policy. See [TODO.md](../TODO.md).
 - CTRS-16: pin guest kernel and benchmark sources. See [TODO.md](../TODO.md).
-- DSLP-6: reconcile the historical lint ticket with the newer clean result. See [TODO-DESLOP.md](../TODO-DESLOP.md).
 - N-2 / CRAB-7: qualify crabtables on the native production kernel and nftables pair before cutover.
 - N-3: run the Intel host boot smoke; N-5: qualify Rosetta on macOS 15 when available.
 - N-4: owner decides public release, notarization and the license-text question; the guest kernel source offer must accompany distributions.

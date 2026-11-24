@@ -852,7 +852,7 @@ Proposed workflow change, before **Run the ARM64 qualification runner** (after R
           command -v jaq
 ```
 
-This proposal has not been executed on the hosted image; validate the pinned installs and rerun the job. It does not promise a green job: the separate identity failure follows `docker restart` with one immediate `buildctl debug workers` call, whose stderr is suppressed (`tests/arm64-build.sh:352-356`); its cause remains unproven. Preserve the isolated harness logs and capture that command's stderr on an AMD64 Linux host with Docker and QEMU binfmt to investigate. The deslop closeout's DSLP-8, now CTRS-13 in `TODO.md`, recorded the platform case as needing evidence; the missing `jaq` explains the reported platform failure, but a successful platform qualification and handler-free proof remain outstanding. The hosted run reports a visible `qemu-aarch64` binfmt handler and therefore cannot prove handler independence.
+This proposal has not been executed on the hosted image; validate the pinned installs and rerun the job. It does not promise a green job: the separate identity failure follows `docker restart` with one immediate `buildctl debug workers` call, whose stderr is suppressed (`tests/arm64-build.sh:352-356`); its cause remains unproven. Preserve the isolated harness logs and capture that command's stderr on an AMD64 Linux host with Docker and QEMU binfmt to investigate. The missing `jaq` explains the reported platform failure, but a successful platform qualification and handler-free proof remain outstanding; see CTRS-13 in `TODO.md`. The hosted run reports a visible `qemu-aarch64` binfmt handler and therefore cannot prove handler independence.
 
 ### Resolution (2026-11-21)
 
