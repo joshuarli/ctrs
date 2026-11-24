@@ -111,5 +111,5 @@ HTTPie ARM64 wheel lock. Set `CTRS_GUEST_DIR` to the frozen boot directory
 and provide a duration covering setup plus twelve hours of work. The OrbStack leg also
 requires explicit `--orbstack-storage-file` arguments for the owned backing
 files used for allocation accounting. The [campaign admission
-requirements](../../../../docs/campaign-native-performance.md#finite-reliability-jobs-and-continuation)
+requirements](../../../../docs/roadmap.md#finite-reliability-jobs-and-continuation)
 apply to both legs.

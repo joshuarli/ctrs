@@ -1,5 +1,5 @@
 #!/bin/bash
-# Qualification runner for ARM64 builds on AMD64 Linux (qemu-accel.md).
+# Qualification runner for ARM64 builds on AMD64 Linux (docs/roadmap.md).
 #
 #   bash tests/arm64-build.sh --case environment
 #   bash tests/arm64-build.sh --case compatibility

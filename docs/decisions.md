@@ -1,6 +1,6 @@
 # Decisions
 
-Binding decisions made during execution that a later slice depends on. Campaign-level decisions live in `docs/campaign-headless-ctrs.md` (Decisions section, owner/prescribed/delegated); this file records the slice-level ones with dates. Append only; never rewrite history here.
+Binding decisions made during execution that a later slice depends on. Current campaign decisions live in `docs/roadmap.md`; this file records the slice-level ones with dates. Append only; never rewrite history here.
 
 ## 2026-11-13
 

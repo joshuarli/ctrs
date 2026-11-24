@@ -7,19 +7,9 @@ compatible container engine for macOS (Virtualization.framework guest) and
 Linux (namespaces/cgroups directly). Keep this file short; detail lives in
 `docs/`.
 
-## Performance campaign (macOS resumed 2026-11-22)
+## Roadmap
 
-The native ARM64 macOS versus OrbStack campaign has resumed with no full gate
-passed. Read `docs/campaign-native-performance.md`, then the
-"Wound down" section of `docs/native-performance-progress.md`, which gives
-separate steps for a Linux host and a Mac. The native `linux-amd64`
-`ctrs`/`dockerd` lane already exists, with cgroup-v2 accounting and frozen
-fixtures. On a Linux host, start from [the 2026-11-23 handoff](docs/linux-handoff-2026-11-23.md),
-then [the recoverable Linux checkpoint](docs/evidence/linux-amd64-checkpoint-2026-11-22.md),
-not by implementing an adapter. Linux results never close macOS-vs-OrbStack gates.
-Production defaults follow the recorded experiment decisions; merging a branch
-to retire it never promotes its production diff
-([reconciliation](docs/evidence/main-reconciliation-2026-11-23.md)).
+[docs/roadmap.md](docs/roadmap.md) holds all current and future work; its Status is the resume point.
 
 ## Commands
 
@@ -55,7 +45,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
   Linux container; no CI job). `arm64-compat` (QEMU) runs `tests/arm64-build.sh` cases.
 - Test tiers: Rust unit/integration and Python offline harness run by `make test` (warm 50s–1m52s); conformance and CLI e2e require a running engine. Empty conformance selections fail and are tested offline.
 - Performance: `bench/native/pyramid.py` (`check`, `run --tier edit|change`) over the workloads in
-  `docs/campaign-native-performance.md`; hot paths are container lifecycle, image pull and bind IO.
+  `docs/roadmap.md`; hot paths are container lifecycle, image pull and bind IO.
   Scenario and full tiers need a named workload and an engine.
 - Components (Rust lines): `ctrs` 24k host API/CLI/daemon, `ctrs-init` 12k Linux agent and runtime,
   `ctrs-image` 3.5k registry and store, `ctrs-proto` 1.5k wire, `ctrs-vmm` 0.8k, `xtask` 0.5k.
@@ -88,10 +78,6 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Install, uninstall | `docs/install.md` |
 | Third-party SBOM (default build + feature-gated) | `docs/third-party.md` |
 | Dated slice decisions (append-only) | `docs/decisions.md` |
-| Campaign record (complete; CTRS-22/23 done) | `docs/campaign-headless-ctrs.md` |
-| macOS OrbStack performance hillclimb | `docs/campaign-native-performance.md` |
-| Performance standing at pause, resume steps, history | `docs/native-performance-progress.md` |
-| Performance acceptance matrix (status per cell) | `docs/native-acceptance-matrix.md` |
 | Docker-driver buildx design (W6/W7 gap) | `docs/buildkit-driver.md` |
 | Bind-mount change-notification design (proposal) | `docs/design-bind-notify.md` |
 | Evidence: firewall qualification | `docs/evidence/crabtables.md` |
@@ -100,9 +86,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask all   # guest assets + signed host binary
 | Evidence: networking/vzNAT | `docs/evidence/net.md` |
 | Evidence: registry client pilot | `docs/evidence/registry.md` |
 | Evidence: security qualification | `docs/evidence/security.md` |
-| Linux continuation handoff (2026-11-23) | `docs/linux-handoff-2026-11-23.md` |
 | Evidence: defaults reconciled with decisions (2026-11-23) | `docs/evidence/main-reconciliation-2026-11-23.md` |
-| Campaign closeout (Gate J, local) | `docs/evidence/closeout.md` |
 | Release prep (artifact manifest) | `docs/evidence/release.md` |
 | Experiment: smolvm-network analysis | `docs/experiments/smolvm-network.md` |
 | Experiment: microVM isolation research | `docs/experiments/microvm-isolation.md` |

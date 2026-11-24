@@ -1,5 +1,5 @@
 # Declared PILOT workloads for the native-performance campaign; NOT frozen.
-# IDs match docs/campaign-native-performance.md. `status`:
+# IDs match docs/roadmap.md. `status`:
 #   implemented = fixture + runner path exist and have produced trials
 #   pending     = declared, not yet implemented
 #   blocked     = cannot run on this host (record reason in evidence doc)

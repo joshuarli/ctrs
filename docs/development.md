@@ -73,7 +73,7 @@ CARGO_ENCODED_RUSTFLAGS="" cargo xtask kernel  # guest/out/Image      (needs a D
 CARGO_ENCODED_RUSTFLAGS="" cargo xtask disk    # guest/out/data.img   (needs a Docker engine)
 cargo xtask host      # target/release/ctrs, signed with the virtualization entitlement
 cargo xtask all       # guest + host
-cargo xtask linux     # ctrs and ctrs-init as static musl binaries (Linux host build; see N-1 in docs/campaign-headless-ctrs.md)
+cargo xtask linux     # ctrs and ctrs-init as static musl binaries (Linux host build; see N-1 in docs/roadmap.md)
 ```
 
 `CARGO_ENCODED_RUSTFLAGS=""` is required on hosts whose global cargo config

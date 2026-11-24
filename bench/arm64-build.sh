@@ -1,5 +1,5 @@
 #!/bin/bash
-# S6 benchmark for ARM64 builds on AMD64 Linux (qemu-accel.md).
+# S6 benchmark for ARM64 builds on AMD64 Linux (docs/roadmap.md).
 # Equivalent-work comparison of three ways to build the same workload:
 #
 #   A  the unchanged preparation baseline + its actual old pin

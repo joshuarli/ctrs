@@ -25,7 +25,7 @@ binary = ".work/tmp/readiness-main-target/release/ctrs (cargo build --release -p
 api_version = "1.47"
 vm = "Virtualization.framework, guest kernel 6.18.58, allnoconfig"
 kernel_image_sha256 = "f953d09d34b0f3fe5ca2fd089727ce64ee6e9942ba2c52a896a769477d7c2225"
-kernel_note = "2026-11-20 build proof: ARM64 Linux 6.18.58 with patches 0001–0017, 18,802,696 bytes, 212.01 s on x86_64 Linux (host clock 2026-11-21 UTC); not booted or qualified on the Mac; replaces the historical ea485341… build, not its measurements; builds embed timestamps; pins and AMD64 hash in docs/native-performance-progress.md resume step 4"
+kernel_note = "2026-11-20 build proof: ARM64 Linux 6.18.58 with patches 0001–0017, 18,802,696 bytes, 212.01 s on x86_64 Linux (host clock 2026-11-21 UTC); not booted or qualified on the Mac; replaces the historical ea485341… build, not its measurements; builds embed timestamps; pins and AMD64 hash in docs/roadmap.md"
 initramfs_sha256 = "6ae4d3abfb3be1f4dcc1edf200261a29e22ad96c922c2d677d5874df21abc8b2"
 
 [engines.orbstack]

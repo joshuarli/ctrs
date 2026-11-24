@@ -1,13 +1,7 @@
 Prefix: DSLP
 Next: 8
 
-Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
-
-## Report
-
-Ground (DSLP-1, base ddaf012): code lines Rust 34.6k (`ctrs` 24k, `ctrs-init` 12k, `ctrs-image` 3.5k, `ctrs-proto` 1.5k), Python 23.8k (`bench/native`); no vendored trees. `make test` (new Makefile target, run by CI `macos` on pull requests) exits 0: cold 4m41s, warm 50s-1m52s on a busy host (observations only; the global `kache` rustc wrapper makes cold partial). `make lint` is red in `crates/ctrs` (DSLP-6). Fixed with obvious causes: bench tests that assumed their working directory (`test_w12.py`) or a quiet disk (`test_resource_cells.py`), two clippy sites in `ctrs-image`. Linux-only and privileged checks are Needs environment; the unit-level ones run in CI `linux-musl`.
-
-Diagnose (DSLP-2): reviewed layer and `docker cp` extraction, host archive load, whiteout and symlink handling; process lifecycle and container setup were not reviewed in depth. Filed DSLP-7 (P1, reproduced in a Linux container): the xattr call after layer extraction follows a symlink. The path checks themselves held for symlink parents, symlink-then-file, hardlink-to-outside-then-file and symlink-then-directory entries.
+Deslop backlog. Campaign sequence and state are in [the roadmap](docs/roadmap.md).
 
 ## Tickets
 

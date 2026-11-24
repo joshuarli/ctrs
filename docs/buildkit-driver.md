@@ -1,7 +1,7 @@
 # Docker-driver `docker buildx build` — design note
 
-Status: scoped, not implemented; active implementation task NP-04 in
-`docs/native-performance-progress.md`. Historical pilots identified a
+Status: historical design note. Current performance work is in
+`docs/roadmap.md`. Historical pilots identified a
 W6/W7 default-driver gap, but the 2026-11-15 scoring/input audit withdrew
 their qualification and precise magnitudes. Rebaseline real application
 builds before choosing/promoting a change; this design note does not

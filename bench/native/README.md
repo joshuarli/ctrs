@@ -1,11 +1,11 @@
 # bench/native — native-workload benchmark harness
 
-Pilot harness for `docs/campaign-native-performance.md`.
+Pilot harness for `docs/roadmap.md`.
 Paired trials, explicit correctness checks and JSONL records, no dashboards.
 Python ≥ 3.11 standard library + the docker CLI only (use `python3`; the 2026-11-18 host provides 3.15.1).
 
 **Qualification is incomplete.** Read
-`docs/native-performance-progress.md` for the next task. Mutable image
+`docs/roadmap.md` for the next task. Mutable image
 tags, several synthetic proxy fixtures, environment isolation and physical
 resource accounting still need qualification. Historical “frozen” wins
 are superseded by the correction in `docs/evidence/native-performance.md`.
