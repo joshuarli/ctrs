@@ -13,7 +13,7 @@ set -u
 label=${1:-${DOCKER_HOST:-default}}
 docker pull -q alpine >/dev/null 2>&1
 for i in 1 2 3; do docker run --rm alpine true >/dev/null 2>&1; done   # warm
-now() { date +%s%N; }
+now() { python3 -c 'import time; print(time.time_ns())'; }
 med() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 run=$(mktemp); ex=$(mktemp)
 for i in $(seq 30); do t=$(now); docker run --rm alpine true >/dev/null 2>&1; echo $(( ($(now)-t)/1000000 )); done > "$run"

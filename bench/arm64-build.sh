@@ -139,13 +139,13 @@ if ! [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
   exit 2
 fi
 load1=$(cut -d' ' -f1 /proc/loadavg)
-nproc_count=$(nproc)
+nproc_count=$(getconf _NPROCESSORS_ONLN)
 model=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
 echo "host: $(uname -srm), $model x $nproc_count, load $load1"
 
 echo "-- verifying fixture checksums"
 for d in "${WORKLOADS[@]}"; do
-  (cd "$BENCH/arm64/$d" && sha256sum -c -s SHA256SUMS) || { echo "fixture $d checksum mismatch" >&2; exit 1; }
+  (cd "$BENCH/arm64/$d" && sha256sum -c SHA256SUMS >/dev/null) || { echo "fixture $d checksum mismatch" >&2; exit 1; }
   echo "  $d ok (golden: $(cat "$BENCH/arm64/$d/GOLDENS"))"
 done
 

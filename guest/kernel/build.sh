@@ -36,11 +36,11 @@ for line in $(grep -E '^CONFIG_[A-Z0-9_]+=y' "$config"); do
 done
 [ "$missing" = 0 ] || { echo "some options were not applied (dependency not met)" >&2; exit 1; }
 if [ "$KARCH" = x86_64 ]; then
-  make -s -j"$(nproc)" ARCH=x86_64 CROSS_COMPILE="$cross" bzImage
+  make -s -j"$(getconf _NPROCESSORS_ONLN)" ARCH=x86_64 CROSS_COMPILE="$cross" bzImage
   cp arch/x86/boot/bzImage .config /out/
   ls -la /out/bzImage
 else
-  make -s -j"$(nproc)" ARCH=arm64 CROSS_COMPILE="$cross" Image
+  make -s -j"$(getconf _NPROCESSORS_ONLN)" ARCH=arm64 CROSS_COMPILE="$cross" Image
   cp arch/arm64/boot/Image .config /out/
   ls -la /out/Image
 fi
