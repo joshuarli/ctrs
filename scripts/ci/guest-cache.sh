@@ -17,7 +17,7 @@ case "$arch" in
   *) echo "arch is arm64 or x86_64, not $arch" >&2; exit 2 ;;
 esac
 mkdir -p "$kout"
-kernel_key=$(cat guest/kernel/build.sh guest/kernel/ctrs.config $extra guest/kernel/patches/*.patch 2>/dev/null | shasum -a 256 | cut -c1-16)
+kernel_key=$(cat guest/kernel/build.sh guest/kernel/ctrs.config $extra guest/kernel/patches/*.patch 2>/dev/null | sha256sum | cut -c1-16)
 if [ -f "$cache/$kfile-$kernel_key" ]; then
   echo "kernel: cached ($kfile, $kernel_key)"
 else
@@ -28,7 +28,7 @@ fi
 cp "$cache/$kfile-$kernel_key" "$kout/$kfile"
 
 # The disk is a blank, sparse ext4 image; its recipe lives in xtask's disk().
-disk_key=$(awk '/^fn disk\(/,/^}/' xtask/src/main.rs | shasum -a 256 | cut -c1-16)
+disk_key=$(awk '/^fn disk\(/,/^}/' xtask/src/main.rs | sha256sum | cut -c1-16)
 if [ -f "$cache/data-$disk_key.img" ]; then
   echo "disk: cached ($disk_key)"
 else

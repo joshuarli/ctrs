@@ -28,7 +28,7 @@ unset DOCKER_CONTEXT
 perl -e 'alarm 300; exec @ARGV' docker pull alpine >/dev/null 2>&1
 [ "$OWN_ENGINE" = "1" ] && DATA_ROOT="$DATA" || DATA_ROOT=${CTRS_DATA_DIR:-}
 
-mode() { stat -f '%Lp' "$1" 2>/dev/null; }
+mode() { python3 -c 'import os, stat, sys; print(format(stat.S_IMODE(os.stat(sys.argv[1]).st_mode), "o"))' "$1" 2>/dev/null; }
 
 m=$(mode "$CTRS_SOCKET")
 [ "$m" = "600" ] && ok 'I1 host socket is 0600' || bad "I1 host socket mode: $m (want 600)"

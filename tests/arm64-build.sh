@@ -96,7 +96,7 @@ case_environment() {
   [ "$karch" = x86_64 ] && ok "host architecture x86_64" || miss "host architecture $karch (want x86_64)"
   local cpu model cores
   model=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
-  cores=$(nproc)
+  cores=$(getconf _NPROCESSORS_ONLN)
   ok "cpu $model ($cores cores, load $mload)"
   ok "kernel $(uname -r)"
 

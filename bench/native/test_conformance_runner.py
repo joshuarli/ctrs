@@ -38,7 +38,8 @@ case "$1" in
     *) exit 99 ;;
 esac
 """,
-                "stat": """#!/bin/sh
+                "python3": """#!/bin/sh
+[ "$1" = '-c' ] || exit 99
 case "$3" in
     "$CTRS_SOCKET") echo 600 ;;
     "$CTRS_DATA_DIR") echo 700 ;;
